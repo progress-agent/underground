@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Optional: keep Netlify from caching too aggressively while iterating
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-store"

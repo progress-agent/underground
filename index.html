@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UnderGround</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { background: #05070b; overflow: hidden; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      #app { position: fixed; inset: 0; }
+      .hud {
+        position: fixed; left: 12px; top: 12px; color: rgba(255,255,255,0.85);
+        background: rgba(20, 24, 34, 0.35);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 12px;
+        padding: 10px 12px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      .hud h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
+      .hud p { margin: 0; font-size: 12px; opacity: 0.85; max-width: 380px; }
+      .hud code { opacity: 0.9; }
+      .hud .small { margin-top: 6px; font-size: 11px; opacity: 0.75; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="hud">
+      <h1>UnderGround (MVP)</h1>
+      <p>3D Tube network visualiser. Orbit: drag • Pan: right-drag/shift-drag • Zoom: wheel.</p>
+      <p class="small">Data: TfL public endpoints (no auth). WIP: route geometry + frosted tubes + trains.</p>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
