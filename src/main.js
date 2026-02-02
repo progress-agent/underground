@@ -30,9 +30,9 @@ controls.maxDistance = 25000;
 // ---------- Simulation params ----------
 const sim = {
   trains: [],
-  timeScale: 8, // 1 = real-time, >1 = sped up
-  verticalScale: 3.0, // multiplies metres of depth into scene units
-  horizontalScale: 1.0, // multiplies metres of x/z into scene units
+  timeScale: Number(new URLSearchParams(location.search).get('t')) || 8, // 1 = real-time, >1 = sped up
+  verticalScale: Number(new URLSearchParams(location.search).get('vz')) || 3.0,
+  horizontalScale: Number(new URLSearchParams(location.search).get('hx')) || 1.0,
 };
 
 // HUD controls (optional)
@@ -40,35 +40,44 @@ const sim = {
   const el = document.getElementById('timeScale');
   const out = document.getElementById('timeScaleValue');
   if (el) {
+    // initialise from URL param t
+    el.value = String(sim.timeScale);
     const apply = () => {
-      sim.timeScale = Number(el.value) || 1;
-      if (out) out.textContent = `${sim.timeScale}×`;
+      const v = Number(el.value) || 1;
+      const url = new URL(location.href);
+      url.searchParams.set('t', String(v));
+      location.href = url.toString();
     };
-    el.addEventListener('input', apply);
-    apply();
+    el.addEventListener('change', apply);
+    if (out) out.textContent = `${sim.timeScale}×`;
   }
 
   const vEl = document.getElementById('verticalScale');
   const vOut = document.getElementById('verticalScaleValue');
   if (vEl) {
+    vEl.value = String(sim.verticalScale);
     const applyV = () => {
-      sim.verticalScale = Number(vEl.value) || 1;
-      if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
+      const v = Number(vEl.value) || 1;
+      const url = new URL(location.href);
+      url.searchParams.set('vz', String(v));
+      location.href = url.toString();
     };
-    vEl.addEventListener('input', applyV);
-    applyV();
+    vEl.addEventListener('change', applyV);
+    if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
   }
 
   const hEl = document.getElementById('horizontalScale');
   const hOut = document.getElementById('horizontalScaleValue');
   if (hEl) {
+    hEl.value = String(sim.horizontalScale);
     const applyH = () => {
-      sim.horizontalScale = Number(hEl.value) || 1;
-      if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
-      // Note: requires refresh (rebuild network) to fully apply; in MVP we keep it as a debug aid.
+      const v = Number(hEl.value) || 1;
+      const url = new URL(location.href);
+      url.searchParams.set('hx', String(v));
+      location.href = url.toString();
     };
-    hEl.addEventListener('input', applyH);
-    applyH();
+    hEl.addEventListener('change', applyH);
+    if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
   }
 }
 
