@@ -27,6 +27,7 @@ export const LINE_DEPTH_M = {
 // Expects header: naptan_id,name,depth_m,source_url,notes
 export async function loadStationDepthAnchors() {
   try {
+    // Vite serves static assets from /public at the site root.
     const res = await fetch('/data/station_depths.csv');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
