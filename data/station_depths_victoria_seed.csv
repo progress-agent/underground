@@ -1,0 +1,20 @@
+# UnderGround station/platform depth anchors
+# Auto-generated seed rows for Victoria line. Review + correct before trusting.
+# Columns: naptan_id,name,depth_m,source_url,notes
+naptan_id,name,depth_m,source_url,notes
+940GZZLUBLR,Blackhorse Road Underground Station,,,
+940GZZLUBXN,Brixton Underground Station,,,
+940GZZLUEUS,Euston Underground Station,,,
+940GZZLUFPK,Finsbury Park Underground Station,,,
+940GZZLUGPK,Green Park Underground Station,,,
+940GZZLUHAI,Highbury & Islington Underground Station,,,
+940GZZLUKSX,King's Cross St. Pancras Underground Station,,,
+940GZZLUOXC,Oxford Circus Underground Station,,,
+940GZZLUPCO,Pimlico Underground Station,,,
+940GZZLUSVS,Seven Sisters Underground Station,,,
+940GZZLUSKW,Stockwell Underground Station,,,
+940GZZLUTMH,Tottenham Hale Underground Station,,,
+940GZZLUVXL,Vauxhall Underground Station,,,
+940GZZLUVIC,Victoria Underground Station,,,
+940GZZLUWWL,Walthamstow Central Underground Station,,,
+940GZZLUWRR,Warren Street Underground Station,,,
