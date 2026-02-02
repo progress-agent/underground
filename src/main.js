@@ -31,9 +31,10 @@ controls.maxDistance = 25000;
 const sim = {
   trains: [],
   timeScale: 8, // 1 = real-time, >1 = sped up
+  verticalScale: 1.2, // multiplies metres of depth into scene units (metres)
 };
 
-// HUD time-scale control (optional)
+// HUD controls (optional)
 {
   const el = document.getElementById('timeScale');
   const out = document.getElementById('timeScaleValue');
@@ -44,6 +45,17 @@ const sim = {
     };
     el.addEventListener('input', apply);
     apply();
+  }
+
+  const vEl = document.getElementById('verticalScale');
+  const vOut = document.getElementById('verticalScaleValue');
+  if (vEl) {
+    const applyV = () => {
+      sim.verticalScale = Number(vEl.value) || 1;
+      if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
+    };
+    vEl.addEventListener('input', applyV);
+    applyV();
   }
 }
 
@@ -214,9 +226,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
       const { x, z } = llToXZ(sp.lat, sp.lon);
       // Depth: use station anchor if available, else heuristic by line.
       const depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
-      // Keep vertical axis in metres, but compress a bit for readability.
-      const VERTICAL_SCALE = 1.2; // bump temporarily for visibility
-      const y = -depthM * VERTICAL_SCALE;
+      const y = -depthM * sim.verticalScale;
       return new THREE.Vector3(x, y, z);
     });
 
@@ -318,8 +328,7 @@ async function buildNetworkMvp() {
           .map(sp => {
             const { x, z } = llToXZ(sp.lat, sp.lon);
             const depthM = depthForStation({ naptanId: sp.id, lineId: id, anchors: depthAnchors });
-            const VERTICAL_SCALE = 1.2;
-            const y = -depthM * VERTICAL_SCALE;
+            const y = -depthM * sim.verticalScale;
             return {
               id: sp.id,
               name: sp.name,
