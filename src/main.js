@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchTubeLines, fetchRouteSequence } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation } from './depth.js';
+import { tryCreateTerrainMesh } from './terrain.js';
 
 // ---------- Scene ----------
 const app = document.getElementById('app');
@@ -35,20 +36,26 @@ const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
 rim.position.set(-60, 80, -40);
 scene.add(rim);
 
-// ---------- Ground (transparent wireframe grid) ----------
+// ---------- Ground (terrain if available, else transparent wireframe grid) ----------
 {
   const grid = new THREE.GridHelper(900, 90, 0x6b7280, 0x334155);
   grid.position.y = -6;
   grid.material.transparent = true;
-  grid.material.opacity = 0.35;
+  grid.material.opacity = 0.25;
   scene.add(grid);
+
+  // Attempt to load generated terrain heightmap (EA LiDAR DTM pipeline output)
+  tryCreateTerrainMesh().then(result => {
+    if (!result) return;
+    scene.add(result.mesh);
+  });
 
   // faint "surface" plane to catch light but not obscure the network
   const geo = new THREE.PlaneGeometry(900, 900, 1, 1);
   const mat = new THREE.MeshPhongMaterial({
     color: 0x0b1223,
     transparent: true,
-    opacity: 0.12,
+    opacity: 0.08,
     shininess: 10,
     specular: 0x1b3b66,
   });
