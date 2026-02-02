@@ -61,3 +61,14 @@ export function depthForStation({ naptanId, lineId, anchors }) {
   if (lineId && lineId in LINE_DEPTH_M) return LINE_DEPTH_M[lineId];
   return 18; // generic underground
 }
+
+export function debugDepthStats({ lineId, stopPoints, anchors }) {
+  const vals = [];
+  for (const sp of stopPoints || []) {
+    const depthM = depthForStation({ naptanId: sp.id, lineId, anchors });
+    vals.push(depthM);
+  }
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  return { count: vals.length, min, max };
+}

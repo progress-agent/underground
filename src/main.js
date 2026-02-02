@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchTubeLines, fetchRouteSequence } from './tfl.js';
-import { loadStationDepthAnchors, depthForStation } from './depth.js';
+import { loadStationDepthAnchors, depthForStation, debugDepthStats } from './depth.js';
 import { tryCreateTerrainMesh } from './terrain.js';
 import { createStationMarkers } from './stations.js';
 
@@ -215,7 +215,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
       // Depth: use station anchor if available, else heuristic by line.
       const depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
       // Keep vertical axis in metres, but compress a bit for readability.
-      const VERTICAL_SCALE = 0.35; // 1.0 would be true metres
+      const VERTICAL_SCALE = 1.2; // bump temporarily for visibility
       const y = -depthM * VERTICAL_SCALE;
       return new THREE.Vector3(x, y, z);
     });
@@ -307,8 +307,9 @@ async function buildNetworkMvp() {
       , null);
 
       const sps = longest?.stopPoint || [];
+      const ds = debugDepthStats({ lineId: id, stopPoints: sps, anchors: depthAnchors });
       addLineFromStopPoints(id, colour, sps, depthAnchors, sim);
-      console.log('built', id, 'stops', sps.length);
+      console.log('built', id, 'stops', sps.length, 'depth[m] min/max', ds.min, ds.max);
 
       // Victoria line station markers + labels (from TfL route sequence stop points)
       if (id === 'victoria') {
@@ -317,7 +318,7 @@ async function buildNetworkMvp() {
           .map(sp => {
             const { x, z } = llToXZ(sp.lat, sp.lon);
             const depthM = depthForStation({ naptanId: sp.id, lineId: id, anchors: depthAnchors });
-            const VERTICAL_SCALE = 0.35;
+            const VERTICAL_SCALE = 1.2;
             const y = -depthM * VERTICAL_SCALE;
             return {
               id: sp.id,
