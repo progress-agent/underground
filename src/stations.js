@@ -48,7 +48,8 @@ export function createStationMarkers({
     for (const st of stations) {
       const el = document.createElement('div');
       el.className = 'station-label';
-      el.textContent = st.name;
+      // Strip redundant suffix for readability
+      el.textContent = st.name.replace(/\s+Underground Station$/i, '');
       root.appendChild(el);
       labelEls.push(el);
     }
