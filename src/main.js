@@ -1,6 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchTubeLines, fetchRouteSequence } from './tfl.js';
+
+function setNetStatus({ kind, text }) {
+  const el = document.getElementById('netStatus');
+  if (!el) return;
+  el.classList.remove('ok', 'warn', 'err');
+  el.classList.add(kind);
+  el.textContent = text;
+  el.style.display = 'block';
+  // auto-hide happy path after a moment
+  if (kind === 'ok') {
+    setTimeout(() => { el.style.display = 'none'; }, 2500);
+  }
+}
 import { loadStationDepthAnchors, depthForStation, debugDepthStats } from './depth.js';
 import { tryCreateTerrainMesh } from './terrain.js';
 import { createStationMarkers } from './stations.js';
@@ -344,6 +357,7 @@ let victoriaStationsVisible = true;
 let victoriaLabelsVisible = true;
 
 async function buildNetworkMvp() {
+  let usedCacheFallback = false;
   try {
     const depthAnchors = await loadStationDepthAnchors();
 
@@ -355,9 +369,19 @@ async function buildNetworkMvp() {
 
     for (const id of wanted) {
       const colour = LINE_COLOURS[id] ?? 0xffffff;
-      const seq = await fetchRouteSequence(id);
 
-      // MVP: pick the longest stopPointSequence as our route spine
+      // Prefer live fetch, but allow cached fallback for robustness.
+      // (fetchRouteSequence internally falls back to cache on network error.)
+      let seq;
+      try {
+        seq = await fetchRouteSequence(id, { ttlMs: 24 * 60 * 60 * 1000, useCache: true, preferCache: false });
+      } catch (err) {
+        // If we fail here, retry preferring cache explicitly (covers cases where
+        // the first throw happened before fallback due to a parse error etc.)
+        usedCacheFallback = true;
+        seq = await fetchRouteSequence(id, { ttlMs: 7 * 24 * 60 * 60 * 1000, useCache: true, preferCache: true });
+      }
+
       const sequences = seq.stopPointSequences || [];
       const longest = sequences.reduce((best, cur) =>
         (!best || (cur.stopPoint?.length || 0) > (best.stopPoint?.length || 0)) ? cur : best
@@ -396,10 +420,19 @@ async function buildNetworkMvp() {
       }
     }
 
+    if (navigator.onLine === false) {
+      setNetStatus({ kind: 'warn', text: 'Offline mode (using cached TfL data if available)' });
+    } else if (usedCacheFallback) {
+      setNetStatus({ kind: 'warn', text: 'TfL unstable — using cached data' });
+    } else {
+      setNetStatus({ kind: 'ok', text: 'TfL data loaded' });
+    }
+
     // frame the camera roughly over the network
     controls.target.set(0, -120, 0);
   } catch (e) {
     console.warn('Network build failed:', e);
+    setNetStatus({ kind: 'err', text: 'TfL fetch failed (no cache yet). Refresh later.' });
   }
 }
 
