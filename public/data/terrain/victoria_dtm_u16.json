@@ -1,0 +1,14 @@
+{
+  "source": "EA LiDAR Composite DTM 1m via WCS (downsampled)",
+  "crs": "EPSG:27700",
+  "bounds_m": [
+    525000,
+    171000,
+    539000,
+    185000
+  ],
+  "width": 2048,
+  "height": 2048,
+  "pixel_size_m": 6.8359375,
+  "heightmap": "victoria_dtm_u16.png"
+}
