@@ -37,47 +37,61 @@ const sim = {
 
 // HUD controls (optional)
 {
+  function setUrlParam(key, value) {
+    const url = new URL(location.href);
+    url.searchParams.set(key, String(value));
+    history.replaceState(null, '', url.toString());
+  }
+
   const el = document.getElementById('timeScale');
   const out = document.getElementById('timeScaleValue');
   if (el) {
     // initialise from URL param t
     el.value = String(sim.timeScale);
-    const apply = () => {
-      const v = Number(el.value) || 1;
-      const url = new URL(location.href);
-      url.searchParams.set('t', String(v));
-      location.href = url.toString();
-    };
-    el.addEventListener('change', apply);
     if (out) out.textContent = `${sim.timeScale}×`;
+
+    el.addEventListener('input', () => {
+      sim.timeScale = Number(el.value) || 1;
+      if (out) out.textContent = `${sim.timeScale}×`;
+    });
+
+    el.addEventListener('change', () => {
+      setUrlParam('t', Number(el.value) || 1);
+    });
   }
 
   const vEl = document.getElementById('verticalScale');
   const vOut = document.getElementById('verticalScaleValue');
   if (vEl) {
     vEl.value = String(sim.verticalScale);
-    const applyV = () => {
-      const v = Number(vEl.value) || 1;
-      const url = new URL(location.href);
-      url.searchParams.set('vz', String(v));
-      location.href = url.toString();
-    };
-    vEl.addEventListener('change', applyV);
     if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
+
+    vEl.addEventListener('input', () => {
+      sim.verticalScale = Number(vEl.value) || 1;
+      if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
+    });
+
+    vEl.addEventListener('change', () => {
+      setUrlParam('vz', Number(vEl.value) || 1);
+      rebuildFromSimScales();
+    });
   }
 
   const hEl = document.getElementById('horizontalScale');
   const hOut = document.getElementById('horizontalScaleValue');
   if (hEl) {
     hEl.value = String(sim.horizontalScale);
-    const applyH = () => {
-      const v = Number(hEl.value) || 1;
-      const url = new URL(location.href);
-      url.searchParams.set('hx', String(v));
-      location.href = url.toString();
-    };
-    hEl.addEventListener('change', applyH);
     if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
+
+    hEl.addEventListener('input', () => {
+      sim.horizontalScale = Number(hEl.value) || 1;
+      if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
+    });
+
+    hEl.addEventListener('change', () => {
+      setUrlParam('hx', Number(hEl.value) || 1);
+      rebuildFromSimScales();
+    });
   }
 }
 
@@ -197,6 +211,17 @@ function llToXZ(lat, lon) {
   const x = dLon * metresPerDegLonAt(ORIGIN.lat) * sim.horizontalScale;
   const z = dLat * METRES_PER_DEG_LAT * sim.horizontalScale;
   return { x, z: -z };
+}
+
+function rebuildFromSimScales() {
+  // MVP: easiest way to apply hx/vz changes is a hard reload.
+  // (We currently bake scales into geometry.)
+  // Later: refactor to allow dynamic rescaling without re-fetching.
+  const url = new URL(location.href);
+  url.searchParams.set('t', String(sim.timeScale));
+  url.searchParams.set('vz', String(sim.verticalScale));
+  url.searchParams.set('hx', String(sim.horizontalScale));
+  location.href = url.toString();
 }
 
 function buildOffsetCurvesFromCenterline(centerPts, halfSpacing = 1.0) {
