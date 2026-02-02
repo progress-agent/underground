@@ -34,17 +34,26 @@ const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
 rim.position.set(-60, 80, -40);
 scene.add(rim);
 
-// ---------- Ground / city haze ----------
+// ---------- Ground (transparent wireframe grid) ----------
 {
-  const geo = new THREE.PlaneGeometry(800, 800, 1, 1);
+  const grid = new THREE.GridHelper(900, 90, 0x6b7280, 0x334155);
+  grid.position.y = -6;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.35;
+  scene.add(grid);
+
+  // faint "surface" plane to catch light but not obscure the network
+  const geo = new THREE.PlaneGeometry(900, 900, 1, 1);
   const mat = new THREE.MeshPhongMaterial({
-    color: 0x111a2d,
-    shininess: 18,
+    color: 0x0b1223,
+    transparent: true,
+    opacity: 0.12,
+    shininess: 10,
     specular: 0x1b3b66,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -6;
+  mesh.position.y = -6.05;
   scene.add(mesh);
 }
 
@@ -59,22 +68,23 @@ scene.add(rim);
     new THREE.Vector3(110, -5.5, -40),
   ];
   const curve = new THREE.CatmullRomCurve3(points);
-  const tube = new THREE.TubeGeometry(curve, 200, 2.6, 10, false);
-  const mat = new THREE.MeshPhysicalMaterial({
+  // River as a distinct surface ribbon (not a tube)
+  const tube = new THREE.TubeGeometry(curve, 200, 1.0, 8, false);
+
+  const mat = new THREE.MeshStandardMaterial({
     color: 0x1d4ed8,
     transparent: true,
-    opacity: 0.22,
-    roughness: 0.15,
-    metalness: 0.0,
-    transmission: 0.9,
-    thickness: 0.5,
-    ior: 1.2,
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.25,
+    opacity: 0.35,
+    roughness: 0.08,
+    metalness: 0.02,
     emissive: new THREE.Color(0x0b1e5b),
-    emissiveIntensity: 0.35,
+    emissiveIntensity: 0.25,
   });
+
+  // Flatten the tube into a ribbon-ish mesh by scaling Y heavily.
   const mesh = new THREE.Mesh(tube, mat);
+  mesh.scale.y = 0.10;
+  mesh.position.y = -2.0;
   scene.add(mesh);
 }
 
