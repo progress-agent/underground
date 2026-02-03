@@ -526,15 +526,19 @@ function focusCameraOnStations({ stations, controls, camera, pad = 1.35 } = {}) 
   box.getCenter(center);
 
   // Frame the box: distance derived from vertical fov.
-  const maxDim = Math.max(size.x, size.y, size.z);
+  // Ignore Y when framing; depth exaggeration can make Y huge and force the camera absurdly far.
+  const maxDim = Math.max(size.x, size.z);
   const fov = camera.fov * Math.PI / 180;
   const dist = (maxDim * pad) / Math.max(1e-6, 2 * Math.tan(fov / 2));
 
   controls.target.copy(center);
 
   // Put camera at a pleasing oblique angle.
+  // Keep a minimum zoom so we don't fly out so far that translucency/fog makes everything vanish.
+  const distClamped = THREE.MathUtils.clamp(dist, 250, 6000);
+
   const dir = new THREE.Vector3(1, 0.6, 1).normalize();
-  camera.position.copy(center).addScaledVector(dir, dist);
+  camera.position.copy(center).addScaledVector(dir, distClamped);
 
   controls.update();
 }
