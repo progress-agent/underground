@@ -9,6 +9,16 @@ function ensureOverlayRoot() {
   return root;
 }
 
+function createOverlayLayer(root) {
+  const layer = document.createElement('div');
+  layer.className = 'station-overlay-layer';
+  layer.style.position = 'absolute';
+  layer.style.inset = '0';
+  layer.style.pointerEvents = 'none';
+  root.appendChild(layer);
+  return layer;
+}
+
 export function createStationMarkers({
   scene,
   stations,
@@ -42,6 +52,7 @@ export function createStationMarkers({
 
   // ---- HTML labels (toggleable) ----
   const root = ensureOverlayRoot();
+  const layer = createOverlayLayer(root);
   const labelEls = [];
 
   if (labels) {
@@ -50,7 +61,7 @@ export function createStationMarkers({
       el.className = 'station-label';
       // Strip redundant suffix for readability
       el.textContent = st.name.replace(/\s+Underground Station$/i, '');
-      root.appendChild(el);
+      layer.appendChild(el);
       labelEls.push(el);
     }
   }
@@ -58,7 +69,7 @@ export function createStationMarkers({
   let labelsVisible = labels;
   function setLabelsVisible(v) {
     labelsVisible = !!v;
-    root.style.display = labelsVisible ? 'block' : 'none';
+    layer.style.display = labelsVisible ? 'block' : 'none';
   }
   setLabelsVisible(labelsVisible);
 
@@ -106,6 +117,7 @@ export function createStationMarkers({
     geo.dispose();
     mat.dispose();
     for (const el of labelEls) el.remove();
+    layer.remove();
   }
 
   return { mesh, stations, setLabelsVisible, update, dispose };
