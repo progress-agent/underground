@@ -274,6 +274,9 @@ const initialLineVisibility = (prefs.lineVisibility && typeof prefs.lineVisibili
 const lineGroups = new Map();
 // Store approximate centerline points per line (for camera focus helpers).
 const lineCenterPoints = new Map();
+// Pickable meshes for raycast selection (click-to-focus).
+const linePickables = [];
+
 
 function setLineVisible(lineId, visible) {
   const g = lineGroups.get(lineId);
@@ -406,6 +409,9 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
 
   leftMesh.userData.lineId = lineId;
   rightMesh.userData.lineId = lineId;
+
+  // Allow click-to-focus.
+  linePickables.push(leftMesh, rightMesh);
 
   group.add(leftMesh, rightMesh);
 
@@ -542,6 +548,7 @@ async function buildNetworkMvp() {
 
           const cb = document.createElement('input');
           cb.type = 'checkbox';
+          cb.dataset.line = id;
           const startVisible = (initialLineVisibility[id] ?? true) !== false;
           cb.checked = startVisible;
           cb.addEventListener('change', () => {
@@ -696,6 +703,58 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// ---------- Click-to-focus / shift-click toggle ----------
+{
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+
+  function getMouseNdc(ev) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+  }
+
+  function onPointerDown(ev) {
+    // Only left click / primary.
+    if (ev.button !== 0) return;
+
+    getMouseNdc(ev);
+    raycaster.setFromCamera(mouse, camera);
+
+    const hits = raycaster.intersectObjects(linePickables, false);
+    if (!hits || hits.length === 0) return;
+
+    const hit = hits[0].object;
+    const lineId = hit?.userData?.lineId;
+    if (!lineId) return;
+
+    // UX:
+    // - Click: focus camera on that line
+    // - Shift+Click: toggle visibility for that line
+    if (ev.shiftKey) {
+      const g = lineGroups.get(lineId);
+      if (!g) return;
+      const next = !g.visible;
+      setLineVisible(lineId, next);
+      initialLineVisibility[lineId] = next;
+      prefs.lineVisibility = initialLineVisibility;
+      savePrefs(prefs);
+
+      // Sync checkbox if present
+      const wrap = document.getElementById('lineToggles');
+      const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
+      if (cb) cb.checked = next;
+      return;
+    }
+
+    const pts = lineCenterPoints.get(lineId);
+    if (!pts || pts.length === 0) return;
+    focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
+  }
+
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+}
 
 // ---------- UI toggles ----------
 function updateSimUi() {
