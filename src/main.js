@@ -466,11 +466,18 @@ async function buildNetworkMvp() {
       if (wrap) {
         wrap.innerHTML = '';
         for (const id of wanted) {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.justifyContent = 'space-between';
+          row.style.gap = '8px';
+
           const label = document.createElement('label');
           label.style.display = 'flex';
           label.style.alignItems = 'center';
           label.style.gap = '6px';
           label.style.userSelect = 'none';
+          label.style.cursor = 'pointer';
 
           const cb = document.createElement('input');
           cb.type = 'checkbox';
@@ -499,7 +506,38 @@ async function buildNetworkMvp() {
           label.appendChild(cb);
           label.appendChild(swatch);
           label.appendChild(text);
-          wrap.appendChild(label);
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = 'Focus';
+          btn.title = 'Focus camera on this line';
+          btn.style.fontSize = '11px';
+          btn.style.padding = '2px 8px';
+          btn.style.borderRadius = '999px';
+          btn.style.border = '1px solid rgba(255,255,255,0.14)';
+          btn.style.background = 'rgba(255,255,255,0.06)';
+          btn.style.color = 'rgba(255,255,255,0.88)';
+          btn.style.cursor = 'pointer';
+
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const pts = lineCenterPoints.get(id);
+            if (!pts || pts.length === 0) return;
+            focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
+          });
+
+          // Nice UX: double-click the label row to focus too.
+          label.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            const pts = lineCenterPoints.get(id);
+            if (!pts || pts.length === 0) return;
+            focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
+          });
+
+          row.appendChild(label);
+          row.appendChild(btn);
+          wrap.appendChild(row);
         }
       }
     }
