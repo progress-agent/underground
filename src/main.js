@@ -688,6 +688,9 @@ async function buildNetworkMvp() {
             const cb = lineCheckboxes.get(id);
             if (cb) cb.checked = true;
 
+            // Make the current focus shareable.
+            setUrlParam('focus', id);
+
             const pts = lineCenterPoints.get(id);
             if (!pts || pts.length === 0) return;
             focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
@@ -949,6 +952,9 @@ window.addEventListener('resize', () => {
     initialLineVisibility[lineId] = true;
     prefs.lineVisibility = initialLineVisibility;
     savePrefs(prefs);
+
+    // Make the current focus shareable.
+    setUrlParam('focus', lineId);
 
     const wrap = document.getElementById('lineToggles');
     const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
