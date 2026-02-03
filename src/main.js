@@ -871,6 +871,21 @@ function setVictoriaLabelsVisible(v) {
     });
   }
 
+  const focusAllBtn = document.getElementById('focusAll');
+  if (focusAllBtn) {
+    focusAllBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      // Same as the 'A' shortcut: focus camera on all currently-visible tube lines.
+      const pts = [];
+      for (const [lineId, group] of lineGroups.entries()) {
+        if (!group?.visible) continue;
+        const cps = lineCenterPoints.get(lineId);
+        if (cps && cps.length) pts.push(...cps);
+      }
+      focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.18 });
+    });
+  }
+
   // Initialize pause UI on load.
   updateSimUi();
 }

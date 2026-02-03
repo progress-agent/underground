@@ -114,6 +114,7 @@
       <p>3D Tube network visualiser. Orbit: drag • Pan: right-drag/shift-drag • Zoom: wheel.</p>
       <p class="small">Data: TfL public endpoints (no auth). Cached for stability; works offline after first load.</p>
       <p class="small"><code>V</code>: Victoria stations • <code>L</code>: labels • <code>F</code>: focus Victoria • <code>A</code>: focus all visible lines</p>
+      <p class="small">UI: <b>Focus all</b> button frames all visible lines.</p>
       <p class="small">Tip: start focused on a line with <code>?focus=victoria</code> (or any line id). Click a line in the scene to focus.</p>
       <p class="small" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <label style="display:flex; gap:6px; align-items:center; user-select:none;">
@@ -128,6 +129,7 @@
 
       <p class="small" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
         <button id="togglePause" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Pause</button>
+        <button id="focusAll" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Focus all</button>
         <span id="simStatus" style="opacity:0.78;">Running</span>
         <span style="opacity:0.7;">(Space to toggle)</span>
       </p>
