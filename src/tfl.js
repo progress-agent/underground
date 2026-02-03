@@ -87,6 +87,13 @@ export async function fetchTubeLines(opts) {
   return fetchJson('https://api.tfl.gov.uk/Line/Mode/tube', opts);
 }
 
+export async function fetchBundledRouteSequenceIndex() {
+  // Returns bundled cache index if present, else null.
+  const res = await fetch('/data/tfl/route-sequence/index.json', { cache: 'no-store' }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json().catch(() => null);
+}
+
 export async function fetchRouteSequence(lineId, opts) {
   return fetchJson(`https://api.tfl.gov.uk/Line/${encodeURIComponent(lineId)}/Route/Sequence/all`, opts);
 }

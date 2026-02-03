@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { fetchTubeLines, fetchRouteSequence } from './tfl.js';
+import { fetchRouteSequence, fetchBundledRouteSequenceIndex } from './tfl.js';
 
 function setNetStatus({ kind, text }) {
   const el = document.getElementById('netStatus');
@@ -374,11 +374,16 @@ async function buildNetworkMvp() {
   try {
     const depthAnchors = await loadStationDepthAnchors();
 
-    // Render all TfL tube lines we know about (TfL ids include hyphens for some lines)
-    const wanted = [
-      'bakerloo','central','circle','district','hammersmith-city',
-      'jubilee','metropolitan','northern','piccadilly','victoria','waterloo-city'
-    ];
+    // Render all TfL tube lines we know about.
+    // If the bundled cache index exists, use it as the source of truth (keeps demo working offline
+    // and avoids hard-coding line ids in two places).
+    const bundledIndex = await fetchBundledRouteSequenceIndex();
+    const wanted = bundledIndex?.lines
+      ? Object.keys(bundledIndex.lines)
+      : [
+          'bakerloo','central','circle','district','hammersmith-city',
+          'jubilee','metropolitan','northern','piccadilly','victoria','waterloo-city'
+        ];
 
     // Build UI toggles
     {
