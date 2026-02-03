@@ -807,7 +807,26 @@ async function buildNetworkMvp() {
           // Ground cube + platform cube + connecting line (MVP)
           // Make platform Y match the built tunnel centerline so shafts always intersect the tube.
           try {
-            const shaftsData = await loadLineShafts('victoria');
+            // Prefer prebuilt/cached shaft positions (generated via scripts), but fall back
+            // to deriving them from the station list so shafts still render in dev/offline.
+            let shaftsData = await loadLineShafts('victoria');
+            if (!shaftsData) {
+              shaftsData = {
+                line: 'victoria',
+                origin: ORIGIN,
+                verticalScale: sim.verticalScale,
+                groundY: -6,
+                shafts: stations.map(st => ({
+                  id: st.id,
+                  name: st.name,
+                  x: st.pos.x,
+                  z: st.pos.z,
+                  groundY: -6,
+                  // initial platformY; we will override from centerline below.
+                  platformY: st.pos.y,
+                })),
+              };
+            }
 
             // Build a lookup from station id -> nearest centerline y.
             const centerPts = lineCenterPoints.get('victoria');
@@ -836,6 +855,7 @@ async function buildNetworkMvp() {
             if (victoriaShaftsLayer?.updateGroundYById && terrain?.heightSampler) {
               const groundYById = {};
               for (const s of shaftsData?.shafts ?? []) {
+                if (!s?.id) continue;
                 const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: 24000 });
                 const h01 = terrain.heightSampler(u, v);
                 groundYById[s.id] = terrainHeightToWorldY({ h01, displacementScale: 60, displacementBias: -30, baseY: -6 });
