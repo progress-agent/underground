@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex } from './tfl.js';
+import { loadStationDepthAnchors, depthForStation, debugDepthStats } from './depth.js';
+import { tryCreateTerrainMesh } from './terrain.js';
+import { createStationMarkers } from './stations.js';
 
 function setNetStatus({ kind, text }) {
   const el = document.getElementById('netStatus');
@@ -14,9 +17,6 @@ function setNetStatus({ kind, text }) {
     setTimeout(() => { el.style.display = 'none'; }, 2500);
   }
 }
-import { loadStationDepthAnchors, depthForStation, debugDepthStats } from './depth.js';
-import { tryCreateTerrainMesh } from './terrain.js';
-import { createStationMarkers } from './stations.js';
 
 // ---------- Scene ----------
 const app = document.getElementById('app');
