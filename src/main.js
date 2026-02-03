@@ -78,6 +78,9 @@ function resetPrefsAndCache() {
 const prefs = loadPrefs();
 
 // ---------- Simulation params ----------
+// Set by the terrain loader when/if a terrain mesh exists.
+let applyTerrainOpacity = null;
+
 function getUrlNumberParam(key) {
   const sp = new URLSearchParams(location.search);
   if (!sp.has(key)) return null;
@@ -130,9 +133,7 @@ function deleteUrlParam(key) {
 
 // HUD controls (optional)
 {
-  // These are declared here and assigned later when the terrain mesh loads.
-  // The handlers check for existence before applying.
-  let applyTerrainOpacity = null;
+  // Handlers check for existence before applying.
 
   const el = document.getElementById('timeScale');
   const out = document.getElementById('timeScaleValue');
@@ -190,7 +191,7 @@ function deleteUrlParam(key) {
       prefs.groundOpacity = op;
       savePrefs(prefs);
       if (gOut) gOut.textContent = op.toFixed(2);
-      applyTerrainOpacity(op);
+      applyTerrainOpacity?.(op);
     });
   }
 
