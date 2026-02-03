@@ -162,6 +162,8 @@ export function addShaftsToScene({
     },
     dispose() {
       scene.remove(group);
+
+      // Dispose shared resources once.
       platformGeo.dispose();
       groundGeo.dispose();
       shaftGeo.dispose();
@@ -169,8 +171,13 @@ export function addShaftsToScene({
       groundMat.dispose();
       lineMat.dispose();
       shaftMat.dispose();
+
+      // Lines use per-station BufferGeometry; meshes share the geos above.
       for (const obj of group.children) {
-        if (obj.geometry) obj.geometry.dispose?.();
+        const geo = obj.geometry;
+        if (!geo) continue;
+        if (geo === platformGeo || geo === groundGeo || geo === shaftGeo) continue;
+        geo.dispose?.();
       }
     }
   };
