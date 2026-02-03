@@ -113,7 +113,7 @@
       <h1>UnderGround (MVP)</h1>
       <p>3D Tube network visualiser. Orbit: drag • Pan: right-drag/shift-drag • Zoom: wheel.</p>
       <p class="small">Data: TfL public endpoints (no auth). Cached for stability; works offline after first load.</p>
-      <p class="small"><code>V</code>: Victoria stations • <code>L</code>: labels • <code>F</code>: focus Victoria • <code>A</code>: focus all visible lines</p>
+      <p class="small"><code>V</code>: Victoria stations • <code>L</code>: labels • <code>S</code>: shafts • <code>F</code>: focus Victoria • <code>A</code>: focus all visible lines</p>
       <p class="small">UI: <b>Focus all</b> button frames all visible lines.</p>
       <p class="small">Tip: start focused on a line with <code>?focus=victoria</code> (or any line id). Click a line in the scene to focus.</p>
       <p class="small" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
@@ -124,6 +124,10 @@
         <label style="display:flex; gap:6px; align-items:center; user-select:none;">
           <input id="victoriaLabels" type="checkbox" checked />
           <span>Labels</span>
+        </label>
+        <label style="display:flex; gap:6px; align-items:center; user-select:none;">
+          <input id="victoriaShafts" type="checkbox" checked />
+          <span>Shafts</span>
         </label>
       </p>
 

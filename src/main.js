@@ -528,6 +528,7 @@ let victoriaLabelsVisible = prefs.victoriaLabelsVisible ?? true;
 
 // Victoria station shafts (ground cube + platform cube + vertical line)
 let victoriaShaftsLayer = null;
+let victoriaShaftsVisible = prefs.victoriaShaftsVisible ?? true;
 
 // Simple camera focus helpers (MVP)
 function focusCameraOnStations({ stations, controls, camera, pad = 1.35 } = {}) {
@@ -801,6 +802,7 @@ async function buildNetworkMvp() {
 
             victoriaShaftsLayer?.dispose?.();
             victoriaShaftsLayer = addShaftsToScene({ scene, shaftsData, colour, platformYById });
+            if (victoriaShaftsLayer?.group) victoriaShaftsLayer.group.visible = victoriaShaftsVisible;
           } catch {
             // ignore
           }
@@ -810,6 +812,8 @@ async function buildNetworkMvp() {
           if (stCb) stCb.checked = victoriaStationsVisible;
           const lbCb = document.getElementById('victoriaLabels');
           if (lbCb) lbCb.checked = victoriaLabelsVisible;
+          const shCb = document.getElementById('victoriaShafts');
+          if (shCb) shCb.checked = victoriaShaftsVisible;
         }
 
         loadedCount++;
@@ -1080,6 +1084,13 @@ function setVictoriaLabelsVisible(v) {
   savePrefs(prefs);
 }
 
+function setVictoriaShaftsVisible(v) {
+  victoriaShaftsVisible = !!v;
+  if (victoriaShaftsLayer?.group) victoriaShaftsLayer.group.visible = victoriaShaftsVisible;
+  prefs.victoriaShaftsVisible = victoriaShaftsVisible;
+  savePrefs(prefs);
+}
+
 // Hook up HUD controls (optional)
 {
   const stCb = document.getElementById('victoriaStations');
@@ -1091,6 +1102,12 @@ function setVictoriaLabelsVisible(v) {
   if (lbCb) {
     lbCb.checked = victoriaLabelsVisible;
     lbCb.addEventListener('change', () => setVictoriaLabelsVisible(lbCb.checked));
+  }
+
+  const shCb = document.getElementById('victoriaShafts');
+  if (shCb) {
+    shCb.checked = victoriaShaftsVisible;
+    shCb.addEventListener('change', () => setVictoriaShaftsVisible(shCb.checked));
   }
 
   const resetBtn = document.getElementById('resetPrefs');
@@ -1165,6 +1182,11 @@ window.addEventListener('keydown', (e) => {
     setVictoriaLabelsVisible(!victoriaLabelsVisible);
     const lbCb = document.getElementById('victoriaLabels');
     if (lbCb) lbCb.checked = victoriaLabelsVisible;
+  }
+  if (e.key === 's' || e.key === 'S') {
+    setVictoriaShaftsVisible(!victoriaShaftsVisible);
+    const shCb = document.getElementById('victoriaShafts');
+    if (shCb) shCb.checked = victoriaShaftsVisible;
   }
   if (e.key === 'f' || e.key === 'F') {
     // Focus the camera on the Victoria line stations for quick re-orientation.
