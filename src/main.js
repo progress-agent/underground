@@ -289,6 +289,8 @@ const lineGroups = new Map();
 const lineCenterPoints = new Map();
 // Pickable meshes for raycast selection (click-to-focus).
 const linePickables = [];
+// Track meshes by lineId for hover highlight.
+const lineMeshesById = new Map();
 
 
 function setLineVisible(lineId, visible) {
@@ -422,6 +424,9 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
 
   leftMesh.userData.lineId = lineId;
   rightMesh.userData.lineId = lineId;
+
+  // Track for hover highlight.
+  lineMeshesById.set(lineId, [leftMesh, rightMesh]);
 
   // Allow click-to-focus.
   linePickables.push(leftMesh, rightMesh);
@@ -765,13 +770,38 @@ window.addEventListener('resize', () => {
     return hit?.userData?.lineId || null;
   }
 
+  function setHoverHighlight(lineId) {
+    // Clear all highlights (cheap; only ~11 lines).
+    for (const [id, meshes] of lineMeshesById.entries()) {
+      for (const m of meshes) {
+        if (!m?.material) continue;
+        // Reset to baseline.
+        m.material.emissiveIntensity = 0.10;
+        m.material.opacity = 0.42;
+        m.material.thickness = 0.9;
+      }
+    }
+
+    if (!lineId) return;
+    const meshes = lineMeshesById.get(lineId);
+    if (!meshes) return;
+    for (const m of meshes) {
+      if (!m?.material) continue;
+      m.material.emissiveIntensity = 0.22;
+      m.material.opacity = 0.62;
+      m.material.thickness = 1.25;
+    }
+  }
+
   function onPointerMove(ev) {
     const lineId = pickLineUnderPointer(ev);
     moveTip(ev, lineId);
+    setHoverHighlight(lineId);
   }
 
   function onPointerLeave() {
     moveTip({}, null);
+    setHoverHighlight(null);
   }
 
   function onPointerDown(ev) {
