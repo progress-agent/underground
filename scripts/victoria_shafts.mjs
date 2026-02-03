@@ -2,9 +2,23 @@ import { fetchRouteSequence } from '../src/tfl.js';
 import fs from 'node:fs/promises';
 
 const LINE_ID = 'victoria';
-const seq = await fetchRouteSequence(LINE_ID);
+
+async function loadRouteSequence(lineId) {
+  // Prefer live fetch (TfL), but fall back to the repo-bundled cache so this script
+  // works offline and in CI without network.
+  try {
+    return await fetchRouteSequence(lineId);
+  } catch (err) {
+    const p = `public/data/tfl/route-sequence/${lineId}.json`;
+    const raw = await fs.readFile(p, 'utf8');
+    console.warn(`TfL fetch failed; using bundled ${p}`);
+    return JSON.parse(raw);
+  }
+}
+
+const seq = await loadRouteSequence(LINE_ID);
 const sequences = seq.stopPointSequences || [];
-const longest = sequences.reduce((best, cur) => (!best || (cur.stopPoint?.length||0)>(best.stopPoint?.length||0))?cur:best, null);
+const longest = sequences.reduce((best, cur) => (!best || (cur.stopPoint?.length || 0) > (best.stopPoint?.length || 0)) ? cur : best, null);
 const sps = longest?.stopPoint || [];
 
 // load anchors from public/data/station_depths.csv (same parser as app)
