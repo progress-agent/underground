@@ -469,6 +469,7 @@ function focusCameraOnStations({ stations, controls, camera, pad = 1.35 } = {}) 
 async function buildNetworkMvp() {
   let usedCacheFallback = false;
   try {
+    setNetStatus({ kind: 'warn', text: 'Loading TfL tube lines…' });
     const depthAnchors = await loadStationDepthAnchors();
 
     // Render all TfL tube lines we know about.
