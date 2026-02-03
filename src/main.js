@@ -6,6 +6,10 @@ import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY } from './te
 import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 
+// Real-world tube tunnels are built as parallel bores roughly 5–10 m apart.
+// Our 3D scene units are metres, but we use a smaller offset for visual clarity at overview zoom.
+const TUNNEL_OFFSET_METRES = 1.15;
+
 function setNetStatus({ kind, text }) {
   const el = document.getElementById('netStatus');
   if (!el) return;
@@ -491,7 +495,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
 
   const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
 
-  const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, 1.15);
+  const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, TUNNEL_OFFSET_METRES);
 
   const segs = Math.max(80, centerPts.length * 10);
   const radius = 4.5;
