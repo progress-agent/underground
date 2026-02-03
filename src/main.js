@@ -1040,6 +1040,32 @@ function setVictoriaLabelsVisible(v) {
     });
   }
 
+  const copyLinkBtn = document.getElementById('copyLink');
+  if (copyLinkBtn) {
+    copyLinkBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const url = new URL(location.href);
+      // Ensure the current sim sliders are represented.
+      url.searchParams.set('t', String(sim.timeScale));
+      url.searchParams.set('vz', String(sim.verticalScale));
+      url.searchParams.set('hx', String(sim.horizontalScale));
+
+      // Preserve focus param if present; otherwise, omit.
+      const focusId = normalizeLineId(getUrlStringParam('focus'));
+      if (!focusId) url.searchParams.delete('focus');
+
+      const text = url.toString();
+
+      try {
+        await navigator.clipboard.writeText(text);
+        setNetStatus({ kind: 'ok', text: 'Link copied' });
+      } catch {
+        // Fallback: prompt-based copy.
+        window.prompt('Copy link:', text);
+      }
+    });
+  }
+
   // Initialize pause UI on load.
   updateSimUi();
 }
