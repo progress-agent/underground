@@ -690,6 +690,7 @@ async function buildNetworkMvp() {
 
             // Make the current focus shareable.
             setUrlParam('focus', id);
+            updateSimUi();
 
             const pts = lineCenterPoints.get(id);
             if (!pts || pts.length === 0) return;
@@ -813,7 +814,7 @@ async function buildNetworkMvp() {
     // Optional: focus on a specific line after everything is built.
     // If the line was previously hidden (persisted prefs), focusing should also reveal it.
     const focusId = normalizeLineId(urlFocusLine);
-    if (focusId) {
+    if (focusId && focusId !== 'all') {
       setLineVisible(focusId, true);
       initialLineVisibility[focusId] = true;
       prefs.lineVisibility = initialLineVisibility;
@@ -831,7 +832,10 @@ async function buildNetworkMvp() {
     }
 
     // Otherwise frame the camera over all currently-visible tube lines.
-    if (!focusId) {
+    if (!focusId || focusId === 'all') {
+      // Explicitly clear focus from URL if we're doing the default framing.
+      if (focusId === 'all') deleteUrlParam('focus');
+
       const pts = [];
       for (const [lineId, group] of lineGroups.entries()) {
         if (!group?.visible) continue;
@@ -846,6 +850,9 @@ async function buildNetworkMvp() {
         controls.target.set(0, -120, 0);
       }
     }
+
+    // Update HUD focus label once the network is built.
+    updateSimUi();
   } catch (e) {
     console.warn('Network build failed:', e);
 
@@ -997,6 +1004,7 @@ window.addEventListener('resize', () => {
 
     // Make the current focus shareable.
     setUrlParam('focus', lineId);
+    updateSimUi();
 
     const wrap = document.getElementById('lineToggles');
     const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
@@ -1018,6 +1026,12 @@ function updateSimUi() {
   const label = document.getElementById('simStatus');
   if (btn) btn.textContent = sim.paused ? 'Resume' : 'Pause';
   if (label) label.textContent = sim.paused ? 'Paused' : 'Running';
+
+  const focusLabel = document.getElementById('focusStatus');
+  if (focusLabel) {
+    const focusId = normalizeLineId(getUrlStringParam('focus')) || 'all';
+    focusLabel.textContent = `Focus: ${focusId.replace(/-/g, ' ')}`;
+  }
 }
 
 function setSimPaused(v) {
@@ -1100,7 +1114,7 @@ function setVictoriaLabelsVisible(v) {
 
       // Preserve focus param if present; otherwise, omit.
       const focusId = normalizeLineId(getUrlStringParam('focus'));
-      if (!focusId) url.searchParams.delete('focus');
+      if (!focusId || focusId === 'all') url.searchParams.delete('focus');
 
       const text = url.toString();
 
