@@ -830,8 +830,22 @@ async function buildNetworkMvp() {
       }
     }
 
-    // Otherwise frame the camera roughly over the network.
-    if (!focusId) controls.target.set(0, -120, 0);
+    // Otherwise frame the camera over all currently-visible tube lines.
+    if (!focusId) {
+      const pts = [];
+      for (const [lineId, group] of lineGroups.entries()) {
+        if (!group?.visible) continue;
+        const cps = lineCenterPoints.get(lineId);
+        if (cps && cps.length) pts.push(...cps);
+      }
+
+      if (pts.length) {
+        focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.15 });
+      } else {
+        // Fallback: keep an OK-ish target if we somehow have no points.
+        controls.target.set(0, -120, 0);
+      }
+    }
   } catch (e) {
     console.warn('Network build failed:', e);
 
