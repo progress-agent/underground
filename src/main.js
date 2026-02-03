@@ -27,6 +27,10 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x0b1020, 1);
 app.appendChild(renderer.domElement);
+// On mobile browsers, allow OrbitControls to handle gestures without the page
+// also panning/zooming.
+renderer.domElement.style.touchAction = 'none';
+renderer.domElement.style.webkitTapHighlightColor = 'transparent';
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x0b1020, 2500, 15000);
