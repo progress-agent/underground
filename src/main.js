@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats } from './depth.js';
-import { tryCreateTerrainMesh } from './terrain.js';
+import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY } from './terrain.js';
 import { createStationMarkers } from './stations.js';
 import { loadVictoriaShafts, addShaftsToScene } from './shafts.js';
 
@@ -80,6 +80,7 @@ const prefs = loadPrefs();
 // ---------- Simulation params ----------
 // Set by the terrain loader when/if a terrain mesh exists.
 let applyTerrainOpacity = null;
+let terrain = null;
 
 function getUrlNumberParam(key) {
   const sp = new URLSearchParams(location.search);
@@ -237,7 +238,8 @@ scene.add(rim);
 
   // Attempt to load generated terrain heightmap (EA LiDAR DTM pipeline output)
   // Terrain mesh (optional)
-  let terrain = null;
+  // (stored in module-scope `terrain` so other systems can read it)
+  terrain = null;
   applyTerrainOpacity = (opacity) => {
     if (!terrain?.mesh?.material) return;
     terrain.mesh.material.opacity = opacity;
@@ -253,6 +255,18 @@ scene.add(rim);
     grid.visible = false;
 
     applyTerrainOpacity(prefs.groundOpacity ?? 0.10);
+
+    // If station shafts already exist, snap their ground cubes to the terrain surface (approx).
+    // This improves the "shaft length" feel without needing per-station survey data.
+    if (victoriaShaftsLayer?.updateGroundYById && terrain.heightSampler) {
+      const groundYById = {};
+      for (const s of victoriaShaftsLayer.shaftsData?.shafts ?? []) {
+        const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: 24000 });
+        const h01 = terrain.heightSampler(u, v);
+        groundYById[s.id] = terrainHeightToWorldY({ h01, displacementScale: 60, displacementBias: -30, baseY: -6 });
+      }
+      victoriaShaftsLayer.updateGroundYById(groundYById);
+    }
   });
 
   // faint "surface" plane to catch light but not obscure the network
@@ -806,6 +820,18 @@ async function buildNetworkMvp() {
 
             victoriaShaftsLayer?.dispose?.();
             victoriaShaftsLayer = addShaftsToScene({ scene, shaftsData, colour, platformYById });
+
+            // If terrain is already loaded, snap ground cubes to terrain surface (approx).
+            if (victoriaShaftsLayer?.updateGroundYById && terrain?.heightSampler) {
+              const groundYById = {};
+              for (const s of shaftsData?.shafts ?? []) {
+                const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: 24000 });
+                const h01 = terrain.heightSampler(u, v);
+                groundYById[s.id] = terrainHeightToWorldY({ h01, displacementScale: 60, displacementBias: -30, baseY: -6 });
+              }
+              victoriaShaftsLayer.updateGroundYById(groundYById);
+            }
+
             if (victoriaShaftsLayer?.group) victoriaShaftsLayer.group.visible = victoriaShaftsVisible;
           } catch {
             // ignore

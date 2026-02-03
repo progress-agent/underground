@@ -46,8 +46,53 @@ export async function tryCreateTerrainMesh({ opacity = 0.10 } = {}) {
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.y = -6.0;
 
-    return { mesh, meta, widthM, heightM };
+    // Convenience sampler: read "height" from the displacement map by sampling the same
+    // texture used by the terrain material. This is approximate (no geo alignment yet)
+    // but good enough to drive surface markers.
+    // Returns a value in [0..1] where 0 is black and 1 is white.
+    let heightSampler = null;
+    try {
+      const img = tex.image;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      heightSampler = (u, v) => {
+        const uu = Math.min(1, Math.max(0, u));
+        const vv = Math.min(1, Math.max(0, v));
+        const x = Math.round(uu * (canvas.width - 1));
+        const y = Math.round((1 - vv) * (canvas.height - 1)); // flip v (canvas origin top-left)
+        const i = (y * canvas.width + x) * 4;
+        return data[i] / 255; // red channel
+      };
+    } catch {
+      // ignore
+    }
+
+    return { mesh, meta, widthM, heightM, heightSampler };
   } catch {
     return null;
   }
+}
+
+export function terrainHeightToWorldY({ h01, displacementScale = 60, displacementBias = -30, baseY = -6 } = {}) {
+  // MeshStandardMaterial displacement: y += h * scale + bias
+  // Our plane is centered at baseY.
+  const h = Number.isFinite(h01) ? h01 : 0;
+  return baseY + (h * displacementScale + displacementBias);
+}
+
+export function xzToTerrainUV({
+  x,
+  z,
+  terrainSize = 24000,
+} = {}) {
+  // PlaneGeometry(size,size) is centered at origin.
+  // Convert world x/z -> UV [0..1]
+  const u = (x + terrainSize / 2) / terrainSize;
+  const v = (z + terrainSize / 2) / terrainSize;
+  return { u, v };
 }
