@@ -261,7 +261,7 @@ scene.add(rim);
     terrain.mesh.material.needsUpdate = true;
   };
 
-  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? 0.10 }).then(result => {
+  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? 0.10, wireframe: false }).then(result => {
     if (!result) return;
     terrain = result;
     scene.add(result.mesh);

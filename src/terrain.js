@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
-export async function tryCreateTerrainMesh({ opacity = 0.10 } = {}) {
+export async function tryCreateTerrainMesh({ opacity = 0.10, wireframe = false } = {}) {
   // Looks for generated outputs from scripts/build-heightmap.mjs
-  // Expected files (repo-relative):
-  // - /data/terrain/london_height_u16.png
-  // - /data/terrain/london_height.json
+  // Expected files (served from /public/data):
+  // - /data/terrain/victoria_dtm_u16.png
+  // - /data/terrain/victoria_dtm_u16.json
   try {
     // Prefer Victoria AOI heightmap for now.
     const metaRes = await fetch('/data/terrain/victoria_dtm_u16.json', { cache: 'no-store' });
@@ -40,7 +40,7 @@ export async function tryCreateTerrainMesh({ opacity = 0.10 } = {}) {
       displacementMap: tex,
       displacementScale: 60,
       displacementBias: -30,
-      wireframe: true,
+      wireframe: !!wireframe,
     });
 
     const mesh = new THREE.Mesh(geom, mat);
