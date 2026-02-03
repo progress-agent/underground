@@ -73,6 +73,17 @@ export async function fetchJson(url, {
   const cached = useCache ? cacheGet(url, { ttlMs }) : null;
   if (preferCache && cached) return cached;
 
+  // If the browser explicitly knows we're offline, don't even attempt a network fetch.
+  // This avoids long timeouts on first paint and makes the bundled cache feel instant.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    if (cached) return cached;
+    if (allowBundledFallback) {
+      const bundled = await fetchBundledJsonFor(url).catch(() => null);
+      if (bundled) return bundled;
+    }
+    throw new Error(`Offline (no cache) for ${url}`);
+  }
+
   try {
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) {
