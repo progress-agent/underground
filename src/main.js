@@ -219,6 +219,9 @@ const initialLineVisibility = (prefs.lineVisibility && typeof prefs.lineVisibili
 
 // Track line groups so we can toggle visibility.
 const lineGroups = new Map();
+// Store approximate centerline points per line (for camera focus helpers).
+const lineCenterPoints = new Map();
+
 function setLineVisible(lineId, visible) {
   const g = lineGroups.get(lineId);
   if (!g) return;
@@ -320,6 +323,9 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
       const y = -depthM * sim.verticalScale;
       return new THREE.Vector3(x, y, z);
     });
+
+  // Keep a copy for camera focus helpers.
+  lineCenterPoints.set(lineId, centerPts);
 
   if (centerPts.length < 2) return null;
 
@@ -626,6 +632,16 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'f' || e.key === 'F') {
     // Focus the camera on the Victoria line stations for quick re-orientation.
     focusCameraOnStations({ stations: victoriaStationsLayer?.stations, controls, camera });
+  }
+  if (e.key === 'a' || e.key === 'A') {
+    // Focus the camera on all currently-visible tube lines.
+    const pts = [];
+    for (const [lineId, group] of lineGroups.entries()) {
+      if (!group?.visible) continue;
+      const cps = lineCenterPoints.get(lineId);
+      if (cps && cps.length) pts.push(...cps);
+    }
+    focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.18 });
   }
 });
 
