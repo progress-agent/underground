@@ -53,8 +53,8 @@
       }
 
       .hud {
-        position: fixed; left: 12px; top: 12px; color: rgba(255,255,255,0.85);
-        background: rgba(20, 24, 34, 0.35);
+        position: fixed; left: 12px; top: 12px; color: rgba(255,255,255,0.92);
+        background: rgba(20, 24, 34, 0.45);
         border: 1px solid rgba(255,255,255,0.10);
         border-radius: 12px;
         padding: 10px 12px;
@@ -62,9 +62,9 @@
         -webkit-backdrop-filter: blur(10px);
       }
       .hud h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
-      .hud p { margin: 0; font-size: 12px; opacity: 0.85; max-width: 380px; }
-      .hud code { opacity: 0.9; }
-      .hud .small { margin-top: 6px; font-size: 11px; opacity: 0.75; }
+      .hud p { margin: 0; font-size: 12px; opacity: 0.92; max-width: 380px; }
+      .hud code { opacity: 0.95; }
+      .hud .small { margin-top: 6px; font-size: 11px; opacity: 0.88; }
 
       .net-status {
         position: fixed;
@@ -144,6 +144,12 @@
         <input id="verticalScale" type="range" min="0.2" max="200" value="3" step="0.2" style="vertical-align: middle; width: 160px;" />
         <span id="verticalScaleValue">3.0×</span>
       </p>
+      <p class="small">
+        Ground opacity:
+        <input id="groundOpacity" type="range" min="0" max="0.6" value="0.10" step="0.02" style="vertical-align: middle; width: 160px;" />
+        <span id="groundOpacityValue">0.10</span>
+      </p>
+
       <p class="small">
         Horizontal scale:
         <input id="horizontalScale" type="range" min="0.25" max="3" value="1" step="0.05" style="vertical-align: middle; width: 160px;" />

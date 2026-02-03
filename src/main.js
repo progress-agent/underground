@@ -129,6 +129,9 @@ function deleteUrlParam(key) {
 
 // HUD controls (optional)
 {
+  // These are declared here and assigned later when the terrain mesh loads.
+  // The handlers check for existence before applying.
+  let applyTerrainOpacity = null;
 
   const el = document.getElementById('timeScale');
   const out = document.getElementById('timeScaleValue');
@@ -169,6 +172,24 @@ function deleteUrlParam(key) {
       if (v === 3.0) deleteUrlParam('vz');
       else setUrlParam('vz', v);
       rebuildFromSimScales();
+    });
+  }
+
+  const gEl = document.getElementById('groundOpacity');
+  const gOut = document.getElementById('groundOpacityValue');
+  if (gEl) {
+    const defaultOpacity = 0.10;
+    const cur = prefs.groundOpacity ?? defaultOpacity;
+    gEl.value = String(cur);
+    if (gOut) gOut.textContent = Number(cur).toFixed(2);
+
+    gEl.addEventListener('input', () => {
+      const v = Number(gEl.value);
+      const op = Number.isFinite(v) ? v : defaultOpacity;
+      prefs.groundOpacity = op;
+      savePrefs(prefs);
+      if (gOut) gOut.textContent = op.toFixed(2);
+      applyTerrainOpacity(op);
     });
   }
 
@@ -213,9 +234,19 @@ scene.add(rim);
   scene.add(grid);
 
   // Attempt to load generated terrain heightmap (EA LiDAR DTM pipeline output)
-  tryCreateTerrainMesh().then(result => {
+  // Terrain mesh (optional)
+  let terrain = null;
+  applyTerrainOpacity = (opacity) => {
+    if (!terrain?.mesh?.material) return;
+    terrain.mesh.material.opacity = opacity;
+    terrain.mesh.material.needsUpdate = true;
+  };
+
+  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? 0.10 }).then(result => {
     if (!result) return;
+    terrain = result;
     scene.add(result.mesh);
+    applyTerrainOpacity(prefs.groundOpacity ?? 0.10);
   });
 
   // faint "surface" plane to catch light but not obscure the network

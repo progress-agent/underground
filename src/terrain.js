@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export async function tryCreateTerrainMesh() {
+export async function tryCreateTerrainMesh({ opacity = 0.10 } = {}) {
   // Looks for generated outputs from scripts/build-heightmap.mjs
   // Expected files (repo-relative):
   // - /data/terrain/london_height_u16.png
@@ -36,7 +36,7 @@ export async function tryCreateTerrainMesh() {
       roughness: 0.95,
       metalness: 0.0,
       transparent: true,
-      opacity: 0.10,
+      opacity,
       displacementMap: tex,
       displacementScale: 60,
       displacementBias: -30,
