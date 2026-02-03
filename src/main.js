@@ -58,6 +58,22 @@ function savePrefs(next) {
     // ignore quota/private mode
   }
 }
+function resetPrefsAndCache() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    // clear prefs
+    localStorage.removeItem(PREFS_KEY);
+    // clear TfL cache entries
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('ug:tfl:')) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    // ignore
+  }
+}
 const prefs = loadPrefs();
 
 // ---------- Simulation params ----------
@@ -693,7 +709,7 @@ function setVictoriaLabelsVisible(v) {
   savePrefs(prefs);
 }
 
-// Hook up HUD checkboxes (optional)
+// Hook up HUD controls (optional)
 {
   const stCb = document.getElementById('victoriaStations');
   if (stCb) {
@@ -704,6 +720,14 @@ function setVictoriaLabelsVisible(v) {
   if (lbCb) {
     lbCb.checked = victoriaLabelsVisible;
     lbCb.addEventListener('change', () => setVictoriaLabelsVisible(lbCb.checked));
+  }
+
+  const resetBtn = document.getElementById('resetPrefs');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      resetPrefsAndCache();
+      location.reload();
+    });
   }
 }
 
