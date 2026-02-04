@@ -389,25 +389,17 @@ const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
 rim.position.set(-60, 80, -40);
 scene.add(rim);
 
-// ---------- Ground (terrain if available, else transparent wireframe grid) ----------
+// ---------- Ground (terrain if available, else debug grid) ----------
 {
-  // Emergency: bright grid so something is visible
-  const grid = new THREE.GridHelper(24000, 60, 0xffffff, 0x888888);
-  grid.position.y = 0;
-  grid.material.transparent = false;
+  // Debug fallback: visible grid if terrain fails
+  const grid = new THREE.GridHelper(24000, 120, 0x6b7280, 0x334155);
+  grid.position.y = -6;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.25;
+  grid.visible = false; // Hidden by default, shown if terrain fails
   scene.add(grid);
   
-  // Add a bright reference plane at y=0
-  const planeGeo = new THREE.PlaneGeometry(24000, 24000);
-  const planeMat = new THREE.MeshBasicMaterial({ color: 0x2a3a4a, side: THREE.DoubleSide });
-  const plane = new THREE.Mesh(planeGeo, planeMat);
-  plane.rotation.x = -Math.PI / 2;
-  plane.position.y = -1;
-  scene.add(plane);
-
-  // Attempt to load generated terrain heightmap (EA LiDAR DTM pipeline output)
-  // Terrain mesh (optional)
-  // (stored in module-scope `terrain` so other systems can read it)
+  // Attempt to load generated terrain heightmap
   terrain = null;
   applyTerrainOpacity = (opacity) => {
     if (!terrain?.mesh?.material) return;
@@ -421,15 +413,13 @@ scene.add(rim);
   tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? TERRAIN_CONFIG.opacity, wireframe: false }).then(result => {
     console.log('Terrain load result:', result ? 'success' : 'failed');
     if (!result) {
-      console.warn('Terrain failed to load - keeping grid visible');
+      console.warn('Terrain failed to load - showing fallback grid');
+      grid.visible = true;
       return;
     }
     terrain = result;
     console.log('Adding terrain mesh to scene');
     scene.add(result.mesh);
-
-    // If we have real terrain, hide the debug grid so it doesn't visually fight the heightmap.
-    grid.visible = false;
 
     applyTerrainOpacity(prefs.groundOpacity ?? TERRAIN_CONFIG.opacity);
 
