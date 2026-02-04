@@ -20,7 +20,7 @@
 - [ ] Research Jubilee, Northern, Piccadilly, Waterloo & City depths
 - [x] Research Jubilee, Northern, Piccadilly depths from web sources (11 stations added)
 - [x] Research Waterloo & City line depths (2 stations added)
-- [ ] Add depth interpolation for stations between known anchors
+- [x] Add depth interpolation for stations between known anchors
 
 ### Twin Tunnels
 - [x] Extracted offset constant `TUNNEL_OFFSET_METRES = 1.15`
