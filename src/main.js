@@ -60,6 +60,101 @@ controls.touches = {
   TWO: THREE.TOUCH.DOLLY_PAN,
 };
 
+// ---------- FPS-style Keyboard Controls ----------
+// Adds WASD/QE/SX movement + arrow key look direction
+// Works alongside OrbitControls (mouse) — use one or both
+const fpsControls = {
+  enabled: true,
+  moveSpeed: 15.0,        // base movement speed (units/sec)
+  fastMultiplier: 2.5,    // W = faster
+  rotateSpeed: 1.5,       // arrow key rotation speed (rad/sec)
+  keys: new Set(),        // currently pressed keys
+  velocity: new THREE.Vector3(),
+  rotation: new THREE.Euler(0, 0, 0, 'YXZ'),
+};
+
+// Initialize rotation from current camera
+fpsControls.rotation.y = camera.rotation.y;
+fpsControls.rotation.x = camera.rotation.x;
+
+window.addEventListener('keydown', (e) => {
+  fpsControls.keys.add(e.key.toLowerCase());
+});
+
+window.addEventListener('keyup', (e) => {
+  fpsControls.keys.delete(e.key.toLowerCase());
+});
+
+// Prevent default scrolling for control keys
+window.addEventListener('keydown', (e) => {
+  const controlKeys = ['s', 'w', 'x', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+  if (controlKeys.includes(e.key.toLowerCase())) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
+function updateFpsControls(dt) {
+  if (!fpsControls.enabled) return;
+
+  const keys = fpsControls.keys;
+  const moveSpeed = fpsControls.moveSpeed;
+  const fastMult = fpsControls.fastMultiplier;
+
+  // Arrow keys control look direction (yaw only, for simplicity)
+  let yawDelta = 0;
+  if (keys.has('arrowleft')) yawDelta += fpsControls.rotateSpeed * dt;
+  if (keys.has('arrowright')) yawDelta -= fpsControls.rotateSpeed * dt;
+
+  // Pitch control (optional - up/down look)
+  let pitchDelta = 0;
+  if (keys.has('arrowup')) pitchDelta += fpsControls.rotateSpeed * dt;
+  if (keys.has('arrowdown')) pitchDelta -= fpsControls.rotateSpeed * dt;
+
+  fpsControls.rotation.y += yawDelta;
+  fpsControls.rotation.x += pitchDelta;
+  fpsControls.rotation.x = THREE.MathUtils.clamp(fpsControls.rotation.x, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
+
+  // Calculate forward/right vectors based on current rotation
+  const cosYaw = Math.cos(fpsControls.rotation.y);
+  const sinYaw = Math.sin(fpsControls.rotation.y);
+
+  // Forward is -Z in Three.js, but we calculate based on yaw
+  const forward = new THREE.Vector3(-sinYaw, 0, -cosYaw);
+  const right = new THREE.Vector3(cosYaw, 0, -sinYaw);
+  const up = new THREE.Vector3(0, 1, 0);
+
+  // Calculate movement direction
+  const moveDir = new THREE.Vector3();
+
+  // S = forward (normal speed)
+  if (keys.has('s')) moveDir.add(forward);
+  // W = faster forward
+  if (keys.has('w')) moveDir.add(forward.multiplyScalar(fastMult));
+  // X = backward
+  if (keys.has('x')) moveDir.sub(forward);
+  // A = left
+  if (keys.has('a')) moveDir.sub(right);
+  // D = right
+  if (keys.has('d')) moveDir.add(right);
+  // E = ascend
+  if (keys.has('e')) moveDir.add(up);
+  // Q = descend
+  if (keys.has('q')) moveDir.sub(up);
+
+  // Apply movement
+  if (moveDir.lengthSq() > 0) {
+    moveDir.normalize();
+    const actualSpeed = keys.has('w') ? moveSpeed * fastMult : moveSpeed;
+    const displacement = moveDir.multiplyScalar(actualSpeed * dt);
+
+    camera.position.add(displacement);
+    controls.target.add(displacement);
+  }
+
+  // Apply rotation to camera (affects look direction and thus movement)
+  camera.rotation.set(fpsControls.rotation.x, fpsControls.rotation.y, 0, 'YXZ');
+}
+
 // ---------- Persistent UI prefs (localStorage) ----------
 const PREFS_KEY = 'ug:prefs:v1';
 function loadPrefs() {
@@ -1286,6 +1381,12 @@ function setVictoriaShaftsVisible(v) {
 
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
+
+  // FPS controls now use: S=forward, W=fast-forward, X=backward, A=left, D=right
+  // Arrow keys = look direction
+  // These are handled in updateFpsControls() above
+
+  // Non-conflicting shortcuts (letters not used by FPS controls)
   if (e.key === 'v' || e.key === 'V') {
     setVictoriaStationsVisible(!victoriaStationsVisible);
     const stCb = document.getElementById('victoriaStations');
@@ -1296,7 +1397,8 @@ window.addEventListener('keydown', (e) => {
     const lbCb = document.getElementById('victoriaLabels');
     if (lbCb) lbCb.checked = victoriaLabelsVisible;
   }
-  if (e.key === 's' || e.key === 'S') {
+  // Shafts toggle moved to Shift+S (conflicts with S=forward)
+  if ((e.key === 's' || e.key === 'S') && e.shiftKey) {
     setVictoriaShaftsVisible(!victoriaShaftsVisible);
     const shCb = document.getElementById('victoriaShafts');
     if (shCb) shCb.checked = victoriaShaftsVisible;
@@ -1305,7 +1407,8 @@ window.addEventListener('keydown', (e) => {
     // Focus the camera on the Victoria line stations for quick re-orientation.
     focusCameraOnStations({ stations: victoriaStationsLayer?.stations, controls, camera });
   }
-  if (e.key === 'a' || e.key === 'A') {
+  // Focus all moved to Shift+A (conflicts with A=left movement)
+  if ((e.key === 'a' || e.key === 'A') && e.shiftKey) {
     // Focus the camera on all currently-visible tube lines.
     const pts = [];
     for (const [lineId, group] of lineGroups.entries()) {
@@ -1326,6 +1429,10 @@ window.addEventListener('keydown', (e) => {
 const clock = new THREE.Clock();
 function tick() {
   const dt = clock.getDelta();
+
+  // Update FPS controls before orbit controls (keyboard takes precedence)
+  updateFpsControls(dt);
+
   controls.update();
 
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);

@@ -125,7 +125,7 @@
     <div id="app"></div>
     <div id="netStatus" class="net-status" style="display:none"></div>
     <div id="hoverTip" class="hover-tip" style="display:none"></div>
-    <div class="hint"><b>Click</b> a line to focus • <b>Shift+Click</b> to toggle line • <b>Hover</b> for name</div>
+    <div class="hint"><b>Click</b> line to focus • <b>S/W/X</b> move • <b>AD</b> strafe • <b>QE</b> up/down • <b>Arrows</b> look • <b>Mouse</b> orbit</div>
 
     <div id="hud" class="hud">
       <details id="hudDetails" open>
@@ -138,11 +138,10 @@
           </span>
         </summary>
 
-        <p>3D Tube network visualiser. Orbit: drag • Pan: right-drag/shift-drag • Zoom: wheel.</p>
-        <p class="small">Data: TfL public endpoints (no auth). Cached for stability; works offline after first load.</p>
-        <p class="small"><code>V</code>: stations • <code>L</code>: labels • <code>S</code>: shafts • <code>F</code>: focus current line • <code>A</code>: focus all visible lines</p>
-        <p class="small">UI: <b>Focus all</b> button frames all visible lines.</p>
-        <p class="small">Tip: start focused on a line with <code>?focus=victoria</code> (or any line id). Click a line in the scene to focus.</p>
+        <p>3D Tube network visualiser. <b>Mouse:</b> drag to orbit • right-drag/shift-drag to pan • wheel to zoom.</p>
+        <p class="small"><b>Keyboard controls:</b> <code>S</code>=forward • <code>W</code>=fast forward • <code>X</code>=backward • <code>A</code>/<code>D</code>=strafe • <code>E</code>/<code>Q</code>=up/down • <code>Arrows</code>=look direction</p>
+        <p class="small"><b>Shortcuts:</b> <code>V</code>=stations • <code>L</code>=labels • <code>Shift+S</code>=shafts • <code>F</code>=focus line • <code>Shift+A</code>=focus all • <code>Space</code>=pause</p>
+        <p class="small">Data: TfL public endpoints (cached; works offline). Tip: start with <code>?focus=victoria</code> in URL.</p>
 
         <p class="small row">
           <label style="display:flex; gap:6px; align-items:center; user-select:none;">
