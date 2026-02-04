@@ -71,6 +71,10 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUHBN,Holborn Underground Station,26,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,85ft below surface per depth diagrams
 # Jubilee line (selected stations with researched depths)
 940GZZLUWSM,Westminster Underground Station,30,https://chaddavis.photography/westminster-tube-station/,Jubilee line platform approx 30m below ground
+# Piccadilly line (selected stations with researched depths)
+940GZZLUCGN,Covent Garden Underground Station,37,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,121ft below surface per depth diagrams
+940GZZLULSQ,Leicester Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
+940GZZLURSQ,Russell Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Remaining West Acton through to Leytonstone
 # - Hainault loop stations
