@@ -183,7 +183,7 @@ function updateFpsControls(dt) {
 }
 
 // ---------- Persistent UI prefs (localStorage) ----------
-const PREFS_KEY = 'ug:prefs:v1';
+const PREFS_KEY = 'ug:prefs:v2';
 function loadPrefs() {
   if (typeof localStorage === 'undefined') return {};
   try {
@@ -322,7 +322,7 @@ function deleteUrlParam(key) {
   const gEl = document.getElementById('groundOpacity');
   const gOut = document.getElementById('groundOpacityValue');
   if (gEl) {
-    const defaultOpacity = 0.35;
+    const defaultOpacity = TERRAIN_CONFIG.opacity;
     const cur = prefs.groundOpacity ?? defaultOpacity;
     gEl.value = String(cur);
     if (gOut) gOut.textContent = Number(cur).toFixed(2);
@@ -393,7 +393,7 @@ scene.add(rim);
     terrain.mesh.material.needsUpdate = true;
   };
 
-  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? 0.35, wireframe: false }).then(result => {
+  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? TERRAIN_CONFIG.opacity, wireframe: false }).then(result => {
     if (!result) return;
     terrain = result;
     scene.add(result.mesh);
@@ -401,7 +401,7 @@ scene.add(rim);
     // If we have real terrain, hide the debug grid so it doesn't visually fight the heightmap.
     grid.visible = false;
 
-    applyTerrainOpacity(prefs.groundOpacity ?? 0.35);
+    applyTerrainOpacity(prefs.groundOpacity ?? TERRAIN_CONFIG.opacity);
 
     // If station shafts already exist, snap their ground cubes to the terrain surface (approx).
     // This improves the "shaft length" feel without needing per-station survey data.
