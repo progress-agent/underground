@@ -1169,7 +1169,7 @@ window.addEventListener('resize', () => {
 
     const name = prettyLineName(lineId);
     if (lastHoverLineId !== lineId) {
-      tip.innerHTML = `<b>${name}</b> <span class="muted">(click to focus, shift+click to toggle)</span>`;
+      tip.innerHTML = `<b>${name}</b> <span class="muted">(shift+click to toggle)</span>`;
       tip.style.display = 'block';
       lastHoverLineId = lineId;
     }
@@ -1239,7 +1239,7 @@ window.addEventListener('resize', () => {
     if (!lineId) return;
 
     // UX:
-    // - Click: focus camera on that line (and ensure it's visible)
+    // - Click: does nothing (no camera focus)
     // - Shift+Click: toggle visibility for that line
     if (ev.shiftKey) {
       const g = lineGroups.get(lineId);
@@ -1254,26 +1254,8 @@ window.addEventListener('resize', () => {
       const wrap = document.getElementById('lineToggles');
       const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
       if (cb) cb.checked = next;
-      return;
     }
-
-    // Ensure visible before focusing.
-    setLineVisible(lineId, true);
-    initialLineVisibility[lineId] = true;
-    prefs.lineVisibility = initialLineVisibility;
-    savePrefs(prefs);
-
-    // Make the current focus shareable.
-    setUrlParam('focus', lineId);
-    updateSimUi();
-
-    const wrap = document.getElementById('lineToggles');
-    const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
-    if (cb) cb.checked = true;
-
-    const pts = lineCenterPoints.get(lineId);
-    if (!pts || pts.length === 0) return;
-    focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
+    // Click without shift: no action (intentionally empty)
   }
 
   renderer.domElement.addEventListener('pointermove', onPointerMove);
