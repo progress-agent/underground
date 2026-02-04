@@ -1,0 +1,272 @@
+{
+  "line": "hammersmith-city",
+  "origin": {
+    "lat": 51.5074,
+    "lon": -0.1278
+  },
+  "verticalScale": 3,
+  "groundY": -6,
+  "shafts": [
+    {
+      "id": "940GZZLUBKG",
+      "name": "Barking Underground Station",
+      "x": 14470.813861781631,
+      "z": -3553.445720000455,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUEHM",
+      "name": "East Ham Underground Station",
+      "x": 12401.416737441392,
+      "z": -3511.923360000089,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUUPK",
+      "name": "Upton Park Underground Station",
+      "x": 11298.158612726167,
+      "z": -3110.2808000001073,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUPLW",
+      "name": "Plaistow Underground Station",
+      "x": 10064.017199837414,
+      "z": -2665.112120000073,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWHM",
+      "name": "West Ham Underground Station",
+      "x": 9205.134595179377,
+      "z": -2308.3315200007264,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUBBB",
+      "name": "Bromley-by-Bow Underground Station",
+      "x": 8055.454128973278,
+      "z": -1941.3094800003441,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUBWR",
+      "name": "Bow Road Underground Station",
+      "x": 7113.84275455389,
+      "z": -2175.1928000007047,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUMED",
+      "name": "Mile End Underground Station",
+      "x": 6524.071156389222,
+      "z": -1972.813040000694,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUSGN",
+      "name": "Stepney Green Underground Station",
+      "x": 5626.387788694035,
+      "z": -1609.4645600005283,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWPL",
+      "name": "Whitechapel Underground Station",
+      "x": 4699.67313579784,
+      "z": -1348.9757600001071,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUADE",
+      "name": "Aldgate East Underground Station",
+      "x": 3839.612650833317,
+      "z": -850.1508400002848,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLULVT",
+      "name": "Liverpool Street Underground Station",
+      "x": 3091.4507949848585,
+      "z": -1110.0830400005293,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUMGT",
+      "name": "Moorgate Underground Station",
+      "x": 2735.3152199653114,
+      "z": -1199.5843199999886,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUBBN",
+      "name": "Barbican Underground Station",
+      "x": 2065.239899729116,
+      "z": -1433.2450000001202,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUFCN",
+      "name": "Farringdon Underground Station",
+      "x": 1585.773327912915,
+      "z": -1430.6846400002566,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUKSX",
+      "name": "King's Cross St. Pancras Underground Station",
+      "x": 319.1362759805517,
+      "z": -2589.637160000004,
+      "groundY": -6,
+      "platformY": -51,
+      "depth_m": 17
+    },
+    {
+      "id": "940GZZLUESQ",
+      "name": "Euston Square Underground Station",
+      "x": -556.3059400451266,
+      "z": -2026.4692800004818,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUGPS",
+      "name": "Great Portland Street Underground Station",
+      "x": -1140.6038591384813,
+      "z": -1830.1008000003226,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUBST",
+      "name": "Baker Street Underground Station",
+      "x": -2032.1899640706868,
+      "z": -1723.567560000361,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUERC",
+      "name": "Edgware Road (Circle Line) Underground Station",
+      "x": -2773.700260541349,
+      "z": -1386.824560000256,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUPAH",
+      "name": "Paddington (H&C Line)-Underground",
+      "x": -3499.4131034897414,
+      "z": -1200.8088400000609,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLURYO",
+      "name": "Royal Oak Underground Station",
+      "x": -4222.908759978869,
+      "z": -1303.8911600000342,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWSP",
+      "name": "Westbourne Park Underground Station",
+      "x": -5076.317685565595,
+      "z": -1526.1972000003584,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLULAD",
+      "name": "Ladbroke Grove Underground Station",
+      "x": -5722.488964287832,
+      "z": -1118.6546800002443,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLULRD",
+      "name": "Latimer Road Underground Station",
+      "x": -6235.767629607833,
+      "z": -666.695479999953,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWLA",
+      "name": "Wood Lane Underground Station",
+      "x": -6702.138943898997,
+      "z": -252.58508000060175,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUSBM",
+      "name": "Shepherd's Bush Market Underground Station",
+      "x": -6829.973600691032,
+      "z": 202.71371999995864,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUGHK",
+      "name": "Goldhawk Road Underground Station",
+      "x": -6853.53120682073,
+      "z": 600.5714000000044,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUHSC",
+      "name": "Hammersmith (H&C Line) Underground Station",
+      "x": -6736.782482325023,
+      "z": 1559.5931999998852,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    }
+  ]
+}
