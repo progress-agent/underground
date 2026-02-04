@@ -7,7 +7,7 @@ import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 import { loadThamesData, createThamesMesh } from './thames.js';
 
-// Version: 2026-02-04-2213 - Force Netlify rebuild
+// Version: 2026-02-04-2344 - Force fresh Netlify build
 // Emergency debugging: catch all errors
 window.addEventListener('error', (e) => {
   console.error('GLOBAL ERROR:', e.error);
@@ -1003,8 +1003,8 @@ async function buildNetworkMvp() {
             size: 6.0,
             labels: true,
           });
-          const sv = lineStationsVisible.get(id) ?? true;
-          const lv = lineLabelsVisible.get(id) ?? true;
+          const sv = lineStationsVisible.get(id) ?? victoriaStationsVisible;
+          const lv = lineLabelsVisible.get(id) ?? victoriaLabelsVisible;
           stationsLayer.setLabelsVisible(lv);
           stationsLayer.mesh.visible = sv;
 
