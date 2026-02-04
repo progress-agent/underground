@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
-import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY } from './terrain.js';
+import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, TERRAIN_CONFIG } from './terrain.js';
 import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 
@@ -397,9 +397,9 @@ scene.add(rim);
       if (layers.shaftsLayer?.updateGroundYById && terrain.heightSampler) {
         const groundYById = {};
         for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
-          const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: 24000 });
+          const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: TERRAIN_CONFIG.size });
           const h01 = terrain.heightSampler(u, v);
-          groundYById[s.id] = terrainHeightToWorldY({ h01, displacementScale: 60, displacementBias: -30, baseY: -6 });
+          groundYById[s.id] = terrainHeightToWorldY({ h01 });
         }
         layers.shaftsLayer.updateGroundYById(groundYById);
       }
@@ -1030,9 +1030,9 @@ async function buildNetworkMvp() {
               const groundYById = {};
               for (const s of shaftsData?.shafts ?? []) {
                 if (!s?.id) continue;
-                const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: 24000 });
+                const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: TERRAIN_CONFIG.size });
                 const h01 = terrain.heightSampler(u, v);
-                groundYById[s.id] = terrainHeightToWorldY({ h01, displacementScale: 60, displacementBias: -30, baseY: -6 });
+                groundYById[s.id] = terrainHeightToWorldY({ h01 });
               }
               shaftsLayer.updateGroundYById(groundYById);
             }
