@@ -7,6 +7,12 @@ import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 import { loadThamesData, createThamesMesh } from './thames.js';
 
+// Emergency debugging: catch all errors
+window.addEventListener('error', (e) => {
+  console.error('GLOBAL ERROR:', e.error);
+  document.body.insertAdjacentHTML('beforeend', `<div style="position:fixed;top:10px;left:10px;background:red;color:white;padding:10px;z-index:9999">ERROR: ${e.error?.message || e.message}</div>`);
+});
+
 // Real-world tube tunnels are built as parallel bores roughly 5–10 m apart (centre-to-centre).
 // With 4.5m radius tubes, we need ~6-8m half-spacing to show clear separation.
 const TUNNEL_OFFSET_METRES = 6.0;
@@ -32,10 +38,11 @@ function setNetStatus({ kind, text }) {
 // ---------- Scene ----------
 const app = document.getElementById('app');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x0b1020, 1);
+// Use a lighter background so scene is visible even if nothing renders
+renderer.setClearColor(0x1a1a2e, 1);
 app.appendChild(renderer.domElement);
 // On mobile browsers, allow OrbitControls to handle gestures without the page
 // also panning/zooming.
@@ -218,6 +225,7 @@ function resetPrefsAndCache() {
   }
 }
 const prefs = loadPrefs();
+console.log('Prefs loaded:', { groundOpacity: prefs.groundOpacity, twinTunnels: prefs.twinTunnelsEnabled });
 
 // ---------- Simulation params ----------
 // Set by the terrain loader when/if a terrain mesh exists.
@@ -378,11 +386,19 @@ scene.add(rim);
 
 // ---------- Ground (terrain if available, else transparent wireframe grid) ----------
 {
-  const grid = new THREE.GridHelper(24000, 120, 0x6b7280, 0x334155);
-  grid.position.y = -6;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.25;
+  // Emergency: bright grid so something is visible
+  const grid = new THREE.GridHelper(24000, 60, 0xffffff, 0x888888);
+  grid.position.y = 0;
+  grid.material.transparent = false;
   scene.add(grid);
+  
+  // Add a bright reference plane at y=0
+  const planeGeo = new THREE.PlaneGeometry(24000, 24000);
+  const planeMat = new THREE.MeshBasicMaterial({ color: 0x2a3a4a, side: THREE.DoubleSide });
+  const plane = new THREE.Mesh(planeGeo, planeMat);
+  plane.rotation.x = -Math.PI / 2;
+  plane.position.y = -1;
+  scene.add(plane);
 
   // Attempt to load generated terrain heightmap (EA LiDAR DTM pipeline output)
   // Terrain mesh (optional)
@@ -394,9 +410,17 @@ scene.add(rim);
     terrain.mesh.material.needsUpdate = true;
   };
 
+  // Emergency debugging: ensure something is visible
+  console.log('Initializing scene...');
+  
   tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? TERRAIN_CONFIG.opacity, wireframe: false }).then(result => {
-    if (!result) return;
+    console.log('Terrain load result:', result ? 'success' : 'failed');
+    if (!result) {
+      console.warn('Terrain failed to load - keeping grid visible');
+      return;
+    }
     terrain = result;
+    console.log('Adding terrain mesh to scene');
     scene.add(result.mesh);
 
     // If we have real terrain, hide the debug grid so it doesn't visually fight the heightmap.
