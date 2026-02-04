@@ -787,7 +787,7 @@ async function buildNetworkMvp() {
         console.log('built', id, 'stops', sps.length, 'depth[m] min/max', ds.min, ds.max);
 
         // Station markers + labels + shafts for deep tube lines (Victoria, Bakerloo, Central, etc.)
-        const DEEP_LINES_WITH_SHAFTS = new Set(['victoria', 'bakerloo', 'central', 'jubilee', 'northern', 'piccadilly']);
+        const DEEP_LINES_WITH_SHAFTS = new Set(['victoria', 'bakerloo', 'central', 'jubilee', 'northern', 'piccadilly', 'waterloo-city']);
         if (DEEP_LINES_WITH_SHAFTS.has(id)) {
           const stations = sps
             .filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon))
