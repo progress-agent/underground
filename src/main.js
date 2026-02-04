@@ -10,6 +10,10 @@ import { loadLineShafts, addShaftsToScene } from './shafts.js';
 // With 4.5m radius tubes, we need ~6-8m half-spacing to show clear separation.
 const TUNNEL_OFFSET_METRES = 6.0;
 
+// Twin tunnel toggle preference
+let twinTunnelsEnabled = prefs.twinTunnelsEnabled ?? true;
+let twinTunnelOffset = twinTunnelsEnabled ? TUNNEL_OFFSET_METRES : 0;
+
 function setNetStatus({ kind, text }) {
   const el = document.getElementById('netStatus');
   if (!el) return;
@@ -655,7 +659,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
 
   const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
 
-  const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, TUNNEL_OFFSET_METRES);
+  const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelOffset);
 
   const segs = Math.max(80, centerPts.length * 10);
   const radius = 4.5;
@@ -1361,6 +1365,20 @@ function setVictoriaShaftsVisible(v) {
   if (shCb) {
     shCb.checked = victoriaShaftsVisible;
     shCb.addEventListener('change', () => setVictoriaShaftsVisible(shCb.checked));
+  }
+
+  // Twin tunnel toggle
+  const twinCb = document.getElementById('twinTunnels');
+  if (twinCb) {
+    twinCb.checked = twinTunnelsEnabled;
+    twinCb.addEventListener('change', () => {
+      twinTunnelsEnabled = twinCb.checked;
+      twinTunnelOffset = twinTunnelsEnabled ? TUNNEL_OFFSET_METRES : 0;
+      prefs.twinTunnelsEnabled = twinTunnelsEnabled;
+      savePrefs(prefs);
+      // Reload to apply tunnel offset change
+      location.reload();
+    });
   }
 
   const resetBtn = document.getElementById('resetPrefs');
