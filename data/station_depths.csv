@@ -75,6 +75,9 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUCGN,Covent Garden Underground Station,37,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,121ft below surface per depth diagrams
 940GZZLULSQ,Leicester Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
 940GZZLURSQ,Russell Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
+# Northern line (selected stations with researched depths)
+940GZZLUAGL,Angel Underground Station,28,https://en.wikipedia.org/wiki/Angel_tube_station,27.5m escalator vertical distance (approx platform depth)
+940GZZLUHTD,Hampstead Underground Station,55,https://www.mylondon.news/news/transport/london-underground-station-deepest-lift-32575981,55.2m shaft depth - deepest on Northern line
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Remaining West Acton through to Leytonstone
 # - Hainault loop stations
