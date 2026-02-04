@@ -25,12 +25,12 @@ export const TERRAIN_CONFIG = {
   // Material/displacement settings
   displacementScale: 120,
   displacementBias: -60,
-  opacity: 0.75,
+  opacity: 1.0,
 
-  // Color theming - lighter, more distinct from background
-  color: 0x3a4a5a,
-  roughness: 0.75,
-  metalness: 0.15,
+  // Color theming - bright, distinct from background
+  color: 0x5a6a7a,
+  roughness: 0.8,
+  metalness: 0.1,
 };
 
 export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false } = {}) {
@@ -75,15 +75,12 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       color: TERRAIN_CONFIG.color,
       roughness: TERRAIN_CONFIG.roughness,
       metalness: TERRAIN_CONFIG.metalness,
-      transparent: true,
-      opacity,
+      transparent: false,
+      opacity: 1.0,
       displacementMap: tex,
       displacementScale: TERRAIN_CONFIG.displacementScale,
       displacementBias: TERRAIN_CONFIG.displacementBias,
       wireframe: !!wireframe,
-      // Enhanced terrain appearance
-      emissive: new THREE.Color(0x1a3a5c),
-      emissiveIntensity: 0.1,
       side: THREE.DoubleSide,
     });
 

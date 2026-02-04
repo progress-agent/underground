@@ -1587,8 +1587,15 @@ function tick() {
   }
 
   // Update station label projections for ALL lines
+  let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
-    layers.stationsLayer?.update?.({ camera, renderer });
+    if (layers.stationsLayer?.update) {
+      layers.stationsLayer.update({ camera, renderer });
+      updateCallCount++;
+    }
+  }
+  if (updateCallCount === 0 && lineShaftLayers.size > 0) {
+    console.log('No station updates called, lineShaftLayers size:', lineShaftLayers.size);
   }
 
   // Update environment based on camera height (sky/fog/background)
