@@ -1,0 +1,254 @@
+{
+  "line": "jubilee",
+  "origin": {
+    "lat": 51.5074,
+    "lon": -0.1278
+  },
+  "verticalScale": 3,
+  "groundY": -6,
+  "shafts": [
+    {
+      "id": "940GZZLUSTD",
+      "name": "Stratford Underground Station",
+      "x": 8615.293709937858,
+      "z": -3830.0759200004627,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWHM",
+      "name": "West Ham Underground Station",
+      "x": 9205.134595179377,
+      "z": -2308.3315200007264,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUCGT",
+      "name": "Canning Town Underground Station",
+      "x": 9431.495475255031,
+      "z": -688.4028800005154,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUNGW",
+      "name": "North Greenwich Underground Station",
+      "x": 9151.922120157002,
+      "z": 771.4475999996654,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUCYF",
+      "name": "Canary Wharf Underground Station",
+      "x": 7590.676417449712,
+      "z": 435.4838399999659,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUCWR",
+      "name": "Canada Water Underground Station",
+      "x": 5431.760389816621,
+      "z": 1054.0890799995248,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUBMY",
+      "name": "Bermondsey Underground Station",
+      "x": 4421.000512698886,
+      "z": 1074.237999999276,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLULNB",
+      "name": "London Bridge Underground Station",
+      "x": 2697.138040619831,
+      "z": 186.9062799995288,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSWK",
+      "name": "Southwark Underground Station",
+      "x": 1556.811329788758,
+      "z": 348.4315999998603,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWLO",
+      "name": "Waterloo Underground Station",
+      "x": 902.1177406137182,
+      "z": 456.5233199998417,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWSM",
+      "name": "Westminster Underground Station",
+      "x": 203.6347188681808,
+      "z": 676.8255999996882,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUGPK",
+      "name": "Green Park Underground Station",
+      "x": -1038.4054207817044,
+      "z": 50.427960000028804,
+      "groundY": -6,
+      "platformY": -54,
+      "depth_m": 18
+    },
+    {
+      "id": "940GZZLUBND",
+      "name": "Bond Street Underground Station",
+      "x": -1518.9805858275372,
+      "z": -768.553280000645,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUBST",
+      "name": "Baker Street Underground Station",
+      "x": -2032.1899640706868,
+      "z": -1723.567560000361,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSJW",
+      "name": "St. John's Wood Underground Station",
+      "x": -3197.4600225684985,
+      "z": -3019.109720000118,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSWC",
+      "name": "Swiss Cottage Underground Station",
+      "x": -3263.00559727054,
+      "z": -4038.8009200002725,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUFYR",
+      "name": "Finchley Road Underground Station",
+      "x": -3606.0459147650504,
+      "z": -4388.791000000153,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWHP",
+      "name": "West Hampstead Underground Station",
+      "x": -4383.031194583962,
+      "z": -4367.974160000506,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUKBN",
+      "name": "Kilburn Underground Station",
+      "x": -5296.858451185677,
+      "z": -4428.6435599999895,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWIG",
+      "name": "Willesden Green Underground Station",
+      "x": -6494.762722880805,
+      "z": -4647.164720000377,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUDOH",
+      "name": "Dollis Hill Underground Station",
+      "x": -7709.434467174129,
+      "z": -4959.862600000286,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUNDN",
+      "name": "Neasden Underground Station",
+      "x": -8455.586997793878,
+      "z": -5185.953520000546,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUWYP",
+      "name": "Wembley Park Underground Station",
+      "x": -10494.359234165511,
+      "z": -6211.433360000323,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUKBY",
+      "name": "Kingsbury Underground Station",
+      "x": -10461.65573389134,
+      "z": -8621.177400000493,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUQBY",
+      "name": "Queensbury Underground Station",
+      "x": -10976.389427825236,
+      "z": -9661.240160000627,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUCPK",
+      "name": "Canons Park Underground Station",
+      "x": -11563.528117069523,
+      "z": -11165.507320000195,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSTM",
+      "name": "Stanmore Underground Station",
+      "x": -12157.526226922166,
+      "z": -12516.709480000218,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    }
+  ]
+}
