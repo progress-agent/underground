@@ -534,6 +534,27 @@ function llToXZ(lat, lon) {
   return { x, z: -z };
 }
 
+// Shared station registry: all lines use same X/Z for stations with same NaPTAN ID
+// This ensures interchanges show vertical stacks, not offset tubes
+const sharedStationPositions = new Map(); // naptanId -> { x, z, lat, lon }
+
+function registerStationPosition(naptanId, lat, lon) {
+  if (!naptanId) return;
+  const key = String(naptanId).trim();
+  if (sharedStationPositions.has(key)) {
+    // Already registered — return canonical position
+    return sharedStationPositions.get(key);
+  }
+  const { x, z } = llToXZ(lat, lon);
+  sharedStationPositions.set(key, { x, z, lat, lon });
+  return { x, z, lat, lon };
+}
+
+function getStationPosition(naptanId) {
+  if (!naptanId) return null;
+  return sharedStationPositions.get(String(naptanId).trim());
+}
+
 function rebuildFromSimScales() {
   // MVP: easiest way to apply hx/vz changes is a hard reload.
   // (We currently bake scales into geometry.)
@@ -591,15 +612,23 @@ function stationUsFromPolyline(centerPts) {
 
 function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
   // stopPoints: [{lat, lon, name, id, naptanId?}]
-  const centerPts = stopPoints
-    .filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon))
-    .map(sp => {
-      const { x, z } = llToXZ(sp.lat, sp.lon);
-      // Depth: use station anchor if available, else heuristic by line.
-      const depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
-      const y = -depthM * sim.verticalScale;
-      return new THREE.Vector3(x, y, z);
-    });
+  // Build curve points using shared X/Z for stations (so interchanges show vertical stacks)
+  const centerPts = [];
+
+  for (const sp of stopPoints) {
+    if (!Number.isFinite(sp.lat) || !Number.isFinite(sp.lon)) continue;
+
+    // Register this station's ground position (shared across all lines)
+    registerStationPosition(sp.id, sp.lat, sp.lon);
+    const pos = getStationPosition(sp.id);
+
+    // Depth is line-specific (Y coordinate)
+    const depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
+    const y = -depthM * sim.verticalScale;
+
+    // Use shared X/Z, line-specific Y
+    centerPts.push(new THREE.Vector3(pos.x, y, pos.z));
+  }
 
   // Keep a copy for camera focus helpers.
   lineCenterPoints.set(lineId, centerPts);
