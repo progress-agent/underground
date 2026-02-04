@@ -65,17 +65,12 @@ controls.touches = {
 // Works alongside OrbitControls (mouse) — use one or both
 const fpsControls = {
   enabled: true,
-  moveSpeed: 15.0,        // base movement speed (units/sec)
-  fastMultiplier: 2.5,    // W = faster
-  rotateSpeed: 1.5,       // arrow key rotation speed (rad/sec)
+  moveSpeed: 100.0,       // base movement speed (units/sec) — increased for tube scale
+  fastMultiplier: 2.0,    // W = faster
+  rotateSpeed: 2.0,       // arrow key rotation speed (rad/sec)
   keys: new Set(),        // currently pressed keys
-  velocity: new THREE.Vector3(),
-  rotation: new THREE.Euler(0, 0, 0, 'YXZ'),
+  active: false,          // true when FPS keys are being held
 };
-
-// Initialize rotation from current camera
-fpsControls.rotation.y = camera.rotation.y;
-fpsControls.rotation.x = camera.rotation.x;
 
 window.addEventListener('keydown', (e) => {
   fpsControls.keys.add(e.key.toLowerCase());
@@ -97,62 +92,88 @@ function updateFpsControls(dt) {
   if (!fpsControls.enabled) return;
 
   const keys = fpsControls.keys;
+  const hasFpsKey = ['s', 'w', 'x', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']
+    .some(k => keys.has(k));
+
+  fpsControls.active = hasFpsKey;
+
+  if (!hasFpsKey) return;
+
+  // Disable OrbitControls while using FPS controls to prevent fighting
+  controls.enabled = false;
+
   const moveSpeed = fpsControls.moveSpeed;
   const fastMult = fpsControls.fastMultiplier;
 
-  // Arrow keys control look direction (yaw only, for simplicity)
-  let yawDelta = 0;
-  if (keys.has('arrowleft')) yawDelta += fpsControls.rotateSpeed * dt;
-  if (keys.has('arrowright')) yawDelta -= fpsControls.rotateSpeed * dt;
+  // Get camera's current forward direction (from camera matrix)
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
 
-  // Pitch control (optional - up/down look)
-  let pitchDelta = 0;
-  if (keys.has('arrowup')) pitchDelta += fpsControls.rotateSpeed * dt;
-  if (keys.has('arrowdown')) pitchDelta -= fpsControls.rotateSpeed * dt;
+  // Project forward onto XZ plane for movement (keep Y separate)
+  const forwardXZ = new THREE.Vector3(forward.x, 0, forward.z).normalize();
 
-  fpsControls.rotation.y += yawDelta;
-  fpsControls.rotation.x += pitchDelta;
-  fpsControls.rotation.x = THREE.MathUtils.clamp(fpsControls.rotation.x, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
-
-  // Calculate forward/right vectors based on current rotation
-  const cosYaw = Math.cos(fpsControls.rotation.y);
-  const sinYaw = Math.sin(fpsControls.rotation.y);
-
-  // Forward is -Z in Three.js, but we calculate based on yaw
-  const forward = new THREE.Vector3(-sinYaw, 0, -cosYaw);
-  const right = new THREE.Vector3(cosYaw, 0, -sinYaw);
-  const up = new THREE.Vector3(0, 1, 0);
+  // Right vector is perpendicular to forward in XZ plane
+  const right = new THREE.Vector3(-forward.z, 0, forward.x).normalize();
 
   // Calculate movement direction
   const moveDir = new THREE.Vector3();
 
   // S = forward (normal speed)
-  if (keys.has('s')) moveDir.add(forward);
+  if (keys.has('s')) moveDir.add(forwardXZ);
   // W = faster forward
-  if (keys.has('w')) moveDir.add(forward.multiplyScalar(fastMult));
+  if (keys.has('w')) moveDir.add(forwardXZ.clone().multiplyScalar(fastMult));
   // X = backward
-  if (keys.has('x')) moveDir.sub(forward);
-  // A = left
+  if (keys.has('x')) moveDir.sub(forwardXZ);
+  // A = left (strafe)
   if (keys.has('a')) moveDir.sub(right);
-  // D = right
+  // D = right (strafe)
   if (keys.has('d')) moveDir.add(right);
   // E = ascend
-  if (keys.has('e')) moveDir.add(up);
+  if (keys.has('e')) moveDir.y += 1;
   // Q = descend
-  if (keys.has('q')) moveDir.sub(up);
+  if (keys.has('q')) moveDir.y -= 1;
 
   // Apply movement
   if (moveDir.lengthSq() > 0) {
     moveDir.normalize();
     const actualSpeed = keys.has('w') ? moveSpeed * fastMult : moveSpeed;
     const displacement = moveDir.multiplyScalar(actualSpeed * dt);
-
     camera.position.add(displacement);
     controls.target.add(displacement);
   }
 
-  // Apply rotation to camera (affects look direction and thus movement)
-  camera.rotation.set(fpsControls.rotation.x, fpsControls.rotation.y, 0, 'YXZ');
+  // Arrow keys rotate the camera (yaw and pitch)
+  const yawSpeed = fpsControls.rotateSpeed;
+  const pitchSpeed = fpsControls.rotateSpeed;
+
+  let yaw = 0;
+  let pitch = 0;
+
+  if (keys.has('arrowleft')) yaw += yawSpeed * dt;
+  if (keys.has('arrowright')) yaw -= yawSpeed * dt;
+  if (keys.has('arrowup')) pitch += pitchSpeed * dt;
+  if (keys.has('arrowdown')) pitch -= pitchSpeed * dt;
+
+  if (yaw !== 0 || pitch !== 0) {
+    // Get current rotation
+    const quaternion = camera.quaternion.clone();
+    const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
+
+    // Apply yaw (Y axis rotation)
+    euler.y += yaw;
+
+    // Apply pitch (X axis rotation) with clamping
+    euler.x += pitch;
+    euler.x = THREE.MathUtils.clamp(euler.x, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
+
+    // Set new rotation
+    camera.quaternion.setFromEuler(euler);
+
+    // Update OrbitControls target to match new look direction
+    const lookDistance = camera.position.distanceTo(controls.target);
+    const newForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    controls.target.copy(camera.position).add(newForward.multiplyScalar(lookDistance));
+  }
 }
 
 // ---------- Persistent UI prefs (localStorage) ----------
@@ -1432,6 +1453,16 @@ function tick() {
 
   // Update FPS controls before orbit controls (keyboard takes precedence)
   updateFpsControls(dt);
+
+  // Re-enable OrbitControls when not using FPS controls
+  if (!fpsControls.active && !controls.enabled) {
+    controls.enabled = true;
+    // Sync controls target with current camera direction
+    const lookDistance = 1000; // default look distance
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    controls.target.copy(camera.position).add(forward.multiplyScalar(lookDistance));
+  }
 
   controls.update();
 
