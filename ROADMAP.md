@@ -18,7 +18,8 @@
 - [x] Extract Bakerloo depths from `data/sources/london-underground-depth-diagrams.pdf` (25 stations)
 - [x] Extract Central depths from PDF (29 stations)
 - [ ] Research Jubilee, Northern, Piccadilly, Waterloo & City depths
-- [ ] Research Jubilee, Northern, Piccadilly, Waterloo & City depths (Wikipedia, TfL archives)
+- [x] Research Jubilee, Northern, Piccadilly depths from web sources (11 stations added)
+- [ ] Research Waterloo & City line depths
 - [ ] Add depth interpolation for stations between known anchors
 
 ### Twin Tunnels
