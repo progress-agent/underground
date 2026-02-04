@@ -53,3 +53,37 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUWLO,Waterloo Underground Station,4,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf Bakerloo platforms
 940GZZLULBN,Lambeth North Underground Station,3,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
 940GZZLUEAC,Elephant & Castle Underground Station,3,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+# Central line depths (from london-underground-depth-diagrams.pdf)
+940GZZLUEPG,Epping Underground Station,81,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUTHB,Theydon Bois Underground Station,54,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUBKH,Buckhurst Hill Underground Station,40,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUNAN,North Acton Underground Station,33,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUHAN,Hainault Underground Station,36,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUEBY,Ealing Broadway Underground Station,33,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUWAC,West Acton Underground Station,33,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUFLP,Fairlop Underground Station,30,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUNHG,Notting Hill Gate Underground Station,28,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUEAN,East Acton Underground Station,12,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUHPK,Holland Park Underground Station,14,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUWCY,White City Underground Station,7,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUSBC,Shepherd's Bush Underground Station,6,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUMAR,Marble Arch Underground Station,27,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUQWY,Queensway Underground Station,27,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLULGT,Lancaster Gate Underground Station,18,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUBND,Bond Street Underground Station,22,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf Central platforms
+940GZZLUTCR,Tottenham Court Road Underground Station,25,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf Central platforms
+940GZZLUHBN,Holborn Underground Station,23,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUCHL,Chancery Lane Underground Station,20,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLULYS,Leytonstone Underground Station,23,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUSTD,St Paul's Underground Station,17,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUBNK,Bank Underground Station,14,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf Central platforms
+940GZZLULVT,Liverpool Street Underground Station,14,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf Central platforms
+940GZZLUBTH,Bethnal Green Underground Station,14,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLULEY,Leyton Underground Station,15,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUMIL,Mile End Underground Station,12,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUSTD,Stratford Underground Station,4,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUWAN,Wanstead Underground Station,29,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUGHL,Gants Hill Underground Station,25,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLURBG,Redbridge Underground Station,12,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUBKE,Barkingside Underground Station,25,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
+940GZZLUNBP,Newbury Park Underground Station,19,https://content.tfl.gov.uk/london-underground-depth-diagrams.pdf,depth-diagrams-pdf
