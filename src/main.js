@@ -878,7 +878,7 @@ async function buildNetworkMvp() {
           }
 
           // Keep HUD checkboxes in sync (in case build happens after user toggled)
-          // TODO: Generalize UI toggles for Bakerloo/Central
+          // Legacy Victoria-specific toggles (deprecated; use lineToggles for new lines).
           if (id === 'victoria') {
             const stCb = document.getElementById('victoriaStations');
             if (stCb) stCb.checked = victoriaStationsVisible;
