@@ -5,10 +5,9 @@ A small Three.js/Vite prototype that renders a depth-aware London Underground ne
 ## Features
 
 - **3D tube tunnels**: Twin tunnels for each line with realistic separation
-- **Station shafts**: Vertical shafts connecting surface to platform level
-  - Victoria line: 16 stations (curated depths)
-  - Bakerloo line: 25 stations (heuristic depths)
-  - Central line: 22 stations (heuristic depths)
+- **Station shafts**: Vertical shafts connecting surface to platform level (236 stations across all 11 lines)
+  - Deep tube lines (132 stations): Victoria (16, curated), Bakerloo (25), Central (22), Jubilee (27), Northern (12), Piccadilly (28), Waterloo & City (2)
+  - Sub-surface lines (104 stations): Circle (28), District (33), Hammersmith & City (29), Metropolitan (14)
 - **Terrain heightmap**: EA LiDAR data for surface visualization
 - **Interactive camera**: Focus on individual lines or all visible lines
 
@@ -78,13 +77,11 @@ src/           # Main application source
   shafts.js    # Vertical shaft rendering
   terrain.js   # Heightmap integration
 scripts/       # Data generation utilities
-  victoria_shafts.mjs   # Generate Victoria line shafts JSON
-  bakerloo_shafts.mjs   # Generate Bakerloo line shafts JSON
-  central_shafts.mjs    # Generate Central line shafts JSON
+  *_shafts.mjs          # Generate shaft JSON for each line (11 lines)
   build-heightmap.mjs   # Process EA LiDAR tiles
+  cache-tfl.mjs         # Cache TfL route sequences for offline use
 public/data/   # Static assets served at runtime
-  victoria/shafts.json  # Victoria station positions & depths
-  bakerloo/shafts.json  # Bakerloo station positions & depths
-  central/shafts.json   # Central station positions & depths
+  */shafts.json         # Station positions & depths for each line (11 lines)
+  tfl/                  # Cached TfL route sequences
   station_depths.csv    # Curated depth anchors
 ```
