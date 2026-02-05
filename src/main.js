@@ -7,7 +7,7 @@ import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 import { loadThamesData, createThamesMesh } from './thames.js';
 
-// Version: 2026-02-05-0433 - Work tick: sync version stamp
+// Version: 2026-02-05-0553 - Work tick: clean up console.log spam
 // Emergency debugging: catch all errors
 window.addEventListener('error', (e) => {
   console.error('GLOBAL ERROR:', e.error);
@@ -280,7 +280,7 @@ function resetPrefsAndCache() {
   }
 }
 const prefs = loadPrefs();
-console.log('Prefs loaded:', { groundOpacity: prefs.groundOpacity, twinTunnels: prefs.twinTunnelsEnabled });
+// Prefs loaded silently
 
 // Initialize twin tunnel settings now that prefs is loaded
 twinTunnelsEnabled = prefs.twinTunnelsEnabled ?? true;
@@ -463,20 +463,15 @@ scene.add(rim);
   };
 
   // Emergency debugging: ensure something is visible
-  console.log('Initializing scene...');
+  // Scene init
   
   tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? TERRAIN_CONFIG.opacity, wireframe: false }).then(result => {
-    console.log('Terrain load result:', result ? 'success' : 'failed');
     if (!result) {
-      console.warn('Terrain failed to load - showing fallback grid');
       grid.visible = true;
       return;
     }
     terrain = result;
-    console.log('Adding terrain mesh to scene:', result.mesh.name);
     scene.add(result.mesh);
-    console.log('Terrain mesh added, scene children:', scene.children.length);
-    console.log('Terrain in scene:', scene.getObjectByName('terrainMesh') ? 'yes' : 'no');
 
     applyTerrainOpacity(prefs.groundOpacity ?? TERRAIN_CONFIG.opacity);
 
@@ -1027,7 +1022,7 @@ async function buildNetworkMvp() {
         const ds = debugDepthStats({ lineId: id, stopPoints: sps, anchors: depthAnchors });
         addLineFromStopPoints(id, colour, sps, depthAnchors, sim);
         setLineVisible(id, (initialLineVisibility[id] ?? true) !== false);
-        console.log('built', id, 'stops', sps.length, 'depth[m] min/max', ds.min, ds.max);
+        // Line built silently
 
         // Station markers + labels + shafts for deep tube lines (Victoria, Bakerloo, Central, etc.)
         const DEEP_LINES_WITH_SHAFTS = new Set(['victoria', 'bakerloo', 'central', 'jubilee', 'northern', 'piccadilly', 'waterloo-city', 'circle', 'district', 'hammersmith-city', 'metropolitan', 'dlr']);
@@ -1649,7 +1644,7 @@ function tick() {
     }
   }
   if (updateCallCount === 0 && lineShaftLayers.size > 0) {
-    console.log('No station updates called, lineShaftLayers size:', lineShaftLayers.size);
+    // Station updates skipped
   }
 
   // Update environment based on camera height (sky/fog/background)
