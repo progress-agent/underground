@@ -8,6 +8,7 @@ import { loadLineShafts, addShaftsToScene } from './shafts.js';
 import { loadThamesData, createThamesMesh } from './thames.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
+import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
 
 // Version: 2026-02-05-0553 - Work tick: clean up console.log spam
 // Emergency debugging: catch all errors
@@ -558,6 +559,14 @@ loadCrossrailData().then(crossrailData => {
     }
   }
 });
+
+// ---------- Geological Strata (London Clay & Chalk bedrock) ----------
+const geologyGroup = createGeologicalStrata(null, TERRAIN_CONFIG.depthScale);
+if (geologyGroup) {
+  scene.add(geologyGroup);
+  addGeologyToLegend();
+  console.log('Geological strata added to scene');
+}
 
 // ---------- Tube lines (real TfL route sequences) ----------
 // Brand-ish colours (can refine later)
