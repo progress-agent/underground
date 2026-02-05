@@ -10,7 +10,7 @@
 #
 # Coverage:
 # - Victoria line: complete (16 stations)
-# - Bakerloo line: partial (9 stations with depths)
+# - Bakerloo line: partial (12 stations with depths)
 # - Central line: partial (5 stations with depths)
 # - Jubilee: 1 station, Northern: 2 stations, Piccadilly: 3 stations
 #
@@ -51,9 +51,9 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUBST,Baker Street Underground Station (Bakerloo),18,https://en.wikipedia.org/wiki/Baker_Street_tube_station,wikipedia-estimate-deep-tube
 940GZZLURGP,Regent's Park Underground Station,,https://en.wikipedia.org/wiki/Regent%27s_Park_tube_station,wikipedia-estimate
 940GZZLUOXC,Oxford Circus Underground Station (Bakerloo),,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
-940GZZLUPCC,Piccadilly Circus Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Piccadilly_Circus_tube_station,wikipedia-estimate
-940GZZLUCHX,Charing Cross Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Charing_Cross_tube_station,wikipedia-estimate
-940GZZLUEMB,Embankment Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Embankment_tube_station,wikipedia-estimate
+940GZZLUPCC,Piccadilly Circus Underground Station (Bakerloo),19,https://en.wikipedia.org/wiki/Piccadilly_Circus_tube_station,wikipedia-estimate-deep-tube
+940GZZLUCHX,Charing Cross Underground Station (Bakerloo),21,https://en.wikipedia.org/wiki/Charing_Cross_tube_station,wikipedia-estimate-deep-tube
+940GZZLUEMB,Embankment Underground Station (Bakerloo),12,https://en.wikipedia.org/wiki/Embankment_tube_station,wikipedia-estimate-deep-tube-cut-and-cover
 940GZZLUWLO,Waterloo Underground Station (Bakerloo),22,https://en.wikipedia.org/wiki/Waterloo_tube_station,wikipedia-estimate-deep-level
 940GZZLULBN,Lambeth North Underground Station,,https://en.wikipedia.org/wiki/Lambeth_North_tube_station,wikipedia-estimate
 940GZZLUEAC,Elephant & Castle Underground Station (Bakerloo),20,https://en.wikipedia.org/wiki/Elephant_and_Castle_tube_station,wikipedia-estimate-deep-level
