@@ -205,6 +205,27 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUDEB,Debden Underground Station,5,https://en.wikipedia.org/wiki/Debden_tube_station,Surface station
 940GZZLUTCR,Theydon Bois Underground Station,6,https://en.wikipedia.org/wiki/Theydon_Bois_tube_station,Surface station
 940GZZLUEPP,Epping Underground Station,5,https://en.wikipedia.org/wiki/Epping_tube_station,Surface station
+# Piccadilly line — western section (Heathrow branch and main line)
+940GZZLUHR4,Heathrow Terminal 4 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminal_4_tube_station,Surface station
+940GZZLUHR5,Heathrow Terminal 5 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminal_5_station,Surface station
+940GZZLUHRC,Heathrow Terminals 2 & 3 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminals_2_%26_3_tube_station,Surface station
+940GZZLUHAT,Hatton Cross Underground Station,5,https://en.wikipedia.org/wiki/Hatton_Cross_tube_station,Elevated station
+940GZZLUHGD,Hounslow West Underground Station,6,https://en.wikipedia.org/wiki/Hounslow_West_tube_station,Shallow station
+940GZZLUHGR,Hounslow East Underground Station,8,https://en.wikipedia.org/wiki/Hounslow_East_tube_station,Shallow cut-and-cover
+940GZZLUHSN,Hounslow Central Underground Station,8,https://en.wikipedia.org/wiki/Hounslow_Central_tube_station,Shallow sub-surface
+940GZZLUOCE,Osterley Underground Station,8,https://en.wikipedia.org/wiki/Osterley_tube_station,Shallow sub-surface
+940GZZLUBOS,Boston Manor Underground Station,10,https://en.wikipedia.org/wiki/Boston_Manor_tube_station,Approximate depth
+940GZZLUNFD,Northfields Underground Station,8,https://en.wikipedia.org/wiki/Northfields_tube_station,Shallow sub-surface
+940GZZLUSFK,South Ealing Underground Station,8,https://en.wikipedia.org/wiki/South_Ealing_tube_station,Shallow sub-surface
+940GZZLUACT,Acton Town Underground Station,6,https://en.wikipedia.org/wiki/Acton_Town_tube_station,Shallow station with surface platforms
+940GZZLUECM,Ealing Common Underground Station,6,https://en.wikipedia.org/wiki/Ealing_Common_tube_station,Shallow sub-surface
+940GZZLUNHG,North Ealing Underground Station,6,https://en.wikipedia.org/wiki/North_Ealing_tube_station,Shallow sub-surface
+940GZZLUPKR,Park Royal Underground Station,6,https://en.wikipedia.org/wiki/Park_Royal_tube_station,Elevated station
+940GZZLUALE,Alperton Underground Station,6,https://en.wikipedia.org/wiki/Alperton_tube_station,Elevated station
+940GZZLUSUT,Sudbury Town Underground Station,6,https://en.wikipedia.org/wiki/Sudbury_Town_tube_station,Elevated station
+940GZZLUSUH,Sudbury Hill Underground Station,6,https://en.wikipedia.org/wiki/Sudbury_Hill_tube_station,Elevated station
+940GZZLUSGB,South Harrow Underground Station,6,https://en.wikipedia.org/wiki/South_Harrow_tube_station,Elevated station
+940GZZLUHGD,Rayners Lane Underground Station,6,https://en.wikipedia.org/wiki/Rayners_Lane_tube_station,Elevated station
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Hainault loop stations
 # - Ealing Broadway to West Acton (main line)
