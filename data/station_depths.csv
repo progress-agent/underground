@@ -359,5 +359,27 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUMHC,Moor Park Underground Station,5,https://en.wikipedia.org/wiki/Moor_Park_tube_station,Surface station
 940GZZLUCXY,Croxley Underground Station,5,https://en.wikipedia.org/wiki/Croxley_tube_station,Surface station
 940GZZLUWAF,Watford Underground Station,5,https://en.wikipedia.org/wiki/Watford_tube_station,Surface terminus
+# Metropolitan line — Amersham/Chesham branch
+940GZZLURKW,Rickmansworth Underground Station,5,https://en.wikipedia.org/wiki/Rickmansworth_tube_station,Surface station
+940GZZLUCSM,Chorleywood Underground Station,5,https://en.wikipedia.org/wiki/Chorleywood_tube_station,Surface station
+940GZZLUCWD,Croxley Underground Station,5,https://en.wikipedia.org/wiki/Croxley_tube_station,Surface station
+940GZZLUMPK,Moor Park Underground Station,5,https://en.wikipedia.org/wiki/Moor_Park_tube_station,Surface station
+940GZZLUNHA,Northwood Hills Underground Station,6,https://en.wikipedia.org/wiki/Northwood_Hills_tube_station,Surface station
+940GZZLUNWD,Northwood Underground Station,5,https://en.wikipedia.org/wiki/Northwood_tube_station,Surface station
+940GZZLUAFB,Amersham Underground Station,5,https://en.wikipedia.org/wiki/Amersham_tube_station,Surface terminus
+940GZZLUCAL,Chalfont & Latimer Underground Station,5,https://en.wikipedia.org/wiki/Chalfont_%26_Latimer_tube_station,Surface station
+940GZZLUCFM,Chesham Underground Station,5,https://en.wikipedia.org/wiki/Chesham_tube_station,Surface terminus
+# District line — Richmond branch
+940GZZLURMD,Richmond Underground Station,5,https://en.wikipedia.org/wiki/Richmond_station_(London),Surface terminus
+940GZZLUKWG,Kew Gardens Underground Station,6,https://en.wikipedia.org/wiki/Kew_Gardens_tube_station,Surface station
+940GZZLUGNS,Gunnersbury Underground Station,6,https://en.wikipedia.org/wiki/Gunnersbury_station,Surface station
+940GZZLUTNG,Turnham Green Underground Station,6,https://en.wikipedia.org/wiki/Turnham_Green_tube_station,Surface station
+940GZZLUSTM,Stamford Brook Underground Station,6,https://en.wikipedia.org/wiki/Stamford_Brook_tube_station,Surface station
+940GZZLURVP,Ravenscourt Park Underground Station,6,https://en.wikipedia.org/wiki/Ravenscourt_Park_tube_station,Surface station
+# District line — Wimbledon branch
+940GZZLUWBN,Wimbledon Underground Station,5,https://en.wikipedia.org/wiki/Wimbledon_station,Surface terminus
+940GZZLUWPL,Wimbledon Park Underground Station,5,https://en.wikipedia.org/wiki/Wimbledon_Park_tube_station,Surface station
+940GZZLUSFD,Southfields Underground Station,6,https://en.wikipedia.org/wiki/Southfields_tube_station,Surface station
+940GZZLUECY,Earlsfield Underground Station,6,https://en.wikipedia.org/wiki/Earlsfield_station,Surface station
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Ealing Broadway to West Acton (main line - already partially covered above)
