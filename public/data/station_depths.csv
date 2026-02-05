@@ -12,7 +12,7 @@
 # - Victoria line: complete (16 stations)
 # - Bakerloo line: partial (14 stations with depths)
 # - Central line: partial (10 stations with depths)
-# - Jubilee: 3 stations, Northern: 7 stations, Piccadilly: 8 stations
+# - Jubilee: 5 stations, Northern: 7 stations, Piccadilly: 8 stations
 #
 # Columns:
 # naptan_id,name,depth_m,source_url,notes
@@ -81,6 +81,8 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUWSM,Westminster Underground Station,30,https://chaddavis.photography/westminster-tube-station/,Jubilee line platform approx 30m below ground
 940GZZLUBMY,Bermondsey Underground Station,32,https://en.wikipedia.org/wiki/Bermondsey_tube_station,wikipedia-estimate-deep-tube
 940GZZLUBDS,Bond Street Underground Station (Jubilee),24,https://en.wikipedia.org/wiki/Bond_Street_tube_station,wikipedia-estimate-deep-tube
+940GZZLUWLO,Waterloo Underground Station (Jubilee),26,https://en.wikipedia.org/wiki/Waterloo_tube_station,wikipedia-estimate-deep-tube
+940GZZLULNB,London Bridge Underground Station (Jubilee),28,https://en.wikipedia.org/wiki/London_Bridge_station,wikipedia-estimate-deep-tube
 # Piccadilly line (selected stations with researched depths)
 940GZZLUCGN,Covent Garden Underground Station,37,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,121ft below surface per depth diagrams
 940GZZLULSQ,Leicester Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
