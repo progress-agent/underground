@@ -10,9 +10,9 @@
 #
 # Coverage:
 # - Victoria line: complete (16 stations)
-# - Bakerloo line: partial (in progress)
-# - Central line: partial (in progress)
-# - Jubilee, Northern, Piccadilly: TODO (research from Wikipedia/TfL archives)
+# - Bakerloo line: partial (9 stations with depths)
+# - Central line: partial (1 station with depth)
+# - Jubilee: 1 station, Northern: 2 stations, Piccadilly: 3 stations
 #
 # Columns:
 # naptan_id,name,depth_m,source_url,notes
@@ -46,17 +46,17 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUKPK,Kilburn Park Underground Station,10,https://www.wikitree.com/wiki/Space:Kilburn_Park_Station,_Kilburn,_London_One_Place_Study,34ft below surface per original documentation
 940GZZLUMPK,Maida Vale Underground Station,12,https://www.wikitree.com/wiki/Space:Kilburn_Park_Station,_Kilburn,_London_One_Place_Study,38ft below surface per original documentation
 940GZZLUWYP,Warwick Avenue Underground Station,10,https://www.wikitree.com/wiki/Space:Kilburn_Park_Station,_Kilburn,_London_One_Place_Study,34ft below surface per original documentation
-940GZZLUPAC,Paddington Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Paddington_tube_station,wikipedia-estimate
+940GZZLUPAC,Paddington Underground Station (Bakerloo),15,https://en.wikipedia.org/wiki/Paddington_tube_station,wikipedia-estimate-cut-and-cover
 940GZZLUMEA,Marylebone Underground Station,,https://en.wikipedia.org/wiki/Marylebone_station,wikipedia-estimate
-940GZZLUBST,Baker Street Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Baker_Street_tube_station,wikipedia-estimate
+940GZZLUBST,Baker Street Underground Station (Bakerloo),18,https://en.wikipedia.org/wiki/Baker_Street_tube_station,wikipedia-estimate-deep-tube
 940GZZLURGP,Regent's Park Underground Station,,https://en.wikipedia.org/wiki/Regent%27s_Park_tube_station,wikipedia-estimate
 940GZZLUOXC,Oxford Circus Underground Station (Bakerloo),,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
 940GZZLUPCC,Piccadilly Circus Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Piccadilly_Circus_tube_station,wikipedia-estimate
 940GZZLUCHX,Charing Cross Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Charing_Cross_tube_station,wikipedia-estimate
 940GZZLUEMB,Embankment Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Embankment_tube_station,wikipedia-estimate
-940GZZLUWLO,Waterloo Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Waterloo_tube_station,wikipedia-estimate
+940GZZLUWLO,Waterloo Underground Station (Bakerloo),22,https://en.wikipedia.org/wiki/Waterloo_tube_station,wikipedia-estimate-deep-level
 940GZZLULBN,Lambeth North Underground Station,,https://en.wikipedia.org/wiki/Lambeth_North_tube_station,wikipedia-estimate
-940GZZLUEAC,Elephant & Castle Underground Station (Bakerloo),,https://en.wikipedia.org/wiki/Elephant_and_Castle_tube_station,wikipedia-estimate
+940GZZLUEAC,Elephant & Castle Underground Station (Bakerloo),20,https://en.wikipedia.org/wiki/Elephant_and_Castle_tube_station,wikipedia-estimate-deep-level
 # Central line (eastbound from West Ruislip)
 940GZZLUWRP,West Ruislip Underground Station,,https://en.wikipedia.org/wiki/West_Ruislip_station,wikipedia-estimate
 940GZZLURBG,Ruislip Gardens Underground Station,,https://en.wikipedia.org/wiki/Ruislip_Gardens_tube_station,wikipedia-estimate
