@@ -3,6 +3,14 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "description": "Interactive 3D visualization of the London Underground network with depth data, infrastructure layers, and geological strata",
+  "keywords": ["london", "underground", "tube", "3d", "visualization", "threejs", "crossrail", "tideway", "geology"],
+  "author": "progress-agent",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/progress-agent/underground.git"
+  },
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
