@@ -9,8 +9,13 @@ A small Three.js/Vite prototype that renders a depth-aware London Underground ne
   - Deep tube lines (132 stations): Victoria (16, curated depths), Bakerloo (25), Central (22), Jubilee (27), Northern (12), Piccadilly (28), Waterloo & City (2)
   - Sub-surface lines (116 stations): Circle (28), District (33), Hammersmith & City (29), Metropolitan (14)
   - Light rail: DLR (12 stations)
+- **Infrastructure layers**:
+  - **Crossrail/Elizabeth Line**: 118km rail line with 41m deep central London tunnels (purple)
+  - **Tideway Tunnel**: 25km super sewer beneath Thames at 30-65m depth (cyan)
+  - **Geological strata**: London Clay (0-30m) and Chalk bedrock (60m+) layers
 - **Terrain heightmap**: EA LiDAR data for surface visualization
 - **Interactive camera**: Focus on individual lines or all visible lines
+- **Curated loading experience**: Progress bar, straight-down view over central London, static camera during load
 
 ## Quick start
 
@@ -48,11 +53,16 @@ This writes JSON into `public/data/tfl/route-sequence/` and updates `index.json`
   - `Shift+S` toggle station shafts
   - `F` focus camera on a line (cycles through visible lines)
   - `Shift+A` focus camera on all currently-visible lines
+  - `R` reset view to curated straight-down position over central London
   - `S`/`W`/`X` move forward/fast-forward/backward (FPS mode)
   - `A`/`D` strafe left/right (FPS mode)
   - `Q`/`E` move up/down (FPS mode)
   - Arrow keys look direction (FPS mode)
   - `Space` pause/resume the simulation
+- Interactive elements:
+  - **Hover stations**: See station name and depth below ground
+  - **HUD toggles**: Show/hide Tideway Tunnel, Crossrail, and Geology layers
+  - **Compass rose**: Bottom-right corner for orientation
 
 ## URL parameters
 
@@ -75,11 +85,16 @@ Example:
 
 ```
 src/           # Main application source
-  main.js      # Scene setup, tunnel rendering, camera control
+  main.js      # Scene setup, tunnel rendering, camera control, UI
   depth.js     # Station depth loading and heuristics
-  stations.js  # Station marker visualization
+  stations.js  # Station marker and label visualization
   shafts.js    # Vertical shaft rendering
-  terrain.js   # Heightmap integration
+  terrain.js   # Heightmap integration and atmospheric lighting
+  crossrail.js # Elizabeth Line visualization
+  tideway.js   # Tideway Tunnel (Super Sewer) visualization
+  geology.js   # London Clay and Chalk bedrock strata
+  thames.js    # Thames river surface visualization
+  tfl.js       # TfL API client with caching
 scripts/       # Data generation utilities
   *_shafts.mjs          # Generate shaft JSON for each line (11 lines)
   build-heightmap.mjs   # Process EA LiDAR tiles
@@ -87,5 +102,7 @@ scripts/       # Data generation utilities
 public/data/   # Static assets served at runtime
   */shafts.json         # Station positions & depths for each line (11 lines)
   tfl/                  # Cached TfL route sequences
-  station_depths.csv    # Curated depth anchors
+  station_depths.csv    # Curated depth anchors (248 stations)
+  crossrail_depths.csv  # Crossrail station depths (26 stations)
+  tideway_depths.csv    # Tideway tunnel depth profile (22 points)
 ```
