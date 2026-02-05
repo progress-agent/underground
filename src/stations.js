@@ -100,13 +100,10 @@ export function createStationMarkers({
       tmp.copy(st.pos);
       tmp.project(camera);
 
-      const behind = tmp.z > 1;
-      if (behind) {
-        el.style.display = 'none';
-        behindCount++;
-        if (behindCount <= 3) hiddenNames.push(st.name + '(behind)');
-        continue;
-      }
+      // Less aggressive behind-camera check: only hide if well behind (z > 1.5)
+      // and reduce opacity for marginal cases instead of hiding completely
+      const behind = tmp.z > 1.5;
+      const marginal = tmp.z > 1 && tmp.z <= 1.5;
 
       const x = (tmp.x * 0.5 + 0.5) * w;
       const y = (-tmp.y * 0.5 + 0.5) * h;
@@ -121,7 +118,10 @@ export function createStationMarkers({
 
       // distance-based fade: labels visible from further away, minimum 0.35 opacity
       const d = camera.position.distanceTo(st.pos);
-      const alpha = THREE.MathUtils.clamp(1.0 - (d - 150) / 800, 0.35, 1.0);
+      let alpha = THREE.MathUtils.clamp(1.0 - (d - 150) / 800, 0.35, 1.0);
+      
+      // Reduce opacity for marginal behind-camera positions
+      if (marginal) alpha *= 0.5;
 
       el.style.display = 'block';
       visibleCount++;
@@ -132,8 +132,7 @@ export function createStationMarkers({
     }
     
     if (updateCount % 30 === 0) {
-      const hidden = hiddenNames.length > 0 ? ' | ' + hiddenNames.join(', ') : '';
-      window.mobileDebug?.show(`vis:${visibleCount} b:${behindCount} off:${offscreenCount}${hidden}`);
+      window.mobileDebug?.show(`vis:${visibleCount}/${labelEls.length} cam:${camera.position.z.toFixed(0)}`);
     }
   }
 
