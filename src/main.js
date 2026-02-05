@@ -7,12 +7,39 @@ import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
 import { loadThamesData, createThamesMesh } from './thames.js';
 
-// Version: 2026-02-04-2344 - Force fresh Netlify build
+// Version: 2026-02-05-0015 - Force fresh Netlify build
 // Emergency debugging: catch all errors
 window.addEventListener('error', (e) => {
   console.error('GLOBAL ERROR:', e.error);
   document.body.insertAdjacentHTML('beforeend', `<div style="position:fixed;top:10px;left:10px;background:red;color:white;padding:10px;z-index:9999">ERROR: ${e.error?.message || e.message}</div>`);
 });
+
+// Mobile debug overlay: shows key logs on screen
+(function setupMobileDebug() {
+  const debugDiv = document.createElement('div');
+  debugDiv.id = 'mobile-debug';
+  debugDiv.style.cssText = 'position:fixed;bottom:10px;left:10px;right:10px;max-height:150px;overflow:auto;background:rgba(0,0,0,0.85);color:#0f0;font-family:monospace;font-size:11px;padding:8px;z-index:10000;border-radius:8px;pointer-events:none;';
+  document.body.appendChild(debugDiv);
+  
+  const logs = [];
+  function show(msg) {
+    logs.push(msg);
+    if (logs.length > 10) logs.shift();
+    debugDiv.textContent = logs.join('\n');
+  }
+  
+  // Capture key logs
+  const origLog = console.log;
+  console.log = (...args) => {
+    origLog.apply(console, args);
+    const msg = args.join(' ');
+    if (msg.includes('stations') || msg.includes('labels') || msg.includes('update')) {
+      show(msg.slice(0, 100));
+    }
+  };
+  
+  window.mobileDebug = { show };
+})();
 
 // Real-world tube tunnels are built as parallel bores roughly 5–10 m apart (centre-to-centre).
 // With 4.5m radius tubes, we need ~6-8m half-spacing to show clear separation.

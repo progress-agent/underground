@@ -74,19 +74,21 @@ export function createStationMarkers({
   setLabelsVisible(labelsVisible);
 
   const tmp = new THREE.Vector3();
+  let updateCount = 0;
   function update({ camera, renderer }) {
-    console.log('stations.update called:', { labelsVisible, labelElsLength: labelEls.length, stationsLength: stations.length });
+    updateCount++;
     if (!labelsVisible) {
-      console.log('labels not visible, skipping update');
+      if (updateCount % 60 === 0) window.mobileDebug?.show('labels: hidden (toggle off)');
       return;
     }
     if (labelEls.length === 0) {
-      console.log('no label elements, skipping update');
+      if (updateCount % 60 === 0) window.mobileDebug?.show('labels: no elements');
       return;
     }
 
     const w = renderer.domElement.clientWidth;
     const h = renderer.domElement.clientHeight;
+    let visibleCount = 0;
 
     for (let i = 0; i < stations.length; i++) {
       const st = stations[i];
@@ -115,10 +117,15 @@ export function createStationMarkers({
       const alpha = THREE.MathUtils.clamp(1.0 - (d - 70) / 220, 0.12, 1.0);
 
       el.style.display = 'block';
+      visibleCount++;
       // Center the pill label on the projected point.
       // (Translate order matters: percentage is based on the element's box.)
       el.style.transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
       el.style.opacity = alpha.toFixed(3);
+    }
+    
+    if (updateCount % 30 === 0) {
+      window.mobileDebug?.show(`labels: ${visibleCount}/${labelEls.length} visible`);
     }
   }
 
