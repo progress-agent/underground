@@ -11,8 +11,8 @@
 # Coverage:
 # - Victoria line: complete (16 stations)
 # - Bakerloo line: partial (13 stations with depths)
-# - Central line: partial (5 stations with depths)
-# - Jubilee: 1 station, Northern: 3 stations, Piccadilly: 5 stations
+# - Central line: partial (6 stations with depths)
+# - Jubilee: 2 stations, Northern: 3 stations, Piccadilly: 5 stations
 #
 # Columns:
 # naptan_id,name,depth_m,source_url,notes
@@ -72,8 +72,10 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUNHG,Notting Hill Gate Underground Station,18,https://en.wikipedia.org/wiki/Notting_Hill_Gate_tube_station,wikipedia-estimate-deep-tube
 940GZZLUBND,Bond Street Underground Station,24,https://en.wikipedia.org/wiki/Bond_Street_tube_station,wikipedia-estimate-deep-tube
 940GZZLULVT,Liverpool Street Underground Station,18,https://en.wikipedia.org/wiki/Liverpool_Street_tube_station,wikipedia-estimate-deep-tube
+940GZZLUTCR,Tottenham Court Road Underground Station,22,https://en.wikipedia.org/wiki/Tottenham_Court_Road_tube_station,wikipedia-estimate-deep-tube
 # Jubilee line (selected stations with researched depths)
 940GZZLUWSM,Westminster Underground Station,30,https://chaddavis.photography/westminster-tube-station/,Jubilee line platform approx 30m below ground
+940GZZLUBMY,Bermondsey Underground Station,32,https://en.wikipedia.org/wiki/Bermondsey_tube_station,wikipedia-estimate-deep-tube
 # Piccadilly line (selected stations with researched depths)
 940GZZLUCGN,Covent Garden Underground Station,37,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,121ft below surface per depth diagrams
 940GZZLULSQ,Leicester Square Underground Station,33,https://www.dailymail.co.uk/sciencetech/article-12938867/London-Underground-tube-deep-underground.html,108ft below surface per depth diagrams
