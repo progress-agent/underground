@@ -1,220 +1,189 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UnderGround — 236 stations across 11 lines</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UnderGround - London Infrastructure Visualization</title>
     <style>
-      html, body { height: 100%; margin: 0; }
-      body { background: #05070b; overflow: hidden; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-      #app { position: fixed; inset: 0; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-      .hint {
-        position: fixed;
-        left: 50%;
-        bottom: 12px;
-        transform: translateX(-50%);
-        z-index: 15;
-        font-size: 12px;
-        color: rgba(255,255,255,0.82);
-        background: rgba(20, 24, 34, 0.30);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 999px;
-        padding: 6px 10px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        user-select: none;
-      }
-      .hint b { font-weight: 600; }
+        body {
+            overflow: hidden;
+            background: #0a0a0a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
 
-      /* HTML overlay for station labels */
-      #station-overlay {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        z-index: 10;
-      }
-      .station-label {
-        position: absolute;
-        left: 0;
-        top: 0;
-        transform: translate(-9999px, -9999px);
-        will-change: transform;
-        padding: 2px 6px;
-        border-radius: 999px;
-        font-size: 11px;
-        line-height: 1.2;
-        color: rgba(255,255,255,0.92);
-        background: rgba(8, 12, 18, 0.55);
-        border: 1px solid rgba(255,255,255,0.12);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-        white-space: nowrap;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.35);
-      }
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
 
-      .hud {
-        position: fixed; left: 12px; top: 12px; color: rgba(255,255,255,0.92);
-        background: rgba(20, 24, 34, 0.45);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 12px;
-        padding: 10px 12px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        max-height: calc(100vh - 24px);
-        overflow: auto;
-        overscroll-behavior: contain;
-      }
-      .hud h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
-      .hud p { margin: 0; font-size: 12px; opacity: 0.92; max-width: 380px; }
-      .hud code { opacity: 0.95; }
-      .hud .small { margin-top: 6px; font-size: 11px; opacity: 0.88; }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
 
-      .hud .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-      .hud button { touch-action: manipulation; }
+        /* Station Labels - HTML overlay with FIXED positioning */
+        .station-label {
+            position: absolute;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 500;
+            pointer-events: none;
+            white-space: nowrap;
+            text-shadow: 
+                0 0 4px rgba(0, 0, 0, 1),
+                0 1px 2px rgba(0, 0, 0, 0.9);
+            /* FIX: Use left/top for positioning instead of transform */
+            /* transform: translate(-50%, -50%); - Removed, handled in JS */
+            transform: translate(-50%, -50%);
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            opacity: 0.9;
+            will-change: left, top, opacity; /* Performance optimization */
+            transition: opacity 0.1s ease-out;
+        }
 
-      /* Mobile: collapse HUD into a small header with a Details toggle */
-      @media (max-width: 520px) {
-        .hud { left: 10px; top: 10px; right: 10px; width: auto; max-width: none; }
-        .hud details > summary { cursor: pointer; user-select: none; list-style: none; }
-        .hud details > summary::-webkit-details-marker { display: none; }
-        .hud details > summary { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-        .hud details > summary .title { font-weight: 700; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-        .hud details > summary .meta { opacity: 0.75; font-size: 11px; }
-        .hud details[open] > summary { margin-bottom: 8px; }
-      }
+        .station-label.above-ground {
+            color: #90EE90;
+            border-color: rgba(144, 238, 144, 0.4);
+        }
 
-      .net-status {
-        position: fixed;
-        right: 12px;
-        top: 12px;
-        z-index: 20;
-        font-size: 12px;
-        color: rgba(255,255,255,0.88);
-        background: rgba(20, 24, 34, 0.35);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 999px;
-        padding: 6px 10px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-      }
-      .net-status b { font-weight: 600; }
-      .net-status.ok { border-color: rgba(34, 197, 94, 0.25); }
-      .net-status.warn { border-color: rgba(245, 158, 11, 0.25); }
-      .net-status.err { border-color: rgba(239, 68, 68, 0.25); }
+        .station-label.deep-level {
+            color: #FFB6C1;
+            border-color: rgba(255, 182, 193, 0.4);
+        }
 
-      .hover-tip {
-        position: fixed;
-        z-index: 25;
-        pointer-events: none;
-        font-size: 12px;
-        color: rgba(255,255,255,0.90);
-        background: rgba(20, 24, 34, 0.55);
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 10px;
-        padding: 6px 8px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        transform: translate(-9999px, -9999px);
-        white-space: nowrap;
-      }
-      .hover-tip b { font-weight: 600; }
-      .hover-tip .muted { opacity: 0.75; }
+        /* FIX: Add depth indicator styling */
+        .station-label.deep-level::after {
+            content: ' ↓';
+            opacity: 0.7;
+            font-size: 9px;
+        }
+
+        /* FIX: Labels behind geometry should be visually distinct */
+        .station-label.occluded {
+            opacity: 0.4 !important;
+        }
+
+        /* UI Controls */
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 20, 20, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            color: #fff;
+            z-index: 1000;
+            border: 1px solid #333;
+            backdrop-filter: blur(5px);
+        }
+
+        #controls h2 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+        }
+
+        .layer-toggle {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .layer-toggle input {
+            margin-right: 8px;
+        }
+
+        .layer-toggle:hover {
+            color: #4CAF50;
+        }
+
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: #888;
+            font-size: 11px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 18px;
+            z-index: 2000;
+        }
+
+        /* FIX: Ensure labels render above canvas */
+        #canvas-container canvas {
+            position: relative;
+            z-index: 1;
+        }
+
+        #canvas-container .station-label {
+            z-index: 100;
+        }
     </style>
-  </head>
-  <body>
-    <div id="app"></div>
-    <div id="netStatus" class="net-status" style="display:none"></div>
-    <div id="hoverTip" class="hover-tip" style="display:none"></div>
-    <div class="hint"><b>Hover</b> for name • <b>Shift+Click</b> to toggle • <b>S/W/X</b> move • <b>AD</b> strafe • <b>QE</b> up/down • <b>Arrows</b> look</div>
-
-    <div id="hud" class="hud">
-      <details id="hudDetails" open>
-        <summary>
-          <span class="title">UnderGround (MVP) <span style="font-size:9px;opacity:0.6">v250205</span></span>
-          <span class="meta">
-            <span id="simStatus" style="opacity:0.78;">Running</span>
-            <span style="opacity:0.55;">•</span>
-            <span id="focusStatus" style="opacity:0.75;">Focus: all</span>
-          </span>
-        </summary>
-
-        <p>3D Tube network visualiser. <b>Mouse:</b> drag to orbit • right-drag/shift-drag to pan • wheel to zoom.</p>
-        <p class="small"><b>Keyboard controls:</b> <code>S</code>=forward • <code>W</code>=fast forward • <code>X</code>=backward • <code>A</code>/<code>D</code>=strafe • <code>E</code>/<code>Q</code>=up/down • <code>Arrows</code>=look direction</p>
-        <p class="small"><b>Shortcuts:</b> <code>V</code>=stations • <code>L</code>=labels • <code>Shift+S</code>=shafts • <code>F</code>=focus line • <code>Shift+A</code>=focus all • <code>Space</code>=pause</p>
-        <p class="small">Data: TfL public endpoints (cached; works offline). Tip: start with <code>?focus=victoria</code> in URL.</p>
-
-        <p class="small row">
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="victoriaStations" type="checkbox" checked />
-            <span>Station markers</span>
-          </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="victoriaLabels" type="checkbox" checked />
-            <span>Labels</span>
-          </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="victoriaShafts" type="checkbox" checked />
-            <span>Shafts</span>
-          </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="twinTunnels" type="checkbox" checked />
-            <span>Twin tunnels</span>
-          </label>
-        </p>
-        <p class="small" id="tunnelOffsetContainer" style="display:none;">
-          Tunnel separation:
-          <input id="tunnelOffset" type="range" min="0" max="12" value="6" step="0.5" style="vertical-align: middle; width: 140px;" />
-          <span id="tunnelOffsetValue">6.0m</span>
-        </p>
-
-        <p class="small row">
-          <button id="togglePause" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Pause</button>
-          <button id="focusAll" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Focus all</button>
-          <button id="copyLink" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Copy link</button>
-          <span style="opacity:0.7;">(Space to toggle)</span>
-        </p>
-
-        <p class="small">
-          Time scale:
-          <input id="timeScale" type="range" min="0.5" max="30" value="8" step="0.5" style="vertical-align: middle; width: 160px;" />
-          <span id="timeScaleValue">8×</span>
-        </p>
-        <p class="small">
-          Vertical exaggeration:
-          <input id="verticalScale" type="range" min="0.2" max="200" value="3" step="0.2" style="vertical-align: middle; width: 160px;" />
-          <span id="verticalScaleValue">3.0×</span>
-        </p>
-        <p class="small">
-          Ground opacity:
-          <input id="groundOpacity" type="range" min="0" max="1.0" value="0.35" step="0.02" style="vertical-align: middle; width: 160px;" />
-          <span id="groundOpacityValue">0.35</span>
-        </p>
-
-        <p class="small">
-          Horizontal scale:
-          <input id="horizontalScale" type="range" min="0.25" max="3" value="1" step="0.05" style="vertical-align: middle; width: 160px;" />
-          <span id="horizontalScaleValue">1.00×</span>
-        </p>
-
-        <p class="small row">
-          <button id="resetPrefs" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Reset settings</button>
-          <span style="opacity:0.7;">Clears saved prefs + TfL cache.</span>
-        </p>
-
-        <div class="small" style="margin-top:8px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
-            <div style="font-weight:600; opacity:0.9;">Lines</div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button id="linesShowAll" style="font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Show all</button>
-              <button id="linesHideAll" style="font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Hide all</button>
-            </div>
-          </div>
-          <div id="lineToggles" style="display:grid; grid-template-columns: 1fr 1fr; gap:6px 10px;"></div>
-        </div>
-      </details>
+</head>
+<body>
+    <div id="loading" class="loading">Loading London Underground...</div>
+    <div id="canvas-container">
+        <canvas id="webgl-canvas"></canvas>
     </div>
 
-    <script type="module" src="/src/main.js"></script>
-  </body>
+    <div id="controls">
+        <h2>Infrastructure Layers</h2>
+        <label class="layer-toggle">
+            <input type="checkbox" id="toggle-tube" checked> Tube Lines
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="toggle-tideway"> Tideway Tunnel (sewer)
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="toggle-crossrail"> Crossrail
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="toggle-geology"> Geological Strata
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="toggle-labels" checked> Station Labels
+        </label>
+    </div>
+
+    <div id="info">
+        Scroll to zoom • Drag to rotate • Right-click to pan<br>
+        <span style="color: #90EE90;">●</span> Shallow &nbsp;
+        <span style="color: #FFB6C1;">●</span> Deep (↓ indicator)
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="src/main.js"></script>
+</body>
 </html>
