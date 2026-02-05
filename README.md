@@ -5,9 +5,10 @@ A small Three.js/Vite prototype that renders a depth-aware London Underground ne
 ## Features
 
 - **3D tube tunnels**: Twin tunnels for each line with realistic separation
-- **Station shafts**: Vertical shafts connecting surface to platform level (236 stations across all 11 lines)
-  - Deep tube lines (132 stations): Victoria (16, curated), Bakerloo (25), Central (22), Jubilee (27), Northern (12), Piccadilly (28), Waterloo & City (2)
-  - Sub-surface lines (104 stations): Circle (28), District (33), Hammersmith & City (29), Metropolitan (14)
+- **Station shafts**: Vertical shafts connecting surface to platform level (248 stations across all 11 Underground lines + DLR)
+  - Deep tube lines (132 stations): Victoria (16, curated depths), Bakerloo (25), Central (22), Jubilee (27), Northern (12), Piccadilly (28), Waterloo & City (2)
+  - Sub-surface lines (116 stations): Circle (28), District (33), Hammersmith & City (29), Metropolitan (14)
+  - Light rail: DLR (12 stations)
 - **Terrain heightmap**: EA LiDAR data for surface visualization
 - **Interactive camera**: Focus on individual lines or all visible lines
 
@@ -40,14 +41,17 @@ This writes JSON into `public/data/tfl/route-sequence/` and updates `index.json`
 - Mouse: orbit/pan/zoom (OrbitControls)
 - In-scene interaction:
   - Hover a line to see its name
-  - Click a line to focus the camera
   - Shift+Click a line to toggle its visibility
 - Keyboard:
-  - `V` toggle Victoria line station markers
-  - `L` toggle Victoria line station labels
-  - `S` toggle Victoria line station shafts
-  - `F` focus camera on the Victoria line
-  - `A` focus camera on all currently-visible lines
+  - `V` toggle station markers
+  - `L` toggle station labels
+  - `Shift+S` toggle station shafts
+  - `F` focus camera on a line (cycles through visible lines)
+  - `Shift+A` focus camera on all currently-visible lines
+  - `S`/`W`/`X` move forward/fast-forward/backward (FPS mode)
+  - `A`/`D` strafe left/right (FPS mode)
+  - `Q`/`E` move up/down (FPS mode)
+  - Arrow keys look direction (FPS mode)
   - `Space` pause/resume the simulation
 
 ## URL parameters
