@@ -11,7 +11,7 @@
 # Coverage:
 # - Victoria line: complete (16 stations)
 # - Bakerloo line: partial (14 stations with depths)
-# - Central line: partial (6 stations with depths)
+# - Central line: partial (8 stations with depths)
 # - Jubilee: 2 stations, Northern: 3 stations, Piccadilly: 6 stations
 #
 # Columns:
@@ -73,6 +73,8 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUBND,Bond Street Underground Station,24,https://en.wikipedia.org/wiki/Bond_Street_tube_station,wikipedia-estimate-deep-tube
 940GZZLULVT,Liverpool Street Underground Station,18,https://en.wikipedia.org/wiki/Liverpool_Street_tube_station,wikipedia-estimate-deep-tube
 940GZZLUTCR,Tottenham Court Road Underground Station,22,https://en.wikipedia.org/wiki/Tottenham_Court_Road_tube_station,wikipedia-estimate-deep-tube
+940GZZLUBNK,Bank Underground Station (Central),19,https://en.wikipedia.org/wiki/Bank_and_Monument_stations,wikipedia-estimate-deep-tube
+940GZZLUSTD,Stratford Underground Station,16,https://en.wikipedia.org/wiki/Stratford_station,wikipedia-estimate-deep-tube
 # Jubilee line (selected stations with researched depths)
 940GZZLUWSM,Westminster Underground Station,30,https://chaddavis.photography/westminster-tube-station/,Jubilee line platform approx 30m below ground
 940GZZLUBMY,Bermondsey Underground Station,32,https://en.wikipedia.org/wiki/Bermondsey_tube_station,wikipedia-estimate-deep-tube
