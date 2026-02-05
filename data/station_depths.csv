@@ -305,6 +305,17 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUNGX,North Greenwich Underground Station,16,https://en.wikipedia.org/wiki/North_Greenwich_tube_station,Jubilee line platforms
 940GZZLUCGT,Canning Town Underground Station,14,https://en.wikipedia.org/wiki/Canning_Town_station,Jubilee line platforms
 940GZZLUSTD,Stratford Underground Station (Jubilee),16,https://en.wikipedia.org/wiki/Stratford_station,Jubilee line platforms
+# Northern line — remaining core stations
+940GZZLUCHF,Chalk Farm Underground Station,14,https://en.wikipedia.org/wiki/Chalk_Farm_tube_station,Deep-level station
+940GZZLUBLM,Belsize Park Underground Station,16,https://en.wikipedia.org/wiki/Belsize_Park_tube_station,Deep-level station
+940GZZLUQBY,Queensway Underground Station,12,https://en.wikipedia.org/wiki/Queensway_tube_station,Deep-level station
+940GZZLULGT,Lancaster Gate Underground Station,10,https://en.wikipedia.org/wiki/Lancaster_Gate_tube_station,Shallow station
+940GZZLUMBA,Marble Arch Underground Station,12,https://en.wikipedia.org/wiki/Marble_Arch_tube_station,Deep-level station
+940GZZLUOGN,Goodge Street Underground Station,14,https://en.wikipedia.org/wiki/Goodge_Street_tube_station,Deep-level station
+940GZZLUACY,Archway Underground Station,18,https://en.wikipedia.org/wiki/Archway_tube_station,Deep-level station
+940GZZLUDGE,Tufnell Park Underground Station,16,https://en.wikipedia.org/wiki/Tufnell_Park_tube_station,Deep-level station
+940GZZLUKSH,Kentish Town Underground Station,14,https://en.wikipedia.org/wiki/Kentish_Town_tube_station,Deep-level station
+940GZZLUCPN,Camden Town Underground Station,12,https://en.wikipedia.org/wiki/Camden_Town_tube_station,Deep-level station
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Hainault loop stations
 # - Ealing Broadway to West Acton (main line)
