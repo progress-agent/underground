@@ -1651,6 +1651,12 @@ window.addEventListener('keydown', (e) => {
     const shCb = document.getElementById('victoriaShafts');
     if (shCb) shCb.checked = victoriaShaftsVisible;
   }
+  // Reset view to curated straight-down position
+  if (e.key === 'r' || e.key === 'R') {
+    camera.position.copy(INITIAL_VIEW.position);
+    controls.target.copy(INITIAL_VIEW.target);
+    controls.update();
+  }
   if (e.key === 'f' || e.key === 'F') {
     // Focus the camera on the Victoria line stations for quick re-orientation.
     focusCameraOnStations({ stations: victoriaStationsLayer?.stations, controls, camera });
