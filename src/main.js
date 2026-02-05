@@ -882,6 +882,8 @@ function focusCameraOnStations({ stations, controls, camera, pad = 1.35 } = {}) 
 }
 
 async function buildNetworkMvp() {
+  // Track loading start time for minimum display duration
+  window.loadingStartTime = Date.now();
   let usedCacheFallback = false;
   try {
     setNetStatus({ kind: 'warn', text: 'Loading TfL tube lines…' });
@@ -1195,12 +1197,16 @@ async function buildNetworkMvp() {
 
     // Loading complete: set bar to 100% and hide it
     updateLoadingProgress(totalLines, totalLines);
+    // Ensure minimum display time so loading feedback is visible even with fast cache
+    const MIN_LOADING_DISPLAY_MS = 1200;
+    const elapsed = Date.now() - window.loadingStartTime;
+    const remaining = Math.max(0, MIN_LOADING_DISPLAY_MS - elapsed);
     setTimeout(() => {
       const loadingBar = document.getElementById('loadingBar');
       if (loadingBar) loadingBar.classList.add('done');
       // Enable controls now that loading is done
       controls.enabled = true;
-    }, 300);
+    }, 300 + remaining);
 
     // Summary status
     if (failed.length) {
