@@ -116,6 +116,70 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUHGT,Heathrow Terminals 2 & 3 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminals_2_%26_3_tube_station,Surface level to shallow
 940GZZLUWIP,South Kensington Underground Station,12,https://en.wikipedia.org/wiki/South_Kensington_tube_station,Approximate depth – Piccadilly line platforms
 940GZZLUNHG,Nightingale Lane Underground Station,40,https://en.wikipedia.org/wiki/Nightingale_Gate_tube_station,Deep – deepest point on Piccadilly line
+# Additional Central line western stations (West Ruislip to Northolt)
+940GZZLUWRP,West Ruislip Underground Station,5,https://en.wikipedia.org/wiki/West_Ruislip_station,Surface level terminus
+940GZZLURBG,Ruislip Gardens Underground Station,5,https://en.wikipedia.org/wiki/Ruislip_Gardens_tube_station,Surface level
+940GZZLUSRP,South Ruislip Underground Station,6,https://en.wikipedia.org/wiki/South_Ruislip_tube_station,Shallow sub-surface
+940GZZLUNHT,Northolt Underground Station,8,https://en.wikipedia.org/wiki/Northolt_tube_station,Shallow sub-surface
+940GZZLUWTA,West Acton Underground Station,5,https://en.wikipedia.org/wiki/West_Acton_tube_station,Surface level terminus
+# Additional Jubilee line stations (east)
+940GZZLUSWK,Stratford Underground Station,16,https://en.wikipedia.org/wiki/Stratford_station,Lower level Jubilee platforms
+940GZZLUCPK,Canning Town Underground Station,14,https://en.wikipedia.org/wiki/Canning_Town_station,Jubilee line platforms below ground
+940GZZLUNXL,North Greenwich Underground Station,16,https://en.wikipedia.org/wiki/North_Greenwich_tube_station,Jubilee line platforms
+940GZZLUCGT,Canada Water Underground Station,18,https://en.wikipedia.org/wiki/Canada_Water_station,Deep-level station
+940GZZLUBMY,Bermondsey Underground Station,18,https://en.wikipedia.org/wiki/Bermondsey_tube_station,Jubilee line platform
+940GZZLUSWK,Stratford Underground Station (Jubilee),16,https://en.wikipedia.org/wiki/Stratford_station,Lower level Jubilee platforms
+940GZZLUWMS,Westminster Underground Station,30,https://en.wikipedia.org/wiki/Westminster_tube_station,Deep-level Jubilee platforms
+940GZZLUGPK,Green Park Underground Station (Jubilee),18,https://en.wikipedia.org/wiki/Green_Park_tube_station,Jubilee line platforms
+940GZZLUBND,Bond Street Underground Station (Jubilee),22,https://en.wikipedia.org/wiki/Bond_Street_tube_station,Deep-level Jubilee platforms
+# Additional Northern line stations
+940GZZLUBNK,Bank Underground Station (Northern),18,https://en.wikipedia.org/wiki/Bank_and_Monument_stations,Northern line platforms
+940GZZLUEUS,Euston Underground Station (Northern),25,https://en.wikipedia.org/wiki/Euston_station,Deep Northern line platforms
+940GZZLUKNG,King's Cross St. Pancras Underground Station (Northern),18,https://en.wikipedia.org/wiki/King%27s_Cross_St_Pancras_tube_station,Northern line platforms
+940GZZLUTCR,Tottenham Court Road Underground Station (Northern),12,https://en.wikipedia.org/wiki/Tottenham_Court_Road_station,Shallow cut-and-cover Northern line
+940GZZLUCLF,Chalk Farm Underground Station,14,https://en.wikipedia.org/wiki/Chalk_Farm_tube_station,Approximate depth
+940GZZLUHLT,Hampstead Underground Station,55,https://en.wikipedia.org/wiki/Hampstead_tube_station,Deepest on Northern line
+940GZZLUBTX,Brixton Underground Station,10,https://en.wikipedia.org/wiki/Brixton_tube_station,Shallow cut-and-cover terminus
+940GZZLUSWN,Swiss Cottage Underground Station,16,https://en.wikipedia.org/wiki/Swiss_Cottage_tube_station,Approximate depth
+# Additional Piccadilly line stations
+940GZZLUHRC,Heathrow Terminals 2 & 3 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminals_2_%26_3_tube_station,Surface level to shallow
+940GZZLUHR5,Heathrow Terminal 5 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminal_5_station,Surface level
+940GZZLUHRC,Heathrow Terminals 2 & 3 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminals_2_%26_3_tube_station,Surface level to shallow
+940GZZLULHR,Heathrow Terminals 2 & 3 Underground Station,5,https://en.wikipedia.org/wiki/Heathrow_Terminals_2_%26_3_tube_station,Surface level to shallow
+940GZZLUHWT,Hatton Cross Underground Station,5,https://en.wikipedia.org/wiki/Hatton_Cross_tube_station,Surface level
+940GZZLUHNC,Hounslow Central Underground Station,8,https://en.wikipedia.org/wiki/Hounslow_Central_tube_station,Shallow sub-surface
+940GZZLUOCE,Osterley Underground Station,8,https://en.wikipedia.org/wiki/Osterley_tube_station,Shallow sub-surface
+940GZZLUBOS,Boston Manor Underground Station,10,https://en.wikipedia.org/wiki/Boston_Manor_tube_station,Approximate depth
+940GZZLUNFD,Northfields Underground Station,8,https://en.wikipedia.org/wiki/Northfields_tube_station,Shallow sub-surface
+940GZZLUSKS,South Kensington Underground Station,12,https://en.wikipedia.org/wiki/South_Kensington_tube_station,Piccadilly line platforms
+940GZZLUHPC,Hyde Park Corner Underground Station,15,https://en.wikipedia.org/wiki/Hyde_Park_Corner_tube_station,Approximate depth
+940GZZLUGPK,Green Park Underground Station (Piccadilly),18,https://en.wikipedia.org/wiki/Green_Park_tube_station,Piccadilly line platforms
+940GZZLUPCC,Piccadilly Circus Underground Station,18,https://en.wikipedia.org/wiki/Piccadilly_Circus_tube_station,Piccadilly line platforms
+# Additional District line stations (shallow sub-surface)
+940GZZLUEBY,Earl's Court Underground Station (District),8,https://en.wikipedia.org/wiki/Earl%27s_Court_tube_station,Shallow sub-surface District line
+940GZZLUWBT,West Brompton Underground Station,6,https://en.wikipedia.org/wiki/West_Brompton_station,Shallow sub-surface
+940GZZLUFUL,Fulham Broadway Underground Station,6,https://en.wikipedia.org/wiki/Fulham_Broadway_tube_station,Shallow sub-surface
+940GZZLUPSG,Parsons Green Underground Station,6,https://en.wikipedia.org/wiki/Parsons_Green_tube_station,Shallow sub-surface
+940GZZLUPUY,Putney Bridge Underground Station,6,https://en.wikipedia.org/wiki/Putney_Bridge_tube_station,Shallow sub-surface
+940GZZLUECT,Edgware Road (Circle/District) Underground Station,8,https://en.wikipedia.org/wiki/Edgware_Road_tube_station_(Circle,_District_and_Hammersmith_%26_City_lines),Shallow sub-surface
+940GZZLUPAC,Paddington Underground Station (District),8,https://en.wikipedia.org/wiki/Paddington_tube_station_(District_and_Circle_lines),Shallow sub-surface
+940GZZLUBWT,Bayswater Underground Station,6,https://en.wikipedia.org/wiki/Bayswater_tube_station,Shallow sub-surface
+940GZZLUNHG,Notting Hill Gate Underground Station (District),8,https://en.wikipedia.org/wiki/Notting_Hill_Gate_tube_station,Shallow sub-surface District line
+940GZZLUHGH,High Street Kensington Underground Station,6,https://en.wikipedia.org/wiki/High_Street_Kensington_tube_station,Shallow sub-surface
+940GZZLUGTR,Gloucester Road Underground Station (District),8,https://en.wikipedia.org/wiki/Gloucester_Road_tube_station,Shallow sub-surface
+940GZZLUSKS,South Kensington Underground Station (District),8,https://en.wikipedia.org/wiki/South_Kensington_tube_station,Shallow sub-surface District line
+# Additional Circle line stations (shallow sub-surface)
+940GZZLUERC,Edgware Road (Bakerloo) Underground Station,8,https://en.wikipedia.org/wiki/Edgware_Road_tube_station_(Bakerloo_Line),Shallow sub-surface Circle line
+940GZZLUMBA,Embankment Underground Station (Circle),8,https://en.wikipedia.org/wiki/Embankment_tube_station,Shallow sub-surface Circle line
+940GZZLUTMP,Temple Underground Station,8,https://en.wikipedia.org/wiki/Temple_tube_station,Shallow sub-surface
+940GZZLUBLM,Blackfriars Underground Station,8,https://en.wikipedia.org/wiki/Blackfriars_tube_station,Shallow sub-surface
+940GZZLUMMT,Mansion House Underground Station,8,https://en.wikipedia.org/wiki/Mansion_House_tube_station,Shallow sub-surface
+940GZZLUCST,Cannon Street Underground Station,8,https://en.wikipedia.org/wiki/Cannon_Street_tube_station,Shallow sub-surface
+940GZZLUMSH,Monument Underground Station,8,https://en.wikipedia.org/wiki/Bank_and_Monument_stations,Shallow sub-surface
+940GZZLUTWH,Tower Hill Underground Station,8,https://en.wikipedia.org/wiki/Tower_Hill_tube_station,Shallow sub-surface
+940GZZLUALD,Aldgate Underground Station,8,https://en.wikipedia.org/wiki/Aldgate_tube_station,Shallow sub-surface
+940GZZLULVT,Liverpool Street Underground Station (Circle),8,https://en.wikipedia.org/wiki/Liverpool_Street_station,Shallow sub-surface Circle line
+940GZZLUBNK,Bank Underground Station (Circle),8,https://en.wikipedia.org/wiki/Bank_and_Monument_stations,Shallow sub-surface Circle line
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Remaining West Acton through to Leytonstone
 # - Hainault loop stations
