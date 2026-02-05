@@ -316,6 +316,13 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUDGE,Tufnell Park Underground Station,16,https://en.wikipedia.org/wiki/Tufnell_Park_tube_station,Deep-level station
 940GZZLUKSH,Kentish Town Underground Station,14,https://en.wikipedia.org/wiki/Kentish_Town_tube_station,Deep-level station
 940GZZLUCPN,Camden Town Underground Station,12,https://en.wikipedia.org/wiki/Camden_Town_tube_station,Deep-level station
+# Northern line — Battersea branch (new extension)
+940GZZLUNWY,Nine Elms Underground Station,20,https://en.wikipedia.org/wiki/Nine_Elms_tube_station,Deep-level station (new extension)
+940GZZLUBTT,Battersea Power Station Underground Station,18,https://en.wikipedia.org/wiki/Battersea_Power_Station_tube_station,Deep-level terminus (new extension)
+# Northern line — remaining Charing Cross branch stations
+940GZZLUODS,Old Street Underground Station,16,https://en.wikipedia.org/wiki/Old_Street_station,Deep-level station
+940GZZLUEUS,Euston Underground Station (Northern City),22,https://en.wikipedia.org/wiki/Euston_station,Northern City Line platforms
+940GZZLUMRH,Moorgate Underground Station (Northern City),16,https://en.wikipedia.org/wiki/Moorgate_station,Northern City Line platforms
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Hainault loop stations
 # - Ealing Broadway to West Acton (main line)
