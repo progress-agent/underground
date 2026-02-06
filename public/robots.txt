@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Allow all search engines to crawl the entire site
+# Sitemap will be added here if one is generated in the future
