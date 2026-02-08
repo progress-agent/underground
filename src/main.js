@@ -518,7 +518,7 @@ let tidewayMesh = null;
 loadTidewayData().then(tidewayData => {
   if (tidewayData) {
     // Use the same projection as tube stations
-    tidewayMesh = createTidewayTunnel(tidewayData, llToXZ, TERRAIN_CONFIG.depthScale);
+    tidewayMesh = createTidewayTunnel(tidewayData, llToXZ, sim.verticalScale);
     if (tidewayMesh) {
       scene.add(tidewayMesh);
       addTidewayToLegend();
@@ -531,7 +531,7 @@ loadTidewayData().then(tidewayData => {
 let crossrailMesh = null;
 loadCrossrailData().then(crossrailData => {
   if (crossrailData) {
-    crossrailMesh = createCrossrailTunnel(crossrailData, llToXZ, TERRAIN_CONFIG.depthScale);
+    crossrailMesh = createCrossrailTunnel(crossrailData, llToXZ, sim.verticalScale);
     if (crossrailMesh) {
       scene.add(crossrailMesh);
       addCrossrailToLegend();
@@ -541,7 +541,7 @@ loadCrossrailData().then(crossrailData => {
 });
 
 // ---------- Geological Strata (London Clay & Chalk bedrock) ----------
-const geologyGroup = createGeologicalStrata(null, TERRAIN_CONFIG.depthScale);
+const geologyGroup = createGeologicalStrata(null, sim.verticalScale);
 if (geologyGroup) {
   scene.add(geologyGroup);
   addGeologyToLegend();
@@ -1016,11 +1016,26 @@ async function buildNetworkMvp() {
         // Station markers + labels + shafts for all lines
         const DEEP_LINES_WITH_SHAFTS = new Set(['victoria', 'bakerloo', 'central', 'jubilee', 'northern', 'piccadilly', 'waterloo-city', 'circle', 'district', 'hammersmith-city', 'metropolitan', 'dlr']);
         if (DEEP_LINES_WITH_SHAFTS.has(id)) {
+          // Build interpolated depth map from all branches (matches tube centerline)
+          const branchArrays = branches && branches.length > 0 ? branches : [sps];
+          const interpolatedDepths = new Map();
+          for (const branchStops of branchArrays) {
+            const validBranch = branchStops.filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon));
+            if (validBranch.length < 2) continue;
+            const interp = buildDepthInterpolator(validBranch, depthAnchors);
+            for (const sp of validBranch) {
+              const d = interp(sp.id);
+              if (d !== null && !interpolatedDepths.has(sp.id)) {
+                interpolatedDepths.set(sp.id, d);
+              }
+            }
+          }
+
           const stations = sps
             .filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon))
             .map(sp => {
               const { x, z } = llToXZ(sp.lat, sp.lon);
-              const depthM = depthForStation({ naptanId: sp.id, lineId: id, anchors: depthAnchors });
+              const depthM = interpolatedDepths.get(sp.id) ?? depthForStation({ naptanId: sp.id, lineId: id, anchors: depthAnchors });
               const y = -depthM * sim.verticalScale;
               return {
                 id: sp.id,

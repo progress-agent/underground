@@ -71,21 +71,21 @@ export function createStationMarkers({
   if (labels) {
     for (const st of stations) {
       const name = cleanStationName(st.name);
-      if (_labelledNames.has(name)) {
+      const isDuplicate = _labelledNames.has(name);
+
+      // Surface: dedup (shared stations overlap at Y=0)
+      if (isDuplicate) {
         surfaceEls.push(null);
-        undergroundEls.push(null);
-        continue;
+      } else {
+        _labelledNames.add(name);
+        const surfEl = document.createElement('div');
+        surfEl.className = 'station-label station-label-surface';
+        surfEl.textContent = name;
+        surfaceLayer.appendChild(surfEl);
+        surfaceEls.push(surfEl);
       }
-      _labelledNames.add(name);
 
-      // Surface label
-      const surfEl = document.createElement('div');
-      surfEl.className = 'station-label station-label-surface';
-      surfEl.textContent = name;
-      surfaceLayer.appendChild(surfEl);
-      surfaceEls.push(surfEl);
-
-      // Underground label
+      // Underground: always create (different line depths prevent overlap)
       const ugEl = document.createElement('div');
       ugEl.className = 'station-label station-label-underground';
       ugEl.textContent = name;
@@ -140,14 +140,11 @@ export function createStationMarkers({
 
         if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
 
-        const d = camera.position.distanceTo(tmpSurface.set(st.pos.x, 0, st.pos.z));
-        const alpha = THREE.MathUtils.clamp(1.0 - (d - 500) / 5000, 0.55, 1.0);
-
         el.style.display = 'block';
         el.style.left = `${x.toFixed(1)}px`;
         el.style.top = `${y.toFixed(1)}px`;
         el.style.transform = 'translate(-50%, -50%)';
-        el.style.opacity = alpha.toFixed(3);
+        el.style.opacity = '1';
       } else {
         // Underground: project at actual station depth
         tmpUnderground.copy(st.pos);
@@ -161,13 +158,18 @@ export function createStationMarkers({
         if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
 
         const d = camera.position.distanceTo(st.pos);
-        const alpha = THREE.MathUtils.clamp(1.0 - (d - 200) / 2000, 0.55, 1.0);
+
+        if (d > 3000) { el.style.display = 'none'; continue; }
+
+        const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / 2850, 0.0, 1.0);
+        const fontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / 2850);
 
         el.style.display = 'block';
         el.style.left = `${x.toFixed(1)}px`;
         el.style.top = `${y.toFixed(1)}px`;
         el.style.transform = 'translate(-50%, -50%)';
         el.style.opacity = alpha.toFixed(3);
+        el.style.fontSize = `${fontSize.toFixed(1)}px`;
       }
     }
   }

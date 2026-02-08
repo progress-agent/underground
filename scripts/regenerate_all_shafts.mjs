@@ -13,9 +13,9 @@ const LINES = [
 
 // Line-specific heuristic depths (metres) when no anchor is available
 const LINE_DEPTH_DEFAULTS = {
-  bakerloo: 20, central: 24, circle: 8, district: 8, dlr: 6,
-  'hammersmith-city': 8, jubilee: 22, metropolitan: 10, northern: 26,
-  piccadilly: 22, victoria: 28, 'waterloo-city': 20,
+  bakerloo: 25, central: 28, circle: 8, district: 10, dlr: 6,
+  'hammersmith-city': 9, jubilee: 32, metropolitan: 10, northern: 30,
+  piccadilly: 30, victoria: 33, 'waterloo-city': 35,
 };
 
 const ORIGIN = { lat: 51.5074, lon: -0.1278 };
@@ -42,7 +42,8 @@ try {
   for (const line of lines) {
     const cols = line.split(',');
     const id = cols[0].trim();
-    const depth = Number((cols[2] || '').trim());
+    const depthStr = (cols[2] || '').trim();
+    const depth = depthStr ? Number(depthStr) : NaN;
     if (id && Number.isFinite(depth)) anchors.set(id, depth);
   }
 } catch (err) {

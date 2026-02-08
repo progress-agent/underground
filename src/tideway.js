@@ -47,11 +47,11 @@ export function createTidewayTunnel(data, latLonToXZ, verticalScale = 3.0) {
   const group = new THREE.Group();
   group.name = 'tideway-tunnel';
   
-  // Sort points from west to east (roughly)
-  const sortedPoints = [...data.points].sort((a, b) => a.lon - b.lon);
-  
+  // Use CSV file order directly (pre-sorted west→east route sequence)
+  const orderedPoints = data.points;
+
   // Create curve through all points
-  const curvePoints = sortedPoints.map(p => {
+  const curvePoints = orderedPoints.map(p => {
     const xz = latLonToXZ(p.lat, p.lon);
     // Depth is negative Y (below ground)
     const y = -(p.depth * verticalScale);
@@ -92,7 +92,7 @@ export function createTidewayTunnel(data, latLonToXZ, verticalScale = 3.0) {
   group.add(glowMesh);
   
   // Add depth markers at key points
-  sortedPoints.forEach((p, i) => {
+  orderedPoints.forEach((p, i) => {
     if (i % 3 === 0) { // Every 3rd point to avoid clutter
       const xz = latLonToXZ(p.lat, p.lon);
       const y = -(p.depth * verticalScale);

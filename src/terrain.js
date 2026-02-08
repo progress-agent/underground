@@ -168,15 +168,14 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       color: TERRAIN_CONFIG.color,
       roughness: TERRAIN_CONFIG.roughness,
       metalness: TERRAIN_CONFIG.metalness,
-      transparent: true,
+      transparent: false,
       opacity: opacity,
-      depthWrite: false, // Don't occlude tube lines beneath the terrain
+      depthWrite: true,
       wireframe: !!wireframe,
       side: THREE.DoubleSide,
     });
 
     const mesh = new THREE.Mesh(geom, mat);
-    mesh.renderOrder = -1; // Render terrain first (behind everything else)
     mesh.position.y = TERRAIN_CONFIG.baseY;
     mesh.name = 'terrainMesh';
     console.log('Terrain mesh created:', {
