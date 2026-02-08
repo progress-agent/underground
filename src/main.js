@@ -491,25 +491,6 @@ scene.add(rim);
     snapAllShaftsToTerrain();
   });
   
-  // Helper: snap all line shafts to current terrain height
-  function snapAllShaftsToTerrain() {
-    if (!terrain?.heightSampler) return;
-    for (const [lineId, layers] of lineShaftLayers) {
-      if (layers.shaftsLayer?.updateGroundYById) {
-        const groundYById = {};
-        for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
-          if (!s?.id) continue;
-          const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: TERRAIN_CONFIG.size });
-          const h01 = terrain.heightSampler(u, v);
-          groundYById[s.id] = terrainHeightToWorldY({ h01 });
-        }
-        if (Object.keys(groundYById).length > 0) {
-          layers.shaftsLayer.updateGroundYById(groundYById);
-        }
-      }
-    }
-  }
-
   // faint "surface" plane to catch light but not obscure the network
   const geo = new THREE.PlaneGeometry(900, 900, 1, 1);
   const mat = new THREE.MeshPhongMaterial({
@@ -523,6 +504,27 @@ scene.add(rim);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = -6.05;
   scene.add(mesh);
+}
+
+// Helper: snap all line shafts to current terrain height (module-scoped
+// so it's accessible from both the terrain .then() callback and the
+// per-line shaft loading code).
+function snapAllShaftsToTerrain() {
+  if (!terrain?.heightSampler) return;
+  for (const [lineId, layers] of lineShaftLayers) {
+    if (layers.shaftsLayer?.updateGroundYById) {
+      const groundYById = {};
+      for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
+        if (!s?.id) continue;
+        const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: TERRAIN_CONFIG.size });
+        const h01 = terrain.heightSampler(u, v);
+        groundYById[s.id] = terrainHeightToWorldY({ h01 });
+      }
+      if (Object.keys(groundYById).length > 0) {
+        layers.shaftsLayer.updateGroundYById(groundYById);
+      }
+    }
+  }
 }
 
 // ---------- Thames (accurate river from BNG data) ----------
@@ -1172,8 +1174,8 @@ async function buildNetworkMvp() {
 
             // Store per-line layers for later access
             lineShaftLayers.set(id, { stationsLayer, shaftsLayer });
-          } catch {
-            // ignore
+          } catch (err) {
+            console.warn(`Shaft loading failed for ${id}:`, err.message);
           }
 
           // Keep HUD checkboxes in sync (in case build happens after user toggled)

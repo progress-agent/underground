@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 
+// Track which station names already have a label to avoid duplicates
+// when the same station appears on multiple lines (e.g. Farringdon on Circle + Metropolitan + H&C)
+const _labelledNames = new Set();
+
+function cleanStationName(name) {
+  return name.replace(/\s+(Underground|DLR) Station$/i, '');
+}
+
 function ensureOverlayRoot() {
   let root = document.getElementById('station-overlay');
   if (root) return root;
@@ -58,10 +66,15 @@ export function createStationMarkers({
 
   if (labels) {
     for (const st of stations) {
+      const name = cleanStationName(st.name);
+      if (_labelledNames.has(name)) {
+        labelEls.push(null); // Placeholder to keep index alignment with stations[]
+        continue;
+      }
+      _labelledNames.add(name);
       const el = document.createElement('div');
       el.className = 'station-label';
-      // Strip redundant suffix for readability
-      el.textContent = st.name.replace(/\s+Underground Station$/i, '');
+      el.textContent = name;
       layer.appendChild(el);
       labelEls.push(el);
     }
@@ -92,23 +105,21 @@ export function createStationMarkers({
     let visibleCount = 0;
 
     for (let i = 0; i < stations.length; i++) {
-      const st = stations[i];
       const el = labelEls[i];
+      if (!el) continue; // Deduplicated — no label for this station
 
+      const st = stations[i];
       tmp.copy(st.pos);
       tmp.project(camera);
 
-      // CRITICAL FIX: Check if behind camera (z > 1 in NDC means behind)
+      // Check if behind camera (z > 1 in NDC means behind)
       if (tmp.z > 1) {
         el.style.display = 'none';
         continue;
       }
 
-      // Less aggressive behind-camera check for marginal cases (was projected but barely visible)
-      const marginal = tmp.z > 0.9;
-
       const x = (tmp.x * 0.5 + 0.5) * w;
-      // FIX: Proper Y-coordinate flip for CSS (WebGL Y up, CSS Y down)
+      // Proper Y-coordinate flip for CSS (WebGL Y up, CSS Y down)
       const y = (1 - (tmp.y * 0.5 + 0.5)) * h;
 
       // quick reject off-screen
@@ -117,17 +128,13 @@ export function createStationMarkers({
         continue;
       }
 
-      // distance-based fade: labels visible from further away, minimum 0.35 opacity
+      // distance-based fade: full opacity up close, fading at bird's-eye distances
+      // range tuned for default camera altitude of ~4500m
       const d = camera.position.distanceTo(st.pos);
-      let alpha = THREE.MathUtils.clamp(1.0 - (d - 150) / 800, 0.35, 1.0);
-      
-      // Reduce opacity for marginal behind-camera positions
-      if (marginal) alpha *= 0.5;
+      const alpha = THREE.MathUtils.clamp(1.0 - (d - 500) / 5000, 0.55, 1.0);
 
       el.style.display = 'block';
       visibleCount++;
-      // CRITICAL FIX: Use left/top for positioning with transform for centering
-      // This avoids subpixel rendering issues and is more reliable
       el.style.left = `${x.toFixed(1)}px`;
       el.style.top = `${y.toFixed(1)}px`;
       el.style.transform = 'translate(-50%, -50%)';
@@ -143,7 +150,13 @@ export function createStationMarkers({
     scene.remove(mesh);
     geo.dispose();
     mat.dispose();
-    for (const el of labelEls) el.remove();
+    for (let i = 0; i < labelEls.length; i++) {
+      const el = labelEls[i];
+      if (el) {
+        _labelledNames.delete(cleanStationName(stations[i].name));
+        el.remove();
+      }
+    }
     layer.remove();
   }
 
