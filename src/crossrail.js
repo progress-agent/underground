@@ -67,9 +67,9 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     return new THREE.CatmullRomCurve3(curvePoints);
   };
   
-  // Create tunnel material (purple - Elizabeth Line brand color)
+  // Create tunnel material (yellow - Elizabeth Line TfL colour)
   const tunnelMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x6b1f7a, // Elizabeth Line purple
+    color: 0xffd300, // Elizabeth Line yellow
     transparent: true,
     opacity: 0.75,
     roughness: 0.3,
@@ -80,16 +80,16 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   // Build central tunnel section (the deep part)
   const centralCurve = createSectionCurve(centralSection);
   if (centralCurve) {
-    const tubeGeometry = new THREE.TubeGeometry(centralCurve, 150, 3.1, 12, false);
+    const tubeGeometry = new THREE.TubeGeometry(centralCurve, 150, 9.0, 12, false);
     const tunnelMesh = new THREE.Mesh(tubeGeometry, tunnelMaterial);
     tunnelMesh.castShadow = true;
     tunnelMesh.receiveShadow = true;
     group.add(tunnelMesh);
-    
+
     // Add glow
-    const glowGeometry = new THREE.TubeGeometry(centralCurve, 100, 3.5, 12, false);
+    const glowGeometry = new THREE.TubeGeometry(centralCurve, 100, 10.0, 12, false);
     const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x8b3f9a,
+      color: 0xffe066,
       transparent: true,
       opacity: 0.2
     });
@@ -99,7 +99,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   // Build western section
   const westCurve = createSectionCurve(westSection);
   if (westCurve) {
-    const westGeometry = new THREE.TubeGeometry(westCurve, 80, 2.8, 10, false);
+    const westGeometry = new THREE.TubeGeometry(westCurve, 80, 7.0, 10, false);
     const westMaterial = tunnelMaterial.clone();
     westMaterial.opacity = 0.5; // More transparent for surface sections
     group.add(new THREE.Mesh(westGeometry, westMaterial));
@@ -108,7 +108,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   // Build eastern section
   const eastCurve = createSectionCurve(eastSection);
   if (eastCurve) {
-    const eastGeometry = new THREE.TubeGeometry(eastCurve, 100, 2.8, 10, false);
+    const eastGeometry = new THREE.TubeGeometry(eastCurve, 100, 7.0, 10, false);
     const eastMaterial = tunnelMaterial.clone();
     eastMaterial.opacity = 0.5;
     group.add(new THREE.Mesh(eastGeometry, eastMaterial));
@@ -122,7 +122,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     
     const markerGeometry = new THREE.SphereGeometry(2, 12, 12);
     const markerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x9b4f9a,
+      color: 0xffd300,
       transparent: true,
       opacity: 0.7
     });
@@ -139,7 +139,7 @@ export function createCrossrailLegendItem() {
   const item = document.createElement('div');
   item.className = 'legend-item';
   item.innerHTML = `
-    <div class="legend-line" style="background: linear-gradient(to right, #6b1f7a, #9b4f9a);"></div>
+    <div class="legend-line" style="background: linear-gradient(to right, #ffd300, #ffe066);"></div>
     <span class="legend-label">Crossrail/Elizabeth Line (18-41m)</span>
   `;
   return item;

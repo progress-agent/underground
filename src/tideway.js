@@ -68,9 +68,9 @@ export function createTidewayTunnel(data, latLonToXZ, verticalScale = 3.0) {
   // Tideway is larger than tube tunnels (7.2m diameter vs 3.6m)
   // but we exaggerate less for visibility
   const tunnelMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x2d4a3e, // Sewer green
+    color: 0x1d4ed8, // Thames-matching blue
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.5,
     roughness: 0.4,
     metalness: 0.2,
     side: THREE.DoubleSide
@@ -84,7 +84,7 @@ export function createTidewayTunnel(data, latLonToXZ, verticalScale = 3.0) {
   // Add glow effect to show it's deeper/bigger
   const glowGeometry = new THREE.TubeGeometry(curve, 100, 4.0, 12, false);
   const glowMaterial = new THREE.MeshBasicMaterial({
-    color: 0x3d5a4e,
+    color: 0x3b82f6,
     transparent: true,
     opacity: 0.15
   });
@@ -99,7 +99,7 @@ export function createTidewayTunnel(data, latLonToXZ, verticalScale = 3.0) {
       
       const markerGeometry = new THREE.SphereGeometry(1.5, 12, 12);
       const markerMaterial = new THREE.MeshBasicMaterial({
-        color: 0x4a7c59,
+        color: 0x3b82f6,
         transparent: true,
         opacity: 0.6
       });
@@ -116,7 +116,7 @@ export function createTidewayLegendItem() {
   const item = document.createElement('div');
   item.className = 'legend-item';
   item.innerHTML = `
-    <div class="legend-line" style="background: linear-gradient(to right, #2d4a3e, #4a7c59);"></div>
+    <div class="legend-line" style="background: linear-gradient(to right, #1d4ed8, #3b82f6);"></div>
     <span class="legend-label">Tideway Tunnel (30-65m)</span>
   `;
   return item;

@@ -399,24 +399,6 @@ function deleteUrlParam(key) {
     });
   }
 
-  const gEl = document.getElementById('groundOpacity');
-  const gOut = document.getElementById('groundOpacityValue');
-  if (gEl) {
-    const defaultOpacity = TERRAIN_CONFIG.opacity;
-    const cur = prefs.groundOpacity ?? defaultOpacity;
-    gEl.value = String(cur);
-    if (gOut) gOut.textContent = Number(cur).toFixed(2);
-
-    gEl.addEventListener('input', () => {
-      const v = Number(gEl.value);
-      const op = Number.isFinite(v) ? v : defaultOpacity;
-      prefs.groundOpacity = op;
-      savePrefs(prefs);
-      if (gOut) gOut.textContent = op.toFixed(2);
-      applyTerrainOpacity?.(op);
-    });
-  }
-
   const hEl = document.getElementById('horizontalScale');
   const hOut = document.getElementById('horizontalScaleValue');
   if (hEl) {
@@ -476,7 +458,7 @@ scene.add(rim);
   // Emergency debugging: ensure something is visible
   // Scene init
   
-  tryCreateTerrainMesh({ opacity: prefs.groundOpacity ?? TERRAIN_CONFIG.opacity, wireframe: false }).then(result => {
+  tryCreateTerrainMesh({ opacity: 1.0, wireframe: false }).then(result => {
     if (!result) {
       grid.visible = true;
       return;
@@ -484,26 +466,12 @@ scene.add(rim);
     terrain = result;
     scene.add(result.mesh);
 
-    applyTerrainOpacity(prefs.groundOpacity ?? TERRAIN_CONFIG.opacity);
-
     // If station shafts already exist, snap their ground cubes to the terrain surface (approx).
     // This improves the "shaft length" feel without needing per-station survey data.
     snapAllShaftsToTerrain();
   });
   
-  // faint "surface" plane to catch light but not obscure the network
-  const geo = new THREE.PlaneGeometry(900, 900, 1, 1);
-  const mat = new THREE.MeshPhongMaterial({
-    color: 0x0b1223,
-    transparent: true,
-    opacity: 0.08,
-    shininess: 10,
-    specular: 0x1b3b66,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = -6.05;
-  scene.add(mesh);
+  // Legacy surface plane removed — terrain mesh provides surface visual at full opacity
 }
 
 // Helper: snap all line shafts to current terrain height (module-scoped
@@ -543,12 +511,15 @@ loadThamesData().then(thamesData => {
   }
 });
 
+// Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
+let applySoloSelection = () => {};
+
 // ---------- Tideway Tunnel (Super Sewer - deeper infrastructure) ----------
 let tidewayMesh = null;
 loadTidewayData().then(tidewayData => {
   if (tidewayData) {
     // Use the same projection as tube stations
-    tidewayMesh = createTidewayTunnel(tidewayData, (lat, lon) => latLonToMeters(lat, lon, TERRAIN_CONFIG.originLat, TERRAIN_CONFIG.originLon), TERRAIN_CONFIG.depthScale);
+    tidewayMesh = createTidewayTunnel(tidewayData, llToXZ, TERRAIN_CONFIG.depthScale);
     if (tidewayMesh) {
       scene.add(tidewayMesh);
       addTidewayToLegend();
@@ -561,7 +532,7 @@ loadTidewayData().then(tidewayData => {
 let crossrailMesh = null;
 loadCrossrailData().then(crossrailData => {
   if (crossrailData) {
-    crossrailMesh = createCrossrailTunnel(crossrailData, (lat, lon) => latLonToMeters(lat, lon, TERRAIN_CONFIG.originLat, TERRAIN_CONFIG.originLon), TERRAIN_CONFIG.depthScale);
+    crossrailMesh = createCrossrailTunnel(crossrailData, llToXZ, TERRAIN_CONFIG.depthScale);
     if (crossrailMesh) {
       scene.add(crossrailMesh);
       addCrossrailToLegend();
@@ -595,7 +566,7 @@ const LINE_COLOURS = {
 };
 
 // Persisted line visibility (defaults to all-on)
-const initialLineVisibility = (prefs.lineVisibility && typeof prefs.lineVisibility === 'object') ? prefs.lineVisibility : {};
+// Line visibility now managed by solo dropdown (no per-line persistence needed)
 
 // Track line groups so we can toggle visibility.
 const lineGroups = new Map();
@@ -736,104 +707,120 @@ function stationUsFromPolyline(centerPts) {
   return cum.map(d => d / total);
 }
 
-function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim) {
-  // stopPoints: [{lat, lon, name, id, naptanId?}]
-  // Filter valid points first
-  const validStopPoints = stopPoints.filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon));
-
-  // Build depth interpolator for this line (interpolates between known anchors)
-  const interpolateDepth = buildDepthInterpolator(validStopPoints, depthAnchors);
-
-  // Build curve points using shared X/Z for stations (so interchanges show vertical stacks)
-  const centerPts = [];
-
-  for (const sp of validStopPoints) {
-    // Register this station's ground position (shared across all lines)
-    registerStationPosition(sp.id, sp.lat, sp.lon);
-    const pos = getStationPosition(sp.id);
-
-    // Depth: prefer interpolated value from anchors, fallback to per-line heuristic
-    let depthM = interpolateDepth(sp.id);
-    if (depthM === null) {
-      depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
-    }
-    const y = -depthM * sim.verticalScale;
-
-    // Use shared X/Z, line-specific Y
-    centerPts.push(new THREE.Vector3(pos.x, y, pos.z));
+// Extract inbound branch sequences from TfL route data, deduplicating stops.
+// Returns { branches: [[sp, ...], ...], allStops: [sp, ...] }
+function extractBranches(sequences) {
+  const inbound = sequences.filter(s => s.direction === 'inbound');
+  if (inbound.length === 0) {
+    // Fallback: if no inbound, use all sequences
+    const all = sequences.filter(s => s.stopPoint?.length > 0);
+    if (all.length === 0) return { branches: [], allStops: [] };
+    // Just pick longest as single branch
+    const longest = all.reduce((best, cur) =>
+      (cur.stopPoint.length > (best?.stopPoint?.length || 0)) ? cur : best, null);
+    const sps = longest?.stopPoint || [];
+    return { branches: [sps], allStops: sps };
   }
 
-  // Keep a copy for camera focus helpers.
-  lineCenterPoints.set(lineId, centerPts);
+  const branches = inbound
+    .map(s => s.stopPoint || [])
+    .filter(arr => arr.length >= 2);
 
-  if (centerPts.length < 2) return null;
+  // Deduplicate all stops by ID, preserving first occurrence
+  const seen = new Set();
+  const allStops = [];
+  for (const branch of branches) {
+    for (const sp of branch) {
+      if (!seen.has(sp.id)) {
+        seen.add(sp.id);
+        allStops.push(sp);
+      }
+    }
+  }
+
+  return { branches, allStops };
+}
+
+function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { branches = null } = {}) {
+  // If branches provided, build one tube per branch. Otherwise treat stopPoints as single branch.
+  const branchArrays = branches && branches.length > 0 ? branches : [stopPoints];
 
   const group = new THREE.Group();
   group.name = `line:${lineId}`;
   lineGroups.set(lineId, group);
   scene.add(group);
 
-  const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
+  const allCenterPts = []; // merged for camera focus
+  const allMeshes = [];
+  const allTrains = [];
 
-  const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
+  for (const branchStops of branchArrays) {
+    const validStopPoints = branchStops.filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon));
+    if (validStopPoints.length < 2) continue;
 
-  const segs = Math.max(80, centerPts.length * 10);
-  const radius = 4.5;
+    const interpolateDepth = buildDepthInterpolator(validStopPoints, depthAnchors);
+    const centerPts = [];
 
-  const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
-  const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+    for (const sp of validStopPoints) {
+      registerStationPosition(sp.id, sp.lat, sp.lon);
+      const pos = getStationPosition(sp.id);
+      let depthM = interpolateDepth(sp.id);
+      if (depthM === null) {
+        depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
+      }
+      const y = -depthM * sim.verticalScale;
+      centerPts.push(new THREE.Vector3(pos.x, y, pos.z));
+    }
 
-  leftMesh.userData.lineId = lineId;
-  rightMesh.userData.lineId = lineId;
+    allCenterPts.push(...centerPts);
 
-  // Track for hover highlight.
-  lineMeshesById.set(lineId, [leftMesh, rightMesh]);
+    const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
+    const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
 
-  // Allow click-to-focus.
-  linePickables.push(leftMesh, rightMesh);
+    const segs = Math.max(80, centerPts.length * 10);
+    const radius = 4.5;
 
-  group.add(leftMesh, rightMesh);
+    const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+    const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+    leftMesh.userData.lineId = lineId;
+    rightMesh.userData.lineId = lineId;
 
-  function makeTrain(curve, phase = 0, dir = +1) {
-    const train = new THREE.Mesh(
-      new THREE.SphereGeometry(2.1, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(colour), emissiveIntensity: 1.6 })
-    );
+    allMeshes.push(leftMesh, rightMesh);
+    linePickables.push(leftMesh, rightMesh);
+    group.add(leftMesh, rightMesh);
 
-    // Roughly-Tube-like motion:
-    // - line speeds typically ~30–50 km/h; include dwell at stations.
-    // - We treat scene units as metres, so these are m/s.
-    const cruiseMps = (lineId === 'victoria' ? 14.5 : 12.0); // ~52 km/h vs ~43 km/h
-    const dwellSec = 22;
-
-    const curveLengthM = curve.getLength();
-
-    train.userData = {
-      t: (Math.random() + phase) % 1,
-      curve,
-      dir,
-      curveLengthM,
-      stationUs,
-      nextStationIndex: dir === 1 ? 0 : stationUs.length - 1,
-      cruiseMps,
-      dwellSec,
-      // internal state
-      _pausedLeft: 0,
+    // One train pair per branch
+    const makeTrain = (curve, phase = 0, dir = +1) => {
+      const train = new THREE.Mesh(
+        new THREE.SphereGeometry(2.1, 16, 16),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(colour), emissiveIntensity: 1.6 })
+      );
+      const cruiseMps = (lineId === 'victoria' ? 14.5 : 12.0);
+      const dwellSec = 22;
+      const curveLengthM = curve.getLength();
+      train.userData = {
+        t: (Math.random() + phase) % 1, curve, dir, curveLengthM, stationUs,
+        nextStationIndex: dir === 1 ? 0 : stationUs.length - 1,
+        cruiseMps, dwellSec, _pausedLeft: 0,
+      };
+      train.position.copy(curve.getPointAt(train.userData.t));
+      group.add(train);
+      sim.trains.push(train);
+      return train;
     };
 
-    // Place initially
-    train.position.copy(curve.getPointAt(train.userData.t));
-
-    group.add(train);
-    sim.trains.push(train);
-    return train;
+    allTrains.push(makeTrain(leftCurve, 0.0, +1));
+    allTrains.push(makeTrain(rightCurve, 0.5, -1));
   }
 
-  // One train each way for MVP.
-  const trainA = makeTrain(leftCurve, 0.0, +1);
-  const trainB = makeTrain(rightCurve, 0.5, -1);
+  // Keep merged center points for camera focus
+  lineCenterPoints.set(lineId, allCenterPts);
 
-  return { group, meshes: [leftMesh, rightMesh], trains: [trainA, trainB] };
+  // Track all meshes for hover highlight
+  lineMeshesById.set(lineId, allMeshes);
+
+  if (allMeshes.length === 0) return null;
+  return { group, meshes: allMeshes, trains: allTrains };
 }
 
 // (trains are kept in sim.trains)
@@ -925,122 +912,67 @@ async function buildNetworkMvp() {
     // Keep a stable order for UI.
     wanted = Array.from(new Set(wanted)).sort();
 
-    // Build UI toggles
+    // Build solo-line dropdown (replaces per-line checkboxes)
     {
-      const wrap = document.getElementById('lineToggles');
-      const btnShowAll = document.getElementById('linesShowAll');
-      const btnHideAll = document.getElementById('linesHideAll');
-
-      // Keep references so we can bulk-toggle.
-      const lineCheckboxes = new Map();
-
-      function applyAll(visible) {
+      const soloSelect = document.getElementById('soloLine');
+      if (soloSelect) {
         for (const id of wanted) {
-          initialLineVisibility[id] = visible;
-          setLineVisible(id, visible);
-          const cb = lineCheckboxes.get(id);
-          if (cb) cb.checked = visible;
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = id.replace(/-/g, ' ');
+          soloSelect.appendChild(opt);
         }
-        prefs.lineVisibility = initialLineVisibility;
-        savePrefs(prefs);
-      }
+        // Add infrastructure layers as additional options
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { disabled: true, textContent: '───────────' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'crossrail', textContent: 'Crossrail' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'tideway', textContent: 'Tideway Tunnel' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'geology', textContent: 'Geology' }));
 
-      if (btnShowAll) btnShowAll.addEventListener('click', () => applyAll(true));
-      if (btnHideAll) btnHideAll.addEventListener('click', () => applyAll(false));
+        // Restore from URL or prefs
+        const focusParam = normalizeLineId(getUrlStringParam('focus'));
+        if (focusParam && focusParam !== 'all') soloSelect.value = focusParam;
 
-      if (wrap) {
-        wrap.innerHTML = '';
-        for (const id of wanted) {
-          const row = document.createElement('div');
-          row.style.display = 'flex';
-          row.style.alignItems = 'center';
-          row.style.justifyContent = 'space-between';
-          row.style.gap = '8px';
-
-          const label = document.createElement('label');
-          label.style.display = 'flex';
-          label.style.alignItems = 'center';
-          label.style.gap = '6px';
-          label.style.userSelect = 'none';
-          label.style.cursor = 'pointer';
-
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.dataset.line = id;
-          const startVisible = (initialLineVisibility[id] ?? true) !== false;
-          cb.checked = startVisible;
-          cb.addEventListener('change', () => {
-            initialLineVisibility[id] = cb.checked;
-            prefs.lineVisibility = initialLineVisibility;
-            savePrefs(prefs);
-            setLineVisible(id, cb.checked);
-          });
-          lineCheckboxes.set(id, cb);
-
-          const swatch = document.createElement('span');
-          swatch.style.display = 'inline-block';
-          swatch.style.width = '10px';
-          swatch.style.height = '10px';
-          swatch.style.borderRadius = '999px';
-          swatch.style.background = `#${(LINE_COLOURS[id] ?? 0xffffff).toString(16).padStart(6, '0')}`;
-          swatch.style.border = '1px solid rgba(255,255,255,0.22)';
-
-          const text = document.createElement('span');
-          text.textContent = id.replace(/-/g, ' ');
-          text.style.opacity = '0.9';
-
-          label.appendChild(cb);
-          label.appendChild(swatch);
-          label.appendChild(text);
-
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.textContent = 'Focus';
-          btn.title = 'Focus camera on this line';
-          btn.style.fontSize = '11px';
-          btn.style.padding = '2px 8px';
-          btn.style.borderRadius = '999px';
-          btn.style.border = '1px solid rgba(255,255,255,0.14)';
-          btn.style.background = 'rgba(255,255,255,0.06)';
-          btn.style.color = 'rgba(255,255,255,0.88)';
-          btn.style.cursor = 'pointer';
-
-          function ensureVisibleAndFocus() {
-            // If the user hid the line earlier, focusing should also reveal it.
-            setLineVisible(id, true);
-            initialLineVisibility[id] = true;
-            prefs.lineVisibility = initialLineVisibility;
-            savePrefs(prefs);
-            const cb = lineCheckboxes.get(id);
-            if (cb) cb.checked = true;
-
-            // Make the current focus shareable.
-            setUrlParam('focus', id);
-            updateSimUi();
-
-            const pts = lineCenterPoints.get(id);
-            if (!pts || pts.length === 0) return;
-            focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
-          }
-
-          btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            ensureVisibleAndFocus();
-          });
-
-          // Nice UX: double-click the label row to focus too.
-          label.addEventListener('dblclick', (e) => {
-            e.preventDefault();
-            ensureVisibleAndFocus();
-          });
-
-          row.appendChild(label);
-          row.appendChild(btn);
-          wrap.appendChild(row);
-        }
+        soloSelect.addEventListener('change', () => {
+          const val = soloSelect.value;
+          applySoloSelection(val);
+          if (val === 'all') deleteUrlParam('focus');
+          else setUrlParam('focus', val);
+          updateSimUi();
+        });
       }
     }
+
+    // Assign module-scoped applySoloSelection (needs cross-block access from keyboard/click handlers)
+    applySoloSelection = function(val) {
+      const isInfra = ['crossrail', 'tideway', 'geology'].includes(val);
+
+      // Tube lines + their stations/shafts: show all or just selected
+      for (const id of wanted) {
+        const visible = val === 'all' || id === val;
+        setLineVisible(id, visible);
+
+        // Toggle per-line station markers, labels, and shafts
+        const layers = lineShaftLayers.get(id);
+        if (layers) {
+          if (layers.stationsLayer?.mesh) layers.stationsLayer.mesh.visible = visible;
+          if (layers.stationsLayer?.setLabelsVisible) layers.stationsLayer.setLabelsVisible(visible);
+          if (layers.shaftsLayer?.group) layers.shaftsLayer.group.visible = visible;
+        }
+      }
+
+      // Infrastructure: visible when "all" or when specifically solo'd
+      if (tidewayMesh) tidewayMesh.visible = val === 'all' || val === 'tideway';
+      if (crossrailMesh) crossrailMesh.visible = val === 'all' || val === 'crossrail';
+      if (geologyGroup) geologyGroup.visible = val === 'all' || val === 'geology';
+
+      // Focus camera on the selected line
+      if (!isInfra && val !== 'all') {
+        const pts = lineCenterPoints.get(val);
+        if (pts && pts.length > 0) {
+          focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
+        }
+      }
+    };
 
     const failed = [];
     let loadedCount = 0;
@@ -1075,17 +1007,14 @@ async function buildNetworkMvp() {
         }
 
         const sequences = seq.stopPointSequences || [];
-        const longest = sequences.reduce((best, cur) =>
-          (!best || (cur.stopPoint?.length || 0) > (best.stopPoint?.length || 0)) ? cur : best
-        , null);
+        const { branches, allStops } = extractBranches(sequences);
 
-        const sps = longest?.stopPoint || [];
+        const sps = allStops;
         const ds = debugDepthStats({ lineId: id, stopPoints: sps, anchors: depthAnchors });
-        addLineFromStopPoints(id, colour, sps, depthAnchors, sim);
-        setLineVisible(id, (initialLineVisibility[id] ?? true) !== false);
-        // Line built silently
+        addLineFromStopPoints(id, colour, sps, depthAnchors, sim, { branches });
+        setLineVisible(id, true);
 
-        // Station markers + labels + shafts for deep tube lines (Victoria, Bakerloo, Central, etc.)
+        // Station markers + labels + shafts for all lines
         const DEEP_LINES_WITH_SHAFTS = new Set(['victoria', 'bakerloo', 'central', 'jubilee', 'northern', 'piccadilly', 'waterloo-city', 'circle', 'district', 'hammersmith-city', 'metropolitan', 'dlr']);
         if (DEEP_LINES_WITH_SHAFTS.has(id)) {
           const stations = sps
@@ -1178,8 +1107,7 @@ async function buildNetworkMvp() {
             console.warn(`Shaft loading failed for ${id}:`, err.message);
           }
 
-          // Keep HUD checkboxes in sync (in case build happens after user toggled)
-          // Legacy Victoria-specific toggles (deprecated; use lineToggles for new lines).
+          // Keep HUD checkboxes in sync
           if (id === 'victoria') {
             const stCb = document.getElementById('victoriaStations');
             if (stCb) stCb.checked = victoriaStationsVisible;
@@ -1225,27 +1153,13 @@ async function buildNetworkMvp() {
     }
 
     // Optional: focus on a specific line after everything is built.
-    // If the line was previously hidden (persisted prefs), focusing should also reveal it.
     const focusId = normalizeLineId(urlFocusLine);
     if (focusId && focusId !== 'all') {
-      setLineVisible(focusId, true);
-      initialLineVisibility[focusId] = true;
-      prefs.lineVisibility = initialLineVisibility;
-      savePrefs(prefs);
-
-      // Sync checkbox UI if present.
-      const wrap = document.getElementById('lineToggles');
-      const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${focusId}"]`);
-      if (cb) cb.checked = true;
-
-      // Focus camera on specific line (user explicitly requested this)
-      const pts = lineCenterPoints.get(focusId);
-      if (pts && pts.length) {
-        focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
-      }
+      applySoloSelection(focusId);
+      // Sync dropdown
+      const soloSelect = document.getElementById('soloLine');
+      if (soloSelect) soloSelect.value = focusId;
     }
-    // Note: When viewing all lines, we keep the curated straight-down view set at init
-    // rather than reframing - this provides a stable, predictable UX
 
     // Update HUD focus label once the network is built.
     updateSimUi();
@@ -1428,18 +1342,15 @@ window.addEventListener('resize', () => {
     // - Click: does nothing (no camera focus)
     // - Shift+Click: toggle visibility for that line
     if (ev.shiftKey) {
-      const g = lineGroups.get(lineId);
-      if (!g) return;
-      const next = !g.visible;
-      setLineVisible(lineId, next);
-      initialLineVisibility[lineId] = next;
-      prefs.lineVisibility = initialLineVisibility;
-      savePrefs(prefs);
-
-      // Sync checkbox if present
-      const wrap = document.getElementById('lineToggles');
-      const cb = wrap?.querySelector?.(`input[type="checkbox"][data-line="${lineId}"]`);
-      if (cb) cb.checked = next;
+      // Solo the clicked line (or back to all if already solo'd)
+      const soloSelect = document.getElementById('soloLine');
+      const currentSolo = soloSelect?.value || 'all';
+      const next = currentSolo === lineId ? 'all' : lineId;
+      applySoloSelection(next);
+      if (soloSelect) soloSelect.value = next;
+      if (next === 'all') deleteUrlParam('focus');
+      else setUrlParam('focus', next);
+      updateSimUi();
     }
     // Click without shift: no action (intentionally empty)
   }
@@ -1458,8 +1369,9 @@ function updateSimUi() {
 
   const focusLabel = document.getElementById('focusStatus');
   if (focusLabel) {
-    const focusId = normalizeLineId(getUrlStringParam('focus')) || 'all';
-    focusLabel.textContent = `Focus: ${focusId.replace(/-/g, ' ')}`;
+    const soloSelect = document.getElementById('soloLine');
+    const focusId = soloSelect?.value || normalizeLineId(getUrlStringParam('focus')) || 'all';
+    focusLabel.textContent = focusId === 'all' ? 'All lines' : focusId.replace(/-/g, ' ');
   }
 
   // Mobile-friendly: auto-collapse the HUD after initial load
@@ -1536,69 +1448,6 @@ function setVictoriaShaftsVisible(v) {
     shCb.addEventListener('change', () => setVictoriaShaftsVisible(shCb.checked));
   }
 
-  // Twin tunnel toggle
-  const twinCb = document.getElementById('twinTunnels');
-  const tunnelOffsetContainer = document.getElementById('tunnelOffsetContainer');
-  const tunnelOffsetSlider = document.getElementById('tunnelOffset');
-  const tunnelOffsetValue = document.getElementById('tunnelOffsetValue');
-
-  if (twinCb) {
-    twinCb.checked = twinTunnelsEnabled;
-    // Show/hide offset slider based on twin tunnel state
-    if (tunnelOffsetContainer) {
-      tunnelOffsetContainer.style.display = twinTunnelsEnabled ? '' : 'none';
-    }
-    twinCb.addEventListener('change', () => {
-      twinTunnelsEnabled = twinCb.checked;
-      twinTunnelOffset = twinTunnelsEnabled ? tunnelOffsetM : 0;
-      prefs.twinTunnelsEnabled = twinTunnelsEnabled;
-      savePrefs(prefs);
-      // Reload to apply tunnel offset change
-      location.reload();
-    });
-  }
-
-  // Infrastructure toggles (Tideway, Crossrail, Geology)
-  const tidewayCb = document.getElementById('toggleTideway');
-  if (tidewayCb) {
-    tidewayCb.checked = false; // Default off
-    tidewayCb.addEventListener('change', () => {
-      if (tidewayMesh) tidewayMesh.visible = tidewayCb.checked;
-    });
-  }
-
-  const crossrailCb = document.getElementById('toggleCrossrail');
-  if (crossrailCb) {
-    crossrailCb.checked = false; // Default off
-    crossrailCb.addEventListener('change', () => {
-      if (crossrailMesh) crossrailMesh.visible = crossrailCb.checked;
-    });
-  }
-
-  const geologyCb = document.getElementById('toggleGeology');
-  if (geologyCb) {
-    geologyCb.checked = false; // Default off
-    geologyCb.addEventListener('change', () => {
-      if (geologyGroup) geologyGroup.visible = geologyCb.checked;
-    });
-  }
-  
-  // Tunnel offset slider
-  if (tunnelOffsetSlider && tunnelOffsetValue) {
-    tunnelOffsetSlider.value = tunnelOffsetM;
-    tunnelOffsetValue.textContent = tunnelOffsetM.toFixed(1) + 'm';
-    tunnelOffsetSlider.addEventListener('input', () => {
-      const v = parseFloat(tunnelOffsetSlider.value);
-      tunnelOffsetM = v;
-      tunnelOffsetValue.textContent = v.toFixed(1) + 'm';
-    });
-    tunnelOffsetSlider.addEventListener('change', () => {
-      prefs.tunnelOffsetM = tunnelOffsetM;
-      savePrefs(prefs);
-      location.reload();
-    });
-  }
-
   const resetBtn = document.getElementById('resetPrefs');
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
@@ -1619,7 +1468,13 @@ function setVictoriaShaftsVisible(v) {
   if (focusAllBtn) {
     focusAllBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      // Same as the 'A' shortcut: focus camera on all currently-visible tube lines.
+      // Reset solo dropdown to all lines
+      applySoloSelection('all');
+      const soloSelect = document.getElementById('soloLine');
+      if (soloSelect) soloSelect.value = 'all';
+      deleteUrlParam('focus');
+      updateSimUi();
+      // Focus camera on all lines
       const pts = [];
       for (const [lineId, group] of lineGroups.entries()) {
         if (!group?.visible) continue;
@@ -1691,12 +1546,27 @@ window.addEventListener('keydown', (e) => {
     controls.update();
   }
   if (e.key === 'f' || e.key === 'F') {
-    // Focus the camera on the Victoria line stations for quick re-orientation.
-    focusCameraOnStations({ stations: victoriaStationsLayer?.stations, controls, camera });
+    // Cycle through lines in the solo dropdown
+    const soloSelect = document.getElementById('soloLine');
+    if (soloSelect) {
+      const options = Array.from(soloSelect.options).filter(o => !o.disabled);
+      const curIdx = options.findIndex(o => o.value === soloSelect.value);
+      const nextIdx = (curIdx + 1) % options.length;
+      soloSelect.value = options[nextIdx].value;
+      applySoloSelection(soloSelect.value);
+      if (soloSelect.value === 'all') deleteUrlParam('focus');
+      else setUrlParam('focus', soloSelect.value);
+      updateSimUi();
+    }
   }
   // Focus all moved to Shift+A (conflicts with A=left movement)
   if ((e.key === 'a' || e.key === 'A') && e.shiftKey) {
-    // Focus the camera on all currently-visible tube lines.
+    // Reset to all lines
+    applySoloSelection('all');
+    const soloSelect = document.getElementById('soloLine');
+    if (soloSelect) soloSelect.value = 'all';
+    deleteUrlParam('focus');
+    updateSimUi();
     const pts = [];
     for (const [lineId, group] of lineGroups.entries()) {
       if (!group?.visible) continue;
