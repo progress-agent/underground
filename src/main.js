@@ -112,11 +112,10 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 50000);
-// Curated view: straight down over central London
-// Position above the city looking directly down
+// Street-level view looking across central London
 const INITIAL_VIEW = {
-  position: new THREE.Vector3(0, 4500, 0),  // High above, straight down
-  target: new THREE.Vector3(0, 0, 0)          // Looking at center of network
+  position: new THREE.Vector3(-200, 30, 400),   // Street level, slight offset south
+  target: new THREE.Vector3(0, -20, 0)           // Looking slightly down into the network
 };
 camera.position.copy(INITIAL_VIEW.position);
 
