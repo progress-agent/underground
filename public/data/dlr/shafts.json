@@ -13,8 +13,8 @@
       "x": 7962.886594298936,
       "z": 4757.260200000046,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLELV",
@@ -22,8 +22,8 @@
       "x": 7695.854200111127,
       "z": 4266.450319999762,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLDEP",
@@ -31,8 +31,8 @@
       "x": 7300.22499128591,
       "z": 3694.1541999995575,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLGRE",
@@ -40,8 +40,8 @@
       "x": 7907.5262198941455,
       "z": 3263.123159999423,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLCUT",
@@ -49,8 +49,8 @@
       "x": 8105.895120921571,
       "z": 2864.1522799998147,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLISL",
@@ -58,8 +58,8 @@
       "x": 8152.386749489298,
       "z": 2180.6474799995885,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLMUD",
@@ -67,8 +67,8 @@
       "x": 7833.73548304671,
       "z": 1858.59871999956,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLCLA",
@@ -76,17 +76,17 @@
       "x": 7842.881377191182,
       "z": 1299.3270399996927,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLSOQ",
       "name": "South Quay DLR Station",
-      "x": 7748.373804364983,
-      "z": 818.2019999994773,
+      "x": 7737.080010838097,
+      "z": 817.8680399995295,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLHEQ",
@@ -94,8 +94,8 @@
       "x": 7370.689948444447,
       "z": 447.6177199993879,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLCAN",
@@ -103,8 +103,8 @@
       "x": 7400.067669029716,
       "z": 285.2018399997229,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
     },
     {
       "id": "940GZZDLWIQ",
@@ -112,8 +112,305 @@
       "x": 7447.598603750224,
       "z": 41.188399999627165,
       "groundY": -6,
-      "platformY": -24,
-      "depth_m": 8
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLPOP",
+      "name": "Poplar DLR Station",
+      "x": 7650.401877696181,
+      "z": -38.29408000060681,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLALL",
+      "name": "All Saints DLR Station",
+      "x": 7944.802667240549,
+      "z": -400.75200000064797,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLLDP",
+      "name": "Langdon Park DLR Station",
+      "x": 7874.476284235718,
+      "z": -865.1790400003091,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLDEV",
+      "name": "Devons Road DLR Station",
+      "x": 7634.396562943357,
+      "z": -1699.5224400001641,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLBOW",
+      "name": "Bow Church DLR Station",
+      "x": 7404.294180717692,
+      "z": -2277.3845600005534,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLPUD",
+      "name": "Pudding Mill Lane DLR Station",
+      "x": 7971.13175644433,
+      "z": -2994.7306399999734,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLSTD",
+      "name": "Stratford DLR Station",
+      "x": 8627.141800079558,
+      "z": -3824.7325600005065,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLWFE",
+      "name": "Westferry DLR Station",
+      "x": 7001.459115899861,
+      "z": -226.0909200002601,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLLIM",
+      "name": "Limehouse DLR Station",
+      "x": 6096.6391792889135,
+      "z": -555.8207600006701,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLSHA",
+      "name": "Shadwell DLR Station",
+      "x": 4930.260527561469,
+      "z": -477.8967600004563,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLBNK",
+      "name": "Bank DLR Station",
+      "x": 2721.9428141328654,
+      "z": -649.3295600002941,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLTWG",
+      "name": "Tower Gateway DLR Station",
+      "x": 3670.9679057754224,
+      "z": -358.11644000071965,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLBEC",
+      "name": "Beckton DLR Station",
+      "x": 13112.78715548141,
+      "z": -775.0098400001633,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLGAL",
+      "name": "Gallions Reach DLR Station",
+      "x": 13812.72520584084,
+      "z": -171.54412000034768,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLCYP",
+      "name": "Cyprus DLR Station",
+      "x": 13284.06480945968,
+      "z": -119.44636000057983,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLBPK",
+      "name": "Beckton Park DLR Station",
+      "x": 12660.966127329179,
+      "z": -155.06876000002222,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLRAL",
+      "name": "Royal Albert DLR Station",
+      "x": 12037.590296891265,
+      "z": -106.53323999996132,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLPRE",
+      "name": "Prince Regent DLR Station",
+      "x": 11221.596392804648,
+      "z": -207.38916000001893,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLCUS",
+      "name": "Custom House (for ExCel) DLR Station",
+      "x": 10704.784086565192,
+      "z": -257.81712000004774,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLRVC",
+      "name": "Royal Victoria DLR Station",
+      "x": 10136.491482224661,
+      "z": -215.51552000006723,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLCGT",
+      "name": "Canning Town DLR Station",
+      "x": 9416.183031270728,
+      "z": -748.8496400005604,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLEIN",
+      "name": "East India DLR Station",
+      "x": 8693.726680934382,
+      "z": -218.07588000072172,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLBLA",
+      "name": "Blackwall DLR Station",
+      "x": 8372.026783110303,
+      "z": -65.79012000000091,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLWLA",
+      "name": "Woolwich Arsenal DLR Station",
+      "x": 13644.496183244057,
+      "z": 1935.9661199995971,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLKGV",
+      "name": "King George V DLR Station",
+      "x": 13193.92232247516,
+      "z": 600.7940399994422,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLLCA",
+      "name": "London City Airport DLR Station",
+      "x": 12231.87126038442,
+      "z": 443.49887999950425,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLPDK",
+      "name": "Pontoon Dock DLR Station",
+      "x": 11080.042894795906,
+      "z": 577.5281599996506,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLWSV",
+      "name": "West Silvertown DLR Station",
+      "x": 10411.076167789344,
+      "z": 507.841839999995,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLSTL",
+      "name": "Star Lane DLR Station",
+      "x": 9142.845513089382,
+      "z": -1490.1295200004583,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLWHM",
+      "name": "West Ham DLR Station",
+      "x": 9165.433100143153,
+      "z": -2281.392080000718,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLABR",
+      "name": "Abbey Road DLR Station",
+      "x": 9113.814227888372,
+      "z": -2730.2343200001783,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLSHS",
+      "name": "Stratford High Street DLR Station",
+      "x": 8780.196952845741,
+      "z": -3428.2107200002524,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
+    },
+    {
+      "id": "940GZZDLSIT",
+      "name": "Stratford International DLR Station",
+      "x": 8187.099574992176,
+      "z": -4215.131800000399,
+      "groundY": -6,
+      "platformY": -18,
+      "depth_m": 6
     }
   ]
 }

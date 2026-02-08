@@ -376,33 +376,13 @@
             <input id="victoriaShafts" type="checkbox" checked />
             <span>Shafts</span>
           </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="twinTunnels" type="checkbox" checked />
-            <span>Twin tunnels</span>
-          </label>
         </p>
 
-        <p class="small" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:8px;">
-          <strong>Infrastructure:</strong>
-        </p>
-        <p class="small row">
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="toggleTideway" type="checkbox" />
-            <span style="color:#00BCD4">Tideway Tunnel</span>
-          </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="toggleCrossrail" type="checkbox" />
-            <span style="color:#9C27B0">Crossrail</span>
-          </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="toggleGeology" type="checkbox" />
-            <span style="color:#718096">Geology</span>
-          </label>
-        </p>
-        <p class="small" id="tunnelOffsetContainer" style="display:none;">
-          Tunnel separation:
-          <input id="tunnelOffset" type="range" min="0" max="12" value="6" step="0.5" style="vertical-align: middle; width: 140px;" />
-          <span id="tunnelOffsetValue">6.0m</span>
+        <p class="small" style="margin-top:8px;">
+          Solo line:
+          <select id="soloLine" style="font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.9); cursor:pointer;">
+            <option value="all">All lines</option>
+          </select>
         </p>
 
         <p class="small row">
@@ -422,11 +402,6 @@
           <input id="verticalScale" type="range" min="0.2" max="200" value="3" step="0.2" style="vertical-align: middle; width: 160px;" />
           <span id="verticalScaleValue">3.0×</span>
         </p>
-        <p class="small">
-          Ground opacity:
-          <input id="groundOpacity" type="range" min="0" max="1.0" value="0.35" step="0.02" style="vertical-align: middle; width: 160px;" />
-          <span id="groundOpacityValue">0.35</span>
-        </p>
 
         <p class="small">
           Horizontal scale:
@@ -438,17 +413,6 @@
           <button id="resetPrefs" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Reset settings</button>
           <span style="opacity:0.7;">Clears saved prefs + TfL cache.</span>
         </p>
-
-        <div class="small" style="margin-top:8px;">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:4px;">
-            <div style="font-weight:600; opacity:0.9;">Lines</div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <button id="linesShowAll" style="font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Show all</button>
-              <button id="linesHideAll" style="font-size:11px; padding:3px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Hide all</button>
-            </div>
-          </div>
-          <div id="lineToggles" style="display:grid; grid-template-columns: 1fr 1fr; gap:6px 10px;"></div>
-        </div>
       </details>
     </div>
 

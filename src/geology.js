@@ -1,5 +1,5 @@
 // Geological strata visualization for London
-// Shows London Clay (tube network layer) and Chalk bedrock (deep infrastructure anchor)
+// Shows Chalk bedrock layer where deep infrastructure (Crossrail, Tideway) anchors
 
 import * as THREE from 'three';
 
@@ -8,66 +8,16 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   group.name = 'geological-strata';
   
   // Define strata boundaries (in real-world metres below ground)
-  const SURFACE = 0;
-  const LONDON_CLAY_BASE = -30;  // Tube tunnels sit mostly in top 30m
   const CHALK_TOP = -60;         // Crossrail/Tideway punch into chalk
   const CHALK_BASE = -150;       // Visual bottom
-  
+
   // Scale to world coordinates
-  const clayBaseY = LONDON_CLAY_BASE * verticalScale;
   const chalkTopY = CHALK_TOP * verticalScale;
   const chalkBaseY = CHALK_BASE * verticalScale;
-  
-  // Create large plane for each stratum
+
+  // Create large plane for chalk stratum
   const planeSize = 40000; // 40km x 40km covers Greater London
   const segments = 64;
-  
-  // --- London Clay Layer (where tube tunnels live) ---
-  // Color: Blue-grey, the clay that makes tube tunneling possible
-  const clayGeometry = new THREE.PlaneGeometry(planeSize, planeSize, segments, segments);
-  clayGeometry.rotateX(-Math.PI / 2);
-  
-  const clayMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x4a5568,      // Blue-grey clay color
-    transparent: true,
-    opacity: 0.35,
-    roughness: 0.9,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  });
-  
-  // Position at middle of London Clay layer
-  const clayMesh = new THREE.Mesh(clayGeometry, clayMaterial);
-  clayMesh.position.y = clayBaseY / 2;
-  clayMesh.userData = { 
-    name: 'London Clay', 
-    depth: '0-30m',
-    description: 'Blue-grey clay where tube tunnels are constructed'
-  };
-  group.add(clayMesh);
-  
-  // --- Woolwich/Reading Beds (thin transitional layer) ---
-  const bedsGeometry = new THREE.PlaneGeometry(planeSize, planeSize, segments, segments);
-  bedsGeometry.rotateX(-Math.PI / 2);
-  
-  const bedsMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x718096,      // Grey-brown transition
-    transparent: true,
-    opacity: 0.1,
-    roughness: 0.8,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  });
-  
-  const bedsMesh = new THREE.Mesh(bedsGeometry, bedsMaterial);
-  bedsMesh.position.y = (clayBaseY + chalkTopY) / 2;
-  bedsMesh.userData = {
-    name: 'Woolwich/Reading Beds',
-    depth: '30-60m',
-    description: 'Transitional sand and silt layer'
-  };
-  group.add(bedsMesh);
   
   // --- Chalk Bedrock (where deep infrastructure anchors) ---
   // Color: White/cream, the stable bedrock
@@ -125,10 +75,7 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
     return new THREE.LineSegments(lineGeometry, lineMaterial);
   };
   
-  // London Clay base boundary
-  group.add(createBoundaryLine(clayBaseY, 0x5a6578, 'London Clay base'));
-  
-  // Chalk top boundary  
+  // Chalk top boundary
   group.add(createBoundaryLine(chalkTopY, 0xe2e8f0, 'Chalk top'));
   
   // --- Depth labels (floating markers) ---
@@ -146,8 +93,6 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
     return marker;
   };
   
-  group.add(createDepthLabel(0, 'Surface', 0xffffff));
-  group.add(createDepthLabel(clayBaseY, '30m - London Clay base', 0x5a6578));
   group.add(createDepthLabel(chalkTopY, '60m - Chalk bedrock', 0xe2e8f0));
   group.add(createDepthLabel(chalkBaseY, '150m+', 0xf7fafc));
   
@@ -166,15 +111,6 @@ export function addGeologyToLegend() {
   header.className = 'legend-item';
   header.innerHTML = `<span class="legend-label" style="color: var(--fg-muted); font-size: 10px; text-transform: uppercase;">Geology</span>`;
   legend.appendChild(header);
-  
-  // London Clay
-  const clayItem = document.createElement('div');
-  clayItem.className = 'legend-item';
-  clayItem.innerHTML = `
-    <div class="legend-line" style="background: #4a5568; opacity: 0.5;"></div>
-    <span class="legend-label">London Clay (0-30m)</span>
-  `;
-  legend.appendChild(clayItem);
   
   // Chalk
   const chalkItem = document.createElement('div');

@@ -8,6 +8,78 @@
   "groundY": -6,
   "shafts": [
     {
+      "id": "940GZZLUEPG",
+      "name": "Epping Underground Station",
+      "x": 16737.471293919658,
+      "z": -20736.689600000394,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUTHB",
+      "name": "Theydon Bois Underground Station",
+      "x": 15997.346738986042,
+      "z": -18296.443880000512,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUDBN",
+      "name": "Debden Underground Station",
+      "x": 14659.89829451088,
+      "z": -15360.601520000562,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLULGN",
+      "name": "Loughton Underground Station",
+      "x": 12698.658297136693,
+      "z": -14921.666760000608,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUBKH",
+      "name": "Buckhurst Hill Underground Station",
+      "x": 12094.544274063652,
+      "z": -13269.900600000099,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUWOF",
+      "name": "Woodford Underground Station",
+      "x": 11208.570422356463,
+      "z": -11076.228680000173,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUSWF",
+      "name": "South Woodford Underground Station",
+      "x": 10749.058528673653,
+      "z": -9407.319240000235,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUSNB",
+      "name": "Snaresbrook Underground Station",
+      "x": 10340.403349400249,
+      "z": -8157.306960000217,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
       "id": "940GZZLULYS",
       "name": "Leytonstone Underground Station",
       "x": 9422.626729417969,
@@ -31,8 +103,8 @@
       "x": 8615.293709937858,
       "z": -3830.0759200004627,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -48,
+      "depth_m": 16
     },
     {
       "id": "940GZZLUMED",
@@ -58,8 +130,8 @@
       "x": 3091.4507949848585,
       "z": -1110.0830400005293,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUBNK",
@@ -67,8 +139,8 @@
       "x": 2772.037370696899,
       "z": -539.9020000005214,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -57,
+      "depth_m": 19
     },
     {
       "id": "940GZZLUSPU",
@@ -94,8 +166,8 @@
       "x": 507.52783794128123,
       "z": -1133.237600000602,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUTCR",
@@ -103,8 +175,8 @@
       "x": -180.83927058385598,
       "z": -1004.7743200006403,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -66,
+      "depth_m": 22
     },
     {
       "id": "940GZZLUOXC",
@@ -112,8 +184,8 @@
       "x": -977.1556448444906,
       "z": -870.9676800007228,
       "groundY": -6,
-      "platformY": -81,
-      "depth_m": 27
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUBND",
@@ -121,8 +193,8 @@
       "x": -1518.9805858275372,
       "z": -768.553280000645,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -72,
+      "depth_m": 24
     },
     {
       "id": "940GZZLUMBA",
@@ -157,8 +229,8 @@
       "x": -4732.584497302564,
       "z": -192.36095999999463,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUHPK",
@@ -193,14 +265,185 @@
       "x": -8276.202755823915,
       "z": -1025.4798400005684,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -63,
+      "depth_m": 21
     },
     {
       "id": "940GZZLUNAN",
       "name": "North Acton Underground Station",
       "x": -9142.776226012531,
       "z": -1794.923680000547,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUHGR",
+      "name": "Hanger Lane Underground Station",
+      "x": -11425.716121210795,
+      "z": -2535.535640000549,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUPVL",
+      "name": "Perivale Underground Station",
+      "x": -13555.73943779658,
+      "z": -3263.5684400006717,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUGFD",
+      "name": "Greenford Underground Station",
+      "x": -15121.904522960365,
+      "z": -3898.871679999994,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUNHT",
+      "name": "Northolt Underground Station",
+      "x": -16691.18752658249,
+      "z": -4545.863520000653,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUSRP",
+      "name": "South Ruislip Underground Station",
+      "x": -18784.765840744094,
+      "z": -5505.107959999972,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLURSG",
+      "name": "Ruislip Gardens Underground Station",
+      "x": -19602.00691221405,
+      "z": -5937.363520000179,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUWRP",
+      "name": "West Ruislip Underground Station",
+      "x": -21484.952512745414,
+      "z": -6933.90016000026,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUHLT",
+      "name": "Hainault Underground Station",
+      "x": 15331.982939975784,
+      "z": -10715.551880000381,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUFLP",
+      "name": "Fairlop Underground Station",
+      "x": 15160.2895635364,
+      "z": -9820.427760000533,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUBKE",
+      "name": "Barkingside Underground Station",
+      "x": 14992.684124631285,
+      "z": -8715.131480000575,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUNBP",
+      "name": "Newbury Park Underground Station",
+      "x": 15091.002486684349,
+      "z": -7606.05032000068,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUGTH",
+      "name": "Gants Hill Underground Station",
+      "x": 13440.65360314532,
+      "z": -7697.110080000159,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLURBG",
+      "name": "Redbridge Underground Station",
+      "x": 11997.750227701334,
+      "z": -7663.6027600001225,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUWSD",
+      "name": "Wanstead Underground Station",
+      "x": 10831.440863050742,
+      "z": -7581.003320000639,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUGGH",
+      "name": "Grange Hill Underground Station",
+      "x": 15233.87243915328,
+      "z": -11797.470960000039,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUCWL",
+      "name": "Chigwell Underground Station",
+      "x": 14054.259955747093,
+      "z": -12302.641120000451,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLURVY",
+      "name": "Roding Valley Underground Station",
+      "x": 11879.06146505377,
+      "z": -12222.824680000269,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUWTA",
+      "name": "West Acton Underground Station",
+      "x": -10613.394432197336,
+      "z": -1180.1033200001327,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "940GZZLUEBY",
+      "name": "Ealing Broadway Underground Station",
+      "x": -12032.185904896804,
+      "z": -847.924440000369,
       "groundY": -6,
       "platformY": -84,
       "depth_m": 28

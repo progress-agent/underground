@@ -13,8 +13,8 @@
       "x": 2772.037370696899,
       "z": -539.9020000005214,
       "groundY": -6,
-      "platformY": -72,
-      "depth_m": 24
+      "platformY": -57,
+      "depth_m": 19
     },
     {
       "id": "940GZZLUWLO",
@@ -22,8 +22,8 @@
       "x": 902.1177406137182,
       "z": 456.5233199998417,
       "groundY": -6,
-      "platformY": -72,
-      "depth_m": 24
+      "platformY": -78,
+      "depth_m": 26
     }
   ]
 }

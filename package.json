@@ -4,7 +4,17 @@
   "version": "0.0.1",
   "type": "module",
   "description": "Interactive 3D visualization of the London Underground network with depth data, infrastructure layers, and geological strata",
-  "keywords": ["london", "underground", "tube", "3d", "visualization", "threejs", "crossrail", "tideway", "geology"],
+  "keywords": [
+    "london",
+    "underground",
+    "tube",
+    "3d",
+    "visualization",
+    "threejs",
+    "crossrail",
+    "tideway",
+    "geology"
+  ],
   "author": "progress-agent",
   "repository": {
     "type": "git",
@@ -19,7 +29,8 @@
     "test": "node -e \"console.log('No tests defined.');\""
   },
   "dependencies": {
-    "three": "^0.161.0"
+    "three": "^0.161.0",
+    "upng-js": "^2.1.0"
   },
   "devDependencies": {
     "vite": "^5.4.14"
