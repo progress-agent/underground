@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 
+// Track which station names already have a label to avoid duplicates
+// when the same station appears on multiple lines (e.g. Farringdon on Circle + Metropolitan + H&C)
+const _labelledNames = new Set();
+
+function cleanStationName(name) {
+  return name.replace(/\s+(Underground|DLR) Station$/i, '');
+}
+
 function ensureOverlayRoot() {
   let root = document.getElementById('station-overlay');
   if (root) return root;
@@ -9,9 +17,9 @@ function ensureOverlayRoot() {
   return root;
 }
 
-function createOverlayLayer(root) {
+function createOverlayLayer(root, className) {
   const layer = document.createElement('div');
-  layer.className = 'station-overlay-layer';
+  layer.className = className;
   layer.style.position = 'absolute';
   layer.style.inset = '0';
   layer.style.pointerEvents = 'none';
@@ -51,91 +59,118 @@ export function createStationMarkers({
   mesh.instanceMatrix.needsUpdate = true;
   scene.add(mesh);
 
-  // ---- HTML labels (toggleable) ----
+  // ---- Dual HTML label system ----
+  // Surface labels: project at Y=0 (street level), visible above ground
+  // Underground labels: project at actual station depth, visible below ground
   const root = ensureOverlayRoot();
-  const layer = createOverlayLayer(root);
-  const labelEls = [];
+  const surfaceLayer = createOverlayLayer(root, 'station-overlay-layer station-layer-surface');
+  const undergroundLayer = createOverlayLayer(root, 'station-overlay-layer station-layer-underground');
+  const surfaceEls = [];
+  const undergroundEls = [];
 
   if (labels) {
     for (const st of stations) {
-      const el = document.createElement('div');
-      el.className = 'station-label';
-      // Strip redundant suffix for readability
-      el.textContent = st.name.replace(/\s+Underground Station$/i, '');
-      layer.appendChild(el);
-      labelEls.push(el);
+      const name = cleanStationName(st.name);
+      const isDuplicate = _labelledNames.has(name);
+
+      // Surface: dedup (shared stations overlap at Y=0)
+      if (isDuplicate) {
+        surfaceEls.push(null);
+      } else {
+        _labelledNames.add(name);
+        const surfEl = document.createElement('div');
+        surfEl.className = 'station-label station-label-surface';
+        surfEl.textContent = name;
+        surfaceLayer.appendChild(surfEl);
+        surfaceEls.push(surfEl);
+      }
+
+      // Underground: always create (different line depths prevent overlap)
+      const ugEl = document.createElement('div');
+      ugEl.className = 'station-label station-label-underground';
+      ugEl.textContent = name;
+      undergroundLayer.appendChild(ugEl);
+      undergroundEls.push(ugEl);
     }
   }
 
   let labelsVisible = labels;
   function setLabelsVisible(v) {
     labelsVisible = !!v;
-    layer.style.display = labelsVisible ? 'block' : 'none';
+    surfaceLayer.style.display = labelsVisible ? 'block' : 'none';
+    undergroundLayer.style.display = labelsVisible ? 'block' : 'none';
   }
   setLabelsVisible(labelsVisible);
 
-  const tmp = new THREE.Vector3();
+  const tmpSurface = new THREE.Vector3();
+  const tmpUnderground = new THREE.Vector3();
   let updateCount = 0;
+
   function update({ camera, renderer }) {
     updateCount++;
-    if (!labelsVisible) {
-      if (updateCount % 60 === 0) window.mobileDebug?.show('labels: hidden (toggle off)');
-      return;
-    }
-    if (labelEls.length === 0) {
-      if (updateCount % 60 === 0) window.mobileDebug?.show('labels: no elements');
-      return;
-    }
+    if (!labelsVisible) return;
+    if (surfaceEls.length === 0) return;
 
     const w = renderer.domElement.clientWidth;
     const h = renderer.domElement.clientHeight;
-    let visibleCount = 0;
+    const cameraAboveGround = camera.position.y >= 0;
+
+    // Toggle layer visibility based on camera position
+    surfaceLayer.style.display = cameraAboveGround ? 'block' : 'none';
+    undergroundLayer.style.display = cameraAboveGround ? 'none' : 'block';
+
+    // Only project labels for the active layer
+    const activeEls = cameraAboveGround ? surfaceEls : undergroundEls;
 
     for (let i = 0; i < stations.length; i++) {
+      const el = activeEls[i];
+      if (!el) continue;
+
       const st = stations[i];
-      const el = labelEls[i];
 
-      tmp.copy(st.pos);
-      tmp.project(camera);
+      if (cameraAboveGround) {
+        // Surface: project station XZ at Y=0
+        tmpSurface.set(st.pos.x, 0, st.pos.z);
+        tmpSurface.project(camera);
 
-      // CRITICAL FIX: Check if behind camera (z > 1 in NDC means behind)
-      if (tmp.z > 1) {
-        el.style.display = 'none';
-        continue;
+        if (tmpSurface.z > 1) { el.style.display = 'none'; continue; }
+
+        const x = (tmpSurface.x * 0.5 + 0.5) * w;
+        const y = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+
+        if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
+
+        el.style.display = 'block';
+        el.style.left = `${x.toFixed(1)}px`;
+        el.style.top = `${y.toFixed(1)}px`;
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.opacity = '1';
+      } else {
+        // Underground: project at actual station depth
+        tmpUnderground.copy(st.pos);
+        tmpUnderground.project(camera);
+
+        if (tmpUnderground.z > 1) { el.style.display = 'none'; continue; }
+
+        const x = (tmpUnderground.x * 0.5 + 0.5) * w;
+        const y = (1 - (tmpUnderground.y * 0.5 + 0.5)) * h;
+
+        if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
+
+        const d = camera.position.distanceTo(st.pos);
+
+        if (d > 3000) { el.style.display = 'none'; continue; }
+
+        const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / 2850, 0.0, 1.0);
+        const fontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / 2850);
+
+        el.style.display = 'block';
+        el.style.left = `${x.toFixed(1)}px`;
+        el.style.top = `${y.toFixed(1)}px`;
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.opacity = alpha.toFixed(3);
+        el.style.fontSize = `${fontSize.toFixed(1)}px`;
       }
-
-      // Less aggressive behind-camera check for marginal cases (was projected but barely visible)
-      const marginal = tmp.z > 0.9;
-
-      const x = (tmp.x * 0.5 + 0.5) * w;
-      // FIX: Proper Y-coordinate flip for CSS (WebGL Y up, CSS Y down)
-      const y = (1 - (tmp.y * 0.5 + 0.5)) * h;
-
-      // quick reject off-screen
-      if (x < -40 || x > w + 40 || y < -20 || y > h + 20) {
-        el.style.display = 'none';
-        continue;
-      }
-
-      // distance-based fade: labels visible from further away, minimum 0.35 opacity
-      const d = camera.position.distanceTo(st.pos);
-      let alpha = THREE.MathUtils.clamp(1.0 - (d - 150) / 800, 0.35, 1.0);
-      
-      // Reduce opacity for marginal behind-camera positions
-      if (marginal) alpha *= 0.5;
-
-      el.style.display = 'block';
-      visibleCount++;
-      // CRITICAL FIX: Use left/top for positioning with transform for centering
-      // This avoids subpixel rendering issues and is more reliable
-      el.style.left = `${x.toFixed(1)}px`;
-      el.style.top = `${y.toFixed(1)}px`;
-      el.style.transform = 'translate(-50%, -50%)';
-      el.style.opacity = alpha.toFixed(3);
-    }
-    
-    if (updateCount % 60 === 0) {
-      window.mobileDebug?.show(`vis:${visibleCount}/${labelEls.length} cam:${camera.position.z.toFixed(0)}`);
     }
   }
 
@@ -143,8 +178,16 @@ export function createStationMarkers({
     scene.remove(mesh);
     geo.dispose();
     mat.dispose();
-    for (const el of labelEls) el.remove();
-    layer.remove();
+    for (let i = 0; i < surfaceEls.length; i++) {
+      const name = cleanStationName(stations[i].name);
+      if (surfaceEls[i]) {
+        _labelledNames.delete(name);
+        surfaceEls[i].remove();
+      }
+      if (undergroundEls[i]) undergroundEls[i].remove();
+    }
+    surfaceLayer.remove();
+    undergroundLayer.remove();
   }
 
   return { mesh, stations, setLabelsVisible, update, dispose };

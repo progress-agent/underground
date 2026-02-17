@@ -76,8 +76,8 @@
       "x": -446.13948785036325,
       "z": -2313.8975200001205,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -81,
+      "depth_m": 27
     },
     {
       "id": "940GZZLUWRR",
@@ -85,8 +85,8 @@
       "x": -728.96933556044,
       "z": -1953.777320000505,
       "groundY": -6,
-      "platformY": -81,
-      "depth_m": 27
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUOXC",
@@ -94,8 +94,8 @@
       "x": -977.1556448444906,
       "z": -870.9676800007228,
       "groundY": -6,
-      "platformY": -81,
-      "depth_m": 27
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUGPK",

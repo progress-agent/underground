@@ -13,8 +13,8 @@
       "x": -2773.700260541349,
       "z": -1386.824560000256,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUPAC",
@@ -22,8 +22,8 @@
       "x": -3318.0888233679225,
       "z": -1022.0289200005802,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -45,
+      "depth_m": 15
     },
     {
       "id": "940GZZLUBWT",
@@ -31,8 +31,8 @@
       "x": -4166.786227728707,
       "z": -543.6868800004572,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUNHG",
@@ -40,8 +40,8 @@
       "x": -4732.584497302564,
       "z": -192.36095999999463,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUHSK",
@@ -49,8 +49,8 @@
       "x": -4503.105698768567,
       "z": 706.3253999995601,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUGTR",
@@ -58,8 +58,8 @@
       "x": -3800.9504619498716,
       "z": 1456.5108799999118,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUSKS",
@@ -67,8 +67,8 @@
       "x": -3210.6245671703878,
       "z": 1481.2239200000045,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUSSQ",
@@ -76,8 +76,8 @@
       "x": -1980.0167952010913,
       "z": 1684.271599999911,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUVIC",
@@ -94,8 +94,8 @@
       "x": -402.4193423567189,
       "z": 874.5299199996387,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUWSM",
@@ -103,8 +103,8 @@
       "x": 203.6347188681808,
       "z": 676.8255999996882,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUEMB",
@@ -121,8 +121,8 @@
       "x": 938.1470205767847,
       "z": -401.4199200005436,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUBKF",
@@ -130,8 +130,8 @@
       "x": 1672.6593222853885,
       "z": -465.42892000029553,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUMSH",
@@ -139,8 +139,8 @@
       "x": 2341.2796139076913,
       "z": -525.096440000726,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUCST",
@@ -148,8 +148,8 @@
       "x": 2589.1194878074816,
       "z": -457.5252000004761,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUMMT",
@@ -157,8 +157,8 @@
       "x": 2898.3477117981893,
       "z": -367.3560000003303,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUTWH",
@@ -166,8 +166,8 @@
       "x": 3551.2398369750763,
       "z": -286.2037200003573,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUALD",
@@ -175,8 +175,8 @@
       "x": 3610.6188618372844,
       "z": -762.0967200003358,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLULVT",
@@ -184,8 +184,8 @@
       "x": 3091.4507949848585,
       "z": -1110.0830400005293,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUMGT",
@@ -193,8 +193,8 @@
       "x": 2735.3152199653114,
       "z": -1199.5843199999886,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUBBN",
@@ -202,8 +202,8 @@
       "x": 2065.239899729116,
       "z": -1433.2450000001202,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUFCN",
@@ -211,8 +211,8 @@
       "x": 1585.773327912915,
       "z": -1430.6846400002566,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUKSX",
@@ -229,8 +229,8 @@
       "x": -556.3059400451266,
       "z": -2026.4692800004818,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUGPS",
@@ -238,8 +238,8 @@
       "x": -1140.6038591384813,
       "z": -1830.1008000003226,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
     },
     {
       "id": "940GZZLUBST",
@@ -247,17 +247,89 @@
       "x": -2032.1899640706868,
       "z": -1723.567560000361,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -54,
+      "depth_m": 18
     },
     {
-      "id": "940GZZLUERC",
-      "name": "Edgware Road (Circle Line) Underground Station",
-      "x": -2773.700260541349,
-      "z": -1386.824560000256,
+      "id": "940GZZLUPAH",
+      "name": "Paddington (H&C Line)-Underground",
+      "x": -3499.4131034897414,
+      "z": -1200.8088400000609,
       "groundY": -6,
-      "platformY": -36,
-      "depth_m": 12
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLURYO",
+      "name": "Royal Oak Underground Station",
+      "x": -4222.908759978869,
+      "z": -1303.8911600000342,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLUWSP",
+      "name": "Westbourne Park Underground Station",
+      "x": -5076.317685565595,
+      "z": -1526.1972000003584,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLULAD",
+      "name": "Ladbroke Grove Underground Station",
+      "x": -5722.488964287832,
+      "z": -1118.6546800002443,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLULRD",
+      "name": "Latimer Road Underground Station",
+      "x": -6235.767629607833,
+      "z": -666.695479999953,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLUWLA",
+      "name": "Wood Lane Underground Station",
+      "x": -6702.138943898997,
+      "z": -252.58508000060175,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLUSBM",
+      "name": "Shepherd's Bush Market Underground Station",
+      "x": -6829.973600691032,
+      "z": 202.71371999995864,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLUGHK",
+      "name": "Goldhawk Road Underground Station",
+      "x": -6853.53120682073,
+      "z": 600.5714000000044,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
+    },
+    {
+      "id": "940GZZLUHSC",
+      "name": "Hammersmith (H&C Line) Underground Station",
+      "x": -6736.782482325023,
+      "z": 1559.5931999998852,
+      "groundY": -6,
+      "platformY": -24,
+      "depth_m": 8
     }
   ]
 }

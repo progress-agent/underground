@@ -13,8 +13,8 @@
       "x": -1480.7341194052049,
       "z": -16043.438400000101,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUOAK",
@@ -22,8 +22,8 @@
       "x": -303.61597076569194,
       "z": -15621.090320000192,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUSGT",
@@ -31,8 +31,8 @@
       "x": -1.1085932296339418,
       "z": -13905.53780000016,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUASG",
@@ -40,8 +40,8 @@
       "x": -364.5885983954991,
       "z": -12139.000720000715,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUBDS",
@@ -49,8 +49,8 @@
       "x": 247.00842897756553,
       "z": -11091.256880000197,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -72,
+      "depth_m": 24
     },
     {
       "id": "940GZZLUWOG",
@@ -58,8 +58,8 @@
       "x": 1241.2086947276607,
       "z": -10027.594280000323,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUTPN",
@@ -67,8 +67,8 @@
       "x": 1721.5759985429372,
       "z": -9225.311040000204,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUMRH",
@@ -76,8 +76,8 @@
       "x": 2195.1531688267137,
       "z": -7050.786160000186,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -63,
+      "depth_m": 21
     },
     {
       "id": "940GZZLUFPK",
@@ -94,8 +94,8 @@
       "x": 1409.5070044012953,
       "z": -5705.706600000524,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUHWY",
@@ -103,8 +103,8 @@
       "x": 1008.5426906584698,
       "z": -5042.46204000056,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUCAR",
@@ -112,8 +112,8 @@
       "x": 644.8548242620483,
       "z": -4577.367080000212,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUKSX",
@@ -130,8 +130,8 @@
       "x": 243.54407513496233,
       "z": -1744.718359999956,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -99,
+      "depth_m": 33
     },
     {
       "id": "940GZZLUHBN",
@@ -139,8 +139,8 @@
       "x": 507.52783794128123,
       "z": -1133.237600000602,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUCGN",
@@ -148,8 +148,8 @@
       "x": 233.0817265303026,
       "z": -633.744760000093,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -111,
+      "depth_m": 37
     },
     {
       "id": "940GZZLULSQ",
@@ -157,8 +157,8 @@
       "x": -43.37371010938566,
       "z": -443.7215200005241,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -99,
+      "depth_m": 33
     },
     {
       "id": "940GZZLUPCC",
@@ -166,8 +166,8 @@
       "x": -415.5838869586085,
       "z": -294.9980000003012,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -57,
+      "depth_m": 19
     },
     {
       "id": "940GZZLUGPK",
@@ -184,8 +184,8 @@
       "x": -1707.3028607114147,
       "z": 485.9117999999947,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUKNB",
@@ -193,8 +193,8 @@
       "x": -2266.24170967692,
       "z": 637.9749199996957,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUSKS",
@@ -202,8 +202,8 @@
       "x": -3210.6245671703878,
       "z": 1481.2239200000045,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUGTR",
@@ -211,8 +211,8 @@
       "x": -3800.9504619498716,
       "z": 1456.5108799999118,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUECT",
@@ -220,8 +220,8 @@
       "x": -4543.70792580387,
       "z": 1707.3148399994736,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUBSC",
@@ -229,8 +229,8 @@
       "x": -5932.844529610663,
       "z": 1902.3474799998417,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUHSD",
@@ -238,8 +238,8 @@
       "x": -6639.08770396363,
       "z": 1680.931999999642,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUTNG",
@@ -247,8 +247,8 @@
       "x": -8782.483426381857,
       "z": 1363.8926399996215,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
     },
     {
       "id": "940GZZLUACT",
@@ -256,8 +256,233 @@
       "x": -10577.503726387971,
       "z": 483.4627599998501,
       "groundY": -6,
-      "platformY": -84,
-      "depth_m": 28
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUECM",
+      "name": "Ealing Common Underground Station",
+      "x": -11118.150787064535,
+      "z": -305.0168000003174,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUNEN",
+      "name": "North Ealing Underground Station",
+      "x": -11159.930894406323,
+      "z": -1124.8886000003247,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUPKR",
+      "name": "Park Royal Underground Station",
+      "x": -10846.268297497083,
+      "z": -2195.5643600006847,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUALP",
+      "name": "Alperton Underground Station",
+      "x": -11904.212673951064,
+      "z": -3698.8296400004087,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSUT",
+      "name": "Sudbury Town Underground Station",
+      "x": -13022.159658958926,
+      "z": -4832.957800000344,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSUH",
+      "name": "Sudbury Hill Underground Station",
+      "x": -14455.709279027882,
+      "z": -5515.460720000727,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSHH",
+      "name": "South Harrow Underground Station",
+      "x": -15568.251872041285,
+      "z": -6399.564160000715,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLURYL",
+      "name": "Rayners Lane Underground Station",
+      "x": -16859.416549179274,
+      "z": -7541.59604000047,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUEAE",
+      "name": "Eastcote Underground Station",
+      "x": -18677.925168238227,
+      "z": -7692.879920000556,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLURSM",
+      "name": "Ruislip Manor Underground Station",
+      "x": -19758.803567130246,
+      "z": -7325.078640000559,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLURSP",
+      "name": "Ruislip Underground Station",
+      "x": -20377.190728034806,
+      "z": -7119.359280000279,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUICK",
+      "name": "Ickenham Underground Station",
+      "x": -21763.070839229556,
+      "z": -6080.298399999988,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHGD",
+      "name": "Hillingdon Underground Station",
+      "x": -22312.37878451262,
+      "z": -5155.785799999987,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUUXB",
+      "name": "Uxbridge Underground Station",
+      "x": -24260.800672669182,
+      "z": -4359.847800000458,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUSEA",
+      "name": "South Ealing Underground Station",
+      "x": -12445.621892472998,
+      "z": 712.1140399999738,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUNFD",
+      "name": "Northfields Underground Station",
+      "x": -12951.071118108723,
+      "z": 899.5769199996791,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUBOS",
+      "name": "Boston Manor Underground Station",
+      "x": -13659.18504353669,
+      "z": 1309.6797999996568,
+      "groundY": -6,
+      "platformY": -60,
+      "depth_m": 20
+    },
+    {
+      "id": "940GZZLUOSY",
+      "name": "Osterley Underground Station",
+      "x": -15549.682935444931,
+      "z": 2908.346319999763,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHWE",
+      "name": "Hounslow East Underground Station",
+      "x": -15844.153012066155,
+      "z": 3805.6968399995267,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHWC",
+      "name": "Hounslow Central Underground Station",
+      "x": -16544.22963657929,
+      "z": 4019.208599999907,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHWT",
+      "name": "Hounslow West Underground Station",
+      "x": -17927.61541300736,
+      "z": 3777.1989199994982,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHNX",
+      "name": "Hatton Cross Underground Station",
+      "x": -20466.77891840451,
+      "z": 4525.491959999882,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "940GZZLUHRC",
+      "name": "Heathrow Terminals 2 & 3 Underground Station",
+      "x": -22481.231390801073,
+      "z": 4025.8877999996544,
+      "groundY": -6,
+      "platformY": -66,
+      "depth_m": 22
+    },
+    {
+      "id": "940GZZLUHR5",
+      "name": "Heathrow Terminal 5 Underground Station",
+      "x": -25134.579998850404,
+      "z": 4157.579359999375,
+      "groundY": -6,
+      "platformY": -66,
+      "depth_m": 22
+    },
+    {
+      "id": "940GZZLUHR4",
+      "name": "Heathrow Terminal 4 Underground Station",
+      "x": -22031.281113723846,
+      "z": 5440.876319999991,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
     }
   ]
 }

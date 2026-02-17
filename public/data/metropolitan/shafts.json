@@ -22,8 +22,8 @@
       "x": 3091.4507949848585,
       "z": -1110.0830400005293,
       "groundY": -6,
-      "platformY": -30,
-      "depth_m": 10
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUMGT",
@@ -85,8 +85,8 @@
       "x": -2032.1899640706868,
       "z": -1723.567560000361,
       "groundY": -6,
-      "platformY": -30,
-      "depth_m": 10
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLUFYR",
@@ -129,6 +129,186 @@
       "name": "Harrow-on-the-Hill Underground Station",
       "x": -14510.446069741003,
       "z": -7992.219400000179,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUNHA",
+      "name": "North Harrow Underground Station",
+      "x": -16255.302526106232,
+      "z": -8624.183040000024,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUPNR",
+      "name": "Pinner Underground Station",
+      "x": -17554.64307831277,
+      "z": -9517.971320000079,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUNWH",
+      "name": "Northwood Hills Underground Station",
+      "x": -19515.675214456394,
+      "z": -10371.9070400003,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUNOW",
+      "name": "Northwood Underground Station",
+      "x": -20510.98407343612,
+      "z": -11538.651960000148,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUMPK",
+      "name": "Moor Park Underground Station",
+      "x": -21108.58511128507,
+      "z": -13630.577400000682,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "940GZZLURKW",
+      "name": "Rickmansworth Underground Station",
+      "x": -23966.607744355362,
+      "z": -14784.075239999964,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUCYD",
+      "name": "Chorleywood Underground Station",
+      "x": -27067.758730099507,
+      "z": -16359.36456000056,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUCAL",
+      "name": "Chalfont & Latimer Underground Station",
+      "x": -29993.613411407965,
+      "z": -17876.322200000515,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUCSM",
+      "name": "Chesham Underground Station",
+      "x": -33496.62944289401,
+      "z": -22019.98656000022,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUAMS",
+      "name": "Amersham Underground Station",
+      "x": -33251.838200375714,
+      "z": -18559.938320000463,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWHW",
+      "name": "West Harrow Underground Station",
+      "x": -15631.164537822946,
+      "z": -8049.549200000184,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLURYL",
+      "name": "Rayners Lane Underground Station",
+      "x": -16859.416549179274,
+      "z": -7541.59604000047,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUEAE",
+      "name": "Eastcote Underground Station",
+      "x": -18677.925168238227,
+      "z": -7692.879920000556,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLURSM",
+      "name": "Ruislip Manor Underground Station",
+      "x": -19758.803567130246,
+      "z": -7325.078640000559,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLURSP",
+      "name": "Ruislip Underground Station",
+      "x": -20377.190728034806,
+      "z": -7119.359280000279,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUICK",
+      "name": "Ickenham Underground Station",
+      "x": -21763.070839229556,
+      "z": -6080.298399999988,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUHGD",
+      "name": "Hillingdon Underground Station",
+      "x": -22312.37878451262,
+      "z": -5155.785799999987,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUUXB",
+      "name": "Uxbridge Underground Station",
+      "x": -24260.800672669182,
+      "z": -4359.847800000458,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUCXY",
+      "name": "Croxley Underground Station",
+      "x": -21750.46059124248,
+      "z": -15545.170080000456,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "940GZZLUWAF",
+      "name": "Watford Underground Station",
+      "x": -20063.94385358668,
+      "z": -16703.12072000036,
       "groundY": -6,
       "platformY": -30,
       "depth_m": 10

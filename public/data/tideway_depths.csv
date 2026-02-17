@@ -1,0 +1,29 @@
+# Thames Tideway Tunnel (Super Sewer) Depth Anchors
+#
+# The Thames Tideway Tunnel is a 25km super sewer running from Acton to Abbey Mills
+# beneath the River Thames. Completed in 2024, it's the deepest operational
+# infrastructure beneath London.
+#
+# Depth ranges from 30m (Acton) to 65m (Blackfriars)
+# Diameter: 7.2m (larger than tube tunnels at ~3.6m)
+#
+# Points in route-sequence order (west to east along the Thames)
+# Spur connections (Mogden, King George's Park, Carnwath) removed — main bore only
+#
+# Columns:
+# id,name,depth_m,lat,lon,source_url,notes
+
+ttw-west-start,Acton Pumping Station,30,51.5083,-0.2764,https://www.tideway.london/the-tunnel/route/,Tunnel start
+ttw-hammersmith,Hammersmith Connection,35,51.4928,-0.2229,https://www.tideway.london/the-tunnel/route/,Beneath Thames at Hammersmith
+ttw-fulham,Fulham Connection,38,51.4791,-0.1936,https://www.tideway.london/the-tunnel/route/,CSO interception point
+ttw-battersea,Battersea Connection,42,51.4762,-0.1439,https://www.tideway.london/the-tunnel/route/,Beneath Battersea Bridge area
+ttw-vauxhall,Vauxhall Connection,45,51.4855,-0.1232,https://www.tideway.london/the-tunnel/route/,Deep shaft at Vauxhall
+ttw-westminster,Westminster Shaft,50,51.4975,-0.1247,https://www.tideway.london/the-tunnel/route/,Near Westminster Bridge
+ttw-victoria,Victoria Embankment,55,51.5010,-0.1180,https://www.tideway.london/the-tunnel/route/,Beneath Victoria Embankment
+ttw-temple,Temple Shaft,58,51.5110,-0.1140,https://www.tideway.london/the-tunnel/route/,Near Temple station
+ttw-blackfriars,Blackfriars Shaft,65,51.5115,-0.1030,https://www.tideway.london/the-tunnel/route/,DEEPEST POINT - 65m below ground
+ttw-aldwych,Aldwych Connection,52,51.5130,-0.1130,https://www.tideway.london/the-tunnel/route/,Near former Aldwych tube station
+ttw-limehouse,Limehouse Connection,45,51.5120,-0.0330,https://www.tideway.london/the-tunnel/route/,Beneath Limehouse Reach
+ttw-victoria-park,Victoria Park Shaft,48,51.5310,-0.0380,https://www.tideway.london/the-tunnel/route/,Ventilation/Access shaft
+ttw-greenwich,Greenwich Connection,42,51.4830,-0.0100,https://www.tideway.london/the-tunnel/route/,Beneath Greenwich
+ttw-abbey-mills,Abbey Mills Pumping Station,40,51.5270,0.0000,https://www.tideway.london/the-tunnel/route/,Tunnel end - connects to Lee Tunnel

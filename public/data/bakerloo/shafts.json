@@ -103,8 +103,8 @@
       "x": -4602.8790894355225,
       "z": -3070.0942800003236,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -30,
+      "depth_m": 10
     },
     {
       "id": "940GZZLUMVL",
@@ -130,8 +130,8 @@
       "x": -3318.0888233679225,
       "z": -1022.0289200005802,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -45,
+      "depth_m": 15
     },
     {
       "id": "940GZZLUERB",
@@ -157,8 +157,8 @@
       "x": -2032.1899640706868,
       "z": -1723.567560000361,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -54,
+      "depth_m": 18
     },
     {
       "id": "940GZZLURGP",
@@ -166,8 +166,8 @@
       "x": -1291.7882608296584,
       "z": -1774.8860800005145,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -60,
+      "depth_m": 20
     },
     {
       "id": "940GZZLUOXC",
@@ -175,8 +175,8 @@
       "x": -977.1556448444906,
       "z": -870.9676800007228,
       "groundY": -6,
-      "platformY": -81,
-      "depth_m": 27
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLUPCC",
@@ -184,8 +184,8 @@
       "x": -415.5838869586085,
       "z": -294.9980000003012,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -57,
+      "depth_m": 19
     },
     {
       "id": "940GZZLUCHX",
@@ -193,8 +193,8 @@
       "x": 36.23714119362293,
       "z": -1.1132000003533449,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -63,
+      "depth_m": 21
     },
     {
       "id": "940GZZLUEMB",
@@ -202,8 +202,8 @@
       "x": 355.71985255843526,
       "z": 38.07143999958697,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -36,
+      "depth_m": 12
     },
     {
       "id": "940GZZLUWLO",
@@ -211,8 +211,8 @@
       "x": 902.1177406137182,
       "z": 456.5233199998417,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -78,
+      "depth_m": 26
     },
     {
       "id": "940GZZLULBN",
@@ -229,8 +229,8 @@
       "x": 1884.1927679147036,
       "z": 1432.0204800000479,
       "groundY": -6,
-      "platformY": -75,
-      "depth_m": 25
+      "platformY": -60,
+      "depth_m": 20
     }
   ]
 }

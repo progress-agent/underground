@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import UPNG from 'upng-js';
 
 // Terrain configuration for London full coverage heightmap
 // Processed by Wisdom on MacBook M5, transferred to VPS
@@ -8,7 +9,7 @@ export const TERRAIN_CONFIG = {
   // Source files
   metaPath: '/data/terrain/london_full_height.json',
   fallbackMetaPath: '/data/terrain/victoria_dtm_u16.json',
-  
+
   // Geographic bounds (EPSG:27700 - British National Grid)
   bounds: {
     xmin: 468733,  // Easting min
@@ -16,13 +17,17 @@ export const TERRAIN_CONFIG = {
     xmax: 610563,  // Easting max
     ymax: 237769,  // Northing max
   },
-  
+
   // Scene configuration
   size: 28000,           // Visual size in scene units (metres) - covers central London
   segments: 256,         // Plane geometry segments
   baseY: -6.0,           // Base elevation offset
-  
+
   // Material/displacement settings
+  // The heightmap values (0-255 in 16-bit container) are normalised to 0..1 floats.
+  // displacementScale of 120 with bias -60 gives terrain displacement from -60 to +60
+  // scene units, centred around the base plane. London's elevation range (~0-130m)
+  // maps well to this with the normalised data.
   displacementScale: 120,
   displacementBias: -60,
   opacity: 1.0,
@@ -33,6 +38,74 @@ export const TERRAIN_CONFIG = {
   metalness: 0.1,
 };
 
+/**
+ * Decode a 16-bit PNG heightmap properly, bypassing the browser's <img> element
+ * which destroys 16-bit precision by quantising to 8-bit.
+ *
+ * Returns { floats: Float32Array (normalised 0..1), width, height }.
+ */
+async function load16bitHeightmap(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch heightmap: ${res.status}`);
+  const buf = await res.arrayBuffer();
+  const png = UPNG.decode(buf);
+
+  const w = png.width;
+  const h = png.height;
+  const depth = png.depth;   // bits per channel
+  const ctype = png.ctype;   // 0 = greyscale
+
+  // UPNG.toRGBA8 always converts to 8-bit RGBA — useless for 16-bit data.
+  // Instead, read the raw decoded buffer directly.
+  // For 16-bit greyscale (ctype 0, depth 16): each pixel is 2 bytes big-endian.
+  const raw = new Uint8Array(png.data);
+
+  let floats;
+  let maxVal;
+
+  if (depth === 16) {
+    // 16-bit greyscale: 2 bytes per pixel, big-endian
+    const pixelCount = w * h;
+    floats = new Float32Array(pixelCount);
+    // Find the actual data range first for optimal normalisation
+    let minRaw = 65535, maxRaw = 0;
+    for (let i = 0; i < pixelCount; i++) {
+      const hi = raw[i * 2];
+      const lo = raw[i * 2 + 1];
+      const val = (hi << 8) | lo;
+      if (val < minRaw) minRaw = val;
+      if (val > maxRaw) maxRaw = val;
+    }
+    maxVal = maxRaw;
+    const range = maxRaw - minRaw || 1;
+    console.log(`Heightmap 16-bit: ${w}x${h}, raw range ${minRaw}–${maxRaw}, normalising to 0..1`);
+
+    for (let i = 0; i < pixelCount; i++) {
+      const hi = raw[i * 2];
+      const lo = raw[i * 2 + 1];
+      const val = (hi << 8) | lo;
+      floats[i] = (val - minRaw) / range;
+    }
+  } else {
+    // 8-bit fallback
+    const pixelCount = w * h;
+    floats = new Float32Array(pixelCount);
+    let minRaw = 255, maxRaw = 0;
+    for (let i = 0; i < pixelCount; i++) {
+      if (raw[i] < minRaw) minRaw = raw[i];
+      if (raw[i] > maxRaw) maxRaw = raw[i];
+    }
+    maxVal = maxRaw;
+    const range = maxRaw - minRaw || 1;
+    console.log(`Heightmap 8-bit: ${w}x${h}, raw range ${minRaw}–${maxRaw}, normalising to 0..1`);
+    for (let i = 0; i < pixelCount; i++) {
+      floats[i] = (raw[i] - minRaw) / range;
+    }
+  }
+
+  return { floats, width: w, height: h, maxVal };
+}
+
 export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false } = {}) {
   // Looks for generated outputs from scripts/build-heightmap.mjs
   // Expected files (served from /public/data):
@@ -42,44 +115,62 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
   // - /data/terrain/victoria_dtm_u16.png (Victoria AOI only)
   // - /data/terrain/victoria_dtm_u16.json
   try {
-    // Prefer full London heightmap if available
-    let metaRes = await fetch('/data/terrain/london_full_height.json', { cache: 'no-store' });
-    if (!metaRes.ok) {
-      // Fallback to Victoria AOI
-      metaRes = await fetch('/data/terrain/victoria_dtm_u16.json', { cache: 'no-store' });
+    // Try each metadata file in order. Vite's dev server returns 200 + HTML for
+    // missing files (SPA fallback), so we must also catch JSON parse errors.
+    let meta = null;
+    for (const path of ['/data/terrain/london_full_height.json', '/data/terrain/victoria_dtm_u16.json']) {
+      try {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('json')) continue;  // Skip HTML fallback responses
+        meta = await res.json();
+        break;
+      } catch { /* not valid JSON, try next */ }
     }
-    if (!metaRes.ok) return null;
-    const meta = await metaRes.json();
+    if (!meta) return null;
 
-    const tex = await new THREE.TextureLoader().loadAsync(`/data/terrain/${meta.heightmap}`);
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
+    // Decode 16-bit PNG properly — browser <img> destroys 16-bit precision
+    const hm = await load16bitHeightmap(`/data/terrain/${meta.heightmap}`);
 
     const [xmin, ymin, xmax, ymax] = meta.bounds_m;
     const widthM = xmax - xmin;
     const heightM = ymax - ymin;
 
-    // Our scene x/z are in local metres from ORIGIN (WGS84 tangent plane-ish).
-    // The heightmap is in EPSG:27700 metres. We'll use it *visually* for now:
-    // render a displaced plane roughly under the network.
-
     const size = TERRAIN_CONFIG.size;
     const segments = TERRAIN_CONFIG.segments;
+    const scale = TERRAIN_CONFIG.displacementScale;
+    const bias = TERRAIN_CONFIG.displacementBias;
 
     const geom = new THREE.PlaneGeometry(size, size, segments, segments);
     geom.rotateX(-Math.PI / 2);
+
+    // CPU-side vertex displacement — more reliable than GPU displacementMap
+    // which requires float texture support in the vertex shader.
+    const pos = geom.attributes.position;
+    const uv = geom.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      const u = uv.getX(i);
+      const v = uv.getY(i);
+      // Sample heightmap at this vertex's UV coordinate
+      const px = Math.min(hm.width - 1, Math.round(u * (hm.width - 1)));
+      const py = Math.min(hm.height - 1, Math.round((1 - v) * (hm.height - 1)));
+      const h01 = hm.floats[py * hm.width + px];
+      // Displace along Y (up) — geometry already rotated to face up
+      pos.setY(i, pos.getY(i) + h01 * scale + bias);
+    }
+    pos.needsUpdate = true;
+    geom.computeVertexNormals(); // Recompute normals for proper lighting
+
+    console.log('Terrain: CPU displacement applied to', pos.count, 'vertices');
 
     const mat = new THREE.MeshStandardMaterial({
       color: TERRAIN_CONFIG.color,
       roughness: TERRAIN_CONFIG.roughness,
       metalness: TERRAIN_CONFIG.metalness,
       transparent: false,
-      opacity: 1.0,
-      displacementMap: tex,
-      displacementScale: TERRAIN_CONFIG.displacementScale,
-      displacementBias: TERRAIN_CONFIG.displacementBias,
+      opacity: opacity,
+      depthWrite: true,
       wireframe: !!wireframe,
       side: THREE.DoubleSide,
     });
@@ -87,42 +178,34 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.y = TERRAIN_CONFIG.baseY;
     mesh.name = 'terrainMesh';
-    console.log('Terrain mesh created:', { 
-      position: mesh.position, 
-      opacity: mat.opacity, 
+    console.log('Terrain mesh created:', {
+      position: mesh.position,
+      opacity: mat.opacity,
+      transparent: mat.transparent,
       visible: mesh.visible,
-      color: mat.color.getHexString(),
-      displacementScale: mat.displacementScale
+      vertexCount: pos.count,
+      cpuDisplacement: { scale, bias },
     });
 
-    // Convenience sampler: read "height" from the displacement map by sampling the same
-    // texture used by the terrain material. This is approximate (no geo alignment yet)
-    // but good enough to drive surface markers.
-    // Returns a value in [0..1] where 0 is black and 1 is white.
+    // Convenience sampler: read normalised height (0..1) from the decoded float data.
+    // Used to snap station shafts to terrain surface.
     let heightSampler = null;
     try {
-      const img = tex.image;
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0);
-      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
+      const { floats, width: tw, height: th } = hm;
       heightSampler = (u, v) => {
         const uu = Math.min(1, Math.max(0, u));
         const vv = Math.min(1, Math.max(0, v));
-        const x = Math.round(uu * (canvas.width - 1));
-        const y = Math.round((1 - vv) * (canvas.height - 1)); // flip v (canvas origin top-left)
-        const i = (y * canvas.width + x) * 4;
-        return data[i] / 255; // red channel
+        const x = Math.round(uu * (tw - 1));
+        const y = Math.round((1 - vv) * (th - 1)); // flip v (texture origin top-left)
+        return floats[y * tw + x];
       };
     } catch {
       // ignore
     }
 
     return { mesh, meta, widthM, heightM, heightSampler };
-  } catch {
+  } catch (err) {
+    console.error('Terrain mesh creation failed:', err);
     return null;
   }
 }
