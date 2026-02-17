@@ -95,6 +95,9 @@ function setNetStatus({ kind, text }) {
 
 // ---------- Scene ----------
 const app = document.getElementById('app');
+const compassRose = document.querySelector('#compass .rose');
+const altimeterEl = document.getElementById('altimeter');
+const altimeterValue = altimeterEl.querySelector('.value');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -317,7 +320,6 @@ function getUrlStringParam(key) {
 }
 
 const urlTimeScale = getUrlNumberParam('t');
-const urlVerticalScale = getUrlNumberParam('vz');
 const urlHorizontalScale = getUrlNumberParam('hx');
 
 // Optional: pre-focus camera on a line id (e.g. ?focus=victoria)
@@ -328,14 +330,13 @@ const sim = {
   paused: prefs.paused ?? false,
   // 1 = real-time, >1 = sped up
   timeScale: urlTimeScale ?? (prefs.timeScale ?? 8),
-  verticalScale: urlVerticalScale ?? (prefs.verticalScale ?? 3.0),
+  verticalScale: 10,
   horizontalScale: urlHorizontalScale ?? (prefs.horizontalScale ?? 1.0),
 };
 
 // Persist current values back to prefs so the next load (without URL params)
 // uses the last-seen settings.
 prefs.timeScale = sim.timeScale;
-prefs.verticalScale = sim.verticalScale;
 prefs.horizontalScale = sim.horizontalScale;
 prefs.paused = !!sim.paused;
 savePrefs(prefs);
@@ -374,27 +375,6 @@ function deleteUrlParam(key) {
       const v = Number(el.value) || 1;
       if (v === 8) deleteUrlParam('t');
       else setUrlParam('t', v);
-    });
-  }
-
-  const vEl = document.getElementById('verticalScale');
-  const vOut = document.getElementById('verticalScaleValue');
-  if (vEl) {
-    vEl.value = String(sim.verticalScale);
-    if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
-
-    vEl.addEventListener('input', () => {
-      sim.verticalScale = Number(vEl.value) || 1;
-      prefs.verticalScale = sim.verticalScale;
-      savePrefs(prefs);
-      if (vOut) vOut.textContent = `${sim.verticalScale.toFixed(2)}×`;
-    });
-
-    vEl.addEventListener('change', () => {
-      const v = Number(vEl.value) || 1;
-      if (v === 3.0) deleteUrlParam('vz');
-      else setUrlParam('vz', v);
-      rebuildFromSimScales();
     });
   }
 
@@ -657,7 +637,6 @@ function rebuildFromSimScales() {
   // Later: refactor to allow dynamic rescaling without re-fetching.
   const url = new URL(location.href);
   url.searchParams.set('t', String(sim.timeScale));
-  url.searchParams.set('vz', String(sim.verticalScale));
   url.searchParams.set('hx', String(sim.horizontalScale));
 
   // Avoid a full navigation to preserve devtools state; still reloads the page.
@@ -1506,7 +1485,6 @@ function setVictoriaShaftsVisible(v) {
       const url = new URL(location.href);
       // Ensure the current sim sliders are represented.
       url.searchParams.set('t', String(sim.timeScale));
-      url.searchParams.set('vz', String(sim.verticalScale));
       url.searchParams.set('hx', String(sim.horizontalScale));
 
       // Preserve focus param if present; otherwise, omit.
@@ -1629,6 +1607,16 @@ function tick() {
   }
 
   controls.update();
+
+  // Rotate compass rose to match camera azimuth
+  // Negate: camera orbiting clockwise (azimuth+) means north moves counter-clockwise on screen
+  const azimuth = controls.getAzimuthalAngle();
+  compassRose.style.transform = `rotate(${-azimuth}rad)`;
+
+  // Update altimeter — camera Y is metres (scene units = metres)
+  const altM = Math.round(camera.position.y);
+  altimeterValue.textContent = altM;
+  altimeterEl.classList.toggle('underground', altM < 0);
 
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
   for (const train of sim.trains) {

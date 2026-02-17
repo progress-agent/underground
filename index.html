@@ -64,7 +64,7 @@
       }
 
       .hud {
-        position: fixed; left: 12px; top: 12px; color: rgba(255,255,255,0.92);
+        position: fixed; left: 12px; top: 12px; z-index: 15; color: rgba(255,255,255,0.92);
         background: rgba(20, 24, 34, 0.45);
         border: 1px solid rgba(255,255,255,0.10);
         border-radius: 12px;
@@ -291,6 +291,35 @@
         border-radius: 50%;
         transform: translate(-50%, -50%);
       }
+
+      /* Altimeter — depth/altitude gauge above compass */
+      #altimeter {
+        position: fixed;
+        bottom: 78px;
+        right: 12px;
+        width: 60px;
+        z-index: 15;
+        pointer-events: none;
+        opacity: 0.7;
+        text-align: center;
+        font-family: monospace;
+      }
+      #altimeter .value {
+        font-size: 13px;
+        font-weight: 700;
+        color: rgba(255,255,255,0.9);
+        line-height: 1;
+      }
+      #altimeter .unit {
+        font-size: 9px;
+        font-weight: 400;
+        color: rgba(255,255,255,0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      #altimeter.underground .value {
+        color: #f87171;
+      }
     </style>
   </head>
   <body>
@@ -335,6 +364,11 @@
         </div>
         <div class="dismiss">Press <span class="key">?</span> or <span class="key">Esc</span> to close</div>
       </div>
+    </div>
+
+    <div id="altimeter">
+      <div class="value">0</div>
+      <div class="unit">metres</div>
     </div>
 
     <div id="compass">
@@ -397,12 +431,6 @@
           <input id="timeScale" type="range" min="0.5" max="30" value="8" step="0.5" style="vertical-align: middle; width: 160px;" />
           <span id="timeScaleValue">8×</span>
         </p>
-        <p class="small">
-          Vertical exaggeration:
-          <input id="verticalScale" type="range" min="0.2" max="200" value="3" step="0.2" style="vertical-align: middle; width: 160px;" />
-          <span id="verticalScaleValue">3.0×</span>
-        </p>
-
         <p class="small">
           Horizontal scale:
           <input id="horizontalScale" type="range" min="0.25" max="3" value="1" step="0.05" style="vertical-align: middle; width: 160px;" />

@@ -94,14 +94,66 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUBOS,Piccadilly Circus Underground Station (Piccadilly),20,https://en.wikipedia.org/wiki/Piccadilly_Circus_tube_station,wikipedia-estimate-deep-tube
 940GZZLUHGT,Holloway Road Underground Station,20,https://en.wikipedia.org/wiki/Holloway_Road_tube_station,wikipedia-estimate-deep-tube
 940GZZLUMRH,Manor House Underground Station,21,https://en.wikipedia.org/wiki/Manor_House_tube_station,wikipedia-estimate-deep-tube
-# Northern line (selected stations with researched depths)
-940GZZLUAGL,Angel Underground Station,28,https://en.wikipedia.org/wiki/Angel_tube_station,27.5m escalator vertical distance (approx platform depth)
+# Northern line — comprehensive depth anchors
+# High Barnet branch (surface stations in cutting, then deep tube from East Finchley south)
+940GZZLUHBT,High Barnet Underground Station,3,,surface-station-in-cutting
+940GZZLUTAW,Totteridge & Whetstone Underground Station,3,,surface-station
+940GZZLUWOP,Woodside Park Underground Station,3,,surface-station
+940GZZLUWFN,West Finchley Underground Station,3,,surface-station
+940GZZLUFYC,Finchley Central Underground Station,3,,surface-station
+940GZZLUMHL,Mill Hill East Underground Station,3,,surface-station-single-track-branch
+940GZZLUEFY,East Finchley Underground Station,8,,shallow-portal-to-deep-tube
+940GZZLUHGT,Highgate Underground Station,20,,deep-tube-under-hill
+940GZZLUACY,Archway Underground Station,25,,deep-tube
+940GZZLUTFP,Tufnell Park Underground Station,22,,deep-tube
+940GZZLUKSH,Kentish Town Underground Station,20,,deep-tube
+940GZZLUCTN,Camden Town Underground Station,20,,deep-tube-junction
+# Edgware branch (surface stations, then deep tube from Hampstead south)
+940GZZLUEGW,Edgware Underground Station,3,,surface-station-terminus
+940GZZLUBTK,Burnt Oak Underground Station,3,,surface-station
+940GZZLUCND,Colindale Underground Station,3,,surface-station
+940GZZLUHCL,Hendon Central Underground Station,3,,surface-station
+940GZZLUBTX,Brent Cross Underground Station,3,,surface-station
+940GZZLUGGN,Golders Green Underground Station,3,,surface-station-depot
 940GZZLUHTD,Hampstead Underground Station,55,https://www.mylondon.news/news/transport/london-underground-station-deepest-lift-32575981,55.2m shaft depth - deepest on Northern line
-940GZZLUGGN,Goodge Street Underground Station,30,https://en.wikipedia.org/wiki/Goodge_Street_tube_station,wikipedia-estimate-deep-tube
-940GZZLUWRR,Warren Street Underground Station (Northern),26,https://en.wikipedia.org/wiki/Warren_Street_tube_station,wikipedia-estimate-deep-tube
-940GZZLUEUS,Euston Underground Station (Northern),27,https://en.wikipedia.org/wiki/Euston_tube_station,wikipedia-estimate-deep-tube
-940GZZLUODS,Old Street Underground Station,16,https://en.wikipedia.org/wiki/Old_Street_station,wikipedia-estimate-deep-tube
-940GZZLUMTC,Moorgate Underground Station (Northern),14,https://en.wikipedia.org/wiki/Moorgate_station,wikipedia-estimate-deep-tube
+940GZZLUBZP,Belsize Park Underground Station,35,,deep-tube-on-hill
+940GZZLUCFM,Chalk Farm Underground Station,20,,deep-tube
+# Shared central section (Camden Town → Kennington)
+940GZZLUMTC,Mornington Crescent Underground Station,14,,deep-tube-shallow
+940GZZLUEUS,Euston Underground Station (Northern),27,https://en.wikipedia.org/wiki/Euston_tube_station,deep-tube
+940GZZLUWRR,Warren Street Underground Station (Northern),26,https://en.wikipedia.org/wiki/Warren_Street_tube_station,deep-tube
+940GZZLUKSX,King's Cross St. Pancras Underground Station (Northern),17,,shared-with-other-lines
+# Bank branch
+940GZZLUAGL,Angel Underground Station,28,https://en.wikipedia.org/wiki/Angel_tube_station,27.5m escalator vertical distance
+940GZZLUODS,Old Street Underground Station,16,https://en.wikipedia.org/wiki/Old_Street_station,deep-tube
+940GZZLUMGT,Moorgate Underground Station (Northern),14,https://en.wikipedia.org/wiki/Moorgate_station,deep-tube
+940GZZLUBNK,Bank Underground Station (Northern),19,,deep-tube
+940GZZLULNB,London Bridge Underground Station (Northern),28,,deep-tube
+940GZZLUBOR,Borough Underground Station,20,,deep-tube
+940GZZLUEAC,Elephant & Castle Underground Station (Northern),20,,deep-tube
+# Charing Cross branch
+940GZZLUGDG,Goodge Street Underground Station,30,https://en.wikipedia.org/wiki/Goodge_Street_tube_station,deep-tube
+940GZZLUTCR,Tottenham Court Road Underground Station (Northern),22,,deep-tube
+940GZZLULSQ,Leicester Square Underground Station (Northern),33,,deep-tube
+940GZZLUCHX,Charing Cross Underground Station (Northern),21,,deep-tube
+940GZZLUEMB,Embankment Underground Station (Northern),12,,deep-tube-near-river
+940GZZLUWLO,Waterloo Underground Station (Northern),26,,deep-tube
+# Kennington and south (Morden branch — gradually shallower heading south)
+940GZZLUKNG,Kennington Underground Station,20,,deep-tube-junction
+940GZZLUOVL,Oval Underground Station,15,,deep-tube
+940GZZLUSKW,Stockwell Underground Station,6,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,shallow-tube
+940GZZLUCPN,Clapham North Underground Station,16,,deep-tube
+940GZZLUCPC,Clapham Common Underground Station,15,,deep-tube
+940GZZLUCPS,Clapham South Underground Station,15,,deep-tube
+940GZZLUBLM,Balham Underground Station,14,,transitioning-to-shallow
+940GZZLUTBC,Tooting Bec Underground Station,12,,shallow-tube
+940GZZLUTBY,Tooting Broadway Underground Station,12,,shallow-tube
+940GZZLUCSD,Colliers Wood Underground Station,12,,shallow-tube
+940GZZLUSWN,South Wimbledon Underground Station,10,,shallow-tube
+940GZZLUMDN,Morden Underground Station,3,,surface-station-terminus-depot
+# Northern Line Extension
+940GZZNEUGST,Nine Elms Underground Station,30,,NLE-deep-tube
+940GZZBPSUST,Battersea Power Station Underground Station,30,,NLE-deep-tube
 # TODO: Extract depths from PDF for remaining Central line stations
 # - Remaining West Acton through to Leytonstone
 # - Hainault loop stations

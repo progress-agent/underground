@@ -4,6 +4,10 @@ import * as THREE from 'three';
 // when the same station appears on multiple lines (e.g. Farringdon on Circle + Metropolitan + H&C)
 const _labelledNames = new Set();
 
+// Module-level label fade distance — shared across all station layers,
+// read every frame by each layer's update() so slider changes apply instantly.
+let _labelMaxDistance = 9000;
+
 function cleanStationName(name) {
   return name.replace(/\s+(Underground|DLR) Station$/i, '');
 }
@@ -159,10 +163,11 @@ export function createStationMarkers({
 
         const d = camera.position.distanceTo(st.pos);
 
-        if (d > 3000) { el.style.display = 'none'; continue; }
+        if (d > _labelMaxDistance) { el.style.display = 'none'; continue; }
 
-        const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / 2850, 0.0, 1.0);
-        const fontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / 2850);
+        const fadeRange = _labelMaxDistance - 150;
+        const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / fadeRange, 0.0, 1.0);
+        const fontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
 
         el.style.display = 'block';
         el.style.left = `${x.toFixed(1)}px`;
