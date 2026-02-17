@@ -1,0 +1,281 @@
+{
+  "line": "crossrail",
+  "origin": {
+    "lat": 51.5074,
+    "lon": -0.1278
+  },
+  "verticalScale": 3,
+  "groundY": -6,
+  "shafts": [
+    {
+      "id": "crw-heathrow-t5",
+      "name": "Heathrow Terminal 5",
+      "x": -24957.20508210915,
+      "z": 4163.3679999997885,
+      "groundY": -6,
+      "platformY": -60,
+      "depth_m": 20
+    },
+    {
+      "id": "crw-heathrow-t23",
+      "name": "Heathrow Terminals 2 & 3",
+      "x": -22462.870315435284,
+      "z": 4052.048000000048,
+      "groundY": -6,
+      "platformY": -54,
+      "depth_m": 18
+    },
+    {
+      "id": "crw-hayes",
+      "name": "Hayes & Harlington",
+      "x": -20245.683856169613,
+      "z": 489.80799999964944,
+      "groundY": -6,
+      "platformY": -45,
+      "depth_m": 15
+    },
+    {
+      "id": "crw-southall",
+      "name": "Southall",
+      "x": -17474.20078208753,
+      "z": 155.84799999963678,
+      "groundY": -6,
+      "platformY": -45,
+      "depth_m": 15
+    },
+    {
+      "id": "crw-hanwell",
+      "name": "Hanwell",
+      "x": -14702.71770800545,
+      "z": -512.0720000003885,
+      "groundY": -6,
+      "platformY": -48,
+      "depth_m": 16
+    },
+    {
+      "id": "crw-ealing",
+      "name": "Ealing Broadway",
+      "x": -12069.80878762747,
+      "z": -846.0320000004012,
+      "groundY": -6,
+      "platformY": -66,
+      "depth_m": 22
+    },
+    {
+      "id": "crw-acton",
+      "name": "Acton Main Line",
+      "x": -10545.493096882326,
+      "z": -1068.6720000006733,
+      "groundY": -6,
+      "platformY": -60,
+      "depth_m": 20
+    },
+    {
+      "id": "crw-paddington",
+      "name": "Paddington",
+      "x": -3339.637104268909,
+      "z": -957.3520000001417,
+      "groundY": -6,
+      "platformY": -84,
+      "depth_m": 28
+    },
+    {
+      "id": "crw-bond-street",
+      "name": "Bond Street",
+      "x": -1538.1731061155556,
+      "z": -734.7120000006606,
+      "groundY": -6,
+      "platformY": -96,
+      "depth_m": 32
+    },
+    {
+      "id": "crw-tottenham-court",
+      "name": "Tottenham Court Road",
+      "x": -221.71864592656718,
+      "z": -957.3520000001417,
+      "groundY": -6,
+      "platformY": -105,
+      "depth_m": 35
+    },
+    {
+      "id": "crw-farringdon",
+      "name": "Farringdon",
+      "x": 1579.7453522267872,
+      "z": -1402.6320000006858,
+      "groundY": -6,
+      "platformY": -114,
+      "depth_m": 38
+    },
+    {
+      "id": "crw-liverpool-street",
+      "name": "Liverpool Street",
+      "x": 3173.3481198239842,
+      "z": -1179.9920000004138,
+      "groundY": -6,
+      "platformY": -123,
+      "depth_m": 41
+    },
+    {
+      "id": "crw-whitechapel",
+      "name": "Whitechapel",
+      "x": 4697.66381056913,
+      "z": -1291.3120000001545,
+      "groundY": -6,
+      "platformY": -90,
+      "depth_m": 30
+    },
+    {
+      "id": "crw-canary-wharf",
+      "name": "Canary Wharf",
+      "x": 7469.1468846512125,
+      "z": 155.84799999963678,
+      "groundY": -6,
+      "platformY": -75,
+      "depth_m": 25
+    },
+    {
+      "id": "crw-custom-house",
+      "name": "Custom House",
+      "x": 10240.629958733294,
+      "z": -289.43200000011643,
+      "groundY": -6,
+      "platformY": -54,
+      "depth_m": 18
+    },
+    {
+      "id": "crw-woolwich",
+      "name": "Woolwich",
+      "x": 13704.983801335899,
+      "z": 1936.9679999994405,
+      "groundY": -6,
+      "platformY": -66,
+      "depth_m": 22
+    },
+    {
+      "id": "crw-abbey-wood",
+      "name": "Abbey Wood",
+      "x": 17169.337643938503,
+      "z": 1825.6479999997,
+      "groundY": -6,
+      "platformY": -45,
+      "depth_m": 15
+    },
+    {
+      "id": "crw-stratford",
+      "name": "Stratford",
+      "x": 8647.027191136098,
+      "z": -4074.3119999999963,
+      "groundY": -6,
+      "platformY": -54,
+      "depth_m": 18
+    },
+    {
+      "id": "crw-maryland",
+      "name": "Maryland",
+      "x": 9270.610882804567,
+      "z": -4296.9520000002685,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-forest-gate",
+      "name": "Forest Gate",
+      "x": 10517.778266141502,
+      "z": -4630.912000000281,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-manor-park",
+      "name": "Manor Park",
+      "x": 12042.093956886649,
+      "z": -4964.872000000294,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-ilford",
+      "name": "Ilford",
+      "x": 13704.983801335899,
+      "z": -5744.112000000059,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-seven-kings",
+      "name": "Seven Kings",
+      "x": 15575.734876341305,
+      "z": -6300.712000000344,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-goodmayes",
+      "name": "Goodmayes",
+      "x": 16615.041029122087,
+      "z": -6523.3520000006165,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-chadwell-heath",
+      "name": "Chadwell Heath",
+      "x": 17792.921335606974,
+      "z": -6745.9920000000975,
+      "groundY": -6,
+      "platformY": -36,
+      "depth_m": 12
+    },
+    {
+      "id": "crw-romford",
+      "name": "Romford",
+      "x": 21534.42348561778,
+      "z": -7525.232000000654,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "crw-gidea-park",
+      "name": "Gidea Park",
+      "x": 23128.02625321498,
+      "z": -7191.272000000642,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "crw-harold-wood",
+      "name": "Harold Wood",
+      "x": 25068.064405072437,
+      "z": -9528.99200000073,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "crw-brentwood",
+      "name": "Brentwood",
+      "x": 29641.01147730787,
+      "z": -11866.712000000029,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    },
+    {
+      "id": "crw-shenfield",
+      "name": "Shenfield",
+      "x": 31719.623782869436,
+      "z": -13647.832000000622,
+      "groundY": -6,
+      "platformY": -30,
+      "depth_m": 10
+    }
+  ]
+}
