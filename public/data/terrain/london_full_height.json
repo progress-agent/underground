@@ -1,0 +1,16 @@
+{
+  "source": "Copernicus DEM 30m (DSM), resampled to 50m BNG grid",
+  "crs": "EPSG:27700",
+  "bounds_m": [
+    490000,
+    155000,
+    560000,
+    205000
+  ],
+  "width": 1400,
+  "height": 1000,
+  "pixel_size_m": 50,
+  "elev_min_m": 0.0,
+  "elev_max_m": 284.16,
+  "heightmap": "london_full_height_u16.png"
+}

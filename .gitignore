@@ -5,7 +5,3 @@ dist
 .DS_Store
 .env
 .env.*
-
-# Large terrain heightmaps (186MB+) — keep locally, don't commit
-public/data/terrain/london_full_height_u16.png
-public/data/terrain/london_full_height.json

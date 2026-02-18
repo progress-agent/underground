@@ -8,7 +8,8 @@
 # Diameter: 7.2m (larger than tube tunnels at ~3.6m)
 #
 # Points in route-sequence order (west to east along the Thames)
-# Spur connections (Mogden, King George's Park, Carnwath) removed — main bore only
+# Main bore only — spurs removed (Mogden, King George's Park, Carnwath,
+# Aldwych, Victoria Park/Lee Tunnel, Greenwich Connection)
 #
 # Columns:
 # id,name,depth_m,lat,lon,source_url,notes
@@ -22,8 +23,8 @@ ttw-westminster,Westminster Shaft,50,51.4975,-0.1247,https://www.tideway.london/
 ttw-victoria,Victoria Embankment,55,51.5010,-0.1180,https://www.tideway.london/the-tunnel/route/,Beneath Victoria Embankment
 ttw-temple,Temple Shaft,58,51.5110,-0.1140,https://www.tideway.london/the-tunnel/route/,Near Temple station
 ttw-blackfriars,Blackfriars Shaft,65,51.5115,-0.1030,https://www.tideway.london/the-tunnel/route/,DEEPEST POINT - 65m below ground
-ttw-aldwych,Aldwych Connection,52,51.5130,-0.1130,https://www.tideway.london/the-tunnel/route/,Near former Aldwych tube station
+ttw-chambers,Chambers Wharf,60,51.5015,-0.0780,https://www.tideway.london/the-tunnel/route/,Main drive shaft Bermondsey
+ttw-earl,Earl Pumping Station,52,51.4980,-0.0530,https://www.tideway.london/the-tunnel/route/,CSO interception Rotherhithe
+ttw-kemp,King Edward Memorial Park,48,51.5080,-0.0370,https://www.tideway.london/the-tunnel/route/,Foreshore shaft Shadwell
 ttw-limehouse,Limehouse Connection,45,51.5120,-0.0330,https://www.tideway.london/the-tunnel/route/,Beneath Limehouse Reach
-ttw-victoria-park,Victoria Park Shaft,48,51.5310,-0.0380,https://www.tideway.london/the-tunnel/route/,Ventilation/Access shaft
-ttw-greenwich,Greenwich Connection,42,51.4830,-0.0100,https://www.tideway.london/the-tunnel/route/,Beneath Greenwich
 ttw-abbey-mills,Abbey Mills Pumping Station,40,51.5270,0.0000,https://www.tideway.london/the-tunnel/route/,Tunnel end - connects to Lee Tunnel

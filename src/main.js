@@ -444,6 +444,7 @@ scene.add(rim);
     }
     terrain = result;
     scene.add(result.mesh);
+    if (result.contourLines) scene.add(result.contourLines);
 
     // If station shafts already exist, snap their ground cubes to the terrain surface (approx).
     // This improves the "shaft length" feel without needing per-station survey data.
@@ -463,7 +464,7 @@ function snapAllShaftsToTerrain() {
       const groundYById = {};
       for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
         if (!s?.id) continue;
-        const { u, v } = xzToTerrainUV({ x: s.x, z: s.z, terrainSize: TERRAIN_CONFIG.size });
+        const { u, v } = xzToTerrainUV({ x: s.x, z: s.z });
         const h01 = terrain.heightSampler(u, v);
         groundYById[s.id] = terrainHeightToWorldY({ h01 });
       }
