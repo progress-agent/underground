@@ -110,14 +110,16 @@ export function createStationMarkers({
   const tmpUnderground = new THREE.Vector3();
   let updateCount = 0;
 
-  function update({ camera, renderer }) {
+  function update({ camera, renderer, terrainSurfaceY }) {
     updateCount++;
     if (!labelsVisible) return;
     if (surfaceEls.length === 0) return;
 
     const w = renderer.domElement.clientWidth;
     const h = renderer.domElement.clientHeight;
-    const cameraAboveGround = camera.position.y >= 0;
+    const cameraAboveGround = Number.isFinite(terrainSurfaceY)
+      ? camera.position.y >= terrainSurfaceY
+      : camera.position.y >= 0;
 
     // Toggle layer visibility based on camera position
     surfaceLayer.style.display = cameraAboveGround ? 'block' : 'none';
@@ -133,8 +135,8 @@ export function createStationMarkers({
       const st = stations[i];
 
       if (cameraAboveGround) {
-        // Surface: project station XZ at Y=0
-        tmpSurface.set(st.pos.x, 0, st.pos.z);
+        // Surface: project station XZ at terrain surface (or Y=0 fallback)
+        tmpSurface.set(st.pos.x, st.surfaceY ?? 0, st.pos.z);
         tmpSurface.project(camera);
 
         if (tmpSurface.z > 1) { el.style.display = 'none'; continue; }

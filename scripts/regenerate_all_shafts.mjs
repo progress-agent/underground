@@ -30,7 +30,8 @@ const llToXZ = (lat, lon) => {
   return { x, z };
 };
 
-const verticalScale = 3.0;
+// Must match VERTICAL_EXAGGERATION in src/terrain.js
+const verticalScale = 5.0;
 const groundY = -6.0;
 
 // Load depth anchors

@@ -6,6 +6,11 @@ import UPNG from 'upng-js';
 const BNG_REF_E = 530000;
 const BNG_REF_N = 180400;
 
+// Unified vertical exaggeration for terrain AND underground depth.
+// VE=5 splits the difference: terrain hills pronounced, underground depth visible,
+// no "diving" artefacts at hilly areas like Hampstead.
+export const VERTICAL_EXAGGERATION = 5;
+
 // Terrain configuration
 export const TERRAIN_CONFIG = {
   // Source files (tried in order)
@@ -17,8 +22,8 @@ export const TERRAIN_CONFIG = {
 
   // Vertical exaggeration for terrain elevation.
   // London's real relief (~0–130m) is invisible at 1:1 on a 14km plane.
-  // 3× makes hills clearly visible without overwhelming the scene.
-  verticalExaggeration: 3,
+  // VE=5 makes hills clearly visible and matches underground depth scaling.
+  verticalExaggeration: VERTICAL_EXAGGERATION,
 
   // Material
   opacity: 1.0,
@@ -263,13 +268,14 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     pos.needsUpdate = true;
     geom.computeVertexNormals();
 
-    // Store module-level state for helper functions (xzToTerrainUV, terrainHeightToWorldY)
+    // Store module-level state for helper functions (xzToTerrainUV, terrainHeightToWorldY, getTerrainMeshSurfaceY)
     terrainState = {
       swSceneX, swSceneZ, neSceneX, neSceneZ,
       terrainW, terrainH, centerX, centerZ,
       VE,
       elevMin: meta.elev_min_m ?? hm.minRaw,
       elevRange: (meta.elev_max_m ?? (hm.minRaw + hm.rawRange)) - (meta.elev_min_m ?? hm.minRaw),
+      segments,   // grid resolution (for mesh vertex sampling)
     };
 
     // ── Vertex colours by elevation ───────────────────────────────────
@@ -316,6 +322,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(centerX, 0, centerZ);
     mesh.name = 'terrainMesh';
+    terrainState.mesh = mesh; // for vertex sampling in getTerrainMeshSurfaceY
     console.log('Terrain mesh created:', {
       position: `(${centerX.toFixed(0)}, 0, ${centerZ.toFixed(0)})`,
       extent: `${terrainW.toFixed(0)}×${terrainH.toFixed(0)}m`,
@@ -391,11 +398,79 @@ export function xzToTerrainUV({ x, z } = {}) {
   };
 }
 
+/**
+ * Convenience: world (x, z) → terrain surface Y in one call.
+ * Composes xzToTerrainUV + heightSampler + terrainHeightToWorldY.
+ */
+export function getTerrainSurfaceY({ x, z, heightSampler }) {
+  if (!heightSampler || !terrainState) return null;
+  const { u, v } = xzToTerrainUV({ x, z });
+  const h01 = heightSampler(u, v);
+  return terrainHeightToWorldY({ h01 });
+}
+
+/**
+ * Sample the actual terrain mesh vertex Y at a world (x, z) position.
+ * Uses bilinear interpolation across the four nearest PlaneGeometry vertices,
+ * so the returned Y matches exactly what the GPU renders — no heightmap/mesh
+ * resolution mismatch.
+ *
+ * Returns world Y (number) or null if (x, z) is outside the mesh bounds.
+ * O(1), no allocation — safe for per-frame use.
+ */
+export function getTerrainMeshSurfaceY({ x, z } = {}) {
+  if (!terrainState?.mesh) return null;
+  const { mesh, segments, centerX, centerZ, terrainW, terrainH } = terrainState;
+  const pos = mesh.geometry.attributes.position;
+
+  // World → mesh-local coordinates
+  const localX = x - centerX;
+  const localZ = z - centerZ;
+
+  // Map to continuous grid coordinates [0, segments]
+  const gridCol = (localX + terrainW / 2) / terrainW * segments;
+  const gridRow = (localZ + terrainH / 2) / terrainH * segments;
+
+  // Bounds check (allow a tiny epsilon for floating-point edge cases)
+  if (gridCol < -0.001 || gridCol > segments + 0.001 ||
+      gridRow < -0.001 || gridRow > segments + 0.001) {
+    return null;
+  }
+
+  // Integer cell indices (clamp to valid range)
+  const col0 = Math.min(Math.max(0, Math.floor(gridCol)), segments - 1);
+  const row0 = Math.min(Math.max(0, Math.floor(gridRow)), segments - 1);
+  const col1 = col0 + 1;
+  const row1 = row0 + 1;
+
+  // Fractional position within the cell [0, 1]
+  const u = gridCol - col0;
+  const v = gridRow - row0;
+
+  // Row-major vertex indices: index = row * (segments + 1) + col
+  const stride = segments + 1;
+  const i00 = row0 * stride + col0;
+  const i10 = row0 * stride + col1;
+  const i01 = row1 * stride + col0;
+  const i11 = row1 * stride + col1;
+
+  // Bilinear interpolation of vertex Y values
+  const y00 = pos.getY(i00);
+  const y10 = pos.getY(i10);
+  const y01 = pos.getY(i01);
+  const y11 = pos.getY(i11);
+
+  return y00 * (1 - u) * (1 - v)
+       + y10 * u * (1 - v)
+       + y01 * (1 - u) * v
+       + y11 * u * v;
+}
+
 // Environment configuration for above/below ground differentiation
 export const ENV_CONFIG = {
   // Altitude thresholds (in scene units/metres)
   surfaceY: 0,           // Ground level
-  skyStartY: 100,        // Where sky becomes visible (lowered for earlier visibility)
+  skyStartY: 200,        // Where sky becomes visible (raised for VE=5: central London ground ≈ Y=75)
   fogDepthY: -50,        // Where underground fog thickens
 
   // Colors - lighter for better visibility

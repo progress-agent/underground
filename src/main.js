@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
-import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, TERRAIN_CONFIG, createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './terrain.js';
+import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './terrain.js';
 import { createStationMarkers } from './stations.js';
 import { loadLineShafts, addShaftsToScene } from './shafts.js';
-import { loadThamesData, createThamesMesh } from './thames.js';
+import { loadThamesData, createThamesVolume } from './thames.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
@@ -117,8 +117,8 @@ scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 50000);
 // Street-level view looking across central London
 const INITIAL_VIEW = {
-  position: new THREE.Vector3(-200, 30, 400),   // Street level, slight offset south
-  target: new THREE.Vector3(0, -20, 0)           // Looking slightly down into the network
+  position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
+  target: new THREE.Vector3(0, 20, 0)            // Looking slightly down into the network
 };
 camera.position.copy(INITIAL_VIEW.position);
 
@@ -330,7 +330,7 @@ const sim = {
   paused: prefs.paused ?? false,
   // 1 = real-time, >1 = sped up
   timeScale: urlTimeScale ?? (prefs.timeScale ?? 8),
-  verticalScale: 10,
+  verticalScale: VERTICAL_EXAGGERATION,
   horizontalScale: urlHorizontalScale ?? (prefs.horizontalScale ?? 1.0),
 };
 
@@ -446,9 +446,21 @@ scene.add(rim);
     scene.add(result.mesh);
     if (result.contourLines) scene.add(result.contourLines);
 
-    // If station shafts already exist, snap their ground cubes to the terrain surface (approx).
-    // This improves the "shaft length" feel without needing per-station survey data.
+    // Reposition tubes + stations to terrain-relative depth, then snap shafts.
+    snapAllTubesToTerrain();
     snapAllShaftsToTerrain();
+
+    // Build Thames 3D volume now that terrain surface is available
+    thamesDataPromise.then(thamesData => {
+      if (!thamesData) return;
+      thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY, {
+        color: 0x1a3d5c,
+        opacity: 0.45,
+      });
+      if (thamesMesh) {
+        scene.add(thamesMesh);
+      }
+    });
   });
   
   // Legacy surface plane removed — terrain mesh provides surface visual at full opacity
@@ -458,15 +470,15 @@ scene.add(rim);
 // so it's accessible from both the terrain .then() callback and the
 // per-line shaft loading code).
 function snapAllShaftsToTerrain() {
-  if (!terrain?.heightSampler) return;
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.shaftsLayer?.updateGroundYById) {
       const groundYById = {};
       for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
         if (!s?.id) continue;
-        const { u, v } = xzToTerrainUV({ x: s.x, z: s.z });
-        const h01 = terrain.heightSampler(u, v);
-        groundYById[s.id] = terrainHeightToWorldY({ h01 });
+        const surfaceY = getTerrainMeshSurfaceY({ x: s.x, z: s.z });
+        if (surfaceY !== null) {
+          groundYById[s.id] = surfaceY;
+        }
       }
       if (Object.keys(groundYById).length > 0) {
         layers.shaftsLayer.updateGroundYById(groundYById);
@@ -475,21 +487,170 @@ function snapAllShaftsToTerrain() {
   }
 }
 
-// ---------- Thames (accurate river from BNG data) ----------
-let thamesMesh = null;
-loadThamesData().then(thamesData => {
-  if (thamesData) {
-    thamesMesh = createThamesMesh(thamesData, {
-      width: 200,
-      color: 0x1d4ed8,
-      opacity: 0.4,
-    });
-    if (thamesMesh) {
-      thamesMesh.position.y = -2.0;
-      scene.add(thamesMesh);
+// Snap all tube centerPts, geometry, stations, and shaft platformY to terrain surface.
+// Called once after terrain loads so that depth is terrain-relative, not sea-level-relative.
+function snapAllTubesToTerrain() {
+  if (!terrain) return;
+  let snappedTubes = 0;
+  let snappedStations = 0;
+
+  // 4a. Update centerPt Y values to terrain-relative depth
+  for (const [lineId, branches] of lineBranchCenterPts) {
+    for (const branchPts of branches) {
+      for (const pt of branchPts) {
+        const surfaceY = getTerrainMeshSurfaceY({ x: pt.x, z: pt.z });
+        if (surfaceY !== null) {
+          pt.y = surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
+        }
+      }
     }
   }
-});
+
+  // 4b. Rebuild tube geometry for each line
+  for (const [lineId, branches] of lineBranchCenterPts) {
+    const group = lineGroups.get(lineId);
+    if (!group) continue;
+    const colour = lineColoursById.get(lineId) ?? 0xffffff;
+
+    // Remove old tube meshes and trains from group
+    const toRemove = [];
+    group.traverse(child => {
+      if (child !== group && child instanceof THREE.Mesh) {
+        toRemove.push(child);
+      }
+    });
+    for (const obj of toRemove) {
+      group.remove(obj);
+      obj.geometry?.dispose();
+      obj.material?.dispose();
+    }
+
+    // Remove old entries from linePickables
+    const oldMeshes = lineMeshesById.get(lineId) || [];
+    for (const m of oldMeshes) {
+      const idx = linePickables.indexOf(m);
+      if (idx >= 0) linePickables.splice(idx, 1);
+    }
+
+    // Remove old trains for this line
+    sim.trains = sim.trains.filter(t => {
+      if (t.parent === group) return false;
+      return true;
+    });
+
+    // Rebuild per branch
+    const newMeshes = [];
+    const mergedCenterPts = [];
+
+    for (const centerPts of branches) {
+      if (centerPts.length < 2) continue;
+      mergedCenterPts.push(...centerPts);
+
+      const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
+      const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
+
+      const segs = Math.max(80, centerPts.length * 10);
+      const radius = 4.5;
+
+      const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+      const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+      leftMesh.userData.lineId = lineId;
+      rightMesh.userData.lineId = lineId;
+
+      newMeshes.push(leftMesh, rightMesh);
+      linePickables.push(leftMesh, rightMesh);
+      group.add(leftMesh, rightMesh);
+
+      // Recreate trains on new curves
+      const makeTrain = (curve, phase = 0, dir = +1) => {
+        const train = new THREE.Mesh(
+          new THREE.SphereGeometry(2.1, 16, 16),
+          new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(colour), emissiveIntensity: 1.6 })
+        );
+        const cruiseMps = (lineId === 'victoria' ? 14.5 : 12.0);
+        const dwellSec = 22;
+        const curveLengthM = curve.getLength();
+        train.userData = {
+          t: (Math.random() + phase) % 1, curve, dir, curveLengthM, stationUs,
+          nextStationIndex: dir === 1 ? 0 : stationUs.length - 1,
+          cruiseMps, dwellSec, _pausedLeft: 0,
+        };
+        train.position.copy(curve.getPointAt(train.userData.t));
+        group.add(train);
+        sim.trains.push(train);
+        return train;
+      };
+
+      makeTrain(leftCurve, 0.0, +1);
+      makeTrain(rightCurve, 0.5, -1);
+      snappedTubes++;
+    }
+
+    lineMeshesById.set(lineId, newMeshes);
+    lineCenterPoints.set(lineId, mergedCenterPts);
+  }
+
+  // 4c. Update station markers (terrain-relative depth + surfaceY for labels)
+  for (const [lineId, layers] of lineShaftLayers) {
+    if (!layers.stationsLayer?.stations) continue;
+    const stations = layers.stationsLayer.stations;
+
+    for (const st of stations) {
+      if (st.depthM == null) continue;
+      const surfaceY = getTerrainMeshSurfaceY({ x: st.pos.x, z: st.pos.z });
+      if (surfaceY !== null) {
+        st.pos.y = surfaceY - st.depthM * sim.verticalScale;
+        st.surfaceY = surfaceY;
+      }
+    }
+
+    // Rebuild InstancedMesh matrices with updated positions
+    const mesh = layers.stationsLayer.mesh;
+    if (mesh) {
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < stations.length; i++) {
+        dummy.position.copy(stations[i].pos);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    snappedStations += stations.length;
+  }
+
+  // 4d. Update shaft platformY from updated centerPts
+  for (const [lineId, layers] of lineShaftLayers) {
+    if (!layers.shaftsLayer?.updatePlatformYById) continue;
+    const centerPts = lineCenterPoints.get(lineId);
+    if (!centerPts?.length) continue;
+
+    const stations = layers.stationsLayer?.stations;
+    if (!stations) continue;
+
+    const platformYById = {};
+    for (const st of stations) {
+      let bestY = st.pos.y;
+      let bestD2 = Infinity;
+      for (const p of centerPts) {
+        const dx = p.x - st.pos.x;
+        const dz = p.z - st.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestY = p.y;
+        }
+      }
+      platformYById[st.id] = bestY;
+    }
+    layers.shaftsLayer.updatePlatformYById(platformYById);
+  }
+
+  console.log(`snapAllTubesToTerrain: ${snappedTubes} tube branches, ${snappedStations} stations repositioned to terrain-relative depth`);
+}
+
+// ---------- Thames (terrain-snapped 3D volume) ----------
+let thamesMesh = null;
+const thamesDataPromise = loadThamesData();
 
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};
@@ -552,6 +713,10 @@ const LINE_COLOURS = {
 const lineGroups = new Map();
 // Store approximate centerline points per line (for camera focus helpers).
 const lineCenterPoints = new Map();
+// Per-branch centerPts with _depthM stashed on each Vector3 (for terrain snap).
+const lineBranchCenterPts = new Map(); // lineId -> [[branchPts], ...]
+// Line colour cache (hex) for tube rebuild after terrain snap.
+const lineColoursById = new Map();     // lineId -> hex colour
 // Pickable meshes for raycast selection (click-to-focus).
 const linePickables = [];
 // Track meshes by lineId for hover highlight.
@@ -730,6 +895,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
   scene.add(group);
 
   const allCenterPts = []; // merged for camera focus
+  const allBranchCenterPts = []; // per-branch (for terrain snap rebuild)
   const allMeshes = [];
   const allTrains = [];
 
@@ -748,10 +914,13 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
         depthM = depthForStation({ naptanId: sp.id, lineId, anchors: depthAnchors });
       }
       const y = -depthM * sim.verticalScale;
-      centerPts.push(new THREE.Vector3(pos.x, y, pos.z));
+      const pt = new THREE.Vector3(pos.x, y, pos.z);
+      pt._depthM = depthM; // stash for terrain-relative repositioning
+      centerPts.push(pt);
     }
 
     allCenterPts.push(...centerPts);
+    allBranchCenterPts.push(centerPts);
 
     const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
     const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
@@ -794,6 +963,9 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
 
   // Keep merged center points for camera focus
   lineCenterPoints.set(lineId, allCenterPts);
+  // Per-branch data for terrain snap rebuild
+  lineBranchCenterPts.set(lineId, allBranchCenterPts);
+  lineColoursById.set(lineId, colour);
 
   // Track all meshes for hover highlight
   lineMeshesById.set(lineId, allMeshes);
@@ -1021,6 +1193,7 @@ async function buildNetworkMvp() {
                 id: sp.id,
                 name: sp.name,
                 pos: new THREE.Vector3(x, y, z),
+                depthM,
               };
             });
 
@@ -1088,7 +1261,7 @@ async function buildNetworkMvp() {
             const shaftsLayer = addShaftsToScene({ scene, shaftsData, colour, platformYById, kind: `${id}-shafts` });
 
             // If terrain is already loaded, snap ground cubes to terrain surface (approx).
-            if (shaftsLayer?.updateGroundYById && terrain?.heightSampler) {
+            if (shaftsLayer?.updateGroundYById && terrain) {
               snapAllShaftsToTerrain();
             }
 
@@ -1117,6 +1290,14 @@ async function buildNetworkMvp() {
         console.warn('Failed to build line', id, e);
         failed.push(id);
       }
+    }
+
+    // If terrain already loaded, snap tubes to terrain-relative depth.
+    // (Handles race condition: terrain may load before or after network.)
+    // snap is idempotent — safe to call even if terrain callback already ran.
+    if (terrain) {
+      snapAllTubesToTerrain();
+      snapAllShaftsToTerrain();
     }
 
     // Loading complete: set bar to 100% and hide it
@@ -1294,9 +1475,9 @@ window.addEventListener('resize', () => {
       return;
     }
 
-    const depthM = Math.abs(station.pos?.z ? station.pos.z / 3.0 : 0).toFixed(0);
-    const depthLabel = depthM > 0 ? `${depthM}m below ground` : 'Surface station';
-    
+    const depthM = station.depthM;
+    const depthLabel = depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
+
     tip.innerHTML = `<b>${station.name}</b><br/><span class="muted">${depthLabel}</span>`;
     tip.style.display = 'block';
     
@@ -1614,10 +1795,14 @@ function tick() {
   const azimuth = controls.getAzimuthalAngle();
   compassRose.style.transform = `rotate(${-azimuth}rad)`;
 
-  // Update altimeter — camera Y is metres (scene units = metres)
-  const altM = Math.round(camera.position.y);
-  altimeterValue.textContent = altM;
-  altimeterEl.classList.toggle('underground', altM < 0);
+  // Update altimeter — divide by VE to show real-world metres
+  const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
+  const realAltM = Math.round(camera.position.y / VERTICAL_EXAGGERATION);
+  altimeterValue.textContent = realAltM;
+  const isUnderground = surfaceYAtCamera !== null
+    ? camera.position.y < surfaceYAtCamera
+    : camera.position.y < 0;
+  altimeterEl.classList.toggle('underground', isUnderground);
 
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
   for (const train of sim.trains) {
@@ -1665,7 +1850,7 @@ function tick() {
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.stationsLayer?.update) {
-      layers.stationsLayer.update({ camera, renderer });
+      layers.stationsLayer.update({ camera, renderer, terrainSurfaceY: surfaceYAtCamera });
       updateCallCount++;
     }
   }
@@ -1686,3 +1871,8 @@ function tick() {
 }
 
 tick();
+
+// Dev-only debug exposure for Playwright / console testing
+if (import.meta.env.DEV) {
+  window.__ug = { camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION };
+}

@@ -4,7 +4,7 @@
     "lat": 51.5074,
     "lon": -0.1278
   },
-  "verticalScale": 3,
+  "verticalScale": 5,
   "groundY": -6,
   "shafts": [
     {
@@ -13,7 +13,7 @@
       "x": 2772.037370696899,
       "z": -539.9020000005214,
       "groundY": -6,
-      "platformY": -57,
+      "platformY": -95,
       "depth_m": 19
     },
     {
@@ -22,7 +22,7 @@
       "x": 902.1177406137182,
       "z": 456.5233199998417,
       "groundY": -6,
-      "platformY": -78,
+      "platformY": -130,
       "depth_m": 26
     }
   ]
