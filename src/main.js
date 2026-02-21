@@ -4,7 +4,8 @@ import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } fr
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './terrain.js';
 import { createStationMarkers } from './stations.js';
-import { loadLineShafts, addShaftsToScene } from './shafts.js';
+import { createUnifiedShafts } from './shafts.js';
+import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume } from './thames.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
@@ -444,6 +445,7 @@ scene.add(rim);
     }
     terrain = result;
     scene.add(result.mesh);
+    if (result.undersideMesh) scene.add(result.undersideMesh);
     if (result.contourLines) scene.add(result.contourLines);
 
     // Reposition tubes + stations to terrain-relative depth, then snap shafts.
@@ -470,20 +472,8 @@ scene.add(rim);
 // so it's accessible from both the terrain .then() callback and the
 // per-line shaft loading code).
 function snapAllShaftsToTerrain() {
-  for (const [lineId, layers] of lineShaftLayers) {
-    if (layers.shaftsLayer?.updateGroundYById) {
-      const groundYById = {};
-      for (const s of layers.shaftsLayer.shaftsData?.shafts ?? []) {
-        if (!s?.id) continue;
-        const surfaceY = getTerrainMeshSurfaceY({ x: s.x, z: s.z });
-        if (surfaceY !== null) {
-          groundYById[s.id] = surfaceY;
-        }
-      }
-      if (Object.keys(groundYById).length > 0) {
-        layers.shaftsLayer.updateGroundYById(groundYById);
-      }
-    }
+  if (unifiedShaftLayer) {
+    unifiedShaftLayer.updateGroundYPositions(getTerrainMeshSurfaceY);
   }
 }
 
@@ -618,31 +608,9 @@ function snapAllTubesToTerrain() {
     snappedStations += stations.length;
   }
 
-  // 4d. Update shaft platformY from updated centerPts
-  for (const [lineId, layers] of lineShaftLayers) {
-    if (!layers.shaftsLayer?.updatePlatformYById) continue;
-    const centerPts = lineCenterPoints.get(lineId);
-    if (!centerPts?.length) continue;
-
-    const stations = layers.stationsLayer?.stations;
-    if (!stations) continue;
-
-    const platformYById = {};
-    for (const st of stations) {
-      let bestY = st.pos.y;
-      let bestD2 = Infinity;
-      for (const p of centerPts) {
-        const dx = p.x - st.pos.x;
-        const dz = p.z - st.pos.z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 < bestD2) {
-          bestD2 = d2;
-          bestY = p.y;
-        }
-      }
-      platformYById[st.id] = bestY;
-    }
-    layers.shaftsLayer.updatePlatformYById(platformYById);
+  // 4d. Update unified shaft platformY from updated centerPts
+  if (unifiedShaftLayer) {
+    unifiedShaftLayer.updatePlatformYPositions(lineCenterPoints);
   }
 
   console.log(`snapAllTubesToTerrain: ${snappedTubes} tube branches, ${snappedStations} stations repositioned to terrain-relative depth`);
@@ -779,6 +747,7 @@ function llToXZ(lat, lon) {
 // Shared station registry: all lines use same X/Z for stations with same NaPTAN ID
 // This ensures interchanges show vertical stacks, not offset tubes
 const sharedStationPositions = new Map(); // naptanId -> { x, z, lat, lon }
+const stationLineCount = new Map(); // naptanId -> number of tube lines serving this station
 
 function registerStationPosition(naptanId, lat, lon) {
   if (!naptanId) return;
@@ -985,8 +954,9 @@ let victoriaLabelsVisible = prefs.victoriaLabelsVisible ?? true;
 let victoriaShaftsLayer = null;
 let victoriaShaftsVisible = prefs.victoriaShaftsVisible ?? true;
 
-// Per-line shaft and station layer tracking (supports all 11 Underground lines + DLR)
-const lineShaftLayers = new Map(); // lineId -> { shaftsLayer, stationsLayer }
+// Per-line station layer tracking (supports all 11 Underground lines + DLR)
+const lineShaftLayers = new Map(); // lineId -> { stationsLayer }
+let unifiedShaftLayer = null; // single frosted-glass shaft layer for all stations
 const lineStationsVisible = new Map(); // lineId -> boolean
 const lineLabelsVisible = new Map(); // lineId -> boolean
 const lineShaftsVisible = new Map(); // lineId -> boolean
@@ -1097,17 +1067,25 @@ async function buildNetworkMvp() {
     applySoloSelection = function(val) {
       const isInfra = ['crossrail', 'tideway', 'geology'].includes(val);
 
-      // Tube lines + their stations/shafts: show all or just selected
+      // Tube lines + their stations: show all or just selected
       for (const id of wanted) {
         const visible = val === 'all' || id === val;
         setLineVisible(id, visible);
 
-        // Toggle per-line station markers, labels, and shafts
+        // Toggle per-line station markers and labels
         const layers = lineShaftLayers.get(id);
         if (layers) {
           if (layers.stationsLayer?.mesh) layers.stationsLayer.mesh.visible = visible;
           if (layers.stationsLayer?.setLabelsVisible) layers.stationsLayer.setLabelsVisible(visible);
-          if (layers.shaftsLayer?.group) layers.shaftsLayer.group.visible = visible;
+        }
+      }
+
+      // Unified shafts: filter by line or show all
+      if (unifiedShaftLayer) {
+        if (val === 'all') {
+          unifiedShaftLayer.setFilteredLines(null);
+        } else if (!isInfra) {
+          unifiedShaftLayer.setFilteredLines(new Set([val]));
         }
       }
 
@@ -1161,6 +1139,13 @@ async function buildNetworkMvp() {
         const { branches, allStops } = extractBranches(sequences);
 
         const sps = allStops;
+
+        // Populate stationLineCount from TfL stopPoint.lines (Underground mode only)
+        for (const sp of sps) {
+          if (!sp.id || stationLineCount.has(sp.id)) continue;
+          stationLineCount.set(sp.id, (sp.lines || []).length || 1);
+        }
+
         const ds = debugDepthStats({ lineId: id, stopPoints: sps, anchors: depthAnchors });
         addLineFromStopPoints(id, colour, sps, depthAnchors, sim, { branches });
         setLineVisible(id, true);
@@ -1183,6 +1168,15 @@ async function buildNetworkMvp() {
             }
           }
 
+          // Identify terminus stations (first + last of each branch)
+          const terminusIds = new Set();
+          for (const br of branchArrays) {
+            if (br.length >= 2) {
+              terminusIds.add(br[0].id);
+              terminusIds.add(br[br.length - 1].id);
+            }
+          }
+
           const stations = sps
             .filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon))
             .map(sp => {
@@ -1194,13 +1188,14 @@ async function buildNetworkMvp() {
                 name: sp.name,
                 pos: new THREE.Vector3(x, y, z),
                 depthM,
+                lineCount: stationLineCount.get(sp.id) || 1,
+                isTerminus: terminusIds.has(sp.id),
               };
             });
 
-          // Dispose old per-line layers if they exist
+          // Dispose old per-line station layer if it exists
           const existing = lineShaftLayers.get(id);
           existing?.stationsLayer?.dispose?.();
-          existing?.shaftsLayer?.dispose?.();
 
           const stationsLayer = createStationMarkers({
             scene,
@@ -1214,65 +1209,21 @@ async function buildNetworkMvp() {
           stationsLayer.setLabelsVisible(lv);
           stationsLayer.mesh.visible = sv;
 
-          // Ground cube + platform cube + connecting line (MVP)
-          // Make platform Y match the built tunnel centerline so shafts always intersect the tube.
-          try {
-            // Prefer prebuilt/cached shaft positions (generated via scripts), but fall back
-            // to deriving them from the station list so shafts still render in dev/offline.
-            let shaftsData = await loadLineShafts(id);
-            if (!shaftsData) {
-              shaftsData = {
-                line: id,
-                origin: ORIGIN,
-                verticalScale: sim.verticalScale,
-                groundY: -6,
-                shafts: stations.map(st => ({
-                  id: st.id,
-                  name: st.name,
-                  x: st.pos.x,
-                  z: st.pos.z,
-                  groundY: -6,
-                  // initial platformY; we will override from centerline below.
-                  platformY: st.pos.y,
-                })),
-              };
-            }
-
-            // Build a lookup from station id -> nearest centerline y.
-            const centerPts = lineCenterPoints.get(id);
-            const platformYById = {};
-            if (centerPts?.length) {
-              for (const st of stations) {
-                let bestY = st.pos.y;
-                let bestD2 = Infinity;
-                for (const p of centerPts) {
-                  const dx = p.x - st.pos.x;
-                  const dz = p.z - st.pos.z;
-                  const d2 = dx * dx + dz * dz;
-                  if (d2 < bestD2) {
-                    bestD2 = d2;
-                    bestY = p.y;
-                  }
-                }
-                platformYById[st.id] = bestY;
-              }
-            }
-
-            const shaftsLayer = addShaftsToScene({ scene, shaftsData, colour, platformYById, kind: `${id}-shafts` });
-
-            // If terrain is already loaded, snap ground cubes to terrain surface (approx).
-            if (shaftsLayer?.updateGroundYById && terrain) {
-              snapAllShaftsToTerrain();
-            }
-
-            const shv = lineShaftsVisible.get(id) ?? true;
-            if (shaftsLayer?.group) shaftsLayer.group.visible = shv;
-
-            // Store per-line layers for later access
-            lineShaftLayers.set(id, { stationsLayer, shaftsLayer });
-          } catch (err) {
-            console.warn(`Shaft loading failed for ${id}:`, err.message);
+          // Register stations in shaft registry for unified shaft creation after loop
+          for (const st of stations) {
+            registerStationForShafts({
+              naptanId: st.id,
+              name: st.name,
+              x: st.pos.x,
+              z: st.pos.z,
+              lineId: id,
+              depthM: st.depthM,
+              tflLineCount: st.lineCount || 1,
+            });
           }
+
+          // Store per-line station layer for later access (labels, markers, hover)
+          lineShaftLayers.set(id, { stationsLayer });
 
           // Keep HUD checkboxes in sync
           if (id === 'victoria') {
@@ -1291,6 +1242,18 @@ async function buildNetworkMvp() {
         failed.push(id);
       }
     }
+
+    // Create unified shaft layer from registry (one frosted glass cylinder per station)
+    unifiedShaftLayer = createUnifiedShafts({
+      scene,
+      registry: getShaftRegistry(),
+      getTerrainMeshSurfaceY: terrain ? getTerrainMeshSurfaceY : null,
+      verticalScale: sim.verticalScale,
+    });
+    if (unifiedShaftLayer?.group) {
+      unifiedShaftLayer.group.visible = victoriaShaftsVisible;
+    }
+    console.log(`Unified shafts: ${getShaftRegistry().size} stations from shaft registry`);
 
     // If terrain already loaded, snap tubes to terrain-relative depth.
     // (Handles race condition: terrain may load before or after network.)
@@ -1595,10 +1558,8 @@ function setVictoriaLabelsVisible(v) {
 
 function setVictoriaShaftsVisible(v) {
   victoriaShaftsVisible = !!v;
-  // Toggle visibility for ALL lines with shafts, not just Victoria
-  for (const [lineId, layers] of lineShaftLayers) {
-    if (layers.shaftsLayer?.group) layers.shaftsLayer.group.visible = victoriaShaftsVisible;
-  }
+  // Toggle unified shaft layer visibility
+  if (unifiedShaftLayer?.group) unifiedShaftLayer.group.visible = victoriaShaftsVisible;
   if (victoriaShaftsLayer?.group) victoriaShaftsLayer.group.visible = victoriaShaftsVisible;
   prefs.victoriaShaftsVisible = victoriaShaftsVisible;
   savePrefs(prefs);
@@ -1874,5 +1835,9 @@ tick();
 
 // Dev-only debug exposure for Playwright / console testing
 if (import.meta.env.DEV) {
-  window.__ug = { camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION };
+  window.__ug = {
+    camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    // Getter so live value is read (unifiedShaftLayer is set after async loading)
+    get unifiedShaftLayer() { return unifiedShaftLayer; },
+  };
 }

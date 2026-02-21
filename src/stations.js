@@ -3,6 +3,7 @@ import * as THREE from 'three';
 // Track which station names already have a label to avoid duplicates
 // when the same station appears on multiple lines (e.g. Farringdon on Circle + Metropolitan + H&C)
 const _labelledNames = new Set();
+const _labelledNamesUG = new Set();
 
 // Module-level label fade distance — shared across all station layers,
 // read every frame by each layer's update() so slider changes apply instantly.
@@ -10,6 +11,15 @@ let _labelMaxDistance = 9000;
 
 function cleanStationName(name) {
   return name.replace(/\s+(Underground|DLR) Station$/i, '');
+}
+
+// Size multiplier based on how many tube lines serve a station:
+// 1 line → small (minor stop), 2 lines → baseline (interchange),
+// 3+ or terminus → large (major hub / end of line)
+function lineSizeMultiplier(lineCount, isTerminus) {
+  if (lineCount >= 3) return 1.5;
+  if (isTerminus || lineCount === 2) return 1.0;
+  return 0.75;
 }
 
 function ensureOverlayRoot() {
@@ -85,16 +95,25 @@ export function createStationMarkers({
         const surfEl = document.createElement('div');
         surfEl.className = 'station-label station-label-surface';
         surfEl.textContent = name;
+        surfEl.style.fontSize = `${Math.max(7, 11 * lineSizeMultiplier(st.lineCount || 1, st.isTerminus)).toFixed(1)}px`;
+        if (st.isTerminus) surfEl.style.color = '#f5e6a3';
         surfaceLayer.appendChild(surfEl);
         surfaceEls.push(surfEl);
       }
 
-      // Underground: always create (different line depths prevent overlap)
-      const ugEl = document.createElement('div');
-      ugEl.className = 'station-label station-label-underground';
-      ugEl.textContent = name;
-      undergroundLayer.appendChild(ugEl);
-      undergroundEls.push(ugEl);
+      // Underground: deduplicate by cleaned name (interchanges share position)
+      if (_labelledNamesUG.has(name)) {
+        undergroundEls.push(null);
+      } else {
+        _labelledNamesUG.add(name);
+        const ugEl = document.createElement('div');
+        ugEl.className = 'station-label station-label-underground';
+        ugEl.textContent = name;
+        ugEl._sizeMultiplier = lineSizeMultiplier(st.lineCount || 1, st.isTerminus);
+        if (st.isTerminus) ugEl.style.color = '#f5e6a3';
+        undergroundLayer.appendChild(ugEl);
+        undergroundEls.push(ugEl);
+      }
     }
   }
 
@@ -169,7 +188,8 @@ export function createStationMarkers({
 
         const fadeRange = _labelMaxDistance - 150;
         const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / fadeRange, 0.0, 1.0);
-        const fontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
+        const baseFontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
+        const fontSize = baseFontSize * (el._sizeMultiplier || 1);
 
         el.style.display = 'block';
         el.style.left = `${x.toFixed(1)}px`;
@@ -177,6 +197,7 @@ export function createStationMarkers({
         el.style.transform = 'translate(-50%, -50%)';
         el.style.opacity = alpha.toFixed(3);
         el.style.fontSize = `${fontSize.toFixed(1)}px`;
+        el.style.zIndex = Math.max(1, Math.floor(10000 - d));
       }
     }
   }
@@ -191,7 +212,10 @@ export function createStationMarkers({
         _labelledNames.delete(name);
         surfaceEls[i].remove();
       }
-      if (undergroundEls[i]) undergroundEls[i].remove();
+      if (undergroundEls[i]) {
+        _labelledNamesUG.delete(name);
+        undergroundEls[i].remove();
+      }
     }
     surfaceLayer.remove();
     undergroundLayer.remove();

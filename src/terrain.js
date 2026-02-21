@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import UPNG from 'upng-js';
+import {
+  generateTerrainGrainTexture,
+  generateTerrainRoughnessTexture,
+  generateUndersideGrainTexture,
+  generateUndersideNormalMap,
+} from './textures.js';
 
 // BNG reference point for the scene ORIGIN (51.5074°N, 0.1278°W)
 // Trafalgar Square ≈ TQ 300 804 ≈ E 530000, N 180400 in British National Grid
@@ -286,9 +292,9 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       if (y > maxY) maxY = y;
     }
     const yRange = maxY - minY || 1;
-    const lowCol = new THREE.Color(0x2d3d47);  // Dark slate (valleys/Thames)
-    const midCol = new THREE.Color(0x4a5b52);  // Grey-green (mid-elevation)
-    const highCol = new THREE.Color(0x6b7b6a); // Sage (hilltops)
+    const lowCol = new THREE.Color(0x5c4a3a);  // Warm dark brown (river clay / valleys)
+    const midCol = new THREE.Color(0x7a6b55);  // Dusty brown (London clay)
+    const highCol = new THREE.Color(0x96886e); // Sandy tan (exposed earth / hilltops)
     const colArr = new Float32Array(pos.count * 3);
     const tmpCol = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
@@ -306,23 +312,76 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
 
     console.log(`Terrain: ${pos.count} vertices, VE=${VE}×, Y range: ${minY.toFixed(1)}–${maxY.toFixed(1)}, mean elev: ${meanElev.toFixed(1)}m`);
 
-    // ── Material ──────────────────────────────────────────────────────
-    const mat = new THREE.MeshStandardMaterial({
+    // ── Generate procedural textures ──────────────────────────────────
+    const grainTex = generateTerrainGrainTexture();
+    const roughnessTex = generateTerrainRoughnessTexture();
+    const undersideGrainTex = generateUndersideGrainTexture();
+    const undersideNormalTex = generateUndersideNormalMap(undersideGrainTex);
+
+    // ── Topside material (warm earth, viewed from above) ────────────
+    const topMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       vertexColors: true,
-      roughness: TERRAIN_CONFIG.roughness,
-      metalness: TERRAIN_CONFIG.metalness,
+      map: grainTex,
+      roughnessMap: roughnessTex,
+      roughness: 0.85,
+      metalness: 0.05,
       transparent: false,
       opacity: opacity,
       depthWrite: true,
       wireframe: !!wireframe,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
     });
 
-    const mesh = new THREE.Mesh(geom, mat);
+    // ── Underside geometry + vertex colours (rock face, viewed from below) ─
+    const undersideGeom = geom.clone();
+    const undersideLowCol = new THREE.Color(0x7a6044);
+    const undersideMidCol = new THREE.Color(0x8d7456);
+    const undersideHighCol = new THREE.Color(0x9e8868);
+    const usColArr = new Float32Array(pos.count * 3);
+    const usTmpCol = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const t = (pos.getY(i) - minY) / yRange;
+      if (t < 0.5) {
+        usTmpCol.copy(undersideLowCol).lerp(undersideMidCol, t * 2);
+      } else {
+        usTmpCol.copy(undersideMidCol).lerp(undersideHighCol, (t - 0.5) * 2);
+      }
+      usColArr[i * 3] = usTmpCol.r;
+      usColArr[i * 3 + 1] = usTmpCol.g;
+      usColArr[i * 3 + 2] = usTmpCol.b;
+    }
+    undersideGeom.setAttribute('color', new THREE.BufferAttribute(usColArr, 3));
+
+    // ── Underside material (rock face with normal map for relief) ────
+    const undersideMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      map: undersideGrainTex,
+      normalMap: undersideNormalTex,
+      normalScale: new THREE.Vector2(0.8, 0.8),
+      roughness: 0.92,
+      metalness: 0.0,
+      transparent: false,
+      opacity: opacity,
+      depthWrite: false,
+      wireframe: !!wireframe,
+      side: THREE.BackSide,
+    });
+
+    // ── Two meshes sharing position, topside renders first ──────────
+    const mesh = new THREE.Mesh(geom, topMat);
     mesh.position.set(centerX, 0, centerZ);
     mesh.name = 'terrainMesh';
+    mesh.renderOrder = -1;
+
+    const undersideMesh = new THREE.Mesh(undersideGeom, undersideMat);
+    undersideMesh.position.set(centerX, 0, centerZ);
+    undersideMesh.name = 'terrainUnderside';
+    undersideMesh.renderOrder = -1;
+
     terrainState.mesh = mesh; // for vertex sampling in getTerrainMeshSurfaceY
+    terrainState.undersideMesh = undersideMesh;
     console.log('Terrain mesh created:', {
       position: `(${centerX.toFixed(0)}, 0, ${centerZ.toFixed(0)})`,
       extent: `${terrainW.toFixed(0)}×${terrainH.toFixed(0)}m`,
@@ -351,7 +410,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const contourLines = generateContourLines(geom);
     if (contourLines) contourLines.position.set(centerX, 0, centerZ);
 
-    return { mesh, meta, widthM, heightM, heightSampler, contourLines };
+    return { mesh, undersideMesh, meta, widthM, heightM, heightSampler, contourLines };
   } catch (err) {
     console.error('Terrain mesh creation failed:', err);
     return null;
@@ -475,9 +534,9 @@ export const ENV_CONFIG = {
 
   // Colors - lighter for better visibility
   skyColor: 0x87CEEB,    // Sky blue (above)
-  groundColor: 0x1a2a3a, // Lighter dark underground (below)
+  groundColor: 0x1f1a15, // Dark warm brown-black (underground)
   fogColorSky: 0xa0d0f0, // Lighter fog when above ground
-  fogColorGround: 0x1a2a3a, // Match ground color when below
+  fogColorGround: 0x1f1a15, // Warm brown-black fog underground
 
   // Fog distances - wider range for clearer visibility
   fogNear: 200,
@@ -540,12 +599,10 @@ export function updateEnvironment(camera, scene, sky, renderer) {
     scene.fog.near = ENV_CONFIG.fogNear * (0.5 + 0.5 * surfaceBlend);
   }
 
-  // Update sky visibility - visible even from underground (dimly) to show "up"
+  // Update sky visibility — hidden underground to avoid wash-out over BackSide terrain
   if (sky) {
-    // Minimum 15% opacity even underground so you can see the sky direction
-    // Full 90% opacity when above ground
-    sky.material.opacity = 0.15 + (surfaceBlend * 0.75);
-    sky.visible = true; // Always visible
+    sky.material.opacity = surfaceBlend * 0.9;
+    sky.visible = surfaceBlend > 0.01;
   }
 
   // Update background color
@@ -581,8 +638,8 @@ export function createAtmosphere(scene) {
   sun.castShadow = false; // Keep it simple, no shadows
   scene.add(sun);
 
-  // Underground fill light - subtle blue from below
-  const underground = new THREE.DirectionalLight(0x4a6fa5, 0.3);
+  // Underground fill light - warm brown from below (complements rock face)
+  const underground = new THREE.DirectionalLight(0x7a6a55, 0.3);
   underground.name = 'undergroundLight';
   underground.position.set(0, -500, 0);
   scene.add(underground);

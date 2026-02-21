@@ -2,36 +2,8 @@
 // Shows the clay-to-chalk boundary surface (~60m depth) where deep infrastructure anchors
 
 import * as THREE from 'three';
-
-// --- Procedural noise for geological undulation ---
-
-function hash2d(x, z) {
-  const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-function smoothNoise(x, z) {
-  const ix = Math.floor(x), iz = Math.floor(z);
-  const fx = x - ix, fz = z - iz;
-  const ux = fx * fx * (3 - 2 * fx);
-  const uz = fz * fz * (3 - 2 * fz);
-  const a = hash2d(ix, iz);
-  const b = hash2d(ix + 1, iz);
-  const c = hash2d(ix, iz + 1);
-  const d = hash2d(ix + 1, iz + 1);
-  return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
-}
-
-function fbmNoise(x, z, octaves = 3) {
-  let value = 0, amplitude = 1, frequency = 1, maxAmp = 0;
-  for (let i = 0; i < octaves; i++) {
-    value += smoothNoise(x * frequency, z * frequency) * amplitude;
-    maxAmp += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2;
-  }
-  return value / maxAmp;
-}
+import { fbmNoise } from './noise.js';
+import { generateChalkGrainTexture, generateChalkRoughnessTexture } from './textures.js';
 
 // --- Main strata creation ---
 
@@ -71,8 +43,8 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
     if (y > cMaxY) cMaxY = y;
   }
   const cRange = cMaxY - cMinY || 1;
-  const chalkLow = new THREE.Color(0x8a7e6e);   // Weathered chalk — warm grey-brown
-  const chalkHigh = new THREE.Color(0xd4cbb8);  // Fresh chalk — light cream
+  const chalkLow = new THREE.Color(0xa39580);   // Weathered chalk — warm grey-brown (more contrast)
+  const chalkHigh = new THREE.Color(0xe8dfc8);  // Fresh chalk — brighter cream
   const colArr = new Float32Array(chalkPos.count * 3);
   const tc = new THREE.Color();
   for (let i = 0; i < chalkPos.count; i++) {
@@ -84,12 +56,17 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   }
   geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
 
+  const chalkGrainTex = generateChalkGrainTexture();
+  const chalkRoughTex = generateChalkRoughnessTexture();
+
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
+    map: chalkGrainTex,
+    roughnessMap: chalkRoughTex,
     transparent: true,
-    opacity: 0.45,
-    roughness: 0.8,
+    opacity: 0.50,
+    roughness: 0.9,
     metalness: 0.0,
     side: THREE.DoubleSide,
     depthWrite: false,

@@ -1,5 +1,37 @@
+// Unified shaft system — one frosted glass cylinder per physical station,
+// sized by interchange complexity (line count).
+
 import * as THREE from 'three';
 
+const BASE_RADIUS = 9;        // ~2x tunnel width for single-line stations
+const PLATFORM_CLEARANCE = 5;  // metres below deepest platform
+
+// Shared frosted glass material for all shafts
+const frostedGlassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.27,
+  roughness: 0.55,
+  metalness: 0.0,
+  transmission: 0.78,
+  thickness: 1.2,
+  ior: 1.45,
+  clearcoat: 0.15,
+  clearcoatRoughness: 0.7,
+  emissive: 0xffffff,
+  emissiveIntensity: 0.03,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+  envMapIntensity: 0.3,
+});
+
+// Unit cylinder — scaled per station via mesh.scale
+const unitCylinderGeo = new THREE.CylinderGeometry(1, 1, 1, 16);
+
+/**
+ * Keep loadLineShafts for backward compat — loads prebuilt shaft JSON.
+ * No longer called from main.js but other consumers may reference it.
+ */
 export async function loadLineShafts(lineId) {
   const id = String(lineId || '').trim().toLowerCase();
   if (!id) return null;
@@ -8,177 +40,138 @@ export async function loadLineShafts(lineId) {
   return res.json();
 }
 
-export function addShaftsToScene({
-  scene,
-  shaftsData,
-  colour = 0x0098d4,
-  platformYById = null,
-  groundYById = null,
-  kind = 'shafts',
-} = {}) {
-  if (!shaftsData?.shafts?.length) return null;
-
+/**
+ * Create one frosted glass cylinder per unique station from the shaft registry.
+ *
+ * @param {Object} opts
+ * @param {THREE.Scene} opts.scene
+ * @param {Map} opts.registry - from getShaftRegistry()
+ * @param {Function} opts.getTerrainMeshSurfaceY - ({ x, z }) => number | null
+ * @param {number} opts.verticalScale - VE multiplier
+ * @returns Unified shaft layer with update/filter/dispose methods
+ */
+export function createUnifiedShafts({ scene, registry, getTerrainMeshSurfaceY, verticalScale }) {
   const group = new THREE.Group();
-  group.userData.kind = kind;
+  group.userData.kind = 'unified-shafts';
+  group.renderOrder = 2;
 
-  const cubeSize = 18; // metres in our scene
-  const platformGeo = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-  const groundGeo = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-
-  // A vertical "shaft" between surface and platform.
-  // Unit height; we'll scale Y per-station.
-  const shaftRadius = 2.2;
-  const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, 1, 10, 1, true);
-
-  const platformMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: new THREE.Color(colour),
-    emissiveIntensity: 0.65,
-    roughness: 0.35,
-  });
-  const groundMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: new THREE.Color(0xffffff),
-    emissiveIntensity: 0.08,
-    roughness: 0.6,
-    transparent: true,
-    opacity: 0.9,
-  });
-
-  const lineMat = new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.45,
-  });
-
-  const shaftMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: new THREE.Color(colour),
-    emissiveIntensity: 0.25,
-    roughness: 0.55,
-    metalness: 0.0,
-    transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide,
-  });
-
-  // Keep handles so we can adjust ground/platform Y later (e.g., after terrain loads).
+  // naptanId -> { mesh, groundY, platformY, radius, entry }
   const byId = new Map();
 
-  function buildShaftBetween({ x, z, groundY, platformY }) {
-    const h = Math.max(0.01, Math.abs(platformY - groundY));
-    const midY = (platformY + groundY) * 0.5;
+  for (const [naptanId, entry] of registry) {
+    const lineCount = Math.max(entry.lineCount, entry.lines.size);
+    const radius = BASE_RADIUS * (1 + 0.25 * (lineCount - 1));
 
-    const shaft = new THREE.Mesh(shaftGeo, shaftMat);
-    shaft.position.set(x, midY, z);
-    shaft.scale.y = h; // geometry height is 1
+    // Initial ground Y from terrain if available, else 0
+    let groundY = 0;
+    if (getTerrainMeshSurfaceY) {
+      const surfY = getTerrainMeshSurfaceY({ x: entry.x, z: entry.z });
+      if (Number.isFinite(surfY)) groundY = surfY;
+    }
 
-    return shaft;
-  }
+    // Platform Y: deepest depth below ground surface
+    const platformY = groundY - (entry.deepestDepthM * verticalScale) - PLATFORM_CLEARANCE;
+    const height = Math.max(0.01, Math.abs(groundY - platformY));
+    const midY = (groundY + platformY) / 2;
 
-  for (const s of shaftsData.shafts) {
-    const platform = new THREE.Mesh(platformGeo, platformMat);
+    const mesh = new THREE.Mesh(unitCylinderGeo, frostedGlassMat);
+    mesh.scale.set(radius, height, radius);
+    mesh.position.set(entry.x, midY, entry.z);
+    mesh.renderOrder = 2;
 
-    const platformY = (platformYById && s.id && Number.isFinite(platformYById[s.id]))
-      ? platformYById[s.id]
-      : s.platformY;
-
-    const groundY = (groundYById && s.id && Number.isFinite(groundYById[s.id]))
-      ? groundYById[s.id]
-      : s.groundY;
-
-    platform.position.set(s.x, platformY, s.z);
-
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.position.set(s.x, groundY, s.z);
-
-    const geom = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(s.x, groundY, s.z),
-      new THREE.Vector3(s.x, platformY, s.z),
-    ]);
-    const link = new THREE.Line(geom, lineMat);
-
-    const shaft = buildShaftBetween({ x: s.x, z: s.z, groundY, platformY });
-
-    group.add(shaft, link, platform, ground);
-    if (s.id) byId.set(s.id, { link, platform, ground, shaft });
+    group.add(mesh);
+    byId.set(naptanId, { mesh, groundY, platformY, radius, entry });
   }
 
   scene.add(group);
+
+  function recalcShaftGeometry(parts) {
+    const height = Math.max(0.01, Math.abs(parts.groundY - parts.platformY));
+    const midY = (parts.groundY + parts.platformY) / 2;
+    parts.mesh.scale.y = height;
+    parts.mesh.position.y = midY;
+  }
+
   return {
     group,
-    shaftsData,
-    updateGroundYById(nextGroundYById = {}) {
-      for (const [id, parts] of byId.entries()) {
-        const y = nextGroundYById[id];
-        if (!Number.isFinite(y)) continue;
+    byId,
 
-        parts.ground.position.y = y;
-
-        // Update shaft geometry.
-        if (parts.shaft) {
-          const x = parts.ground.position.x;
-          const z = parts.ground.position.z;
-          const platformY = parts.platform.position.y;
-          const h = Math.max(0.01, Math.abs(platformY - y));
-          const midY = (platformY + y) * 0.5;
-          parts.shaft.position.set(x, midY, z);
-          parts.shaft.scale.y = h;
-        }
-
-        // Update line geometry endpoints in-place.
-        const pos = parts.link.geometry.attributes.position;
-        // vertex 0 (ground)
-        pos.setY(0, y);
-        pos.needsUpdate = true;
-        parts.link.geometry.computeBoundingSphere();
+    /**
+     * Update ground (surface) Y positions from terrain heightmap.
+     * Called after terrain loads or if terrain updates.
+     */
+    updateGroundYPositions(getTerrainSurfaceYFn) {
+      for (const [naptanId, parts] of byId) {
+        const surfY = getTerrainSurfaceYFn({ x: parts.entry.x, z: parts.entry.z });
+        if (!Number.isFinite(surfY)) continue;
+        parts.groundY = surfY;
+        recalcShaftGeometry(parts);
       }
     },
-    updatePlatformYById(nextPlatformYById = {}) {
-      for (const [id, parts] of byId.entries()) {
-        const y = nextPlatformYById[id];
-        if (!Number.isFinite(y)) continue;
 
-        parts.platform.position.y = y;
+    /**
+     * Update platform (bottom) Y positions from tube centerline data.
+     * For each shaft, finds the lowest centerline Y across all lines serving that station.
+     * Called after tubes snap to terrain-relative depth.
+     *
+     * @param {Map<string, Array<{x,y,z}>>} lineCenterPoints
+     */
+    updatePlatformYPositions(lineCenterPoints) {
+      for (const [naptanId, parts] of byId) {
+        const entry = parts.entry;
+        let deepestY = Infinity;
 
-        // Update shaft geometry.
-        if (parts.shaft) {
-          const x = parts.ground.position.x;
-          const z = parts.ground.position.z;
-          const groundY = parts.ground.position.y;
-          const h = Math.max(0.01, Math.abs(y - groundY));
-          const midY = (y + groundY) * 0.5;
-          parts.shaft.position.set(x, midY, z);
-          parts.shaft.scale.y = h;
+        for (const lineId of entry.lines) {
+          const centerPts = lineCenterPoints.get(lineId);
+          if (!centerPts?.length) continue;
+
+          // Find nearest centerline point by XZ distance
+          let bestY = Infinity;
+          let bestD2 = Infinity;
+          for (const p of centerPts) {
+            const dx = p.x - entry.x;
+            const dz = p.z - entry.z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              bestY = p.y;
+            }
+          }
+
+          if (bestY < deepestY) deepestY = bestY;
         }
 
-        // Update line geometry endpoints in-place.
-        const pos = parts.link.geometry.attributes.position;
-        // vertex 1 (platform)
-        pos.setY(1, y);
-        pos.needsUpdate = true;
-        parts.link.geometry.computeBoundingSphere();
+        if (Number.isFinite(deepestY)) {
+          parts.platformY = deepestY - PLATFORM_CLEARANCE;
+          recalcShaftGeometry(parts);
+        }
       }
     },
+
+    /**
+     * Solo mode: show only shafts serving at least one line in the set.
+     * Pass null or empty to show all.
+     */
+    setFilteredLines(lineIds) {
+      if (!lineIds || lineIds.size === 0) {
+        // Show all
+        for (const parts of byId.values()) parts.mesh.visible = true;
+        return;
+      }
+      for (const [, parts] of byId) {
+        let visible = false;
+        for (const lid of parts.entry.lines) {
+          if (lineIds.has(lid)) { visible = true; break; }
+        }
+        parts.mesh.visible = visible;
+      }
+    },
+
     dispose() {
       scene.remove(group);
-
-      // Dispose shared resources once.
-      platformGeo.dispose();
-      groundGeo.dispose();
-      shaftGeo.dispose();
-      platformMat.dispose();
-      groundMat.dispose();
-      lineMat.dispose();
-      shaftMat.dispose();
-
-      // Lines use per-station BufferGeometry; meshes share the geos above.
-      for (const obj of group.children) {
-        const geo = obj.geometry;
-        if (!geo) continue;
-        if (geo === platformGeo || geo === groundGeo || geo === shaftGeo) continue;
-        geo.dispose?.();
-      }
-    }
+      // unitCylinderGeo and frostedGlassMat are module-level singletons —
+      // don't dispose them here as they may be reused on hot-reload.
+      group.clear();
+    },
   };
 }
