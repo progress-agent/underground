@@ -7,7 +7,7 @@ import { createStationMarkers } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
-import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls } from './m25.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25 } from './m25.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
@@ -692,6 +692,9 @@ function snapAllTubesToTerrain() {
 // ---------- M25 world boundary ----------
 let m25Road = null;
 const m25DataPromise = loadM25Data();
+m25DataPromise.then(data => {
+  if (data?.points?.length) initM25Boundary(data.points);
+});
 
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};
@@ -1835,9 +1838,10 @@ function tick() {
   const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
   const realAltM = Math.round(camera.position.y / VERTICAL_EXAGGERATION);
   altimeterValue.textContent = realAltM;
-  const isUnderground = surfaceYAtCamera !== null
+  const cameraInsideM25 = isInsideM25(camera.position.x, camera.position.z);
+  const isUnderground = cameraInsideM25 && (surfaceYAtCamera !== null
     ? camera.position.y < surfaceYAtCamera
-    : camera.position.y < 0;
+    : camera.position.y < 0);
   altimeterEl.classList.toggle('underground', isUnderground);
 
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
@@ -1886,7 +1890,7 @@ function tick() {
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.stationsLayer?.update) {
-      layers.stationsLayer.update({ camera, renderer, terrainSurfaceY: surfaceYAtCamera });
+      layers.stationsLayer.update({ camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25 });
       updateCallCount++;
     }
   }
@@ -1896,11 +1900,11 @@ function tick() {
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
-    updateEnvironment(camera, scene, skyDome, renderer);
+    updateEnvironment(camera, scene, skyDome, renderer, { insideM25: cameraInsideM25 });
   }
-  
+
   // Update lighting based on camera position
-  updateLighting(camera, atmosphereLights);
+  updateLighting(camera, atmosphereLights, { insideM25: cameraInsideM25 });
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);

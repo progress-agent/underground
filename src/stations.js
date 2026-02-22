@@ -129,16 +129,17 @@ export function createStationMarkers({
   const tmpUnderground = new THREE.Vector3();
   let updateCount = 0;
 
-  function update({ camera, renderer, terrainSurfaceY }) {
+  function update({ camera, renderer, terrainSurfaceY, insideM25 = true }) {
     updateCount++;
     if (!labelsVisible) return;
     if (surfaceEls.length === 0) return;
 
     const w = renderer.domElement.clientWidth;
     const h = renderer.domElement.clientHeight;
-    const cameraAboveGround = Number.isFinite(terrainSurfaceY)
+    // When outside M25, always show surface labels (never underground mode)
+    const cameraAboveGround = !insideM25 || (Number.isFinite(terrainSurfaceY)
       ? camera.position.y >= terrainSurfaceY
-      : camera.position.y >= 0;
+      : camera.position.y >= 0);
 
     // Toggle layer visibility based on camera position
     surfaceLayer.style.display = cameraAboveGround ? 'block' : 'none';

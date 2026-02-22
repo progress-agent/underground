@@ -461,3 +461,50 @@ void main() {`
   console.log(`Thames waterfalls: ${group.children.length} created`);
   return group;
 }
+
+// ---------- Point-in-polygon boundary test ----------
+
+/** Cached M25 polygon in scene coordinates (array of {x, z}) */
+let _m25ScenePolygon = null;
+
+/**
+ * Convert BNG M25 points to scene coordinates and cache for hit-testing.
+ * Call once after M25 data loads.
+ *
+ * @param {Array<{e:number,n:number}>} points  M25 BNG waypoints
+ */
+export function initM25Boundary(points) {
+  if (!points?.length) return;
+  _m25ScenePolygon = points.map(p => bngToScene(p.e, p.n));
+}
+
+/**
+ * Test whether a scene-space (x, z) point is inside the M25 polygon.
+ * Uses ray-casting even-odd rule (~136 edges, sub-microsecond).
+ *
+ * Returns true if boundary not yet loaded (graceful degradation —
+ * existing underground behaviour preserved until M25 data arrives).
+ *
+ * @param {number} x  Scene X coordinate
+ * @param {number} z  Scene Z coordinate
+ * @returns {boolean}
+ */
+export function isInsideM25(x, z) {
+  if (!_m25ScenePolygon) return true; // fallback: assume inside
+
+  let inside = false;
+  const poly = _m25ScenePolygon;
+  const n = poly.length;
+
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i].x, zi = poly[i].z;
+    const xj = poly[j].x, zj = poly[j].z;
+
+    if ((zi > z) !== (zj > z) &&
+        x < (xj - xi) * (z - zi) / (zj - zi) + xi) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}

@@ -739,12 +739,15 @@ export function createSkyDome(scene) {
 }
 
 // Update environment based on camera height
-export function updateEnvironment(camera, scene, sky, renderer) {
+export function updateEnvironment(camera, scene, sky, renderer, { insideM25 = true } = {}) {
   const y = camera.position.y;
 
   // Calculate blend factor (0 = below ground, 1 = above ground/sky)
   // Lower threshold so sky becomes visible earlier when ascending
-  const surfaceBlend = Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / (ENV_CONFIG.skyStartY * 0.6)));
+  // When outside M25, force above-ground appearance (surfaceBlend = 1)
+  const surfaceBlend = insideM25
+    ? Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / (ENV_CONFIG.skyStartY * 0.6)))
+    : 1.0;
 
   // Update fog color and density
   const fogColor = new THREE.Color().lerpColors(
@@ -821,11 +824,14 @@ export function createAtmosphere(scene) {
 }
 
 // Update lighting based on camera position
-export function updateLighting(camera, lights) {
+export function updateLighting(camera, lights, { insideM25 = true } = {}) {
   if (!lights) return;
 
   const y = camera.position.y;
-  const surfaceBlend = Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / ENV_CONFIG.skyStartY));
+  // When outside M25, force above-ground lighting (surfaceBlend = 1)
+  const surfaceBlend = insideM25
+    ? Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / ENV_CONFIG.skyStartY))
+    : 1.0;
 
   // Adjust ambient light intensity
   lights.ambient.intensity = THREE.MathUtils.lerp(
