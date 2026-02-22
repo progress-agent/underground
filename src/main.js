@@ -7,6 +7,7 @@ import { createStationMarkers } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume } from './thames.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createCliffPillar, createThamesWaterfalls } from './m25.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
@@ -128,7 +129,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.target.copy(INITIAL_VIEW.target);
 controls.minDistance = 10;
-controls.maxDistance = 25000;
+controls.maxDistance = 40000;
 // Lock controls during initial load to prevent accidental movement
 controls.enabled = false;
 
@@ -463,6 +464,33 @@ scene.add(rim);
         scene.add(thamesMesh);
       }
     });
+
+    // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
+    m25DataPromise.then(m25Data => {
+      if (!m25Data?.points?.length) return;
+
+      // Generate mask and apply to both terrain materials
+      const maskTex = generateM25Mask(m25Data.points);
+      if (result.topMat) applyM25Mask(result.topMat, maskTex);
+      if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
+
+      // M25 road ring
+      m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
+      if (m25Road) scene.add(m25Road);
+
+      // Cliff pillar descending from disc edge
+      m25Cliff = createCliffPillar(m25Data.points, getTerrainMeshSurfaceY);
+      if (m25Cliff) scene.add(m25Cliff);
+
+      // Thames waterfalls at disc edge (needs both Thames and M25 data)
+      thamesDataPromise.then(thamesData => {
+        if (!thamesData?.points?.length) return;
+        const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
+        if (waterfalls) scene.add(waterfalls);
+      });
+
+      console.log('M25 world boundary applied');
+    });
   });
   
   // Legacy surface plane removed — terrain mesh provides surface visual at full opacity
@@ -619,6 +647,11 @@ function snapAllTubesToTerrain() {
 // ---------- Thames (terrain-snapped 3D volume) ----------
 let thamesMesh = null;
 const thamesDataPromise = loadThamesData();
+
+// ---------- M25 world boundary ----------
+let m25Road = null;
+let m25Cliff = null;
+const m25DataPromise = loadM25Data();
 
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};

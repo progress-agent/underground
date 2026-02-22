@@ -193,6 +193,81 @@ export function generateUndersideNormalMap(grainTexture) {
 }
 
 /**
+ * Heightmap-derived normal map for terrain topside.
+ * Unlike the underside normal map (which derives from a tiled grain texture),
+ * this computes normals from the actual heightmap elevation data — encoding
+ * real London topography (hills, valleys, river channels) at per-pixel resolution.
+ * Micro-grain noise is composited on top for clay particle surface detail.
+ *
+ * Maps 1:1 to terrain mesh UVs (NOT tiled).
+ *
+ * @param {Float32Array} heightFloats  Normalised 0-1 height values
+ * @param {number}       hmWidth       Heightmap width in pixels (e.g. 1400)
+ * @param {number}       hmHeight      Heightmap height in pixels (e.g. 1000)
+ * @param {number}       [outputSize]  Output texture resolution (default 2048)
+ * @param {number}       [strength]    Normal map strength multiplier
+ * @returns {THREE.CanvasTexture}
+ */
+export function generateTerrainNormalMap(heightFloats, hmWidth, hmHeight, outputSize = 2048, strength = 3.0) {
+  const canvas = document.createElement('canvas');
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(outputSize, outputSize);
+  const d = img.data;
+
+  // Pre-compute step size in heightmap space per output pixel
+  const hxStep = (hmWidth - 1) / outputSize;
+  const hyStep = (hmHeight - 1) / outputSize;
+
+  function sampleHM(sx, sy) {
+    const px = Math.max(0, Math.min(hmWidth - 1, Math.round(sx)));
+    const py = Math.max(0, Math.min(hmHeight - 1, Math.round(sy)));
+    return heightFloats[py * hmWidth + px];
+  }
+
+  for (let y = 0; y < outputSize; y++) {
+    for (let x = 0; x < outputSize; x++) {
+      const i = (y * outputSize + x) * 4;
+
+      // Map output pixel to heightmap coordinates
+      const hx = x * hxStep;
+      const hy = y * hyStep;
+
+      // Finite-difference gradients (central difference)
+      const left  = sampleHM(hx - 1, hy);
+      const right = sampleHM(hx + 1, hy);
+      const up    = sampleHM(hx, hy - 1);
+      const down  = sampleHM(hx, hy + 1);
+
+      let dx = (right - left) * strength;
+      let dy = (down - up) * strength;
+
+      // Composite micro-grain noise for clay particle feel
+      const grain = fbmNoise(x * 0.04, y * 0.04, 3);
+      dx += (grain - 0.5) * 0.1;
+      dy += (grain - 0.5) * 0.1;
+
+      // Normal vector (tangent space)
+      const nz = 1.0;
+      const len = Math.sqrt(dx * dx + dy * dy + nz * nz);
+
+      // Encode [-1,1] → [0,255]
+      d[i]     = Math.floor((-dx / len * 0.5 + 0.5) * 255);
+      d[i + 1] = Math.floor((-dy / len * 0.5 + 0.5) * 255);
+      d[i + 2] = Math.floor((nz / len * 0.5 + 0.5) * 255);
+      d[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.repeat.set(1, 1);
+  return tex;
+}
+
+/**
  * Chalk grain — powdery chalk with flint inclusions.
  * 512px, tiled 12×12.
  */

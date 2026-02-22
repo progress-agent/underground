@@ -3,6 +3,7 @@ import UPNG from 'upng-js';
 import {
   generateTerrainGrainTexture,
   generateTerrainRoughnessTexture,
+  generateTerrainNormalMap,
   generateUndersideGrainTexture,
   generateUndersideNormalMap,
 } from './textures.js';
@@ -292,18 +293,33 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       if (y > maxY) maxY = y;
     }
     const yRange = maxY - minY || 1;
-    const lowCol = new THREE.Color(0x5c4a3a);  // Warm dark brown (river clay / valleys)
-    const midCol = new THREE.Color(0x7a6b55);  // Dusty brown (London clay)
-    const highCol = new THREE.Color(0x96886e); // Sandy tan (exposed earth / hilltops)
+    // 5-stop elevation gradient: wider luminance range for visible topographic contrast
+    const elevStops = [
+      { t: 0.00, color: new THREE.Color(0x3d2e1f) }, // Deep umber (river valleys)
+      { t: 0.25, color: new THREE.Color(0x5c4a3a) }, // Warm brown (low areas)
+      { t: 0.50, color: new THREE.Color(0x7a6b55) }, // Dusty mid (London clay)
+      { t: 0.75, color: new THREE.Color(0x96886e) }, // Sandy tan (exposed earth)
+      { t: 1.00, color: new THREE.Color(0xa89e80) }, // Grey-green (hilltops)
+    ];
     const colArr = new Float32Array(pos.count * 3);
     const tmpCol = new THREE.Color();
+    const normals = geom.attributes.normal;
     for (let i = 0; i < pos.count; i++) {
       const t = (pos.getY(i) - minY) / yRange;
-      if (t < 0.5) {
-        tmpCol.copy(lowCol).lerp(midCol, t * 2);
-      } else {
-        tmpCol.copy(midCol).lerp(highCol, (t - 0.5) * 2);
+      // Sample 5-stop gradient
+      let stopIdx = 0;
+      for (let s = 1; s < elevStops.length; s++) {
+        if (t >= elevStops[s].t) stopIdx = s;
+        else break;
       }
+      const s0 = elevStops[stopIdx];
+      const s1 = elevStops[Math.min(stopIdx + 1, elevStops.length - 1)];
+      const localT = s0.t === s1.t ? 0 : (t - s0.t) / (s1.t - s0.t);
+      tmpCol.copy(s0.color).lerp(s1.color, localT);
+      // Slope-dependent darkening: steep normals (low Y) get darker
+      const ny = Math.abs(normals.getY(i));
+      const slopeDarken = 1.0 - (1.0 - ny) * 0.4;
+      tmpCol.multiplyScalar(slopeDarken);
       colArr[i * 3] = tmpCol.r;
       colArr[i * 3 + 1] = tmpCol.g;
       colArr[i * 3 + 2] = tmpCol.b;
@@ -315,6 +331,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     // ── Generate procedural textures ──────────────────────────────────
     const grainTex = generateTerrainGrainTexture();
     const roughnessTex = generateTerrainRoughnessTexture();
+    const terrainNormalTex = generateTerrainNormalMap(hm.floats, hm.width, hm.height);
     const undersideGrainTex = generateUndersideGrainTexture();
     const undersideNormalTex = generateUndersideNormalMap(undersideGrainTex);
 
@@ -323,6 +340,8 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       color: 0xffffff,
       vertexColors: true,
       map: grainTex,
+      normalMap: terrainNormalTex,
+      normalScale: new THREE.Vector2(1.2, 1.2),
       roughnessMap: roughnessTex,
       roughness: 0.85,
       metalness: 0.05,
@@ -410,7 +429,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const contourLines = generateContourLines(geom);
     if (contourLines) contourLines.position.set(centerX, 0, centerZ);
 
-    return { mesh, undersideMesh, meta, widthM, heightM, heightSampler, contourLines };
+    return { mesh, undersideMesh, topMat, undersideMat, meta, widthM, heightM, heightSampler, contourLines };
   } catch (err) {
     console.error('Terrain mesh creation failed:', err);
     return null;
@@ -545,12 +564,12 @@ export const ENV_CONFIG = {
   // Lighting intensities
   ambientAbove: 0.6,
   ambientBelow: 0.25,
-  sunIntensity: 1.2,
+  sunIntensity: 1.5,
 };
 
 // Create sky dome (simple gradient hemisphere)
 export function createSkyDome(scene) {
-  const geometry = new THREE.SphereGeometry(20000, 32, 32);
+  const geometry = new THREE.SphereGeometry(80000, 32, 32);
 
   // Create a simple gradient texture for the sky
   const canvas = document.createElement('canvas');
@@ -597,6 +616,19 @@ export function updateEnvironment(camera, scene, sky, renderer) {
     scene.fog.color.copy(fogColor);
     // Underground: denser fog for mystery; Above: lighter fog for clarity
     scene.fog.near = ENV_CONFIG.fogNear * (0.5 + 0.5 * surfaceBlend);
+
+    // Dynamic fog.far: extend when camera is far from origin (macro view)
+    // so cliff pillar and disc edge remain visible when pulled back
+    const camDist = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
+    const baseFar = ENV_CONFIG.fogFar;
+    const macroFar = 60000;
+    const fogFarBlend = Math.min(1, Math.max(0, (camDist - 10000) / 10000));
+    scene.fog.far = baseFar + (macroFar - baseFar) * fogFarBlend;
+
+    // Underground: tighten fog for atmospheric depth
+    if (surfaceBlend < 0.3) {
+      scene.fog.far *= (0.5 + surfaceBlend * 1.67);
+    }
   }
 
   // Update sky visibility — hidden underground to avoid wash-out over BackSide terrain
@@ -634,7 +666,7 @@ export function createAtmosphere(scene) {
   // Directional "sun" light - only affects above-ground areas primarily
   const sun = new THREE.DirectionalLight(0xfff4e6, ENV_CONFIG.sunIntensity);
   sun.name = 'sunLight';
-  sun.position.set(1000, 2000, 1000);
+  sun.position.set(2000, 600, 1500);
   sun.castShadow = false; // Keep it simple, no shadows
   scene.add(sun);
 
