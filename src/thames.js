@@ -5,6 +5,9 @@ import { VERTICAL_EXAGGERATION } from './terrain.js';
 // Coordinates are in EPSG:27700 (British National Grid)
 // Converted to scene coordinates matching terrain.js origin
 
+// Water surface level in metres OD — flat water surface
+export const WATER_LEVEL_M = 2;
+
 // BNG reference — must match terrain.js (Trafalgar Square ≈ TQ 300 804)
 const BNG_REF_E = 530000;
 const BNG_REF_N = 180400;
@@ -39,7 +42,7 @@ export function bngToScene(easting, northing) {
  * @param {object}   [options]
  * @returns {THREE.Mesh|null}
  */
-export function createThamesVolume(thamesData, getTerrainMeshSurfaceY, options = {}) {
+export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, options = {}) {
   if (!thamesData?.points?.length) return null;
 
   const {
@@ -48,15 +51,13 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY, options =
   } = options;
 
   const VE = VERTICAL_EXAGGERATION;
-  const SURFACE_LIFT = 5; // scene units ABOVE terrain surface (terrain mesh too coarse for river valley)
+  const SURFACE_LIFT = 2;   // small lift above carved terrain to prevent z-fighting
 
-  // ── 1. Convert & filter ──────────────────────────────────────────────
+  // ── 1. Convert all points (no terrain filtering needed) ───────────────
   const validPoints = [];
   for (const pt of thamesData.points) {
     const pos = bngToScene(pt.e, pt.n);
-    const surfaceY = getTerrainMeshSurfaceY({ x: pos.x, z: pos.z });
-    if (surfaceY === null) continue;
-    validPoints.push({ x: pos.x, z: pos.z, surfaceY, w: pt.w, d: pt.d });
+    validPoints.push({ x: pos.x, z: pos.z, w: pt.w, d: pt.d });
   }
 
   if (validPoints.length < 2) {
@@ -85,7 +86,6 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY, options =
     u: cumDist > 0 ? cumDists[i] / cumDist : 0,
     w: p.w,
     d: p.d,
-    surfaceY: p.surfaceY,
   }));
 
   // Linear interpolation between bracketing profiles
@@ -106,7 +106,6 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY, options =
     return {
       w: profiles[lo].w + t * (profiles[hi].w - profiles[lo].w),
       d: profiles[lo].d + t * (profiles[hi].d - profiles[lo].d),
-      surfaceY: profiles[lo].surfaceY + t * (profiles[hi].surfaceY - profiles[lo].surfaceY),
     };
   }
 
@@ -128,26 +127,18 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY, options =
     const normX = nx / nLen;
     const normZ = nz / nLen;
 
-    // Interpolate width, depth, surface from profiles
+    // Interpolate width, depth from profiles
     const prof = lerpProfile(u);
     const halfW = prof.w / 2;
 
-    // Sample terrain at centreline AND both edges, take the max so river
-    // always clears the coarse terrain mesh across its full width
     const leftX  = pos.x + normX * halfW;
     const leftZ  = pos.z + normZ * halfW;
     const rightX = pos.x - normX * halfW;
     const rightZ = pos.z - normZ * halfW;
 
-    const yC = getTerrainMeshSurfaceY({ x: pos.x, z: pos.z });
-    const yL = getTerrainMeshSurfaceY({ x: leftX,  z: leftZ });
-    const yR = getTerrainMeshSurfaceY({ x: rightX, z: rightZ });
-    const surfY = Math.max(yC ?? -Infinity, yL ?? -Infinity, yR ?? -Infinity);
-    const fallback = surfY === -Infinity;
-    const effectiveSurfY = fallback ? prof.surfaceY : surfY;
-
-    const topY = effectiveSurfY + SURFACE_LIFT;
-    const bottomY = effectiveSurfY - prof.d * VE;
+    // Flat water surface at constant level (terrain is carved to match)
+    const topY = WATER_LEVEL_M * VE + SURFACE_LIFT;
+    const bottomY = WATER_LEVEL_M * VE - prof.d * VE;
 
     const base = i * 4 * 3;
     // topLeft

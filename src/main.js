@@ -6,7 +6,7 @@ import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainS
 import { createStationMarkers } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
-import { loadThamesData, createThamesVolume } from './thames.js';
+import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createCliffPillar, createThamesWaterfalls } from './m25.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
@@ -418,6 +418,10 @@ const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
 rim.position.set(-60, 80, -40);
 scene.add(rim);
 
+// ---------- Thames (flat-level 3D volume) ----------
+let thamesMesh = null;
+const thamesDataPromise = loadThamesData();
+
 // ---------- Ground (terrain if available, else debug grid) ----------
 {
   // Debug fallback: visible grid if terrain fails
@@ -439,57 +443,58 @@ scene.add(rim);
   // Emergency debugging: ensure something is visible
   // Scene init
   
-  tryCreateTerrainMesh({ opacity: 1.0, wireframe: false }).then(result => {
-    if (!result) {
-      grid.visible = true;
-      return;
-    }
-    terrain = result;
-    scene.add(result.mesh);
-    if (result.undersideMesh) scene.add(result.undersideMesh);
-    if (result.contourLines) scene.add(result.contourLines);
-
-    // Reposition tubes + stations to terrain-relative depth, then snap shafts.
-    snapAllTubesToTerrain();
-    snapAllShaftsToTerrain();
-
-    // Build Thames 3D volume now that terrain surface is available
-    thamesDataPromise.then(thamesData => {
-      if (!thamesData) return;
-      thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY, {
-        color: 0x1a3d5c,
-        opacity: 0.45,
-      });
-      if (thamesMesh) {
-        scene.add(thamesMesh);
+  // Thames data must load before terrain so we can carve the river valley
+  thamesDataPromise.then(thamesData => {
+    tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData }).then(result => {
+      if (!result) {
+        grid.visible = true;
+        return;
       }
-    });
+      terrain = result;
+      scene.add(result.mesh);
+      if (result.undersideMesh) scene.add(result.undersideMesh);
+      if (result.contourLines) scene.add(result.contourLines);
 
-    // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
-    m25DataPromise.then(m25Data => {
-      if (!m25Data?.points?.length) return;
+      // Reposition tubes + stations to terrain-relative depth, then snap shafts.
+      snapAllTubesToTerrain();
+      snapAllShaftsToTerrain();
 
-      // Generate mask and apply to both terrain materials
-      const maskTex = generateM25Mask(m25Data.points);
-      if (result.topMat) applyM25Mask(result.topMat, maskTex);
-      if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
+      // Build Thames 3D volume (flat water level, no terrain sampling needed)
+      if (thamesData) {
+        thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY, {
+          color: 0x1a3d5c,
+          opacity: 0.45,
+        });
+        if (thamesMesh) {
+          scene.add(thamesMesh);
+        }
+      }
 
-      // M25 road ring
-      m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
-      if (m25Road) scene.add(m25Road);
+      // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
+      m25DataPromise.then(m25Data => {
+        if (!m25Data?.points?.length) return;
 
-      // Cliff pillar descending from disc edge
-      m25Cliff = createCliffPillar(m25Data.points, getTerrainMeshSurfaceY);
-      if (m25Cliff) scene.add(m25Cliff);
+        // Generate mask and apply to both terrain materials
+        const maskTex = generateM25Mask(m25Data.points);
+        if (result.topMat) applyM25Mask(result.topMat, maskTex);
+        if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
 
-      // Thames waterfalls at disc edge (needs both Thames and M25 data)
-      thamesDataPromise.then(thamesData => {
-        if (!thamesData?.points?.length) return;
-        const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
-        if (waterfalls) scene.add(waterfalls);
+        // M25 road ring
+        m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
+        if (m25Road) scene.add(m25Road);
+
+        // Cliff pillar descending from disc edge
+        m25Cliff = createCliffPillar(m25Data.points, getTerrainMeshSurfaceY);
+        if (m25Cliff) scene.add(m25Cliff);
+
+        // Thames waterfalls at disc edge (needs both Thames and M25 data)
+        if (thamesData?.points?.length) {
+          const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
+          if (waterfalls) scene.add(waterfalls);
+        }
+
+        console.log('M25 world boundary applied');
       });
-
-      console.log('M25 world boundary applied');
     });
   });
   
@@ -520,6 +525,50 @@ function snapAllTubesToTerrain() {
         if (surfaceY !== null) {
           pt.y = surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
         }
+      }
+    }
+  }
+
+  // 4a-ii. River-clearance clamp: ensure tubes pass below water surface
+  const VE = sim.verticalScale;
+  const MIN_RIVER_CLEARANCE_M = 8; // metres below water surface
+  const waterY = WATER_LEVEL_M * VE;
+  const minRiverY = waterY - MIN_RIVER_CLEARANCE_M * VE;
+
+  for (const [lineId, branches] of lineBranchCenterPts) {
+    for (const branchPts of branches) {
+      for (const pt of branchPts) {
+        const surfaceY = getTerrainMeshSurfaceY({ x: pt.x, z: pt.z });
+        // If terrain surface is at or below water level, this point is over the river
+        if (surfaceY !== null && surfaceY <= waterY) {
+          pt.y = Math.min(pt.y, minRiverY);
+        }
+      }
+    }
+  }
+
+  // 4a-iii. Synthetic mid-river control points: prevent CatmullRom arcing above water
+  for (const [lineId, branches] of lineBranchCenterPts) {
+    for (const branchPts of branches) {
+      for (let i = branchPts.length - 2; i >= 0; i--) {
+        const a = branchPts[i];
+        const b = branchPts[i + 1];
+        const midX = (a.x + b.x) / 2;
+        const midZ = (a.z + b.z) / 2;
+        const midSurfaceY = getTerrainMeshSurfaceY({ x: midX, z: midZ });
+
+        // Only act if the midpoint is over the river
+        if (midSurfaceY === null || midSurfaceY > waterY) continue;
+
+        // Check if linear interpolation between a and b would sit above clearance
+        const midLerpY = (a.y + b.y) / 2;
+        if (midLerpY <= minRiverY) continue;
+
+        // Splice in a synthetic control point clamped below water
+        const synPt = new THREE.Vector3(midX, minRiverY, midZ);
+        synPt._depthM = MIN_RIVER_CLEARANCE_M;
+        synPt._synthetic = true;
+        branchPts.splice(i + 1, 0, synPt);
       }
     }
   }
@@ -643,10 +692,6 @@ function snapAllTubesToTerrain() {
 
   console.log(`snapAllTubesToTerrain: ${snappedTubes} tube branches, ${snappedStations} stations repositioned to terrain-relative depth`);
 }
-
-// ---------- Thames (terrain-snapped 3D volume) ----------
-let thamesMesh = null;
-const thamesDataPromise = loadThamesData();
 
 // ---------- M25 world boundary ----------
 let m25Road = null;
@@ -1785,9 +1830,11 @@ function tick() {
   controls.update();
 
   // Rotate compass rose to match camera azimuth
-  // Negate: camera orbiting clockwise (azimuth+) means north moves counter-clockwise on screen
+  // OrbitControls azimuthal angle increases counter-clockwise (viewed from above).
+  // CSS rotate() is clockwise-positive. The azimuth directly gives the correct
+  // compass rotation: when camera orbits left, north appears to rotate right on screen.
   const azimuth = controls.getAzimuthalAngle();
-  compassRose.style.transform = `rotate(${-azimuth}rad)`;
+  compassRose.style.transform = `rotate(${azimuth}rad)`;
 
   // Update altimeter — divide by VE to show real-world metres
   const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });

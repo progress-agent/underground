@@ -172,7 +172,132 @@ function generateContourLines(geometry, intervalCount = 12) {
   return lines;
 }
 
-export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false } = {}) {
+/**
+ * Carve a river valley into the terrain elevation array.
+ * Uses signed-distance-field approach: each vertex checks distance to nearest
+ * Thames polyline segment. Within the river width → full carve. Within falloff → smoothstep blend.
+ *
+ * @param {Float32Array} elevations   Elevation in metres OD, mutated in place
+ * @param {number}       vertexCols   Grid columns (segments + 1)
+ * @param {number}       vertexRows   Grid rows (segments + 1)
+ * @param {number}       swSceneX     West edge scene X
+ * @param {number}       neSceneX     East edge scene X
+ * @param {number}       swSceneZ     South edge scene Z (positive)
+ * @param {number}       neSceneZ     North edge scene Z (negative)
+ * @param {Array}        riverSegments [{x, z, halfW}, ...] in scene coords
+ * @param {object}       [options]
+ */
+export function carveRiverChannel(
+  elevations, vertexCols, vertexRows,
+  swSceneX, neSceneX, swSceneZ, neSceneZ,
+  riverSegments,
+  options = {}
+) {
+  const {
+    riverLevelM = 2,      // water surface in metres OD
+    falloffM = 250,       // bank slope width in metres
+    channelDepthM = 3,    // depth below water level to carve
+  } = options;
+
+  const carveElev = riverLevelM - channelDepthM; // target elevation at channel bottom
+  const terrainW = neSceneX - swSceneX;
+  const terrainH = swSceneZ - neSceneZ;
+
+  // ── Spatial bucketing: group segments by X-range for O(1) lookup ──
+  const BUCKET_SIZE = 500; // metres
+  const minX = swSceneX - falloffM;
+  const maxX = neSceneX + falloffM;
+  const bucketCount = Math.ceil((maxX - minX) / BUCKET_SIZE) + 1;
+  const buckets = new Array(bucketCount);
+  for (let i = 0; i < bucketCount; i++) buckets[i] = [];
+
+  // Each segment spans two consecutive river points
+  for (let s = 0; s < riverSegments.length - 1; s++) {
+    const a = riverSegments[s];
+    const b = riverSegments[s + 1];
+    const segMinX = Math.min(a.x, b.x) - Math.max(a.halfW, b.halfW) - falloffM;
+    const segMaxX = Math.max(a.x, b.x) + Math.max(a.halfW, b.halfW) + falloffM;
+    const b0 = Math.max(0, Math.floor((segMinX - minX) / BUCKET_SIZE));
+    const b1 = Math.min(bucketCount - 1, Math.floor((segMaxX - minX) / BUCKET_SIZE));
+    for (let bi = b0; bi <= b1; bi++) {
+      buckets[bi].push(s);
+    }
+  }
+
+  // Smoothstep: 0→1 over [0,1]
+  function smoothstep(t) {
+    const c = Math.max(0, Math.min(1, t));
+    return c * c * (3 - 2 * c);
+  }
+
+  // ── Per-vertex carving ──
+  let carved = 0;
+  for (let row = 0; row < vertexRows; row++) {
+    const vFrac = row / (vertexRows - 1);
+    const vZ = neSceneZ + vFrac * terrainH; // north → south
+
+    for (let col = 0; col < vertexCols; col++) {
+      const uFrac = col / (vertexCols - 1);
+      const vX = swSceneX + uFrac * terrainW; // west → east
+
+      // Find closest distance to any river segment
+      const bi = Math.floor((vX - minX) / BUCKET_SIZE);
+      const segs = (bi >= 0 && bi < bucketCount) ? buckets[bi] : [];
+      if (segs.length === 0) continue;
+
+      let bestDist = Infinity;
+      let bestHalfW = 0;
+
+      for (let si = 0; si < segs.length; si++) {
+        const s = segs[si];
+        const a = riverSegments[s];
+        const b = riverSegments[s + 1];
+
+        // Project vertex onto segment a→b, clamp t to [0,1]
+        const abx = b.x - a.x;
+        const abz = b.z - a.z;
+        const abLenSq = abx * abx + abz * abz;
+        if (abLenSq < 1e-6) continue;
+
+        let t = ((vX - a.x) * abx + (vZ - a.z) * abz) / abLenSq;
+        t = Math.max(0, Math.min(1, t));
+
+        const projX = a.x + t * abx;
+        const projZ = a.z + t * abz;
+        const dx = vX - projX;
+        const dz = vZ - projZ;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+
+        // Interpolate halfW at projection point
+        const hw = a.halfW + t * (b.halfW - a.halfW);
+
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestHalfW = hw;
+        }
+      }
+
+      const idx = row * vertexCols + col;
+      const orig = elevations[idx];
+
+      if (bestDist <= bestHalfW) {
+        // Inside river channel: full carve
+        elevations[idx] = Math.min(orig, carveElev);
+        carved++;
+      } else if (bestDist < bestHalfW + falloffM) {
+        // Falloff zone: blend from carveElev to original
+        const blend = smoothstep((bestDist - bestHalfW) / falloffM);
+        const blended = carveElev + blend * (orig - carveElev);
+        elevations[idx] = Math.min(orig, blended);
+        carved++;
+      }
+    }
+  }
+
+  console.log(`River channel: carved ${carved} vertices (${(carved / (vertexCols * vertexRows) * 100).toFixed(1)}% of terrain)`);
+}
+
+export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false, thamesData = null } = {}) {
   // Looks for generated outputs from scripts/build-heightmap.mjs
   // Expected files (served from /public/data):
   // - /data/terrain/london_full_height_u16.png (full London coverage, 10m res)
@@ -229,17 +354,17 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     geom.rotateX(-Math.PI / 2);
     // After rotation: X spans [-terrainW/2, +terrainW/2], Z spans [-terrainH/2, +terrainH/2]
     // PlaneGeometry UV mapping after rotateX(-PI/2):
-    //   UV (0,0) → (X=-w/2, Z=-h/2) → north-west in scene (negative Z = north)
-    //   UV (1,1) → (X=+w/2, Z=+h/2) → south-east in scene
-    //   UV v=0 → Z=-h/2 (north),  UV v=1 → Z=+h/2 (south)
+    //   UV (0,0) → (X=-w/2, Z=+h/2) → south-west in scene (positive Z = south)
+    //   UV (1,1) → (X=+w/2, Z=-h/2) → north-east in scene
+    //   UV v=0 → Z=+h/2 (south),  UV v=1 → Z=-h/2 (north)
     //
     // Heightmap image convention (top-left origin):
     //   pixel (0,0) = NW = (bngXmin, bngYmax)
     //   pixel (w-1,h-1) = SE = (bngXmax, bngYmin)
     //
-    // Correct sampling: UV v → py = v * (h-1)
-    //   v=0 (north) → py=0 (top of image = NW = north) ✓
-    //   v=1 (south) → py=h-1 (bottom of image = SW = south) ✓
+    // Correct sampling: UV v → py = (1-v) * (h-1)
+    //   v=0 (south) → py=h-1 (bottom of image = south) ✓
+    //   v=1 (north) → py=0 (top of image = north) ✓
 
     const pos = geom.attributes.position;
     const uv = geom.attributes.uv;
@@ -257,13 +382,29 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       const u = uv.getX(i);
       const v = uv.getY(i);
       const px = Math.min(hm.width - 1, Math.round(u * (hm.width - 1)));
-      const py = Math.min(hm.height - 1, Math.round(v * (hm.height - 1)));
+      const py = Math.min(hm.height - 1, Math.round((1 - v) * (hm.height - 1)));
       const h01 = hm.floats[py * hm.width + px];
       const elevM = h01 * elevRange + elevMin;
       elevations[i] = elevM;
       elevSum += elevM;
     }
     const meanElev = elevSum / pos.count;
+
+    // ── Pass 1.5: Carve river channel into elevation data ─────────────
+    // Must happen BEFORE vertex displacement so contours, vertex colours,
+    // and normals all incorporate the carved valley.
+    if (thamesData?.points?.length) {
+      const riverSegments = thamesData.points.map(pt => ({
+        x: pt.e - BNG_REF_E,
+        z: -(pt.n - BNG_REF_N),
+        halfW: (pt.w || 100) / 2,
+      }));
+      carveRiverChannel(
+        elevations, segments + 1, segments + 1,
+        swSceneX, neSceneX, swSceneZ, neSceneZ,
+        riverSegments
+      );
+    }
 
     // ── Second pass: displace vertices with vertical exaggeration ─────
     // Reference to sea level (0m AOD) so Y=0 = Ordnance Datum.

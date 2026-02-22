@@ -25,12 +25,12 @@ naptan_id,name,depth_m,source_url,notes
 940GZZLUHAI,Highbury & Islington Underground Station,34,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
 940GZZLUKSX,King's Cross St. Pancras Underground Station,17,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
 940GZZLUOXC,Oxford Circus Underground Station,27,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
-940GZZLUPCO,Pimlico Underground Station,5,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
+940GZZLUPCO,Pimlico Underground Station,22,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,platform-depth-22.5m-corrected
 940GZZLUSVS,Seven Sisters Underground Station,11,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
-940GZZLUSKW,Stockwell Underground Station,6,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
+940GZZLUSKW,Stockwell Underground Station,15,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,platform-depth-corrected
 940GZZLUTMH,Tottenham Hale Underground Station,11,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
-940GZZLUVXL,Vauxhall Underground Station,4,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
-940GZZLUVIC,Victoria Underground Station,5,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
+940GZZLUVXL,Vauxhall Underground Station,22,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,platform-depth-deep-tube-corrected
+940GZZLUVIC,Victoria Underground Station,22,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,platform-depth-deep-tube-corrected
 940GZZLUWWL,Walthamstow Central Underground Station,24,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
 940GZZLUWRR,Warren Street Underground Station,27,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,depth-diagrams-pdf
 # Bakerloo line (southbound from Harrow & Wealdstone)
@@ -141,7 +141,7 @@ naptan_id,name,depth_m,source_url,notes
 # Kennington and south (Morden branch — gradually shallower heading south)
 940GZZLUKNG,Kennington Underground Station,20,,deep-tube-junction
 940GZZLUOVL,Oval Underground Station,15,,deep-tube
-940GZZLUSKW,Stockwell Underground Station,6,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,shallow-tube
+940GZZLUSKW,Stockwell Underground Station,15,https://content.tfl.gov.uk/bakerloo-central-victoria-lines-tube-depths.pdf,platform-depth-corrected
 940GZZLUCPN,Clapham North Underground Station,16,,deep-tube
 940GZZLUCPC,Clapham Common Underground Station,15,,deep-tube
 940GZZLUCPS,Clapham South Underground Station,15,,deep-tube

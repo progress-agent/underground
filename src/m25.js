@@ -472,8 +472,8 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
 
     // Build waterfall arc: horizontal approach → 90° curve → vertical fall
     const surfaceY = intersection.surfaceY;
-    const halfW = Math.min(ep.width, 200) / 2;
-    const arcRadius = 150;  // radius of the curve from horizontal to vertical
+    const halfW = ep.width / 2;
+    const arcRadius = Math.max(150, halfW * 0.4);
     const fallLength = 500; // vertical fall distance
 
     // Perpendicular direction for ribbon width
