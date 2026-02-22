@@ -14,7 +14,7 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   const CHALK_TOP = -60; // metres below ground — clay/chalk boundary
   const chalkTopY = CHALK_TOP * verticalScale;
 
-  const planeSize = 40000; // 40km covers Greater London
+  const planeSize = 80000; // 80km — extends to M25 boundary from all angles
   const segments = 128;
 
   // --- Chalk boundary surface (clay-to-chalk transition) ---

@@ -7,7 +7,7 @@ import { createStationMarkers } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
-import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createCliffPillar, createThamesWaterfalls } from './m25.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls } from './m25.js';
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
@@ -483,10 +483,6 @@ const thamesDataPromise = loadThamesData();
         m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
         if (m25Road) scene.add(m25Road);
 
-        // Cliff pillar descending from disc edge
-        m25Cliff = createCliffPillar(m25Data.points, getTerrainMeshSurfaceY);
-        if (m25Cliff) scene.add(m25Cliff);
-
         // Thames waterfalls at disc edge (needs both Thames and M25 data)
         if (thamesData?.points?.length) {
           const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
@@ -695,7 +691,6 @@ function snapAllTubesToTerrain() {
 
 // ---------- M25 world boundary ----------
 let m25Road = null;
-let m25Cliff = null;
 const m25DataPromise = loadM25Data();
 
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { VERTICAL_EXAGGERATION } from './terrain.js';
 
 // BNG reference — must match terrain.js
 const BNG_REF_E = 530000;
@@ -245,135 +244,6 @@ export function createM25Road(points, getSurfaceY, options = {}) {
 }
 
 /**
- * Create the cliff pillar — vertical walls descending from the M25 ring
- * down into the void, giving the appearance of a clay disc atop a chalk column.
- *
- * Vertex colours graduate through geological strata:
- *   terrain brown → chalk cream → dark grey
- *
- * @param {Array<{e:number,n:number}>} points       M25 BNG waypoints
- * @param {function}                   getSurfaceY  (x,z) → world Y
- * @param {object}                     [options]
- * @returns {THREE.Mesh}
- */
-export function createCliffPillar(points, getSurfaceY, options = {}) {
-  const {
-    bottomY = -1500,   // bottom of pillar in scene units
-  } = options;
-
-  const VE = VERTICAL_EXAGGERATION;
-
-  // Strata colour stops (depth below terrain surface → colour)
-  const strataColours = [
-    { depth: 0,    color: new THREE.Color(0x7a6044) },   // Terrain brown (surface)
-    { depth: 100,  color: new THREE.Color(0x8d7456) },   // London clay
-    { depth: 300,  color: new THREE.Color(0xd4c9a8) },   // Chalk cream
-    { depth: 800,  color: new THREE.Color(0x9e9485) },   // Greensand grey
-    { depth: 1500, color: new THREE.Color(0x4a4a4a) },   // Deep grey
-  ];
-
-  function getStrataColor(depthBelow) {
-    const d = Math.abs(depthBelow);
-    for (let i = strataColours.length - 1; i >= 0; i--) {
-      if (d >= strataColours[i].depth) {
-        const next = strataColours[Math.min(i + 1, strataColours.length - 1)];
-        if (i === strataColours.length - 1) return strataColours[i].color.clone();
-        const t = (d - strataColours[i].depth) / (next.depth - strataColours[i].depth);
-        return strataColours[i].color.clone().lerp(next.color, t);
-      }
-    }
-    return strataColours[0].color.clone();
-  }
-
-  // Convert points to scene coordinates
-  const scenePts = points.map(p => {
-    const { x, z } = bngToScene(p.e, p.n);
-    const y = getSurfaceY({ x, z });
-    return { x, z, surfaceY: y !== null ? y : 50 };
-  });
-
-  // Each segment has 4 vertices (2 top, 2 bottom) and 2 triangles
-  // But we need vertical subdivisions for strata colouring
-  const VERT_DIVS = 8; // vertical subdivisions per segment
-  const segCount = scenePts.length - 1; // ring is closed, last = first
-  const vertsPerSeg = (VERT_DIVS + 1) * 2; // inner + outer at each vertical level
-  const totalVerts = segCount * vertsPerSeg;
-  const positions = new Float32Array(totalVerts * 3);
-  const colors = new Float32Array(totalVerts * 3);
-  const indicesArr = [];
-
-  for (let seg = 0; seg < segCount; seg++) {
-    const p0 = scenePts[seg];
-    const p1 = scenePts[seg + 1];
-    const segBase = seg * vertsPerSeg;
-
-    for (let v = 0; v <= VERT_DIVS; v++) {
-      const t = v / VERT_DIVS;
-      // Interpolate Y from surface to bottom
-      const y0 = p0.surfaceY + t * (bottomY - p0.surfaceY);
-      const y1 = p1.surfaceY + t * (bottomY - p1.surfaceY);
-
-      const vi = segBase + v * 2;
-
-      // Start-side vertex
-      positions[vi * 3]     = p0.x;
-      positions[vi * 3 + 1] = y0;
-      positions[vi * 3 + 2] = p0.z;
-
-      // End-side vertex
-      positions[(vi + 1) * 3]     = p1.x;
-      positions[(vi + 1) * 3 + 1] = y1;
-      positions[(vi + 1) * 3 + 2] = p1.z;
-
-      // Strata colour based on depth below surface
-      const depth0 = Math.abs(p0.surfaceY - y0);
-      const depth1 = Math.abs(p1.surfaceY - y1);
-      const col0 = getStrataColor(depth0);
-      const col1 = getStrataColor(depth1);
-
-      colors[vi * 3]     = col0.r;
-      colors[vi * 3 + 1] = col0.g;
-      colors[vi * 3 + 2] = col0.b;
-
-      colors[(vi + 1) * 3]     = col1.r;
-      colors[(vi + 1) * 3 + 1] = col1.g;
-      colors[(vi + 1) * 3 + 2] = col1.b;
-    }
-
-    // Triangles for this segment's vertical quads
-    for (let v = 0; v < VERT_DIVS; v++) {
-      const topLeft = segBase + v * 2;
-      const topRight = topLeft + 1;
-      const botLeft = segBase + (v + 1) * 2;
-      const botRight = botLeft + 1;
-
-      // Two triangles per quad (facing outward)
-      indicesArr.push(topLeft, botLeft, topRight);
-      indicesArr.push(topRight, botLeft, botRight);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indicesArr), 1));
-  geometry.computeVertexNormals();
-
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.85,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-  });
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.name = 'm25Cliff';
-
-  console.log(`M25 cliff pillar: ${segCount} segments × ${VERT_DIVS} vertical divs = ${indicesArr.length / 3} triangles`);
-  return mesh;
-}
-
-/**
  * Find where a ray from a point in a direction intersects the M25 polygon boundary.
  * Returns { x, z, surfaceY } in scene coordinates, or null.
  */
@@ -474,7 +344,7 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
     const surfaceY = intersection.surfaceY;
     const halfW = ep.width / 2;
     const arcRadius = Math.max(150, halfW * 0.4);
-    const fallLength = 500; // vertical fall distance
+    const fallLength = 8000; // vertical fall — extends deep into void
 
     // Perpendicular direction for ribbon width
     const perpX = -dirZ;
@@ -482,7 +352,7 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
 
     // Arc samples: 0° = horizontal approach, 90° = vertical fall
     const ARC_SAMPLES = 12;
-    const FALL_SAMPLES = 8;
+    const FALL_SAMPLES = 40;
     const totalSamples = ARC_SAMPLES + FALL_SAMPLES;
 
     const positions = new Float32Array((totalSamples + 1) * 2 * 3);
@@ -508,12 +378,12 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
         px = intersection.x + dirX * arcRadius;
         pz = intersection.z + dirZ * arcRadius;
         py = surfaceY + 2 - arcRadius - fallT * fallLength;
-        alpha = 1.0 - fallT; // fade out
+        alpha = 1.0; // no fade — falls into infinity
       }
 
       // Taper width during fall
       const taperT = i / totalSamples;
-      const taperW = halfW * (1.0 - taperT * 0.6); // narrow to 40% at bottom
+      const taperW = halfW; // constant width — no taper
 
       const vi = i * 2;
       // Left vertex
