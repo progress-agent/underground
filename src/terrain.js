@@ -696,7 +696,7 @@ export const ENV_CONFIG = {
   skyColor: 0x87CEEB,    // Sky blue (above)
   groundColor: 0x1f1a15, // Dark warm brown-black (underground)
   fogColorSky: 0xa0d0f0, // Lighter fog when above ground
-  fogColorGround: 0x1f1a15, // Warm brown-black fog underground
+  fogColorGround: 0x1a1510, // Darker warm fog underground
 
   // Fog distances - wider range for clearer visibility
   fogNear: 200,
@@ -844,5 +844,5 @@ export function updateLighting(camera, lights, { insideM25 = true } = {}) {
   lights.sun.intensity = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, surfaceBlend);
 
   // Underground light fades as we go up
-  lights.underground.intensity = THREE.MathUtils.lerp(0.4, 0, surfaceBlend);
+  lights.underground.intensity = THREE.MathUtils.lerp(0.15, 0, surfaceBlend);
 }

@@ -11,6 +11,11 @@ import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThames
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
+import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -116,6 +121,10 @@ const scene = new THREE.Scene();
 // Re-enabled fog with lighter color for better above-ground visibility
 scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 
+// ── Bloom post-processing (makes headlight beams glow) ──
+const composer = new EffectComposer(renderer);
+// RenderPass and camera added after camera creation (below)
+
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 50000);
 // Street-level view looking across central London
 const INITIAL_VIEW = {
@@ -143,6 +152,20 @@ controls.touches = {
   ONE: THREE.TOUCH.ROTATE,
   TWO: THREE.TOUCH.DOLLY_PAN,
 };
+
+// ── Finish EffectComposer setup now that camera exists ──
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.55,  // strength — moderate, let window brightness drive the glow
+  0.4,   // radius — moderate spread for warm halo
+  0.88   // threshold — catch amber windows, not terrain/stations
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// ── Train system (shared state) ──
+const trainSystem = createTrainSystem({ scene, renderer, camera });
 
 // ---------- FPS-style Keyboard Controls ----------
 // Adds WASD/QE/SX movement + arrow key look direction
@@ -575,17 +598,19 @@ function snapAllTubesToTerrain() {
     if (!group) continue;
     const colour = lineColoursById.get(lineId) ?? 0xffffff;
 
-    // Remove old tube meshes and trains from group
+    // Remove old tube meshes and train groups from scene group
     const toRemove = [];
-    group.traverse(child => {
-      if (child !== group && child instanceof THREE.Mesh) {
-        toRemove.push(child);
-      }
-    });
+    for (const child of [...group.children]) {
+      if (child === group) continue;
+      toRemove.push(child);
+    }
+    // Dispose old trains via train system before removing
+    const oldTrains = toRemove.filter(c => c.isGroup && c.userData.lineId);
+    if (oldTrains.length > 0) disposeTrains(trainSystem, oldTrains);
     for (const obj of toRemove) {
       group.remove(obj);
-      obj.geometry?.dispose();
-      obj.material?.dispose();
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) obj.material.dispose();
     }
 
     // Remove old entries from linePickables
@@ -595,7 +620,7 @@ function snapAllTubesToTerrain() {
       if (idx >= 0) linePickables.splice(idx, 1);
     }
 
-    // Remove old trains for this line
+    // Remove old trains for this line from sim.trains
     sim.trains = sim.trains.filter(t => {
       if (t.parent === group) return false;
       return true;
@@ -624,28 +649,9 @@ function snapAllTubesToTerrain() {
       linePickables.push(leftMesh, rightMesh);
       group.add(leftMesh, rightMesh);
 
-      // Recreate trains on new curves
-      const makeTrain = (curve, phase = 0, dir = +1) => {
-        const train = new THREE.Mesh(
-          new THREE.SphereGeometry(2.1, 16, 16),
-          new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(colour), emissiveIntensity: 1.6 })
-        );
-        const cruiseMps = (lineId === 'victoria' ? 14.5 : 12.0);
-        const dwellSec = 22;
-        const curveLengthM = curve.getLength();
-        train.userData = {
-          t: (Math.random() + phase) % 1, curve, dir, curveLengthM, stationUs,
-          nextStationIndex: dir === 1 ? 0 : stationUs.length - 1,
-          cruiseMps, dwellSec, _pausedLeft: 0,
-        };
-        train.position.copy(curve.getPointAt(train.userData.t));
-        group.add(train);
-        sim.trains.push(train);
-        return train;
-      };
-
-      makeTrain(leftCurve, 0.0, +1);
-      makeTrain(rightCurve, 0.5, -1);
+      // Recreate trains on new curves (density scales with track length)
+      const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
+      sim.trains.push(...branchTrains);
       snappedTubes++;
     }
 
@@ -796,12 +802,15 @@ function frostedTubeMaterial(hex) {
     roughness: 0.45,
     metalness: 0.0,
     transmission: 0.82,
-    thickness: 0.9,
+    thickness: 0.6,
     ior: 1.28,
+    attenuationColor: new THREE.Color(0x9fb3c8),
+    attenuationDistance: 8.0,
     clearcoat: 0.22,
     clearcoatRoughness: 0.6,
     emissive: new THREE.Color(emissive),
     emissiveIntensity: 0.15,
+    depthWrite: true,
   });
 }
 
@@ -982,28 +991,10 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     linePickables.push(leftMesh, rightMesh);
     group.add(leftMesh, rightMesh);
 
-    // One train pair per branch
-    const makeTrain = (curve, phase = 0, dir = +1) => {
-      const train = new THREE.Mesh(
-        new THREE.SphereGeometry(2.1, 16, 16),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: new THREE.Color(colour), emissiveIntensity: 1.6 })
-      );
-      const cruiseMps = (lineId === 'victoria' ? 14.5 : 12.0);
-      const dwellSec = 22;
-      const curveLengthM = curve.getLength();
-      train.userData = {
-        t: (Math.random() + phase) % 1, curve, dir, curveLengthM, stationUs,
-        nextStationIndex: dir === 1 ? 0 : stationUs.length - 1,
-        cruiseMps, dwellSec, _pausedLeft: 0,
-      };
-      train.position.copy(curve.getPointAt(train.userData.t));
-      group.add(train);
-      sim.trains.push(train);
-      return train;
-    };
-
-    allTrains.push(makeTrain(leftCurve, 0.0, +1));
-    allTrains.push(makeTrain(rightCurve, 0.5, -1));
+    // Trains per branch (density scales with track length)
+    const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
+    sim.trains.push(...branchTrains);
+    allTrains.push(...branchTrains);
   }
 
   // Keep merged center points for camera focus
@@ -1407,6 +1398,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ---------- Click-to-focus / shift-click toggle + hover tooltip ----------
@@ -1489,7 +1481,7 @@ window.addEventListener('resize', () => {
         // Reset to baseline.
         m.material.emissiveIntensity = 0.10;
         m.material.opacity = 0.42;
-        m.material.thickness = 0.9;
+        m.material.thickness = 0.6;
       }
     }
 
@@ -1844,47 +1836,8 @@ function tick() {
     : camera.position.y < 0);
   altimeterEl.classList.toggle('underground', isUnderground);
 
-  const simDt = sim.paused ? 0 : (dt * sim.timeScale);
-  for (const train of sim.trains) {
-    // dwell at stations
-    if (train.userData._pausedLeft > 0) {
-      train.userData._pausedLeft = Math.max(0, train.userData._pausedLeft - simDt);
-      continue;
-    }
-
-    const du = (train.userData.cruiseMps * simDt) / Math.max(1e-6, train.userData.curveLengthM);
-    let u = train.userData.t + train.userData.dir * du;
-
-    // wrap
-    if (u >= 1) u -= 1;
-    if (u < 0) u += 1;
-
-    // station arrival detection (very simple): if we crossed the next station u.
-    const stations = train.userData.stationUs;
-    if (stations.length > 0) {
-      const idx = train.userData.nextStationIndex;
-      const targetU = stations[idx];
-
-      const prevU = train.userData.t;
-      const crossed = train.userData.dir === 1
-        ? (prevU <= targetU && u >= targetU) || (prevU > u && (u >= targetU || prevU <= targetU))
-        : (prevU >= targetU && u <= targetU) || (prevU < u && (u <= targetU || prevU >= targetU));
-
-      if (crossed) {
-        u = targetU;
-        train.userData._pausedLeft = train.userData.dwellSec;
-        // advance station index
-        if (train.userData.dir === 1) {
-          train.userData.nextStationIndex = (idx + 1) % stations.length;
-        } else {
-          train.userData.nextStationIndex = (idx - 1 + stations.length) % stations.length;
-        }
-      }
-    }
-
-    train.userData.t = u;
-    train.position.copy(train.userData.curve.getPointAt(u));
-  }
+  // Update all trains (simulation, orientation, LOD, SpotLight pool)
+  updateTrains(trainSystem, sim, camera, dt);
 
   // Update station label projections for ALL lines
   let updateCallCount = 0;
@@ -1906,7 +1859,7 @@ function tick() {
   // Update lighting based on camera position
   updateLighting(camera, atmosphereLights, { insideM25: cameraInsideM25 });
 
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(tick);
 }
 
@@ -1916,6 +1869,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    trainSystem, composer, bloomPass,
     // Getter so live value is read (unifiedShaftLayer is set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
   };

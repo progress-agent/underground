@@ -55,7 +55,7 @@ export function createStationMarkers({
     roughness: 0.35,
     metalness: 0.0,
     emissive: new THREE.Color(colour),
-    emissiveIntensity: 0.9,
+    emissiveIntensity: 0.2,
   });
 
   const mesh = new THREE.InstancedMesh(geo, mat, stations.length);
