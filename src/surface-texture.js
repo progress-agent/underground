@@ -187,11 +187,23 @@ export function rasteriseTile(texState, tileData) {
   const t0 = performance.now();
   let parkCount = 0, roadCount = 0;
 
+  // Rasterise parks (original leisure=park, landuse=grass)
   if (tileData.parks) {
     for (const park of tileData.parks) {
       if (!park.polygon || park.polygon.length < 3) continue;
       rasterisePolygon(park.polygon, bbox, size, pixels, (idx) => {
-        pixels[idx + 3] = 255; // A = park
+        pixels[idx + 3] = 255; // A = green
+      });
+      parkCount++;
+    }
+  }
+
+  // Rasterise supplementary greenery (wood, heath, farmland, etc.)
+  if (tileData.greenery) {
+    for (const green of tileData.greenery) {
+      if (!green.polygon || green.polygon.length < 3) continue;
+      rasterisePolygon(green.polygon, bbox, size, pixels, (idx) => {
+        pixels[idx + 3] = 255; // A = green (same channel as parks)
       });
       parkCount++;
     }

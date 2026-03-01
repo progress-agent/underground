@@ -505,6 +505,30 @@ const thamesDataPromise = loadThamesData();
         }
       }
 
+      // Reservoirs — data fetch started at module scope, create now that terrain is ready
+      reservoirDataPromise.then(data => {
+        if (data) {
+          reservoirsMesh = createReservoirs(data, llToXZ, getTerrainMeshSurfaceY);
+          if (reservoirsMesh) {
+            scene.add(reservoirsMesh);
+            addReservoirsToLegend();
+            console.log('Reservoirs added to scene');
+          }
+        }
+      });
+
+      // Canals — data fetch started at module scope, create now that terrain is ready
+      canalDataPromise.then(data => {
+        if (data) {
+          canalsMesh = createCanals(data, llToXZ, getTerrainMeshSurfaceY);
+          if (canalsMesh) {
+            scene.add(canalsMesh);
+            addCanalsToLegend();
+            console.log('Canals added to scene');
+          }
+        }
+      });
+
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
       m25DataPromise.then(m25Data => {
         if (!m25Data?.points?.length) return;
@@ -813,30 +837,14 @@ if (geologyGroup) {
 }
 
 // ---------- Reservoirs (surface water polygons) ----------
+// Data fetch starts immediately; creation deferred until terrain is ready (see terrain .then() chain)
 let reservoirsMesh = null;
-loadReservoirData().then(data => {
-  if (data) {
-    reservoirsMesh = createReservoirs(data, llToXZ, getTerrainMeshSurfaceY);
-    if (reservoirsMesh) {
-      scene.add(reservoirsMesh);
-      addReservoirsToLegend();
-      console.log('Reservoirs added to scene');
-    }
-  }
-});
+const reservoirDataPromise = loadReservoirData();
 
 // ---------- Canals (surface water ribbons) ----------
+// Data fetch starts immediately; creation deferred until terrain is ready (see terrain .then() chain)
 let canalsMesh = null;
-loadCanalData().then(data => {
-  if (data) {
-    canalsMesh = createCanals(data, llToXZ, getTerrainMeshSurfaceY);
-    if (canalsMesh) {
-      scene.add(canalsMesh);
-      addCanalsToLegend();
-      console.log('Canals added to scene');
-    }
-  }
-});
+const canalDataPromise = loadCanalData();
 
 // ---------- Sewer Tunnels (underground infrastructure) ----------
 let sewersMesh = null;
