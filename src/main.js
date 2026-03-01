@@ -12,6 +12,9 @@ import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThames
 import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
+import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
+import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
+import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
@@ -809,6 +812,45 @@ if (geologyGroup) {
   console.log('Geological strata added to scene');
 }
 
+// ---------- Reservoirs (surface water polygons) ----------
+let reservoirsMesh = null;
+loadReservoirData().then(data => {
+  if (data) {
+    reservoirsMesh = createReservoirs(data, llToXZ, getTerrainMeshSurfaceY);
+    if (reservoirsMesh) {
+      scene.add(reservoirsMesh);
+      addReservoirsToLegend();
+      console.log('Reservoirs added to scene');
+    }
+  }
+});
+
+// ---------- Canals (surface water ribbons) ----------
+let canalsMesh = null;
+loadCanalData().then(data => {
+  if (data) {
+    canalsMesh = createCanals(data, llToXZ, getTerrainMeshSurfaceY);
+    if (canalsMesh) {
+      scene.add(canalsMesh);
+      addCanalsToLegend();
+      console.log('Canals added to scene');
+    }
+  }
+});
+
+// ---------- Sewer Tunnels (underground infrastructure) ----------
+let sewersMesh = null;
+loadSewerData().then(data => {
+  if (data) {
+    sewersMesh = createSewerTunnels(data, llToXZ, sim.verticalScale);
+    if (sewersMesh) {
+      scene.add(sewersMesh);
+      addSewersToLegend();
+      console.log('Sewer tunnels added to scene');
+    }
+  }
+});
+
 // ---------- Tube lines (real TfL route sequences) ----------
 // Brand-ish colours (can refine later)
 const LINE_COLOURS = {
@@ -1185,6 +1227,9 @@ async function buildNetworkMvp() {
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'crossrail', textContent: 'Crossrail' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'tideway', textContent: 'Tideway Tunnel' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'geology', textContent: 'Geology' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'reservoirs', textContent: 'Reservoirs' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'canals', textContent: 'Canals' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'sewers', textContent: 'Sewers' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { disabled: true, textContent: '───────────' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'surface-hybrid', textContent: 'Surface (Hybrid)' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'surface-texture', textContent: 'Surface (Texture)' }));
@@ -1206,7 +1251,7 @@ async function buildNetworkMvp() {
 
     // Assign module-scoped applySoloSelection (needs cross-block access from keyboard/click handlers)
     applySoloSelection = function(val) {
-      const isInfra = ['crossrail', 'tideway', 'geology', 'surface-texture', 'surface-geometry', 'surface-hybrid'].includes(val);
+      const isInfra = ['crossrail', 'tideway', 'geology', 'reservoirs', 'canals', 'sewers', 'surface-texture', 'surface-geometry', 'surface-hybrid'].includes(val);
       const isSurface = val === 'surface-texture' || val === 'surface-geometry' || val === 'surface-hybrid';
 
       // Tube lines + their stations: show all or just selected
@@ -1235,6 +1280,9 @@ async function buildNetworkMvp() {
       if (tidewayMesh) tidewayMesh.visible = val === 'all' || val === 'tideway';
       if (crossrailMesh) crossrailMesh.visible = val === 'all' || val === 'crossrail';
       if (geologyGroup) geologyGroup.visible = val === 'all' || val === 'geology';
+      if (reservoirsMesh) reservoirsMesh.visible = val === 'all' || val === 'reservoirs';
+      if (canalsMesh) canalsMesh.visible = val === 'all' || val === 'canals';
+      if (sewersMesh) sewersMesh.visible = val === 'all' || val === 'sewers';
 
       // Surface features: hybrid (texture + geometry) enabled for "all" mode
       if (surfaceTextureMaterial) {

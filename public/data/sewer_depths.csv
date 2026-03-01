@@ -1,0 +1,100 @@
+# London Sewer Infrastructure — compiled from Thames Water + historical records
+# Victorian Bazalgette system + modern Lee Tunnel
+# Columns: id,name,depth_m,lat,lon,tunnel_id,source_url,notes
+#
+# tunnel_id groups points by tunnel:
+#   lee-tunnel = modern deep tunnel (Abbey Mills → Beckton)
+#   northern-outfall = Victorian surface outfall (Wick Lane → Beckton)
+#   southern-outfall = Victorian surface outfall (Deptford → Crossness)
+#   northern-high-level = Victorian interceptor (Hampstead → Wick Lane)
+#   northern-middle-1 = Victorian interceptor (Kensal Green → Wick Lane)
+#   northern-middle-2 = Victorian interceptor (Kilburn → Wick Lane)
+#   northern-low-1 = Victorian interceptor (Ravenscourt Park → Abbey Mills via Embankment)
+#   northern-low-2 = Victorian interceptor (Hammersmith → Chelsea PS via Chelsea Embankment)
+#   southern-high-level = Victorian interceptor (Herne Hill → Deptford)
+#   southern-middle = Victorian interceptor (Balham → Deptford)
+#   southern-low = Victorian interceptor (Putney → Deptford via Albert Embankment)
+
+# Lee Tunnel (modern deep, 75-80m)
+lee-01,Abbey Mills Pumping Station,75,51.531,-0.002,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Tunnel start
+lee-02,Under East Ham,78,51.527,0.043,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Deep section
+lee-03,Beckton STW,80,51.521,0.087,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Tunnel end at treatment works
+
+# Northern Outfall Sewer (Victorian surface embankment, ~3m)
+nos-01,Wick Lane,3,51.537,-0.022,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,Western start - all north bank interceptors converge here
+nos-02,Queen Elizabeth Olympic Park,3,51.535,-0.015,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,Crosses Olympic Park
+nos-03,Abbey Mills PS,3,51.531,-0.002,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,Pumping station - low level flows lifted to outfall
+nos-04,West Ham,3,51.530,0.015,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,East London
+nos-05,Plaistow,3,51.527,0.030,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,East London
+nos-06,East Ham,3,51.525,0.055,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,East London
+nos-07,Beckton STW,3,51.521,0.087,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,Terminus at Beckton treatment works
+
+# Southern Outfall Sewer (Victorian at grade, ~3m)
+sos-01,Deptford PS,3,51.480,-0.025,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Southern start - all south bank interceptors converge here
+sos-02,Greenwich,3,51.484,0.000,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Greenwich Reach
+sos-03,Woolwich,3,51.493,0.060,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Woolwich Reach
+sos-04,Plumstead,3,51.493,0.090,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Plumstead Marshes
+sos-05,Erith Marshes,3,51.500,0.120,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Erith Reach
+sos-06,Crossness PS,3,51.505,0.136,southern-outfall,https://en.wikipedia.org/wiki/Crossness_Pumping_Station,Terminus at Crossness pumping station
+
+# Northern High Level Sewer (~8m, Hampstead → Wick Lane)
+nhl-01,Hampstead,8,51.556,-0.178,northern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,High level start - Hampstead Heath
+nhl-02,Kentish Town,8,51.549,-0.142,northern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,North London
+nhl-03,Stoke Newington,8,51.561,-0.075,northern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,North East London
+nhl-04,Victoria Park,6,51.539,-0.035,northern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,Approaching convergence
+nhl-05,Wick Lane,5,51.537,-0.022,northern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence with outfall
+
+# Northern Middle Level No.1 (~10m, Kensal Green → Wick Lane)
+nml1-01,Kensal Green,10,51.530,-0.225,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,West start
+nml1-02,Bayswater,10,51.515,-0.180,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,Central London
+nml1-03,Oxford Street,10,51.515,-0.145,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,West End
+nml1-04,Clerkenwell,8,51.523,-0.105,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,Central London
+nml1-05,Bethnal Green,6,51.527,-0.065,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,East London
+nml1-06,Wick Lane,5,51.537,-0.022,northern-middle-1,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence with outfall
+
+# Northern Middle Level No.2 (~10m, Kilburn → Wick Lane)
+nml2-01,Kilburn,10,51.540,-0.200,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,North West start
+nml2-02,Edgware Road,10,51.520,-0.170,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,North London
+nml2-03,Euston Road,8,51.527,-0.132,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,Central London
+nml2-04,King's Cross,8,51.531,-0.124,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,North Central
+nml2-05,Islington,6,51.536,-0.100,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,North London
+nml2-06,Wick Lane,5,51.537,-0.022,northern-middle-2,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence with outfall
+
+# Northern Low Level Branch 1 (~5-10m, via Victoria Embankment)
+nll1-01,Ravenscourt Park,8,51.494,-0.237,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,West London start
+nll1-02,Hammersmith,8,51.492,-0.225,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,Hammersmith
+nll1-03,Kensington,10,51.500,-0.188,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,Kensington
+nll1-04,Piccadilly,10,51.510,-0.140,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,West End
+nll1-05,Strand / Embankment,8,51.510,-0.118,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,Victoria Embankment
+nll1-06,City of London,6,51.513,-0.085,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,City
+nll1-07,Aldgate,5,51.514,-0.072,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,East City
+nll1-08,Abbey Mills PS,5,51.531,-0.002,northern-low-1,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence point
+
+# Northern Low Level Branch 2 (~5-8m, via Chelsea Embankment)
+nll2-01,Hammersmith,8,51.490,-0.225,northern-low-2,https://en.wikipedia.org/wiki/London_sewerage_system,Start near bridge
+nll2-02,Fulham,6,51.475,-0.200,northern-low-2,https://en.wikipedia.org/wiki/London_sewerage_system,Fulham
+nll2-03,King's Road,6,51.487,-0.170,northern-low-2,https://en.wikipedia.org/wiki/London_sewerage_system,Chelsea
+nll2-04,Chelsea Embankment,5,51.485,-0.155,northern-low-2,https://en.wikipedia.org/wiki/London_sewerage_system,Embankment
+nll2-05,Chelsea PS,5,51.487,-0.150,northern-low-2,https://en.wikipedia.org/wiki/London_sewerage_system,Pumped to Branch 1
+
+# Southern High Level Sewer (~8m, Herne Hill → Deptford)
+shl-01,Herne Hill,8,51.461,-0.100,southern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,South London start
+shl-02,Peckham,6,51.471,-0.070,southern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,Peckham
+shl-03,New Cross,5,51.474,-0.040,southern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,New Cross
+shl-04,Deptford PS,5,51.480,-0.025,southern-high-level,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence
+
+# Southern Middle Level Sewer (~8m, Balham → Deptford)
+sml-01,Balham Hill,10,51.445,-0.150,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,South West start
+sml-02,Clapham,8,51.462,-0.137,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,Clapham
+sml-03,Stockwell,8,51.472,-0.122,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,Stockwell
+sml-04,Brixton,8,51.462,-0.113,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,Brixton
+sml-05,Camberwell,6,51.473,-0.093,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,Camberwell
+sml-06,Deptford PS,5,51.480,-0.025,southern-middle,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence
+
+# Southern Low Level Sewer (~5-10m, via Albert Embankment)
+sll-01,Putney,8,51.461,-0.215,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,South West start
+sll-02,Battersea,8,51.477,-0.175,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,Battersea
+sll-03,Vauxhall,6,51.486,-0.125,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,Vauxhall
+sll-04,Old Kent Road,6,51.487,-0.072,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,South East London
+sll-05,Bermondsey,5,51.493,-0.055,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,Bermondsey
+sll-06,Deptford PS,5,51.480,-0.025,southern-low,https://en.wikipedia.org/wiki/London_sewerage_system,Confluence
