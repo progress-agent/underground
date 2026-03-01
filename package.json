@@ -29,6 +29,7 @@
     "test": "node -e \"console.log('No tests defined.');\""
   },
   "dependencies": {
+    "proj4": "^2.20.2",
     "three": "^0.161.0",
     "upng-js": "^2.1.0"
   },

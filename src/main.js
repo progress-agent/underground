@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './terrain.js';
@@ -12,6 +13,10 @@ import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tide
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
+import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
+import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
+import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, isDuplicateBuilding, getSurfaceLoaderStats } from './surface-loader.js';
+import { initThamesMask, isInThames } from './thames-mask.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -491,6 +496,10 @@ const thamesDataPromise = loadThamesData();
         if (thamesMesh) {
           scene.add(thamesMesh);
         }
+        // Initialise Thames river corridor mask for building exclusion
+        if (thamesData.points) {
+          initThamesMask(thamesData.points);
+        }
       }
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
@@ -513,6 +522,60 @@ const thamesDataPromise = loadThamesData();
         }
 
         console.log('M25 world boundary applied');
+
+        // ── Surface features: tiled progressive loading ──
+        // Create parent group for per-tile building meshes
+        surfaceGeometryGroup = new THREE.Group();
+        surfaceGeometryGroup.name = 'surfaceGeometry';
+        surfaceGeometryGroup.visible = true; // hybrid surface on by default
+        scene.add(surfaceGeometryGroup);
+
+        initSurfaceLoader({
+          onTileLoaded: (tileData, tileEntry) => {
+            // Rasterise parks + roads into persistent full-map texture
+            if (surfaceTexState) {
+              rasteriseTile(surfaceTexState, tileData);
+            }
+            // Filter buildings: M25 boundary + Thames river corridor exclusion
+            const filteredBuildings = tileData.buildings
+              ? tileData.buildings.filter(b => isInsideM25(b.cx, b.cz) && !isInThames(b.cx, b.cz))
+              : [];
+            // Create buildings as InstancedMesh for this tile
+            const mesh = createTileBuildings(
+              filteredBuildings, getTerrainMeshSurfaceY,
+              VERTICAL_EXAGGERATION, isDuplicateBuilding
+            );
+            if (mesh) {
+              mesh.name = `buildings-${tileEntry.file}`;
+              surfaceGeometryGroup.add(mesh);
+            }
+          },
+          onTileDisposed: (tileEntry) => {
+            // Remove tile's building mesh from scene
+            const meshName = `buildings-${tileEntry.file}`;
+            const mesh = surfaceGeometryGroup.getObjectByName(meshName);
+            if (mesh) {
+              surfaceGeometryGroup.remove(mesh);
+              disposeTileGeometry(mesh);
+            }
+          },
+        }).then(manifest => {
+          const fullBBox = getFullSceneBBox();
+
+          // Create persistent 4096² texture spanning full M25 area
+          surfaceTexState = createSurfaceTexture(fullBBox, 4096);
+
+          // Inject surface shader into terrain material (chains after M25 mask)
+          if (result.topMat) {
+            const uvBounds = sceneBBoxToUVBounds(fullBBox);
+            applySurfaceTexture(result.topMat, surfaceTexState.texture, uvBounds);
+            setSurfaceTextureEnabled(result.topMat, true); // hybrid surface on by default
+            surfaceTextureMaterial = result.topMat;
+          }
+
+          surfaceDataLoaded = true;
+          console.log(`Surface loader ready: ${manifest.tiles.length} tiles, ${manifest.cols}×${manifest.rows} grid`);
+        }).catch(err => console.warn('Surface loader failed:', err.message));
       });
     });
   });
@@ -702,6 +765,12 @@ m25DataPromise.then(data => {
   if (data?.points?.length) initM25Boundary(data.points);
 });
 
+// ---------- Surface features (tiled progressive loading) ----------
+let surfaceGeometryGroup = null;  // Parent group for per-tile building InstancedMeshes
+let surfaceTextureMaterial = null; // Terrain material ref for texture toggle
+let surfaceTexState = null;       // { texture, pixels, size, bbox } from createSurfaceTexture
+let surfaceDataLoaded = false;
+
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};
 
@@ -817,16 +886,17 @@ function frostedTubeMaterial(hex) {
 // Geo projection: lon/lat -> x/z in *metres* (local tangent plane-ish), centred on London.
 // This makes scene units ≈ metres, so train speeds and station spacing can feel real.
 const ORIGIN = { lat: 51.5074, lon: -0.1278 };
-const METRES_PER_DEG_LAT = 111_320;
-function metresPerDegLonAt(latDeg) {
-  return 111_320 * Math.cos(latDeg * Math.PI / 180);
-}
+
+// OSGB36 / British National Grid — Helmert 7-param datum transform from WGS84
+proj4.defs('EPSG:27700', '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs');
+// Derived from proj4 — consistent with Helmert transform, not independently looked-up.
+const [BNG_REF_E, BNG_REF_N] = proj4('EPSG:4326', 'EPSG:27700', [ORIGIN.lon, ORIGIN.lat]);
+
 function llToXZ(lat, lon) {
-  const dLon = lon - ORIGIN.lon;
-  const dLat = lat - ORIGIN.lat;
-  const x = dLon * metresPerDegLonAt(ORIGIN.lat) * sim.horizontalScale;
-  const z = dLat * METRES_PER_DEG_LAT * sim.horizontalScale;
-  return { x, z: -z };
+  const [e, n] = proj4('EPSG:4326', 'EPSG:27700', [lon, lat]);
+  const x = (e - BNG_REF_E) * sim.horizontalScale;
+  const z = -(n - BNG_REF_N) * sim.horizontalScale;
+  return { x, z };
 }
 
 // Shared station registry: all lines use same X/Z for stations with same NaPTAN ID
@@ -1115,6 +1185,10 @@ async function buildNetworkMvp() {
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'crossrail', textContent: 'Crossrail' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'tideway', textContent: 'Tideway Tunnel' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'geology', textContent: 'Geology' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { disabled: true, textContent: '───────────' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'surface-hybrid', textContent: 'Surface (Hybrid)' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'surface-texture', textContent: 'Surface (Texture)' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'surface-geometry', textContent: 'Surface (Geometry)' }));
 
         // Restore from URL or prefs
         const focusParam = normalizeLineId(getUrlStringParam('focus'));
@@ -1132,7 +1206,8 @@ async function buildNetworkMvp() {
 
     // Assign module-scoped applySoloSelection (needs cross-block access from keyboard/click handlers)
     applySoloSelection = function(val) {
-      const isInfra = ['crossrail', 'tideway', 'geology'].includes(val);
+      const isInfra = ['crossrail', 'tideway', 'geology', 'surface-texture', 'surface-geometry', 'surface-hybrid'].includes(val);
+      const isSurface = val === 'surface-texture' || val === 'surface-geometry' || val === 'surface-hybrid';
 
       // Tube lines + their stations: show all or just selected
       for (const id of wanted) {
@@ -1161,8 +1236,17 @@ async function buildNetworkMvp() {
       if (crossrailMesh) crossrailMesh.visible = val === 'all' || val === 'crossrail';
       if (geologyGroup) geologyGroup.visible = val === 'all' || val === 'geology';
 
-      // Focus camera on the selected line
-      if (!isInfra && val !== 'all') {
+      // Surface features: hybrid (texture + geometry) enabled for "all" mode
+      if (surfaceTextureMaterial) {
+        setSurfaceTextureEnabled(surfaceTextureMaterial, val === 'all' || val === 'surface-texture' || val === 'surface-hybrid');
+      }
+      if (surfaceGeometryGroup) {
+        setSurfaceGeometryVisible(surfaceGeometryGroup, val === 'all' || val === 'surface-geometry' || val === 'surface-hybrid');
+      }
+
+      // Focus camera on the selected line / feature
+      // Surface modes: don't move camera — features are full-map, visible wherever you are
+      if (!isSurface && !isInfra && val !== 'all') {
         const pts = lineCenterPoints.get(val);
         if (pts && pts.length > 0) {
           focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.22 });
@@ -1836,6 +1920,9 @@ function tick() {
     : camera.position.y < 0);
   altimeterEl.classList.toggle('underground', isUnderground);
 
+  // Update surface tile loader (camera-proximity based loading/unloading)
+  updateSurfaceLoader(camera.position.x, camera.position.z);
+
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
 
@@ -1870,7 +1957,9 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass,
-    // Getter so live value is read (unifiedShaftLayer is set after async loading)
+    // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
+    get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
+    get surfaceGeometryGroup() { return surfaceGeometryGroup; },
   };
 }

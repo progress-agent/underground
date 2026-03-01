@@ -5,3 +5,14 @@ dist
 .DS_Store
 .env
 .env.*
+
+# Large terrain heightmap (186MB)
+public/data/terrain/london_full_height_u16.png
+
+# Surface tiles from OSM (692MB, fetched by Prog)
+# Included in dist/ for manual wrangler deploy, not in git
+public/data/surface/tiles/
+
+# Test artifacts
+test-results/
+tests/screenshots/
