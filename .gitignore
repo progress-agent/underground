@@ -9,10 +9,13 @@ dist
 # Large terrain heightmap (186MB)
 public/data/terrain/london_full_height_u16.png
 
-# Surface tiles from OSM (692MB, fetched by Prog)
-# Included in dist/ for manual wrangler deploy, not in git
-public/data/surface/tiles/
+# Surface data from OSM (780MB+ tiles + test data, fetched by Prog)
+# Included in dist/ for manual deploy, not in git
+public/data/surface/
 
 # Test artifacts
 test-results/
 tests/screenshots/
+
+# Local Netlify folder
+.netlify
