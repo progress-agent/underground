@@ -24,6 +24,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { createLensSystem } from './lens.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -171,6 +172,9 @@ const bloomPass = new UnrealBloomPass(
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
+
+// ── Lens character simulation (barrel distortion, CA, vignette) ──
+const lensSystem = createLensSystem(camera, composer, controls);
 
 // ── Train system (shared state) ──
 const trainSystem = createTrainSystem({ scene, renderer, camera });
@@ -429,6 +433,30 @@ function deleteUrlParam(key) {
       if (v === 1.0) deleteUrlParam('hx');
       else setUrlParam('hx', v);
       rebuildFromSimScales();
+    });
+  }
+
+  // ── Focal length slider ──
+  const flEl = document.getElementById('focalLength');
+  const flOut = document.getElementById('focalLengthValue');
+  const initialFl = getUrlNumberParam('fl') ?? prefs.focalLength ?? 35;
+  if (flEl) {
+    flEl.value = String(initialFl);
+    if (flOut) flOut.textContent = `${initialFl}mm`;
+    lensSystem.setFocalLength(initialFl);
+
+    flEl.addEventListener('input', () => {
+      const mm = Number(flEl.value) || 35;
+      lensSystem.setFocalLength(mm);
+      prefs.focalLength = mm;
+      savePrefs(prefs);
+      if (flOut) flOut.textContent = `${mm}mm`;
+    });
+
+    flEl.addEventListener('change', () => {
+      const mm = Number(flEl.value) || 35;
+      if (mm === 35) deleteUrlParam('fl');
+      else setUrlParam('fl', mm);
     });
   }
 }
@@ -1539,6 +1567,7 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
+  lensSystem.updateAspect(camera.aspect);
 });
 
 // ---------- Click-to-focus / shift-click toggle + hover tooltip ----------
@@ -1837,6 +1866,9 @@ function setVictoriaShaftsVisible(v) {
       // Ensure the current sim sliders are represented.
       url.searchParams.set('t', String(sim.timeScale));
       url.searchParams.set('hx', String(sim.horizontalScale));
+      const fl = lensSystem.getFocalLength();
+      if (fl !== 35) url.searchParams.set('fl', String(fl));
+      else url.searchParams.delete('fl');
 
       // Preserve focus param if present; otherwise, omit.
       const focusId = normalizeLineId(getUrlStringParam('focus'));
@@ -1887,6 +1919,15 @@ window.addEventListener('keydown', (e) => {
     camera.position.copy(INITIAL_VIEW.position);
     controls.target.copy(INITIAL_VIEW.target);
     controls.update();
+    // Reset focal length to 35mm default
+    lensSystem.setFocalLength(35);
+    prefs.focalLength = 35;
+    savePrefs(prefs);
+    const flElR = document.getElementById('focalLength');
+    const flOutR = document.getElementById('focalLengthValue');
+    if (flElR) flElR.value = '35';
+    if (flOutR) flOutR.textContent = '35mm';
+    deleteUrlParam('fl');
   }
   if (e.key === 'f' || e.key === 'F') {
     // Cycle through lines in the solo dropdown
@@ -1936,6 +1977,21 @@ window.addEventListener('keydown', (e) => {
     if (helpOverlay) {
       helpOverlay.classList.remove('visible');
     }
+  }
+
+  // Focal length shortcuts: [ = wider, ] = longer
+  if (e.key === '[' || e.key === ']') {
+    const step = e.key === '[' ? -5 : 5;
+    const mm = Math.max(12, Math.min(200, lensSystem.getFocalLength() + step));
+    lensSystem.setFocalLength(mm);
+    prefs.focalLength = mm;
+    savePrefs(prefs);
+    const flEl = document.getElementById('focalLength');
+    const flOut = document.getElementById('focalLengthValue');
+    if (flEl) flEl.value = String(mm);
+    if (flOut) flOut.textContent = `${mm}mm`;
+    if (mm === 35) deleteUrlParam('fl');
+    else setUrlParam('fl', mm);
   }
 });
 
@@ -2012,7 +2068,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
-    trainSystem, composer, bloomPass,
+    trainSystem, composer, bloomPass, lensSystem,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },

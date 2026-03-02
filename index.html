@@ -356,6 +356,7 @@
           <div class="row"><span class="key">R</span> Reset to curated view</div>
           <div class="row"><span class="key">F</span> Focus on line (cycles through)</div>
           <div class="row"><span class="key">Shift</span> + <span class="key">A</span> Focus on all lines</div>
+          <div class="row"><span class="key">[</span> / <span class="key">]</span> Focal length &minus; / +</div>
         </div>
         <div class="section">
           <div class="section-title">Toggles</div>
@@ -442,6 +443,12 @@
           Horizontal scale:
           <input id="horizontalScale" type="range" min="0.25" max="3" value="1" step="0.05" style="vertical-align: middle; width: 160px;" />
           <span id="horizontalScaleValue">1.00×</span>
+        </p>
+        <p class="small">
+          Focal length:
+          <input id="focalLength" type="range" min="12" max="200" value="35" step="1"
+                 style="vertical-align: middle; width: 160px;" />
+          <span id="focalLengthValue">35mm</span>
         </p>
 
         <p class="small row">
