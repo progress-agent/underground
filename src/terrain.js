@@ -692,10 +692,10 @@ export const ENV_CONFIG = {
   skyStartY: 200,        // Where sky becomes visible (raised for VE=5: central London ground ≈ Y=75)
   fogDepthY: -50,        // Where underground fog thickens
 
-  // Colors - lighter for better visibility
-  skyColor: 0x87CEEB,    // Sky blue (above)
+  // Colors
+  skyColor: 0x5a7a8f,    // Muted steel-blue (clear colour behind geometry)
   groundColor: 0x1f1a15, // Dark warm brown-black (underground)
-  fogColorSky: 0xbdd4e6, // Desaturated blue-grey fog above ground
+  fogColorSky: 0x3a4a52, // Dark warm-grey fog — blends with terrain, not sky
   fogColorGround: 0x1a1510, // Darker warm fog underground
 
   // Fog distances - wider range for clearer visibility
@@ -758,10 +758,10 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideM25 = tr
 
   if (scene.fog) {
     scene.fog.color.copy(fogColor);
-    // Fog near: push well out above ground, keep tight underground
-    // Underground (surfaceBlend=0): 100m. Ground (alt=0): ~2200m. Altitude 1000m+: ~5300m.
+    // Fog near: push far out above ground, keep tight underground
+    // Underground (surfaceBlend=0): 100m. Ground (alt=0): ~5000m. Altitude 1000m+: ~10000m.
     const altFactor = Math.min(1, Math.max(0, y / 1000));
-    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + surfaceBlend * (10 + altFactor * 16));
+    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + surfaceBlend * (24 + altFactor * 25));
 
     // Dynamic fog.far: extend for both macro pullback AND altitude
     const camDist = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
@@ -780,7 +780,7 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideM25 = tr
 
   // Update sky visibility — hidden underground to avoid wash-out over BackSide terrain
   if (sky) {
-    sky.material.opacity = surfaceBlend * 0.9;
+    sky.material.opacity = surfaceBlend * 0.45;
     sky.visible = surfaceBlend > 0.01;
   }
 
