@@ -758,17 +758,17 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideM25 = tr
 
   if (scene.fog) {
     scene.fog.color.copy(fogColor);
-    // Fog near: push out with both surface blend and altitude
-    // Underground (surfaceBlend=0): 100m. Ground (alt=0): ~700m. Altitude 1000m+: ~1700m.
+    // Fog near: push well out above ground, keep tight underground
+    // Underground (surfaceBlend=0): 100m. Ground (alt=0): ~2200m. Altitude 1000m+: ~5300m.
     const altFactor = Math.min(1, Math.max(0, y / 1000));
-    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + surfaceBlend * (3 + altFactor * 5));
+    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + surfaceBlend * (10 + altFactor * 16));
 
     // Dynamic fog.far: extend for both macro pullback AND altitude
     const camDist = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
     const baseFar = ENV_CONFIG.fogFar;
     const macroFar = 60000;
     const fogFarBlend = Math.min(1, Math.max(0, (camDist - 10000) / 10000));
-    const altBlend = Math.min(1, Math.max(0, y / 3000));
+    const altBlend = Math.min(1, Math.max(0, y / 1500));
     const altFar = baseFar + (macroFar - baseFar) * altBlend;
     scene.fog.far = Math.max(baseFar + (macroFar - baseFar) * fogFarBlend, altFar);
 
