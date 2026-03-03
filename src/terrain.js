@@ -695,7 +695,7 @@ export const ENV_CONFIG = {
   // Colors - lighter for better visibility
   skyColor: 0x87CEEB,    // Sky blue (above)
   groundColor: 0x1f1a15, // Dark warm brown-black (underground)
-  fogColorSky: 0xa0d0f0, // Lighter fog when above ground
+  fogColorSky: 0xbdd4e6, // Desaturated blue-grey fog above ground
   fogColorGround: 0x1a1510, // Darker warm fog underground
 
   // Fog distances - wider range for clearer visibility
@@ -758,16 +758,19 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideM25 = tr
 
   if (scene.fog) {
     scene.fog.color.copy(fogColor);
-    // Underground: denser fog for mystery; Above: lighter fog for clarity
-    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + 0.5 * surfaceBlend);
+    // Fog near: push out with both surface blend and altitude
+    // Underground (surfaceBlend=0): 100m. Ground (alt=0): ~700m. Altitude 1000m+: ~1700m.
+    const altFactor = Math.min(1, Math.max(0, y / 1000));
+    scene.fog.near = ENV_CONFIG.fogNear * (0.5 + surfaceBlend * (3 + altFactor * 5));
 
-    // Dynamic fog.far: extend when camera is far from origin (macro view)
-    // so cliff pillar and disc edge remain visible when pulled back
+    // Dynamic fog.far: extend for both macro pullback AND altitude
     const camDist = Math.sqrt(camera.position.x * camera.position.x + camera.position.z * camera.position.z);
     const baseFar = ENV_CONFIG.fogFar;
     const macroFar = 60000;
     const fogFarBlend = Math.min(1, Math.max(0, (camDist - 10000) / 10000));
-    scene.fog.far = baseFar + (macroFar - baseFar) * fogFarBlend;
+    const altBlend = Math.min(1, Math.max(0, y / 3000));
+    const altFar = baseFar + (macroFar - baseFar) * altBlend;
+    scene.fog.far = Math.max(baseFar + (macroFar - baseFar) * fogFarBlend, altFar);
 
     // Underground: tighten fog for atmospheric depth
     if (surfaceBlend < 0.3) {
