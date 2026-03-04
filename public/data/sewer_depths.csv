@@ -1,9 +1,8 @@
 # London Sewer Infrastructure — compiled from Thames Water + historical records
-# Victorian Bazalgette system + modern Lee Tunnel
+# Victorian Bazalgette system (Lee Tunnel now in tideway.js → lee_tunnel.csv)
 # Columns: id,name,depth_m,lat,lon,tunnel_id,source_url,notes
 #
 # tunnel_id groups points by tunnel:
-#   lee-tunnel = modern deep tunnel (Abbey Mills → Beckton)
 #   northern-outfall = Victorian surface outfall (Wick Lane → Beckton)
 #   southern-outfall = Victorian surface outfall (Deptford → Crossness)
 #   northern-high-level = Victorian interceptor (Hampstead → Wick Lane)
@@ -15,10 +14,7 @@
 #   southern-middle = Victorian interceptor (Balham → Deptford)
 #   southern-low = Victorian interceptor (Putney → Deptford via Albert Embankment)
 
-# Lee Tunnel (modern deep, 75-80m)
-lee-01,Abbey Mills Pumping Station,75,51.531,-0.002,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Tunnel start
-lee-02,Under East Ham,78,51.527,0.043,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Deep section
-lee-03,Beckton STW,80,51.521,0.087,lee-tunnel,https://www.thameswater.co.uk/lee-tunnel,Tunnel end at treatment works
+# Lee Tunnel — now handled by tideway.js (see lee_tunnel.csv)
 
 # Northern Outfall Sewer (Victorian surface embankment, ~3m)
 nos-01,Wick Lane,3,51.537,-0.022,northern-outfall,https://en.wikipedia.org/wiki/Northern_Outfall_Sewer,Western start - all north bank interceptors converge here

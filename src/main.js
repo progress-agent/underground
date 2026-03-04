@@ -9,7 +9,7 @@ import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25 } from './m25.js';
-import { loadTidewayData, createTidewayTunnel, addTidewayToLegend } from './tideway.js';
+import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
@@ -517,6 +517,7 @@ const thamesDataPromise = loadThamesData();
       // Reposition tubes + stations to terrain-relative depth, then snap shafts.
       snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
+      snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
 
       // Build Thames 3D volume (flat water level, no terrain sampling needed)
       if (thamesData) {
@@ -829,16 +830,16 @@ let surfaceDataLoaded = false;
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};
 
-// ---------- Tideway Tunnel (Super Sewer - deeper infrastructure) ----------
+// ---------- Tideway + Lee Tunnel (Super Sewer system) ----------
 let tidewayMesh = null;
 loadTidewayData().then(tidewayData => {
   if (tidewayData) {
-    // Use the same projection as tube stations
-    tidewayMesh = createTidewayTunnel(tidewayData, llToXZ, sim.verticalScale);
+    tidewayMesh = createTidewaySystem(tidewayData, llToXZ, sim.verticalScale);
     if (tidewayMesh) {
       scene.add(tidewayMesh);
       addTidewayToLegend();
-      console.log('Tideway Tunnel added to scene');
+      if (terrain) snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
+      console.log('Tideway + Lee Tunnel system added to scene');
     }
   }
 });
@@ -1261,7 +1262,7 @@ async function buildNetworkMvp() {
         // Add infrastructure layers as additional options
         soloSelect.appendChild(Object.assign(document.createElement('option'), { disabled: true, textContent: '───────────' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'crossrail', textContent: 'Crossrail' }));
-        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'tideway', textContent: 'Tideway Tunnel' }));
+        soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'tideway', textContent: 'Tideway + Lee Tunnel' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'geology', textContent: 'Geology' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'reservoirs', textContent: 'Reservoirs' }));
         soloSelect.appendChild(Object.assign(document.createElement('option'), { value: 'canals', textContent: 'Canals' }));
@@ -1496,6 +1497,7 @@ async function buildNetworkMvp() {
     if (terrain) {
       snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
+      snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
     }
 
     // Loading complete: set bar to 100% and hide it

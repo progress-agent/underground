@@ -1,30 +1,35 @@
-# Thames Tideway Tunnel (Super Sewer) Depth Anchors
+# Thames Tideway Tunnel (Super Sewer) Route Waypoints
 #
-# The Thames Tideway Tunnel is a 25km super sewer running from Acton to Abbey Mills
-# beneath the River Thames. Completed in 2024, it's the deepest operational
-# infrastructure beneath London.
+# 25km tunnel from Acton to Abbey Mills beneath the River Thames
+# Completed 2024, opened May 2025
+# Depth: 31m (Acton) to 67m (Abbey Mills)
 #
-# Depth ranges from 30m (Acton) to 65m (Blackfriars)
-# Diameter: 7.2m (larger than tube tunnels at ~3.6m)
+# Points in route-sequence order (west to east)
+# MAIN BORE ONLY — Greenwich/Frogmore spurs handled separately in tideway.js
+# Earl, Deptford, Greenwich CSOs connect via the Greenwich Connection spur
+# Dormay, KGP connect via the Frogmore Connection spur
 #
-# Points in route-sequence order (west to east along the Thames)
-# Main bore only — spurs removed (Mogden, King George's Park, Carnwath,
-# Aldwych, Victoria Park/Lee Tunnel, Greenwich Connection)
+# Section boundaries (for variable tunnel diameter):
+#   West (Acton → Carnwath): 6.5m ID → radius 3.25m
+#   West-Central (Carnwath → Kirtling): 7.2m ID → radius 3.6m
+#   East-Central (Kirtling → Chambers): 7.2m ID → radius 3.6m
+#   East (Chambers → Abbey Mills): 7.2m ID → radius 3.6m
 #
-# Columns:
-# id,name,depth_m,lat,lon,source_url,notes
-
-ttw-west-start,Acton Pumping Station,30,51.5083,-0.2764,https://www.tideway.london/the-tunnel/route/,Tunnel start
-ttw-hammersmith,Hammersmith Connection,35,51.4928,-0.2229,https://www.tideway.london/the-tunnel/route/,Beneath Thames at Hammersmith
-ttw-fulham,Fulham Connection,38,51.4791,-0.1936,https://www.tideway.london/the-tunnel/route/,CSO interception point
-ttw-battersea,Battersea Connection,42,51.4762,-0.1439,https://www.tideway.london/the-tunnel/route/,Beneath Battersea Bridge area
-ttw-vauxhall,Vauxhall Connection,45,51.4855,-0.1232,https://www.tideway.london/the-tunnel/route/,Deep shaft at Vauxhall
-ttw-westminster,Westminster Shaft,50,51.4975,-0.1247,https://www.tideway.london/the-tunnel/route/,Near Westminster Bridge
-ttw-victoria,Victoria Embankment,55,51.5010,-0.1180,https://www.tideway.london/the-tunnel/route/,Beneath Victoria Embankment
-ttw-temple,Temple Shaft,58,51.5110,-0.1140,https://www.tideway.london/the-tunnel/route/,Near Temple station
-ttw-blackfriars,Blackfriars Shaft,65,51.5115,-0.1030,https://www.tideway.london/the-tunnel/route/,DEEPEST POINT - 65m below ground
-ttw-chambers,Chambers Wharf,60,51.5015,-0.0780,https://www.tideway.london/the-tunnel/route/,Main drive shaft Bermondsey
-ttw-earl,Earl Pumping Station,52,51.4980,-0.0530,https://www.tideway.london/the-tunnel/route/,CSO interception Rotherhithe
-ttw-kemp,King Edward Memorial Park,48,51.5080,-0.0370,https://www.tideway.london/the-tunnel/route/,Foreshore shaft Shadwell
-ttw-limehouse,Limehouse Connection,45,51.5120,-0.0330,https://www.tideway.london/the-tunnel/route/,Beneath Limehouse Reach
-ttw-abbey-mills,Abbey Mills Pumping Station,40,51.5270,0.0000,https://www.tideway.london/the-tunnel/route/,Tunnel end - connects to Lee Tunnel
+# Columns: id,name,depth_m,lat,lon,section,notes
+ttw-acton,Acton Storm Tanks,31,51.5057,-0.2674,west,Western terminus
+ttw-hammersmith,Hammersmith PS,33,51.4876,-0.2290,west,CSO shaft
+ttw-barn-elms,Barn Elms,34,51.4735,-0.2145,west,CSO shaft
+ttw-putney,Putney Embankment,36,51.4665,-0.2105,west,Foreshore CSO
+ttw-carnwath,Carnwath Road Riverside,42,51.4717,-0.1870,west,Main drive — SECTION BOUNDARY
+ttw-falconbrook,Falconbrook PS,40,51.4710,-0.1730,central,Battersea CSO
+ttw-cremorne,Cremorne Wharf,42,51.4790,-0.1730,central,Chelsea CSO
+ttw-chelsea,Chelsea Embankment,45,51.4850,-0.1600,central,Foreshore CSO
+ttw-kirtling,Kirtling Street,48,51.4785,-0.1420,central,Central main drive — SECTION BOUNDARY
+ttw-heathwall,Heathwall PS,46,51.4760,-0.1360,central,CSO large shaft
+ttw-albert,Albert Embankment,48,51.4920,-0.1215,central,South bank CSO
+ttw-victoria,Victoria Embankment,51,51.5075,-0.1190,central,North bank CSO
+ttw-blackfriars,Blackfriars Bridge,53,51.5095,-0.1050,central,Largest CSO — Fleet intercept
+ttw-chambers,Chambers Wharf,58,51.5010,-0.0745,east,Main drive — SECTION BOUNDARY
+ttw-kemp,King Edward Memorial Park,60,51.5095,-0.0490,east,Deepest CSO shaft
+ttw-limehouse,Limehouse Reach,50,51.5120,-0.0330,east,Route waypoint
+ttw-abbey-mills,Abbey Mills PS,67,51.5305,0.0030,east,Eastern terminus — deepest point

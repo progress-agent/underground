@@ -1,6 +1,6 @@
 // London Sewer Infrastructure visualization module
-// Victorian Bazalgette system + modern Lee Tunnel
-// Includes: Lee Tunnel, Northern/Southern Outfall Sewers, 8 Victorian interceptor sewers
+// Victorian Bazalgette system (Lee Tunnel now handled by tideway.js)
+// Includes: Northern/Southern Outfall Sewers, 8 Victorian interceptor sewers
 
 import * as THREE from 'three';
 
@@ -51,8 +51,6 @@ function parseSewerCSV(csv) {
 
 // Color scheme for different sewer types
 const SEWER_COLORS = {
-  // Modern deep tunnel
-  'lee-tunnel': { base: 0x4a3728, glow: 0x6b4423, name: 'Lee Tunnel (modern, 75-80m)' },
   // Victorian outfall sewers (surface)
   'northern-outfall': { base: 0x5c4033, glow: 0x8b6914, name: 'Northern Outfall Sewer (1865)' },
   'southern-outfall': { base: 0x654321, glow: 0xa0522d, name: 'Southern Outfall Sewer (1865)' },
@@ -94,9 +92,8 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     curve.curveType = 'catmullrom';
     curve.tension = 0.5;
     
-    // Main tunnel tube - slightly smaller than Tideway for Victorian sewers
-    const isDeepTunnel = tunnelId === 'lee-tunnel';
-    const radius = isDeepTunnel ? 3.6 : 2.0; // Lee Tunnel ~7.2m diameter, Victorian ~4m
+    // Victorian sewers are ~4m diameter
+    const radius = 2.0;
     
     const tubeGeometry = new THREE.TubeGeometry(curve, 100, radius, 10, false);
     
@@ -130,7 +127,7 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
         const xz = latLonToXZ(p.lat, p.lon);
         const y = -(p.depth * verticalScale);
         
-        const markerGeometry = new THREE.SphereGeometry(isDeepTunnel ? 1.2 : 0.8, 10, 10);
+        const markerGeometry = new THREE.SphereGeometry(0.8, 10, 10);
         const markerMaterial = new THREE.MeshBasicMaterial({
           color: colorScheme.glow,
           transparent: true,
@@ -163,7 +160,6 @@ export function addSewersToLegend() {
   
   // Add legend items for each major sewer type
   const legendItems = [
-    { color: '#4a3728', glow: '#6b4423', label: 'Lee Tunnel (modern, 75-80m)' },
     { color: '#5c4033', glow: '#8b6914', label: 'Victorian Outfall Sewers (1865)' },
     { color: '#8b7355', glow: '#cd853f', label: 'Northern Victorian Interceptors' },
     { color: '#6b4423', glow: '#bc8f8f', label: 'Southern Victorian Interceptors' }

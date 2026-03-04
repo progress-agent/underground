@@ -1,0 +1,31 @@
+# Thames Tideway Tunnel — Shaft Sites
+# Source: Thames Water Utilities Limited (Thames Tideway Tunnel) Order 2014
+# 21 shaft sites with verified dimensions from the 2014 Order
+#
+# section: west / central / east (determines main tunnel diameter)
+# type: main-drive / cso / reception / connection / system-mod
+# diameter_m: internal shaft diameter
+# depth_m: depth to invert (bottom of shaft)
+#
+# Columns: id,name,section,type,diameter_m,depth_m,lat,lon,notes
+acton,Acton Storm Tanks,west,reception,15,31,51.5057,-0.2674,Western terminus
+hammersmith,Hammersmith PS,west,cso,11,33,51.4876,-0.2290,CSO + connection drive
+barn-elms,Barn Elms,west,cso,6,34,51.4735,-0.2145,215m connection tunnel
+putney,Putney Embankment,west,cso,6,36,51.4665,-0.2105,Foreshore site
+carnwath,Carnwath Road Riverside,west,main-drive,25,42,51.4717,-0.1870,TBM launch west
+dormay,Dormay Street,west,connection,12,24,51.4575,-0.1890,Frogmore spur
+kgp,King Georges Park,west,connection,9,21,51.4540,-0.1935,Shallowest shaft
+falconbrook,Falconbrook PS,central,cso,9,40,51.4710,-0.1730,Battersea side
+cremorne,Cremorne Wharf Depot,central,cso,8,42,51.4790,-0.1730,Chelsea Lots Road
+chelsea,Chelsea Embankment,central,cso,12,45,51.4850,-0.1600,Foreshore site
+kirtling,Kirtling Street,central,main-drive,30,48,51.4785,-0.1420,Central TBM launch
+heathwall,Heathwall PS,central,cso,16,46,51.4760,-0.1360,Two shafts at site
+albert,Albert Embankment,central,cso,16,48,51.4920,-0.1215,South bank opp Parliament
+victoria,Victoria Embankment,central,cso,13,51,51.5075,-0.1190,North bank
+blackfriars,Blackfriars Bridge,central,cso,24,53,51.5095,-0.1050,Largest CSO shaft Fleet
+chambers,Chambers Wharf,east,main-drive,25,58,51.5010,-0.0745,TBM launch east
+earl,Earl PS,east,cso,17,51,51.4830,-0.0375,Shaft extends 3m above ground
+deptford,Deptford Church Street,east,cso,17,48,51.4800,-0.0280,CSO interception
+greenwich,Greenwich PS,east,cso,17,46,51.4835,-0.0100,Greenwich connection start
+kemp,King Edward Memorial Park,east,cso,20,60,51.5095,-0.0490,Deepest CSO shaft
+abbey-mills,Abbey Mills PS,east,reception,20,67,51.5305,0.0030,Eastern terminus deepest

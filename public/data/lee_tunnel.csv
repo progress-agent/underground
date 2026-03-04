@@ -1,0 +1,16 @@
+# Lee Tunnel — Route and Shaft Data
+# 6.9km deep tunnel from Abbey Mills to Beckton STW
+# Completed 2016, 7.2m internal diameter, 75-80m deep
+#
+# type: shaft / route (route points define tunnel path, shaft points have dimensions)
+# diameter_m: shaft internal diameter (0 for route-only points)
+# depth_m: depth below ground
+#
+# Columns: id,name,type,diameter_m,depth_m,lat,lon,notes
+lee-abbey-1,Abbey Mills Shaft 1,shaft,25,68,51.5305,0.0030,Western terminus connects to Tideway
+lee-abbey-2,Abbey Mills Shaft 2,shaft,25,68,51.5310,0.0045,Second shaft at Abbey Mills
+lee-mid-1,Under East Ham,route,0,78,51.5270,0.0250,Mid-tunnel route point
+lee-mid-2,Under Beckton Road,route,0,80,51.5230,0.0500,Deep section route point
+lee-beckton-overflow,Beckton Overflow Shaft,shaft,20,74.5,51.5200,0.0620,Overflow shaft
+lee-beckton-ps,Beckton Pumping Station,shaft,38,98,51.5180,0.0700,Largest shaft in London
+lee-beckton-3,Beckton Shaft 3,shaft,25,84,51.5160,0.0730,Treatment works connection
