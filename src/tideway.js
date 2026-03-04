@@ -25,6 +25,15 @@ const SECTION_RADIUS = {
 // Section boundary site IDs (where TBMs were launched/received)
 const SECTION_BOUNDARIES = ['ttw-carnwath', 'ttw-kirtling', 'ttw-chambers'];
 
+// Human-readable section names for tooltips
+const SECTION_DISPLAY_NAMES = {
+  west: 'Western Section (Acton – Carnwath Road)',
+  wc: 'West-Central (Carnwath Road – Kirtling Street)',
+  ec: 'East-Central (Kirtling Street – Chambers Wharf)',
+  east: 'Eastern Section (Chambers Wharf – Abbey Mills)',
+  full: 'Thames Tideway Tunnel',
+};
+
 // ---------- Materials ----------
 
 function makeTidewayTunnelMaterial() {
@@ -282,6 +291,11 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
 
     const tunnel = new THREE.Mesh(result.tubeGeo, makeTidewayTunnelMaterial());
     tunnel.name = `tideway-tunnel-${sec.name}`;
+    tunnel.userData = {
+      type: 'tideway-tunnel',
+      name: SECTION_DISPLAY_NAMES[sec.name] || `Tideway ${sec.name}`,
+      diameter: radius * 2,
+    };
     group.add(tunnel);
 
     const glow = new THREE.Mesh(result.glowGeo, makeTidewayGlowMaterial());
@@ -300,6 +314,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     const isMainDrive = site.type === 'main-drive' || site.type === 'reception';
     const mat = makeTidewayShaftMaterial(isMainDrive);
     const mesh = buildShaftCylinder(site, llToXZ, VE, mat);
+    mesh.userData.type = 'tideway-shaft';
     tidewayShaftsGroup.add(mesh);
     shaftMeshes.push(mesh);
   }
@@ -317,6 +332,11 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
   if (frogmore) {
     const frogmoreMesh = new THREE.Mesh(frogmore.tubeGeo, makeSpurMaterial());
     frogmoreMesh.name = 'tideway-spur-frogmore';
+    frogmoreMesh.userData = {
+      type: 'tideway-tunnel',
+      name: 'Frogmore Connection Spur',
+      diameter: 2.8,
+    };
     group.add(frogmoreMesh);
   }
 
@@ -331,6 +351,11 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
   if (greenwich) {
     const greenwichMesh = new THREE.Mesh(greenwich.tubeGeo, makeSpurMaterial());
     greenwichMesh.name = 'tideway-spur-greenwich';
+    greenwichMesh.userData = {
+      type: 'tideway-tunnel',
+      name: 'Greenwich Connection Spur',
+      diameter: 5.0,
+    };
     group.add(greenwichMesh);
   }
 
@@ -341,6 +366,13 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     if (leeResult) {
       const leeTunnel = new THREE.Mesh(leeResult.tubeGeo, makeLeeTunnelMaterial());
       leeTunnel.name = 'lee-tunnel';
+      leeTunnel.userData = {
+        type: 'lee-tunnel',
+        name: 'Lee Tunnel',
+        diameter: 7.2,
+        length: 6.9,
+        depthRange: '68–98m',
+      };
       group.add(leeTunnel);
 
       const leeGlow = new THREE.Mesh(leeResult.glowGeo, makeLeeGlowMaterial());
@@ -356,6 +388,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
       if (entry.type !== 'shaft') continue;
       const mat = makeLeeShaftMaterial();
       const mesh = buildShaftCylinder(entry, llToXZ, VE, mat);
+      mesh.userData.type = 'lee-shaft';
       leeShaftsGroup.add(mesh);
       shaftMeshes.push(mesh);
     }
@@ -440,7 +473,7 @@ export function addTidewayToLegend() {
   item.className = 'legend-item';
   item.innerHTML = `
     <div class="legend-line" style="background: linear-gradient(to right, #1d4ed8, #3b82f6, #6b4423);"></div>
-    <span class="legend-label">Tideway + Lee Tunnel (30-98m)</span>
+    <span class="legend-label">Tideway + Lee Tunnel (21–98m)</span>
   `;
   legend.appendChild(item);
 }

@@ -75,6 +75,7 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   const chalkMesh = new THREE.Mesh(geom, mat);
   chalkMesh.position.y = chalkTopY;
   chalkMesh.userData = {
+    type: 'chalk',
     name: 'Chalk Boundary',
     depth: '~60m',
     description: 'Clay-to-chalk transition — deep infrastructure anchors here',
@@ -102,7 +103,7 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   });
   const marker = new THREE.Mesh(markerGeometry, markerMaterial);
   marker.position.set(18000, chalkTopY, 18000);
-  marker.userData = { isStrataMarker: true, label: '60m — Chalk bedrock boundary' };
+  marker.userData = { type: 'chalk-marker', isStrataMarker: true, label: '60m — Chalk bedrock boundary' };
   group.add(marker);
 
   console.log('Chalk boundary surface created: Y =', chalkTopY, ', segments =', segments, ', displacement ±', displacementAmp / 2);

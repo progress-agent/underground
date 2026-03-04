@@ -187,8 +187,73 @@ export function createLensSystem(camera, composer, controls) {
     return currentMm;
   }
 
+  /**
+   * Map mouse NDC through the lens distortion so the raycaster hits what the
+   * user actually sees on screen.
+   *
+   * The post-processing lens shader displaces rendered pixels: for each screen
+   * UV it samples the undistorted framebuffer at distortUV(screenUV). So the
+   * pixel visually at screen position P actually came from undistorted position
+   * distortUV(P). The raycaster works in undistorted space (it only knows the
+   * camera projection), so we must feed it the *source* UV — i.e. apply the
+   * same forward distortUV mapping to the mouse coordinates.
+   *
+   * Uses the green-channel distortion (base k/kcube, no chromatic aberration
+   * offset) since that's where perceived sharpness lives.
+   *
+   * @param {number} ndcX  Mouse X in NDC (-1..+1, left..right)
+   * @param {number} ndcY  Mouse Y in NDC (-1..+1, bottom..top)
+   * @returns {{x: number, y: number}}  Corrected NDC for raycaster
+   */
+  function distortNdc(ndcX, ndcY) {
+    const kVal = lensPass.uniforms.k.value;
+    const kcubeVal = lensPass.uniforms.kcube.value;
+    const scaleVal = lensPass.uniforms.scale.value;
+    const aspect = lensPass.uniforms.aspectRatio.value;
+
+    // Skip if no distortion active (avoids unnecessary work at ~50mm+)
+    if (Math.abs(kVal) < 1e-6 && Math.abs(kcubeVal) < 1e-6) {
+      return { x: ndcX, y: ndcY };
+    }
+
+    // NDC → UV (0..1)  — note: UV y=0 is top in screen space, but in the
+    // shader vUv comes from the fullscreen quad where y=0=bottom, y=1=top.
+    // NDC y=+1=top maps to UV y=1=top, NDC y=-1=bottom maps to UV y=0=bottom.
+    const uvX = (ndcX + 1) * 0.5;
+    const uvY = (ndcY + 1) * 0.5;
+
+    // Replicate GLSL distortUV(uv, k, kcube):
+    //   centred = (uv - 0.5) / scale
+    //   centred.x *= aspectRatio
+    //   r2 = dot(centred, centred); r = sqrt(r2)
+    //   f = 1 + k*r2 + kcube*r2*r
+    //   centred *= f
+    //   centred.x /= aspectRatio
+    //   return centred + 0.5
+    let cx = (uvX - 0.5) / scaleVal;
+    let cy = (uvY - 0.5) / scaleVal;
+    cx *= aspect;
+
+    const r2 = cx * cx + cy * cy;
+    const r = Math.sqrt(r2);
+    const f = 1 + kVal * r2 + kcubeVal * r2 * r;
+
+    cx *= f;
+    cy *= f;
+    cx /= aspect;
+
+    const srcUvX = cx + 0.5;
+    const srcUvY = cy + 0.5;
+
+    // UV → NDC
+    return {
+      x: srcUvX * 2 - 1,
+      y: srcUvY * 2 - 1,
+    };
+  }
+
   // Apply initial 35mm settings
   setFocalLength(35);
 
-  return { setFocalLength, updateAspect, getFocalLength, pass: lensPass };
+  return { setFocalLength, updateAspect, getFocalLength, distortNdc, pass: lensPass };
 }

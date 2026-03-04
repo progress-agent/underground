@@ -1581,7 +1581,12 @@ window.addEventListener('resize', () => {
   let lastHoverLineId = null;
 
   function prettyLineName(lineId) {
-    return String(lineId || '').replace(/-/g, ' ');
+    const raw = String(lineId || '').replace(/-/g, ' ');
+    if (raw === 'dlr') return 'DLR';
+    if (raw === 'hammersmith city') return 'Hammersmith & City Line';
+    if (raw === 'waterloo city') return 'Waterloo & City Line';
+    const titled = raw.replace(/\b\w/g, c => c.toUpperCase());
+    return titled + ' Line';
   }
 
   function moveTip(ev, lineId) {
@@ -1595,7 +1600,7 @@ window.addEventListener('resize', () => {
 
     const name = prettyLineName(lineId);
     if (lastHoverLineId !== lineId) {
-      tip.innerHTML = `<b>${name}</b> <span class="muted">(shift+click to toggle)</span>`;
+      tip.innerHTML = `<b>${name}</b>`;
       tip.style.display = 'block';
       lastHoverLineId = lineId;
     }
@@ -1607,8 +1612,16 @@ window.addEventListener('resize', () => {
 
   function getMouseNdc(ev) {
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+    const rawX = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const rawY = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+
+    // The lens distortion post-process shader displaces rendered pixels on
+    // screen: the pixel at screen NDC (rawX, rawY) actually shows content
+    // from a different position in the undistorted framebuffer. Map through
+    // the same distortion so the raycaster hits what the user visually sees.
+    const corrected = lensSystem.distortNdc(rawX, rawY);
+    mouse.x = corrected.x;
+    mouse.y = corrected.y;
   }
 
   function pickLineUnderPointer(ev) {
@@ -1682,22 +1695,159 @@ window.addEventListener('resize', () => {
 
     tip.innerHTML = `<b>${station.name}</b><br/><span class="muted">${depthLabel}</span>`;
     tip.style.display = 'block';
-    
+    lastHoverLineId = null; // Reset so transition back to line hover updates text
+
+    const x = (ev.clientX ?? 0) + 12;
+    const y = (ev.clientY ?? 0) + 14;
+    tip.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  // ---------- Infrastructure hover ----------
+
+  // Priority tiers — lower = higher priority (small features beat large surfaces)
+  const INFRA_TIER = {
+    'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
+    'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2,
+    'canal': 3, 'reservoir': 3,
+    'thames': 4, 'chalk': 4,
+  };
+
+  // Large-area surface types that would intercept every ray — exclude from pickables
+  const UNPICKABLE_TYPES = new Set(['thames', 'chalk']);
+
+  function collectInfraPickables() {
+    const pickables = [];
+    // Note: thamesMesh excluded — river surface too large, swallows all hovers over it.
+    // Chalk mesh excluded via UNPICKABLE_TYPES — 80km² plane intercepts every downward ray.
+    // Chalk-marker (small sphere) is kept.
+    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup];
+    for (const src of sources) {
+      if (!src || !src.visible) continue;
+      // Single mesh with userData.type
+      if (src.userData?.type && !UNPICKABLE_TYPES.has(src.userData.type)) {
+        pickables.push(src); continue;
+      }
+      // Group — check children (two levels deep for nested groups)
+      if (src.children) {
+        for (const child of src.children) {
+          if (child.userData?.type && !UNPICKABLE_TYPES.has(child.userData.type)) {
+            pickables.push(child); continue;
+          }
+          if (child.children) {
+            for (const gc of child.children) {
+              if (gc.userData?.type && !UNPICKABLE_TYPES.has(gc.userData.type)) pickables.push(gc);
+            }
+          }
+        }
+      }
+    }
+    return pickables;
+  }
+
+  function pickInfraUnderPointer(ev) {
+    const pickables = collectInfraPickables();
+    if (pickables.length === 0) return null;
+
+    getMouseNdc(ev);
+    raycaster.setFromCamera(mouse, camera);
+
+    // Use recursive:true so child meshes inside any accidentally-collected
+    // Groups are still tested, and force-update world matrices on source
+    // groups to guarantee transforms are current after async load.
+    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup];
+    for (const src of infraSources) {
+      if (src) src.updateMatrixWorld(true);
+    }
+
+    const hits = raycaster.intersectObjects(pickables, true);
+    if (hits.length > 0) console.log(`[infra-hover] ${hits.length} hits, best: ${hits[0].object.userData?.type}`);
+    if (!hits || hits.length === 0) return null;
+
+    // Sort by priority tier first, then distance
+    let best = hits[0];
+    let bestTier = INFRA_TIER[best.object.userData?.type] ?? 99;
+    for (let i = 1; i < hits.length; i++) {
+      const tier = INFRA_TIER[hits[i].object.userData?.type] ?? 99;
+      if (tier < bestTier || (tier === bestTier && hits[i].distance < best.distance)) {
+        best = hits[i];
+        bestTier = tier;
+      }
+    }
+    return best.object;
+  }
+
+  function formatInfraTooltip(mesh) {
+    const d = mesh.userData;
+    switch (d.type) {
+      case 'tideway-shaft':
+        return `<b>Thames Tideway Tunnel — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter · ${Math.round(d.depth)}m deep</span>`;
+      case 'lee-shaft':
+        return `<b>Lee Tunnel — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter · ${Math.round(d.depth)}m deep</span>`;
+      case 'tideway-tunnel': {
+        const tidewayLabel = d.name === 'Thames Tideway Tunnel'
+          ? d.name
+          : `Thames Tideway Tunnel — ${d.name}`;
+        return `<b>${tidewayLabel}</b><br/><span class="muted">${d.diameter}m diameter</span>`;
+      }
+      case 'lee-tunnel':
+        return `<b>Lee Tunnel</b><br/><span class="muted">${d.diameter}m diameter · ${d.length}km · ${d.depthRange} deep</span>`;
+      case 'crossrail': {
+        // Strip existing "Crossrail — " or "Crossrail / Elizabeth Line" prefix from branch names
+        const section = d.name
+          .replace(/^Crossrail\s*[—–\-\/]\s*/i, '')
+          .replace(/^Elizabeth Line\s*/i, '')
+          .trim();
+        const crossrailLabel = section
+          ? `Elizabeth Line (Crossrail) — ${section}`
+          : 'Elizabeth Line (Crossrail)';
+        const depthSpec = d.depth ? `${Math.round(d.depth)}m deep` : '';
+        return `<b>${crossrailLabel}</b>${depthSpec ? '<br/><span class="muted">' + depthSpec + '</span>' : ''}`;
+      }
+      case 'sewer':
+        return `<b>London Sewerage — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter</span>`;
+      case 'canal':
+        return `<b>Canal — ${d.name}</b><br/><span class="muted">${d.length.toFixed(1)}km</span>`;
+      case 'reservoir':
+        return `<b>Reservoir — ${d.name}</b><br/><span class="muted">${d.area ? d.area.toFixed(0) + ' ha' : ''}</span>`;
+      case 'thames':
+        return `<b>River Thames</b>`;
+      case 'chalk':
+        return `<b>Chalk Boundary</b><br/><span class="muted">${d.depth} · ${d.description}</span>`;
+      case 'chalk-marker':
+        return `<b>Chalk Boundary</b><br/><span class="muted">${d.label}</span>`;
+      default:
+        return `<b>${d.name || 'Infrastructure'}</b>`;
+    }
+  }
+
+  function moveInfraTip(ev, mesh) {
+    if (!tip || !mesh) return;
+    tip.innerHTML = formatInfraTooltip(mesh);
+    tip.style.display = 'block';
+    lastHoverLineId = null; // Reset so transition back to line hover updates text
     const x = (ev.clientX ?? 0) + 12;
     const y = (ev.clientY ?? 0) + 14;
     tip.style.transform = `translate(${x}px, ${y}px)`;
   }
 
   function onPointerMove(ev) {
-    // Check for station hover first (takes priority)
+    // Tier 1: Station hover (highest priority)
     const station = pickStationUnderPointer(ev);
     if (station) {
       moveStationTip(ev, station);
-      setHoverHighlight(null); // Clear line highlight when hovering station
+      setHoverHighlight(null);
       return;
     }
-    
-    // Fall back to line hover
+
+    // Tier 2: Infrastructure hover
+    const infraMesh = pickInfraUnderPointer(ev);
+    if (infraMesh) {
+      moveInfraTip(ev, infraMesh);
+      setHoverHighlight(null);
+      return;
+    }
+
+    // Tier 3: Line hover
     const lineId = pickLineUnderPointer(ev);
     moveTip(ev, lineId);
     setHoverHighlight(lineId);

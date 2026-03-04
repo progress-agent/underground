@@ -76,7 +76,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   };
 
   // Build a tube for an array of points
-  const buildTube = (pts, radius, segments, opacity) => {
+  const buildTube = (pts, radius, segments, opacity, branchName) => {
     if (pts.length < 2) return;
     const curve = new THREE.CatmullRomCurve3(pts.map(toVec3));
     const geo = new THREE.TubeGeometry(curve, segments, radius, 12, false);
@@ -85,6 +85,11 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.userData = {
+      type: 'crossrail',
+      name: branchName || 'Crossrail / Elizabeth Line',
+      depth: Math.round(pts.reduce((sum, p) => sum + (p.depth || 0), 0) / pts.length),
+    };
     group.add(mesh);
 
     // Glow for deep sections
@@ -100,7 +105,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Main trunk: Heathrow to Whitechapel (full diameter tunnel)
   if (mainPts.length >= 2) {
-    buildTube(mainPts, 9.0, 150, 0.75);
+    buildTube(mainPts, 9.0, 150, 0.75, 'Crossrail — Main Tunnel');
   }
 
   // Get Whitechapel (last main trunk point) as branch junction
@@ -108,12 +113,12 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Abbey Wood branch: prepend junction point for visual continuity
   if (abbeyWoodPts.length >= 1 && junction) {
-    buildTube([junction, ...abbeyWoodPts], 9.0, 60, 0.75);
+    buildTube([junction, ...abbeyWoodPts], 9.0, 60, 0.75, 'Crossrail — Abbey Wood Branch');
   }
 
   // Shenfield branch: surface railway, slightly thinner & more transparent
   if (shenfieldPts.length >= 1 && junction) {
-    buildTube([junction, ...shenfieldPts], 7.0, 100, 0.5);
+    buildTube([junction, ...shenfieldPts], 7.0, 100, 0.5, 'Crossrail — Shenfield Branch');
   }
 
   // Station markers at deep points (depth >= 25m)

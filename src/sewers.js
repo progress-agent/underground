@@ -52,7 +52,7 @@ function parseSewerCSV(csv) {
 // Color scheme for different sewer types
 const SEWER_COLORS = {
   // Victorian outfall sewers (surface)
-  'northern-outfall': { base: 0x5c4033, glow: 0x8b6914, name: 'Northern Outfall Sewer (1865)' },
+  'northern-outfall': { base: 0x5c4033, glow: 0x8b6914, name: 'Northern Outfall Sewer (1868)' },
   'southern-outfall': { base: 0x654321, glow: 0xa0522d, name: 'Southern Outfall Sewer (1865)' },
   // Victorian interceptors - north bank
   'northern-high-level': { base: 0x8b7355, glow: 0xcd853f, name: 'Northern High Level Sewer' },
@@ -109,6 +109,12 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     const tunnelMesh = new THREE.Mesh(tubeGeometry, tunnelMaterial);
     tunnelMesh.castShadow = true;
     tunnelMesh.receiveShadow = true;
+    tunnelMesh.userData = {
+      type: 'sewer',
+      tunnelId,
+      name: colorScheme.name,
+      diameter: radius * 2,
+    };
     group.add(tunnelMesh);
     
     // Glow effect for visibility

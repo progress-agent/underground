@@ -222,6 +222,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'thamesRiver';
+  mesh.userData = { type: 'thames', name: 'River Thames' };
   mesh.renderOrder = 1; // draw after terrain so top face wins depth test at boundaries
 
   console.log(`Thames volume: ${validPoints.length} data points → ${vertCount} vertices, ${triCount} triangles`);
