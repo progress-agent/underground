@@ -13,6 +13,8 @@ let leeTunnelData = null;
 // Shaft cylinders stored for terrain snapping
 let shaftMeshes = [];
 
+let moduleVE = 5;
+
 // ---------- Section diameters (from 2014 Order) ----------
 const SECTION_RADIUS = {
   west: 3.25,    // 6.5m ID
@@ -48,17 +50,17 @@ function makeTidewayShaftMaterial(isMainDrive = false) {
   return new THREE.MeshPhysicalMaterial({
     color: 0x1d4ed8,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.45,
     roughness: 0.5,
     metalness: 0.0,
-    transmission: 0.7,
+    transmission: 0.35,
     thickness: 1.5,
     ior: 1.45,
     clearcoat: 0.1,
     emissive: 0x1d4ed8,
-    emissiveIntensity: isMainDrive ? 0.06 : 0.04,
+    emissiveIntensity: isMainDrive ? 0.10 : 0.07,
     side: THREE.DoubleSide,
-    depthWrite: false,
+    depthWrite: true,
   });
 }
 
@@ -66,17 +68,17 @@ function makeLeeShaftMaterial() {
   return new THREE.MeshPhysicalMaterial({
     color: 0x6b4423,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.45,
     roughness: 0.5,
     metalness: 0.0,
-    transmission: 0.7,
+    transmission: 0.35,
     thickness: 1.5,
     ior: 1.45,
     clearcoat: 0.1,
     emissive: 0x4a3728,
-    emissiveIntensity: 0.04,
+    emissiveIntensity: 0.07,
     side: THREE.DoubleSide,
-    depthWrite: false,
+    depthWrite: true,
   });
 }
 
@@ -263,6 +265,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
   if (!data || !data.route?.points?.length) return null;
 
   const VE = verticalScale;
+  moduleVE = verticalScale;
   const group = new THREE.Group();
   group.name = 'tideway-system';
   shaftMeshes = [];
@@ -405,8 +408,13 @@ export function snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY) {
     const surfaceY = getTerrainMeshSurfaceY({ x: ud.xz.x, z: ud.xz.z });
     if (surfaceY === null || !Number.isFinite(surfaceY)) continue;
 
-    // Shaft top at terrain surface, centre at (surfaceY - halfHeight)
-    mesh.position.y = surfaceY - ud.halfHeight;
+    // Tunnel centreline is at Y = -(depth * VE)
+    // Shaft must span from surfaceY (top) down to tunnelY (bottom)
+    const tunnelY = -(ud.depth * moduleVE);
+    const newHeight = Math.max(1, surfaceY - tunnelY);
+
+    mesh.scale.y = newHeight;
+    mesh.position.y = (surfaceY + tunnelY) / 2;
   }
 }
 
