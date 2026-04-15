@@ -20,6 +20,7 @@
 //   This means the texture and vM25Uv use the same orientation — no flip needed.
 
 import * as THREE from 'three';
+import { isInThames } from './thames-mask.js';
 
 // ─── BNG / scene reference (must match terrain.js, m25.js) ──────────────────
 const BNG_REF_E = 530000;
@@ -95,6 +96,26 @@ function sceneToPx(sceneX, sceneZ, bbox, size) {
   return {
     px: Math.round(normX * (size - 1)),
     py: Math.round(normY * (size - 1)),
+  };
+}
+
+/**
+ * Convert a pixel position back to scene coordinates (inverse of sceneToPx).
+ *
+ * @param {number} px     Pixel X coordinate
+ * @param {number} py     Pixel Y coordinate
+ * @param {object} bbox   { minX, maxX, minZ, maxZ } in scene coords
+ * @param {number} size   Texture resolution (pixels)
+ * @returns {{ sceneX: number, sceneZ: number }}
+ */
+function pxToScene(px, py, bbox, size) {
+  const rangeX = bbox.maxX - bbox.minX;
+  const rangeZ = bbox.maxZ - bbox.minZ;
+  const normX = px / (size - 1);
+  const normY = py / (size - 1);
+  return {
+    sceneX: normX * rangeX + bbox.minX,
+    sceneZ: bbox.maxZ - normY * rangeZ,
   };
 }
 
@@ -259,6 +280,8 @@ function rasterisePolygon(polygon, bbox, size, pixels, paintFn) {
   for (let py = minPy; py <= maxPy; py++) {
     for (let px = minPx; px <= maxPx; px++) {
       if (pointInPolygon(px, py, pxPoly)) {
+        const sc = pxToScene(px, py, bbox, size);
+        if (isInThames(sc.sceneX, sc.sceneZ)) continue;
         const idx = (py * size + px) * 4;
         paintFn(idx);
       }
@@ -306,6 +329,8 @@ function rasteriseRoad(points, width, bbox, size, pixels) {
       for (let px = minPx; px <= maxPx; px++) {
         const d = distToSegment(px, py, a.px, a.py, b.px, b.py);
         if (d <= halfWPx) {
+          const sc = pxToScene(px, py, bbox, size);
+          if (isInThames(sc.sceneX, sc.sceneZ)) continue;
           const idx = (py * size + px) * 4;
           pixels[idx + 2] = 255; // B = road
         }

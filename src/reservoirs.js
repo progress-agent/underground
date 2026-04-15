@@ -31,7 +31,8 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     opacity: 0.6,
     roughness: 0.2,
     metalness: 0.1,
-    side: THREE.DoubleSide
+    side: THREE.DoubleSide,
+    depthWrite: false
   });
   
   for (const feature of data.features) {
@@ -56,11 +57,11 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     const shape = new THREE.Shape();
     
     // First point (note: z is used as y in the 2D shape plane)
-    shape.moveTo(sceneCoords[0].x, sceneCoords[0].z);
-    
+    shape.moveTo(sceneCoords[0].x, -sceneCoords[0].z);
+
     // Remaining points
     for (let i = 1; i < sceneCoords.length; i++) {
-      shape.lineTo(sceneCoords[i].x, sceneCoords[i].z);
+      shape.lineTo(sceneCoords[i].x, -sceneCoords[i].z);
     }
     
     shape.closePath();
