@@ -70,19 +70,33 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     const shapeGeometry = new THREE.ShapeGeometry(shape);
     shapeGeometry.rotateX(-Math.PI / 2);
 
-    // Drape each vertex onto the terrain surface individually.
-    // A flat polygon at the centroid Y z-fights where terrain undulates —
-    // with VE=5, even 2m real variation = 10 scene units vs the old 0.5 lift.
-    const SURFACE_LIFT = 3; // scene units above local terrain (prevents z-fight)
+    // Reservoirs are flat water surfaces at dam/spillway level.
+    // Find the maximum terrain height across all vertices — the polygon must
+    // clear every terrain peak within the basin to avoid z-fighting.
+    // ShapeGeometry interior triangles are too sparse to drape per-vertex.
+    const SURFACE_LIFT = 5; // scene units above highest terrain point
     const pos = shapeGeometry.attributes.position;
+    let maxY = surfaceY;
     for (let i = 0; i < pos.count; i++) {
-      const vx = pos.getX(i);
-      const vz = pos.getZ(i);
-      const localY = getTerrainSurfaceY({ x: vx, z: vz });
-      pos.setY(i, (localY !== null ? localY : surfaceY) + SURFACE_LIFT);
+      const localY = getTerrainSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
+      if (localY !== null && localY > maxY) maxY = localY;
+    }
+    // Also sample a grid within the bounding box to catch terrain peaks
+    // between the sparse edge vertices
+    shapeGeometry.computeBoundingBox();
+    const bb = shapeGeometry.boundingBox;
+    const GRID_STEP = 200; // metres — finer than terrain grid (~137m)
+    for (let gx = bb.min.x; gx <= bb.max.x; gx += GRID_STEP) {
+      for (let gz = bb.min.z; gz <= bb.max.z; gz += GRID_STEP) {
+        const gy = getTerrainSurfaceY({ x: gx, z: gz });
+        if (gy !== null && gy > maxY) maxY = gy;
+      }
+    }
+    const waterY = maxY + SURFACE_LIFT;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, waterY);
     }
     pos.needsUpdate = true;
-    shapeGeometry.computeVertexNormals();
     
     const mesh = new THREE.Mesh(shapeGeometry, waterMaterial);
     mesh.userData = { 
