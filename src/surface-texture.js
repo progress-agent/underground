@@ -357,18 +357,15 @@ const SURFACE_FRAG = /* glsl */ `
     if (suv.x >= 0.0 && suv.x <= 1.0 && suv.y >= 0.0 && suv.y <= 1.0) {
       vec4 sf = texture2D(surfaceTex, suv);
 
-      float road   = sf.b;   // road presence
-      float park   = sf.a;   // park presence
+      float road   = sf.b;   // road presence (0..1 after bilinear filtering)
+      float park   = sf.a;   // park presence (0..1 after bilinear filtering)
 
-      // Parks: muted green overlay
-      if (park > 0.5) {
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.35, 0.15), 0.7);
-      }
+      // Parks: muted green overlay — smooth blend eliminates threshold jitter
+      // at texture pixel boundaries (bilinear produces intermediate values)
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.35, 0.15), park * 0.7);
 
-      // Roads: dark asphalt
-      if (road > 0.5) {
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.15, 0.14, 0.13), 0.8);
-      }
+      // Roads: dark asphalt (road overwrites park where both present)
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.15, 0.14, 0.13), road * 0.8);
     }
   }
 `;
