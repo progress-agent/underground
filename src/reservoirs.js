@@ -52,27 +52,37 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     
     const surfaceY = getTerrainSurfaceY({ x: centroidX, z: centroidZ });
     if (surfaceY === null || surfaceY === undefined) continue;
-    
+
     // Create shape from coordinates
     const shape = new THREE.Shape();
-    
-    // First point (note: z is used as y in the 2D shape plane)
+
+    // First point (negate Z to compensate for rotateX(-PI/2) which negates Y→Z)
     shape.moveTo(sceneCoords[0].x, -sceneCoords[0].z);
 
     // Remaining points
     for (let i = 1; i < sceneCoords.length; i++) {
       shape.lineTo(sceneCoords[i].x, -sceneCoords[i].z);
     }
-    
+
     shape.closePath();
-    
-    // Create flat geometry at surface height
+
+    // Create geometry and rotate to XZ plane
     const shapeGeometry = new THREE.ShapeGeometry(shape);
-    
-    // Rotate to lie flat on XZ plane at surfaceY
-    // ShapeGeometry creates geometry in XY plane, we need to rotate -90° around X
     shapeGeometry.rotateX(-Math.PI / 2);
-    shapeGeometry.translate(0, surfaceY + 0.5, 0); // +0.5m to avoid z-fighting with terrain
+
+    // Drape each vertex onto the terrain surface individually.
+    // A flat polygon at the centroid Y z-fights where terrain undulates —
+    // with VE=5, even 2m real variation = 10 scene units vs the old 0.5 lift.
+    const SURFACE_LIFT = 3; // scene units above local terrain (prevents z-fight)
+    const pos = shapeGeometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const vx = pos.getX(i);
+      const vz = pos.getZ(i);
+      const localY = getTerrainSurfaceY({ x: vx, z: vz });
+      pos.setY(i, (localY !== null ? localY : surfaceY) + SURFACE_LIFT);
+    }
+    pos.needsUpdate = true;
+    shapeGeometry.computeVertexNormals();
     
     const mesh = new THREE.Mesh(shapeGeometry, waterMaterial);
     mesh.userData = { 
