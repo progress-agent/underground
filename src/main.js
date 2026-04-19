@@ -25,6 +25,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { createLensSystem } from './lens.js';
+import { initAudio, updateAudio, setMasterVolume, getMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources, getPoolDebug } from './audio.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -134,7 +135,7 @@ scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 const composer = new EffectComposer(renderer);
 // RenderPass and camera added after camera creation (below)
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 50000);
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1.0, 50000);
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -178,6 +179,28 @@ const lensSystem = createLensSystem(camera, composer, controls);
 
 // ── Train system (shared state) ──
 const trainSystem = createTrainSystem({ scene, renderer, camera });
+
+// ── Audio — autoplay gesture ──
+// AudioContext requires a user gesture to start. Piggyback on first interaction.
+{
+  let audioStarted = false;
+  function tryStartAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    initAudio(camera);
+    document.removeEventListener('click', tryStartAudio);
+    document.removeEventListener('keydown', tryStartAudio);
+    document.removeEventListener('pointerdown', tryStartAudio);
+  }
+  document.addEventListener('click', tryStartAudio, { once: false });
+  document.addEventListener('keydown', tryStartAudio, { once: false });
+  document.addEventListener('pointerdown', tryStartAudio, { once: false });
+}
+
+// ── Tab visibility — fade audio when backgrounded ──
+document.addEventListener('visibilitychange', () => {
+  setTabVisible(!document.hidden);
+});
 
 // ---------- FPS-style Keyboard Controls ----------
 // Adds WASD/QE/SX movement + arrow key look direction
@@ -532,6 +555,12 @@ const thamesDataPromise = loadThamesData();
         if (thamesData.points) {
           initThamesMask(thamesData.points);
         }
+
+        // Register spatial audio sources (trains added dynamically, Thames static)
+        initSpatialSources({
+          trainSystem,
+          thamesPoints: thamesData.points,
+        });
       }
 
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
@@ -957,7 +986,8 @@ function frostedTubeMaterial(hex) {
     clearcoat: 0.22,
     clearcoatRoughness: 0.6,
     emissive: new THREE.Color(emissive),
-    emissiveIntensity: 0.15,
+    emissiveIntensity: 0.0,
+    fog: true,
     depthWrite: true,
   });
 }
@@ -1973,6 +2003,27 @@ function setVictoriaShaftsVisible(v) {
     shCb.addEventListener('change', () => setVictoriaShaftsVisible(shCb.checked));
   }
 
+  // ── Audio volume HUD ──
+  const volSlider = document.getElementById('audioVolume');
+  const volOut = document.getElementById('audioVolumeValue');
+  const muteBtn = document.getElementById('audioMute');
+  let audioMuted = false;
+  if (volSlider) {
+    volSlider.addEventListener('input', () => {
+      const v = Number(volSlider.value) / 100;
+      setMasterVolume(v);
+      if (volOut) volOut.textContent = `${volSlider.value}%`;
+    });
+  }
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+      audioMuted = !audioMuted;
+      setMuted(audioMuted);
+      muteBtn.textContent = audioMuted ? 'Unmute' : 'Mute';
+      if (volSlider) volSlider.disabled = audioMuted;
+    });
+  }
+
   const resetBtn = document.getElementById('resetPrefs');
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
@@ -2176,7 +2227,9 @@ function tick() {
 
   // Update altimeter — divide by VE to show real-world metres
   const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
-  const realAltM = Math.round(camera.position.y / VERTICAL_EXAGGERATION);
+  const realAltM = surfaceYAtCamera !== null
+    ? Math.round((camera.position.y - surfaceYAtCamera) / VERTICAL_EXAGGERATION)
+    : Math.round(camera.position.y / VERTICAL_EXAGGERATION);
   altimeterValue.textContent = realAltM;
   const cameraInsideM25 = isInsideM25(camera.position.x, camera.position.z);
   const isUnderground = cameraInsideM25 && (surfaceYAtCamera !== null
@@ -2210,6 +2263,17 @@ function tick() {
   // Update lighting based on camera position
   updateLighting(camera, atmosphereLights, { insideM25: cameraInsideM25 });
 
+  // Update spatial audio (ambient crossfades, filter sweeps, wind)
+  if (isAudioReady()) {
+    updateAudio(dt, {
+      cameraPosition: camera.position,
+      altitude: realAltM,
+      isUnderground,
+      surfaceY: surfaceYAtCamera,
+      focalLength: lensSystem.getFocalLength(),
+    });
+  }
+
   composer.render();
   requestAnimationFrame(tick);
 }
@@ -2220,7 +2284,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
-    trainSystem, composer, bloomPass, lensSystem,
+    trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },

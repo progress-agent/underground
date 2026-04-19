@@ -70,6 +70,9 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
     metalness: 0.0,
     side: THREE.DoubleSide,
     depthWrite: false,
+    emissive: new THREE.Color(0xe8dfc8),
+    emissiveIntensity: 0.35,
+    fog: false,
   });
 
   const chalkMesh = new THREE.Mesh(geom, mat);

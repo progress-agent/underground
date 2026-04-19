@@ -3,6 +3,19 @@
 
 import * as THREE from 'three';
 
+// Ray-cast point-in-polygon test (even-odd rule) on the XZ plane.
+function pointInPolygon(x, z, coords) {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const xi = coords[i].x, zi = coords[i].z;
+    const xj = coords[j].x, zj = coords[j].z;
+    const intersect = ((zi > z) !== (zj > z)) &&
+      (x < ((xj - xi) * (z - zi)) / (zj - zi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 let reservoirData = null;
 
 export async function loadReservoirData() {
@@ -81,13 +94,14 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
       const localY = getTerrainSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
       if (localY !== null && localY > maxY) maxY = localY;
     }
-    // Also sample a grid within the bounding box to catch terrain peaks
-    // between the sparse edge vertices
+    // Sample a grid inside the bounding box, but skip samples outside the
+    // reservoir polygon — otherwise nearby hills drag the water surface up.
     shapeGeometry.computeBoundingBox();
     const bb = shapeGeometry.boundingBox;
-    const GRID_STEP = 200; // metres — finer than terrain grid (~137m)
+    const GRID_STEP = 200;
     for (let gx = bb.min.x; gx <= bb.max.x; gx += GRID_STEP) {
       for (let gz = bb.min.z; gz <= bb.max.z; gz += GRID_STEP) {
+        if (!pointInPolygon(gx, gz, sceneCoords)) continue;
         const gy = getTerrainSurfaceY({ x: gx, z: gz });
         if (gy !== null && gy > maxY) maxY = gy;
       }
