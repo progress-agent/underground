@@ -207,9 +207,9 @@ document.addEventListener('visibilitychange', () => {
 // Works alongside OrbitControls (mouse) — use one or both
 const fpsControls = {
   enabled: true,
-  moveSpeed: 1000.0,      // base movement speed (units/sec) — 10X for tube-scale flying
+  moveSpeed: 500.0,       // base movement speed (units/sec)
   fastMultiplier: 2.0,    // W = faster
-  rotateSpeed: 2.0,       // arrow key rotation speed (rad/sec)
+  rotateSpeed: 1.0,       // arrow key rotation speed (rad/sec)
   keys: new Set(),        // currently pressed keys
   active: false,          // true when FPS keys are being held
 };
@@ -280,6 +280,8 @@ function updateFpsControls(dt) {
     moveDir.normalize();
     const actualSpeed = keys.has('w') ? moveSpeed * fastMult : moveSpeed;
     const displacement = moveDir.multiplyScalar(actualSpeed * dt);
+    // Halve vertical (Q/E) motion — horizontal (WASD) unchanged
+    displacement.y *= 0.5;
     camera.position.add(displacement);
     controls.target.add(displacement);
   }
@@ -435,27 +437,6 @@ function deleteUrlParam(key) {
       const v = Number(el.value) || 1;
       if (v === 8) deleteUrlParam('t');
       else setUrlParam('t', v);
-    });
-  }
-
-  const hEl = document.getElementById('horizontalScale');
-  const hOut = document.getElementById('horizontalScaleValue');
-  if (hEl) {
-    hEl.value = String(sim.horizontalScale);
-    if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
-
-    hEl.addEventListener('input', () => {
-      sim.horizontalScale = Number(hEl.value) || 1;
-      prefs.horizontalScale = sim.horizontalScale;
-      savePrefs(prefs);
-      if (hOut) hOut.textContent = `${sim.horizontalScale.toFixed(2)}×`;
-    });
-
-    hEl.addEventListener('change', () => {
-      const v = Number(hEl.value) || 1;
-      if (v === 1.0) deleteUrlParam('hx');
-      else setUrlParam('hx', v);
-      rebuildFromSimScales();
     });
   }
 
@@ -2007,7 +1988,10 @@ function setVictoriaShaftsVisible(v) {
   const volSlider = document.getElementById('audioVolume');
   const volOut = document.getElementById('audioVolumeValue');
   const muteBtn = document.getElementById('audioMute');
-  let audioMuted = false;
+  // Default muted on first boot (matches audio.js _muted default)
+  let audioMuted = true;
+  if (muteBtn) muteBtn.textContent = 'Unmute';
+  if (volSlider) volSlider.disabled = true;
   if (volSlider) {
     volSlider.addEventListener('input', () => {
       const v = Number(volSlider.value) / 100;
@@ -2093,110 +2077,7 @@ function setVictoriaShaftsVisible(v) {
   updateSimUi();
 }
 
-window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
-
-  // FPS controls now use: S=forward, W=fast-forward, X=backward, A=left, D=right
-  // Arrow keys = look direction
-  // These are handled in updateFpsControls() above
-
-  // Non-conflicting shortcuts (letters not used by FPS controls)
-  if (e.key === 'v' || e.key === 'V') {
-    setVictoriaStationsVisible(!victoriaStationsVisible);
-    const stCb = document.getElementById('victoriaStations');
-    if (stCb) stCb.checked = victoriaStationsVisible;
-  }
-  if (e.key === 'l' || e.key === 'L') {
-    setVictoriaLabelsVisible(!victoriaLabelsVisible);
-    const lbCb = document.getElementById('victoriaLabels');
-    if (lbCb) lbCb.checked = victoriaLabelsVisible;
-  }
-  // Shafts toggle moved to Shift+S (conflicts with S=forward)
-  if ((e.key === 's' || e.key === 'S') && e.shiftKey) {
-    setVictoriaShaftsVisible(!victoriaShaftsVisible);
-    const shCb = document.getElementById('victoriaShafts');
-    if (shCb) shCb.checked = victoriaShaftsVisible;
-  }
-  // Reset view to curated straight-down position
-  if (e.key === 'r' || e.key === 'R') {
-    camera.position.copy(INITIAL_VIEW.position);
-    controls.target.copy(INITIAL_VIEW.target);
-    controls.update();
-    // Reset focal length to 35mm default
-    lensSystem.setFocalLength(35);
-    prefs.focalLength = 35;
-    savePrefs(prefs);
-    const flElR = document.getElementById('focalLength');
-    const flOutR = document.getElementById('focalLengthValue');
-    if (flElR) flElR.value = '35';
-    if (flOutR) flOutR.textContent = '35mm';
-    deleteUrlParam('fl');
-  }
-  if (e.key === 'f' || e.key === 'F') {
-    // Cycle through lines in the solo dropdown
-    const soloSelect = document.getElementById('soloLine');
-    if (soloSelect) {
-      const options = Array.from(soloSelect.options).filter(o => !o.disabled);
-      const curIdx = options.findIndex(o => o.value === soloSelect.value);
-      const nextIdx = (curIdx + 1) % options.length;
-      soloSelect.value = options[nextIdx].value;
-      applySoloSelection(soloSelect.value);
-      if (soloSelect.value === 'all') deleteUrlParam('focus');
-      else setUrlParam('focus', soloSelect.value);
-      updateSimUi();
-    }
-  }
-  // Focus all moved to Shift+A (conflicts with A=left movement)
-  if ((e.key === 'a' || e.key === 'A') && e.shiftKey) {
-    // Reset to all lines
-    applySoloSelection('all');
-    const soloSelect = document.getElementById('soloLine');
-    if (soloSelect) soloSelect.value = 'all';
-    deleteUrlParam('focus');
-    updateSimUi();
-    const pts = [];
-    for (const [lineId, group] of lineGroups.entries()) {
-      if (!group?.visible) continue;
-      const cps = lineCenterPoints.get(lineId);
-      if (cps && cps.length) pts.push(...cps);
-    }
-    focusCameraOnStations({ stations: pts.map(pos => ({ pos })), controls, camera, pad: 1.18 });
-  }
-  if (e.key === ' ' || e.code === 'Space') {
-    // Pause/resume the simulation.
-    e.preventDefault();
-    toggleSimPaused();
-  }
-
-  // Help overlay toggle
-  if (e.key === '?' || e.key === '/' || e.key.toLowerCase() === 'h') {
-    const helpOverlay = document.getElementById('helpOverlay');
-    if (helpOverlay) {
-      helpOverlay.classList.toggle('visible');
-    }
-  }
-  if (e.key === 'Escape') {
-    const helpOverlay = document.getElementById('helpOverlay');
-    if (helpOverlay) {
-      helpOverlay.classList.remove('visible');
-    }
-  }
-
-  // Focal length shortcuts: [ = wider, ] = longer
-  if (e.key === '[' || e.key === ']') {
-    const step = e.key === '[' ? -5 : 5;
-    const mm = Math.max(12, Math.min(200, lensSystem.getFocalLength() + step));
-    lensSystem.setFocalLength(mm);
-    prefs.focalLength = mm;
-    savePrefs(prefs);
-    const flEl = document.getElementById('focalLength');
-    const flOut = document.getElementById('focalLengthValue');
-    if (flEl) flEl.value = String(mm);
-    if (flOut) flOut.textContent = `${mm}mm`;
-    if (mm === 35) deleteUrlParam('fl');
-    else setUrlParam('fl', mm);
-  }
-});
+// Non-direction keyboard shortcuts removed — only S/W/X/A/D, Q/E, arrows remain active.
 
 // ---------- Animate ----------
 const clock = new THREE.Clock();

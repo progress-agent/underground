@@ -25,6 +25,12 @@ test('Surface A/B comparison screenshots', async ({ page }) => {
   // Extra settle time for terrain mesh + shafts + surface data
   await page.waitForTimeout(5000);
 
+  // HUD defaults to closed — open the <details> so inner controls are interactable
+  await page.evaluate(() => {
+    const hud = document.getElementById('hudDetails');
+    if (hud) hud.open = true;
+  });
+
   const soloSelect = page.locator('#soloLine');
 
   // Verify the dropdown has surface options

@@ -337,7 +337,7 @@
     </div>
     <div id="netStatus" class="net-status" style="display:none"></div>
     <div id="hoverTip" class="hover-tip" style="display:none"></div>
-    <div class="hint"><b>Hover</b> for name • <b>Shift+Click</b> to toggle • <b>S/W/X</b> move • <b>AD</b> strafe • <b>QE</b> up/down • <b>Arrows</b> look • <b>Space</b> pause • <b>R</b> reset • <b>?</b> help</div>
+    <div class="hint"><b>Hover</b> for name • <b>Shift+Click</b> to toggle • <b>S/W/X</b> move • <b>AD</b> strafe • <b>QE</b> up/down • <b>Arrows</b> look</div>
 
     <div id="helpOverlay">
       <div class="panel">
@@ -390,20 +390,15 @@
     </div>
 
     <div id="hud" class="hud">
-      <details id="hudDetails" open>
+      <details id="hudDetails">
         <summary>
-          <span class="title">UnderGround (MVP) <span style="font-size:9px;opacity:0.6">v250206a</span></span>
+          <span class="title">Under Ground <span style="font-size:9px;opacity:0.6">v250206a</span></span>
           <span class="meta">
             <span id="simStatus" style="opacity:0.78;">Running</span>
             <span style="opacity:0.55;">•</span>
             <span id="focusStatus" style="opacity:0.75;">Focus: all</span>
           </span>
         </summary>
-
-        <p>3D Tube network visualiser. <b>Mouse:</b> drag to orbit • right-drag/shift-drag to pan • wheel to zoom.</p>
-        <p class="small"><b>Keyboard controls:</b> <code>S</code>=forward • <code>W</code>=fast forward • <code>X</code>=backward • <code>A</code>/<code>D</code>=strafe • <code>E</code>/<code>Q</code>=up/down • <code>Arrows</code>=look direction</p>
-        <p class="small"><b>Shortcuts:</b> <code>V</code>=stations • <code>L</code>=labels • <code>Shift+S</code>=shafts • <code>F</code>=focus line • <code>Shift+A</code>=focus all • <code>Space</code>=pause</p>
-        <p class="small">Data: TfL public endpoints (cached; works offline). Tip: start with <code>?focus=victoria</code> in URL.</p>
 
         <p class="small row">
           <label style="display:flex; gap:6px; align-items:center; user-select:none;">
@@ -438,11 +433,6 @@
           Time scale:
           <input id="timeScale" type="range" min="0.5" max="30" value="8" step="0.5" style="vertical-align: middle; width: 160px;" />
           <span id="timeScaleValue">8×</span>
-        </p>
-        <p class="small">
-          Horizontal scale:
-          <input id="horizontalScale" type="range" min="0.25" max="3" value="1" step="0.05" style="vertical-align: middle; width: 160px;" />
-          <span id="horizontalScaleValue">1.00×</span>
         </p>
         <p class="small">
           Focal length:

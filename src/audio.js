@@ -52,7 +52,7 @@ let undergroundLP = null;
 // State tracking
 let _initialised = false;
 let _masterVolume = 0.6;
-let _muted = false;
+let _muted = true; // default muted on boot — user toggles via HUD
 let _tabVisible = true;
 
 // Throttle counters
@@ -683,7 +683,7 @@ export function initAudio(camera) {
     compressor.connect(ctx.destination);
 
     masterGain = ctx.createGain();
-    masterGain.gain.value = _masterVolume;
+    masterGain.gain.value = _muted ? 0 : _masterVolume;
     masterGain.connect(compressor);
 
     // ── Ambient bus ──
