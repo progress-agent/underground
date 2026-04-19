@@ -58,6 +58,7 @@ export async function initSurfaceLoader(opts) {
       cz: (bb.minZ + bb.maxZ) / 2,
       data: null,
       meshRef: null,           // opaque ref for geometry module to track
+      buildingHashes: new Set(), // spatial hashes this tile contributed to placedBuildings
     });
   }
 
@@ -92,8 +93,19 @@ export function updateSurfaceLoader(camX, camZ) {
     if (dist < LOAD_RADIUS && ts.state === 'idle') {
       toLoad.push({ tile, ts, dist });
     } else if (dist > UNLOAD_RADIUS && ts.state === 'loaded') {
-      // Dispose far-away tiles
-      ts.state = 'disposed';
+      // Dispose far-away tiles. Reset to 'idle' (not 'disposed') so the tile
+      // re-enters the load queue if the camera comes back within LOAD_RADIUS.
+      // 'disposed' is reserved for permanent failures (SPA fallback below).
+      //
+      // Surrender this tile's spatial hashes from the global dedup registry
+      // BEFORE firing the external disposal hook — otherwise those hashes
+      // would persist and reject every building on the tile's next reload,
+      // leaving the tile invisible but counted as 'loaded' (correctness bug).
+      if (ts.buildingHashes && ts.buildingHashes.size > 0) {
+        for (const hash of ts.buildingHashes) placedBuildings.delete(hash);
+        ts.buildingHashes.clear();
+      }
+      ts.state = 'idle';
       ts.data = null;
       if (onTileDisposed) onTileDisposed(tile);
     }
@@ -143,14 +155,27 @@ export function buildingHash(b) {
 }
 
 /**
- * Check if a building is a duplicate (already placed by another tile).
- * If not, registers it and returns false.
+ * Build a per-tile dedup predicate. The returned closure checks whether a
+ * building's spatial hash is already resident in the global `placedBuildings`
+ * registry; if not, it records the hash both globally and on the tile's own
+ * `buildingHashes` Set (so the tile can surrender those hashes when disposed).
+ *
+ * Replaces the old module-level `isDuplicateBuilding` which leaked hashes
+ * forever — on reload, every building hashed identically and was rejected,
+ * leaving the tile with zero rendered buildings.
+ *
+ * @param {string} tileKey  The manifest file key (matches tileStates Map key)
+ * @returns {(b: object) => boolean}  true if duplicate (skip), false if new
  */
-export function isDuplicateBuilding(b) {
-  const hash = buildingHash(b);
-  if (placedBuildings.has(hash)) return true;
-  placedBuildings.add(hash);
-  return false;
+export function makeTileDedup(tileKey) {
+  return function dedup(b) {
+    const hash = buildingHash(b);
+    if (placedBuildings.has(hash)) return true;
+    placedBuildings.add(hash);
+    const ts = tileStates ? tileStates.get(tileKey) : null;
+    if (ts) ts.buildingHashes.add(hash);
+    return false;
+  };
 }
 
 /**

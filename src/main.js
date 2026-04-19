@@ -18,7 +18,7 @@ import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.j
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
-import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, isDuplicateBuilding, getSurfaceLoaderStats } from './surface-loader.js';
+import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats } from './surface-loader.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -599,7 +599,7 @@ const thamesDataPromise = loadThamesData();
             // Create buildings as InstancedMesh for this tile
             const mesh = createTileBuildings(
               filteredBuildings, getTerrainMeshSurfaceY,
-              VERTICAL_EXAGGERATION, isDuplicateBuilding
+              VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file)
             );
             if (mesh) {
               mesh.name = `buildings-${tileEntry.file}`;
@@ -2225,5 +2225,19 @@ if (import.meta.env.DEV) {
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
+    // Sum of populated instance counts across all per-tile building InstancedMeshes.
+    // This is what the Phase 0b fix actually guards: tiles can be `state='loaded'`
+    // yet render zero buildings if the dedup Set rejects them. Assert against this
+    // getter (not stats.loaded) to catch the zero-render regression.
+    get buildingInstanceCount() {
+      if (!surfaceGeometryGroup) return 0;
+      let total = 0;
+      surfaceGeometryGroup.traverse((obj) => {
+        if (obj.isInstancedMesh && obj.name && obj.name.startsWith('buildings-')) {
+          total += obj.count;
+        }
+      });
+      return total;
+    },
   };
 }
