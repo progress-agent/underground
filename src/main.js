@@ -26,6 +26,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { createLensSystem } from './lens.js';
 import { initAudio, updateAudio, setMasterVolume, getMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources, getPoolDebug } from './audio.js';
+import { createIntro } from './intro.js';
+import { initIntroTuner } from './intro-tuner.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -443,14 +445,14 @@ function deleteUrlParam(key) {
   // ── Focal length slider ──
   const flEl = document.getElementById('focalLength');
   const flOut = document.getElementById('focalLengthValue');
-  const initialFl = getUrlNumberParam('fl') ?? prefs.focalLength ?? 35;
+  const initialFl = getUrlNumberParam('fl') ?? prefs.focalLength ?? 30;
   if (flEl) {
     flEl.value = String(initialFl);
     if (flOut) flOut.textContent = `${initialFl}mm`;
     lensSystem.setFocalLength(initialFl);
 
     flEl.addEventListener('input', () => {
-      const mm = Number(flEl.value) || 35;
+      const mm = Number(flEl.value) || 30;
       lensSystem.setFocalLength(mm);
       prefs.focalLength = mm;
       savePrefs(prefs);
@@ -458,8 +460,8 @@ function deleteUrlParam(key) {
     });
 
     flEl.addEventListener('change', () => {
-      const mm = Number(flEl.value) || 35;
-      if (mm === 35) deleteUrlParam('fl');
+      const mm = Number(flEl.value) || 30;
+      if (mm === 30) deleteUrlParam('fl');
       else setUrlParam('fl', mm);
     });
   }
@@ -1520,8 +1522,9 @@ async function buildNetworkMvp() {
     setTimeout(() => {
       const loadingBar = document.getElementById('loadingBar');
       if (loadingBar) loadingBar.classList.add('done');
-      // Enable controls now that loading is done
-      controls.enabled = true;
+      // Cinematic intro was started before network build began (main.js:1578)
+      // so it runs concurrently with tile/terrain streaming. No controls call
+      // here — intro.finalize() re-enables controls on every exit path.
     }, 300 + remaining);
 
     // Summary status
@@ -1571,6 +1574,14 @@ async function buildNetworkMvp() {
     }
   }
 }
+
+// ---------- Cinematic intro (Track C) ----------
+// Fire immediately — intro runs concurrently with network build / tile
+// streaming. Camera descends from 5000m while terrain + buildings stream in
+// beneath it. finalize() re-enables controls on every exit path.
+const intro = createIntro({ camera, controls, fpsControls, llToXZ });
+intro.run();
+initIntroTuner({ intro, camera, controls });
 
 buildNetworkMvp();
 
@@ -2084,11 +2095,14 @@ const clock = new THREE.Clock();
 function tick() {
   const dt = clock.getDelta();
 
+  // Cinematic intro — owns camera while running (no-op when not running)
+  intro.update(dt);
+
   // Update FPS controls before orbit controls (keyboard takes precedence)
   updateFpsControls(dt);
 
   // Re-enable OrbitControls when not using FPS controls
-  if (!fpsControls.active && !controls.enabled) {
+  if (!intro.isRunning() && !fpsControls.active && !controls.enabled) {
     controls.enabled = true;
     // Sync controls target with current camera direction
     const lookDistance = 1000; // default look distance
@@ -2097,7 +2111,10 @@ function tick() {
     controls.target.copy(camera.position).add(forward.multiplyScalar(lookDistance));
   }
 
-  controls.update();
+  // Skip OrbitControls update while the intro owns the camera — controls.enabled=false
+  // only blocks input handlers, not update() itself, whose final lookAt(target) would
+  // otherwise override intro's lookAt(OXC) and desync renderer vs label projection.
+  if (!intro.isRunning()) controls.update();
 
   // Rotate compass rose to match camera azimuth
   // OrbitControls azimuthal angle increases counter-clockwise (viewed from above).
@@ -2166,6 +2183,7 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
+    fpsControls, intro,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
