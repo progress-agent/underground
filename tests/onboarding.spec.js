@@ -100,6 +100,8 @@ test('tab switch shows All Controls panel', async ({ page }) => {
   await expect(modal.locator('[data-panel="all"]')).toBeVisible();
   await expect(modal.locator('[data-panel="basics"]')).toBeHidden();
   await expect(modal).toContainText('Orbit');  // unique to All Controls
+  await expect(modal).toContainText('Touch (mobile)');  // Step 4 legend
+  await expect(modal).toContainText('Pinch');
   await expect(modal.locator('.tab.active')).toHaveText(/All Controls/i);
 });
 

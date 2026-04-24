@@ -29,6 +29,7 @@ import { initAudio, updateAudio, setMasterVolume, getMasterVolume, setMuted, set
 import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 import { initOnboarding } from './onboarding.js';
+import { initLandscapeLock } from './landscape-lock.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -155,15 +156,18 @@ controls.maxDistance = 40000;
 // Lock controls during initial load to prevent accidental movement
 controls.enabled = false;
 
-// Mobile/touch UX:
-// - 1 finger: rotate
-// - 2 fingers: dolly + pan
-// (Three.js OrbitControls defaults vary by version; set explicitly.)
+// Mobile touch v1 — D-001 §4.
+// - 1 finger: pan (move across the map)
+// - 2 fingers: pinch to dolly, twist to rotate
+// OrbitControls' `touches` config cannot express full Google-Earth vocabulary
+// (no parallel-drag pitch, no 3-finger altitude); that's v2 via a bespoke
+// Pointer-Events layer. This config ships a viable mobile experience for the
+// personal/friends audience.
 controls.enablePan = true;
 controls.screenSpacePanning = false;
 controls.touches = {
-  ONE: THREE.TOUCH.ROTATE,
-  TWO: THREE.TOUCH.DOLLY_PAN,
+  ONE: THREE.TOUCH.PAN,
+  TWO: THREE.TOUCH.DOLLY_ROTATE,
 };
 
 // ── Finish EffectComposer setup now that camera exists ──
@@ -411,6 +415,12 @@ function updateFpsControls(dt) {
 // ---------- Onboarding overlay (Week-1 Step 2) ----------
 // Hint card + persistent ? modal. Self-contained — fires on ug:intro-done.
 const onboarding = initOnboarding();
+
+// ---------- Landscape lock (Week-1 Step 3) ----------
+// Portrait + narrow viewport → full-screen rotate-device overlay. iOS Safari
+// silently rejects screen.orientation.lock(), so CSS + matchMedia is the
+// load-bearing path.
+const landscapeLock = initLandscapeLock();
 
 // ---------- Persistent UI prefs (localStorage) ----------
 const PREFS_KEY = 'ug:prefs:v2';
@@ -2273,7 +2283,7 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
-    fpsControls, intro, onboarding,
+    fpsControls, intro, onboarding, landscapeLock,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
