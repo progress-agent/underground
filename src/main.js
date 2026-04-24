@@ -205,15 +205,16 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------- FPS-style Keyboard Controls ----------
-// Adds WASD/QE/SX movement + arrow key look direction
-// Works alongside OrbitControls (mouse) — use one or both
+// WASD translate + Q/E vertical + arrow keys rotate. Shift-hold OR the HUD
+// flight toggle multiplies speed by sprintMultiplier (3×).
 const fpsControls = {
   enabled: true,
-  moveSpeed: 500.0,       // base movement speed (units/sec)
-  fastMultiplier: 2.0,    // W = faster
-  rotateSpeed: 1.0,       // arrow key rotation speed (rad/sec)
-  keys: new Set(),        // currently pressed keys
-  active: false,          // true when FPS keys are being held
+  moveSpeed: 500.0,          // base movement speed (units/sec)
+  sprintMultiplier: 3.0,     // Shift-hold or HUD flight toggle
+  flightToggle: false,       // latching 3× toggle, mirrors Shift
+  rotateSpeed: 1.0,          // arrow key rotation speed (rad/sec)
+  keys: new Set(),           // currently pressed keys (lowercase .key)
+  active: false,             // true when any movement key is held
 };
 
 window.addEventListener('keydown', (e) => {
@@ -224,9 +225,15 @@ window.addEventListener('keyup', (e) => {
   fpsControls.keys.delete(e.key.toLowerCase());
 });
 
+// Clear stuck keys when window loses focus (prevents runaway movement on
+// cmd-tab away mid-hold — a keyup may never fire in that case).
+window.addEventListener('blur', () => {
+  fpsControls.keys.clear();
+});
+
 // Prevent default scrolling for control keys
 window.addEventListener('keydown', (e) => {
-  const controlKeys = ['s', 'w', 'x', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+  const controlKeys = ['s', 'w', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
   if (controlKeys.includes(e.key.toLowerCase())) {
     e.preventDefault();
   }
@@ -236,7 +243,7 @@ function updateFpsControls(dt) {
   if (!fpsControls.enabled) return;
 
   const keys = fpsControls.keys;
-  const hasFpsKey = ['s', 'w', 'x', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']
+  const hasFpsKey = ['w', 's', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']
     .some(k => keys.has(k));
 
   fpsControls.active = hasFpsKey;
@@ -247,7 +254,8 @@ function updateFpsControls(dt) {
   controls.enabled = false;
 
   const moveSpeed = fpsControls.moveSpeed;
-  const fastMult = fpsControls.fastMultiplier;
+  const sprinting = keys.has('shift') || fpsControls.flightToggle;
+  const speedMult = sprinting ? fpsControls.sprintMultiplier : 1.0;
 
   // Get camera's current forward direction (from camera matrix)
   const forward = new THREE.Vector3();
@@ -259,29 +267,21 @@ function updateFpsControls(dt) {
   // Right vector is perpendicular to forward in XZ plane
   const right = new THREE.Vector3(-forward.z, 0, forward.x).normalize();
 
-  // Calculate movement direction
+  // Calculate movement direction (standard FPS convention: W forward, S back)
   const moveDir = new THREE.Vector3();
-
-  // S = forward (normal speed)
-  if (keys.has('s')) moveDir.add(forwardXZ);
-  // W = faster forward
-  if (keys.has('w')) moveDir.add(forwardXZ.clone().multiplyScalar(fastMult));
-  // X = backward
-  if (keys.has('x')) moveDir.sub(forwardXZ);
-  // A = left (strafe)
+  if (keys.has('w')) moveDir.add(forwardXZ);
+  if (keys.has('s')) moveDir.sub(forwardXZ);
   if (keys.has('a')) moveDir.sub(right);
-  // D = right (strafe)
   if (keys.has('d')) moveDir.add(right);
-  // E = ascend
   if (keys.has('e')) moveDir.y += 1;
-  // Q = descend
   if (keys.has('q')) moveDir.y -= 1;
 
-  // Apply movement
+  // Apply movement — translate-together preserves controls offset invariant
+  // so minDistance/maxDistance/polar clamps survive (see
+  // _REPORTS/24Apr26f/sources/consult-0109/loopback-gemini-target.md §3).
   if (moveDir.lengthSq() > 0) {
     moveDir.normalize();
-    const actualSpeed = keys.has('w') ? moveSpeed * fastMult : moveSpeed;
-    const displacement = moveDir.multiplyScalar(actualSpeed * dt);
+    const displacement = moveDir.multiplyScalar(moveSpeed * speedMult * dt);
     // Halve vertical (Q/E) motion — horizontal (WASD) unchanged
     displacement.y *= 0.5;
     camera.position.add(displacement);
@@ -320,6 +320,91 @@ function updateFpsControls(dt) {
     const newForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     controls.target.copy(camera.position).add(newForward.multiplyScalar(lookDistance));
   }
+}
+
+// ---------- HUD 3× flight toggle (latching, mirrors Shift-hold) ----------
+{
+  const btn = document.getElementById('flightSprint');
+  if (btn) {
+    const render = () => {
+      const on = fpsControls.flightToggle;
+      btn.textContent = `Fast flight: ${on ? 'on' : 'off'}`;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.style.background = on ? 'rgba(201,184,150,0.22)' : 'rgba(255,255,255,0.06)';
+      btn.style.borderColor = on ? 'rgba(201,184,150,0.55)' : 'rgba(255,255,255,0.14)';
+      btn.style.color = on ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.88)';
+    };
+    btn.addEventListener('click', () => {
+      fpsControls.flightToggle = !fpsControls.flightToggle;
+      render();
+    });
+    render();
+  }
+}
+
+// ---------- OrbitControls ROTATE-start re-pivot ----------
+// When the user begins a rotate drag, adopt whatever is under the pointer as
+// the new pivot. Preserves offset by translating camera.position by the same
+// delta as controls.target — no visual jump (Cesium/Mapbox pattern).
+// See _REPORTS/24Apr26f/sources/consult-0109/loopback-gemini-target.md §6.
+{
+  const repivotRaycaster = new THREE.Raycaster();
+  const lastNdc = new THREE.Vector2(0, 0);
+  let haveNdc = false;
+
+  const updateNdcFromEvent = (ev) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const rawX = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    const rawY = -(((ev.clientY - rect.top) / rect.height) * 2 - 1);
+    // Lens distortion maps screen NDC to framebuffer NDC — raycast against
+    // what the user sees, not the undistorted pixel.
+    const corrected = lensSystem?.distortNdc
+      ? lensSystem.distortNdc(rawX, rawY)
+      : { x: rawX, y: rawY };
+    lastNdc.set(corrected.x, corrected.y);
+    haveNdc = true;
+  };
+  renderer.domElement.addEventListener('pointerdown', updateNdcFromEvent);
+  renderer.domElement.addEventListener('pointermove', updateNdcFromEvent);
+
+  // Candidate targets: terrain first (broad, reliable hit), then surface
+  // buildings, then line tubes. Stations/shafts/infra are fine fallbacks but
+  // terrain+buildings cover ~all visible frames.
+  const collectRepivotTargets = () => {
+    const targets = [];
+    if (terrain?.mesh) targets.push(terrain.mesh);
+    if (terrain?.undersideMesh) targets.push(terrain.undersideMesh);
+    if (surfaceGeometryGroup) {
+      surfaceGeometryGroup.traverse(obj => {
+        if (obj.isMesh || obj.isInstancedMesh) targets.push(obj);
+      });
+    }
+    for (const m of linePickables) targets.push(m);
+    return targets;
+  };
+
+  controls.addEventListener('start', () => {
+    // OrbitControls STATE: NONE=-1, ROTATE=0, DOLLY=1, PAN=2, TOUCH_*=3..6
+    // Only re-pivot on mouse ROTATE (state 0). Pan/dolly preserve pivot.
+    const state = typeof controls.getState === 'function' ? controls.getState() : -1;
+    if (state !== 0) return;
+    if (!haveNdc) return;
+    if (intro.isRunning?.()) return;
+
+    const targets = collectRepivotTargets();
+    if (targets.length === 0) return;
+
+    repivotRaycaster.setFromCamera(lastNdc, camera);
+    const hits = repivotRaycaster.intersectObjects(targets, true);
+    if (!hits || hits.length === 0) return;
+
+    // Translate both camera and target by the same delta → offset preserved,
+    // no spherical discontinuity, no clamp violation.
+    const delta = hits[0].point.clone().sub(controls.target);
+    if (delta.lengthSq() < 1e-6) return;
+    controls.target.add(delta);
+    camera.position.add(delta);
+  });
 }
 
 // ---------- Persistent UI prefs (localStorage) ----------
