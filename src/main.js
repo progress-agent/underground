@@ -21,6 +21,7 @@ import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTex
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
 import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats } from './surface-loader.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
+import { initThamesZones, getZoneAt, nearestThamesSegment } from './thames-zones.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -641,6 +642,8 @@ const thamesDataPromise = loadThamesData();
         // Initialise Thames river corridor mask for building exclusion
         if (thamesData.points) {
           initThamesMask(thamesData.points);
+          // Init zone segments for hover-tooltip nearest-segment lookup
+          initThamesZones(thamesData.points);
         }
 
         // Register spatial audio sources (trains added dynamically, Thames static)
@@ -1838,15 +1841,17 @@ window.addEventListener('resize', () => {
     'thames': 4, 'chalk': 4,
   };
 
-  // Large-area surface types that would intercept every ray — exclude from pickables
-  const UNPICKABLE_TYPES = new Set(['thames', 'chalk']);
+  // Large-area surface types that would intercept every ray — exclude from pickables.
+  // Thames is now PICKABLE (zone-aware tooltip via hitPoint nearest-segment lookup).
+  // Priority tier 4 ensures any tunnel/shaft/sewer hit at the same pixel beats it.
+  const UNPICKABLE_TYPES = new Set(['chalk']);
 
   function collectInfraPickables() {
     const pickables = [];
-    // Note: thamesMesh excluded — river surface too large, swallows all hovers over it.
     // Chalk mesh excluded via UNPICKABLE_TYPES — 80km² plane intercepts every downward ray.
     // Chalk-marker (small sphere) is kept.
-    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup];
+    // thamesMesh now included — small features (shafts/tunnels) beat it via INFRA_TIER.
+    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh];
     for (const src of sources) {
       if (!src || !src.visible) continue;
       // Single mesh with userData.type
@@ -1880,7 +1885,7 @@ window.addEventListener('resize', () => {
     // Use recursive:true so child meshes inside any accidentally-collected
     // Groups are still tested, and force-update world matrices on source
     // groups to guarantee transforms are current after async load.
-    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup];
+    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh];
     for (const src of infraSources) {
       if (src) src.updateMatrixWorld(true);
     }
@@ -1899,7 +1904,9 @@ window.addEventListener('resize', () => {
         bestTier = tier;
       }
     }
-    return best.object;
+    // Return mesh + hitPoint so per-class formatters can do spatial lookups
+    // (e.g. Thames zone resolution via nearestThamesSegment(hit.point)).
+    return { mesh: best.object, hitPoint: best.point };
   }
 
   // ---------- Tooltip rendering helpers ----------
@@ -1934,7 +1941,7 @@ window.addEventListener('resize', () => {
     return `<table>${trs.join('')}</table>`;
   }
 
-  function formatInfraTooltip(mesh) {
+  function formatInfraTooltip(mesh, hitPoint = null) {
     const ud = mesh.userData;
     const t = ud.type;
 
@@ -1946,7 +1953,30 @@ window.addEventListener('resize', () => {
       return `<b>Chalk Boundary</b><br/><span class="muted">${ud.label}</span>`;
     }
     if (t === 'thames') {
-      return `<b>River Thames</b>`;
+      // Zone-aware tooltip: nearest waypoint segment -> zone -> tabular layout.
+      // Falls back to plain "River Thames" header if hitPoint missing or zones
+      // not yet initialised.
+      let zone = null;
+      if (hitPoint) {
+        const segIdx = nearestThamesSegment(hitPoint.x, hitPoint.z);
+        if (segIdx !== null) zone = getZoneAt(segIdx);
+      }
+      const title = 'River Thames';
+      const subtitle = zone ? zone.name : null;
+      const rows = [];
+      if (zone) {
+        rows.push(['WIDTH', `~${zone.meanWidth}m`]);
+        // Always show mean+max in metres; if mean===max, just print one value
+        const depthVal = (zone.maxDepth > zone.meanDepth)
+          ? `${zone.meanDepth}m mean (${zone.maxDepth}m max)`
+          : `${zone.meanDepth}m`;
+        rows.push(['DEPTH', depthVal]);
+        rows.push(['AT TIDE', 'MHWS']);
+      }
+      const header = subtitle
+        ? `<b>${title}</b><div class="sub">${subtitle}</div>`
+        : `<b>${title}</b>`;
+      return header + _renderInfraTable(rows);
     }
 
     // Merge meta (gap-filler) with userData (authoritative).
@@ -2064,9 +2094,9 @@ window.addEventListener('resize', () => {
     return header + _renderInfraTable(rows);
   }
 
-  function moveInfraTip(ev, mesh) {
+  function moveInfraTip(ev, mesh, hitPoint = null) {
     if (!tip || !mesh) return;
-    tip.innerHTML = formatInfraTooltip(mesh);
+    tip.innerHTML = formatInfraTooltip(mesh, hitPoint);
     tip.style.display = 'block';
     lastHoverLineId = null; // Reset so transition back to line hover updates text
     const x = (ev.clientX ?? 0) + 12;
@@ -2084,9 +2114,9 @@ window.addEventListener('resize', () => {
     }
 
     // Tier 2: Infrastructure hover
-    const infraMesh = pickInfraUnderPointer(ev);
-    if (infraMesh) {
-      moveInfraTip(ev, infraMesh);
+    const infraHit = pickInfraUnderPointer(ev);
+    if (infraHit) {
+      moveInfraTip(ev, infraHit.mesh, infraHit.hitPoint);
       setHoverHighlight(null);
       return;
     }
