@@ -15,6 +15,7 @@ import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
+import { lookupInfraMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
@@ -1901,48 +1902,166 @@ window.addEventListener('resize', () => {
     return best.object;
   }
 
+  // ---------- Tooltip rendering helpers ----------
+  //
+  // Single shared formatter (Wave 1 plan §4 — locked):
+  //   - Header with optional per-class subtitle
+  //   - Tabular Plex Mono body for {DIAMETER, DEPTH, INSTALLED}
+  //   - Rows omitted entirely if value is null/undefined
+  //   - Unnamed canal/reservoir => minimal one-row tooltip (type only)
+  //   - Chalk/chalk-marker keep string-only semantics (special-cased)
+  //
+  // Data merge: lookupInfraMeta(mesh) provides defaults; mesh.userData
+  // fields take precedence (existing data wins on conflict).
+
+  function _isLikelyOsmAutoName(name) {
+    // OSM bulk-export rows leave names like "Canal 1085535988" or
+    // "Reservoir 147855520" — treat as effectively unnamed.
+    if (!name) return true;
+    return /^(Canal|Reservoir)\s+\d+$/i.test(name)
+        || /^Reservoir\s*[№#]\d+$/i.test(name);
+  }
+
+  function _renderInfraTable(rows) {
+    // rows: array of [label, value] pairs; value already stringified.
+    // Skips rows with null/undefined/empty value.
+    const trs = [];
+    for (const [label, value] of rows) {
+      if (value === null || value === undefined || value === '') continue;
+      trs.push(`<tr><th>${label}</th><td>${value}</td></tr>`);
+    }
+    if (!trs.length) return '';
+    return `<table>${trs.join('')}</table>`;
+  }
+
   function formatInfraTooltip(mesh) {
-    const d = mesh.userData;
-    switch (d.type) {
+    const ud = mesh.userData;
+    const t = ud.type;
+
+    // Special-cases that retain string-only semantics (per Jordan-locked):
+    if (t === 'chalk') {
+      return `<b>Chalk Boundary</b><br/><span class="muted">${ud.depth} - ${ud.description}</span>`;
+    }
+    if (t === 'chalk-marker') {
+      return `<b>Chalk Boundary</b><br/><span class="muted">${ud.label}</span>`;
+    }
+    if (t === 'thames') {
+      return `<b>River Thames</b>`;
+    }
+
+    // Merge meta (gap-filler) with userData (authoritative).
+    const meta = lookupInfraMeta(mesh) || {};
+    const merged = {
+      name: ud.name ?? meta.name,
+      diameter: ud.diameter ?? meta.diameter,
+      depth: ud.depth ?? meta.depth,
+      installed: ud.installed ?? meta.installed,
+    };
+
+    // Per-class header (title + optional subtitle):
+    let title = merged.name || 'Infrastructure';
+    let subtitle = null;
+
+    switch (t) {
       case 'tideway-shaft':
-        return `<b>Thames Tideway Tunnel — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter · ${Math.round(d.depth)}m deep</span>`;
+        title = 'Thames Tideway Tunnel';
+        subtitle = merged.name || null;
+        break;
       case 'lee-shaft':
-        return `<b>Lee Tunnel — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter · ${Math.round(d.depth)}m deep</span>`;
+        title = 'Lee Tunnel';
+        subtitle = merged.name || null;
+        break;
       case 'tideway-tunnel': {
-        const tidewayLabel = d.name === 'Thames Tideway Tunnel'
-          ? d.name
-          : `Thames Tideway Tunnel — ${d.name}`;
-        return `<b>${tidewayLabel}</b><br/><span class="muted">${d.diameter}m diameter</span>`;
+        if (merged.name && merged.name !== 'Thames Tideway Tunnel') {
+          title = 'Thames Tideway Tunnel';
+          subtitle = merged.name;
+        } else {
+          title = merged.name || 'Thames Tideway Tunnel';
+        }
+        break;
       }
       case 'lee-tunnel':
-        return `<b>Lee Tunnel</b><br/><span class="muted">${d.diameter}m diameter · ${d.length}km · ${d.depthRange} deep</span>`;
+        title = 'Lee Tunnel';
+        break;
       case 'crossrail': {
-        // Strip existing "Crossrail — " or "Crossrail / Elizabeth Line" prefix from branch names
-        const section = d.name
+        // Strip existing "Crossrail - " / "Elizabeth Line " prefix off section names
+        const raw = merged.name || '';
+        const section = raw
           .replace(/^Crossrail\s*[—–\-\/]\s*/i, '')
           .replace(/^Elizabeth Line\s*/i, '')
           .trim();
-        const crossrailLabel = section
-          ? `Elizabeth Line (Crossrail) — ${section}`
-          : 'Elizabeth Line (Crossrail)';
-        const depthSpec = d.depth ? `${Math.round(d.depth)}m deep` : '';
-        return `<b>${crossrailLabel}</b>${depthSpec ? '<br/><span class="muted">' + depthSpec + '</span>' : ''}`;
+        title = 'Elizabeth Line';
+        subtitle = section || 'Crossrail';
+        break;
       }
       case 'sewer':
-        return `<b>London Sewerage — ${d.name}</b><br/><span class="muted">${d.diameter}m diameter</span>`;
+        title = 'London Sewerage';
+        subtitle = merged.name || (ud.tunnelId || null);
+        break;
       case 'canal':
-        return `<b>Canal — ${d.name}</b><br/><span class="muted">${d.length.toFixed(1)}km</span>`;
+        if (_isLikelyOsmAutoName(merged.name)) {
+          // Minimal one-row tooltip per Jordan-locked decision
+          return `<b>Canal</b>`;
+        }
+        title = 'Canal';
+        subtitle = merged.name;
+        break;
       case 'reservoir':
-        return `<b>Reservoir — ${d.name}</b><br/><span class="muted">${d.area ? d.area.toFixed(0) + ' ha' : ''}</span>`;
-      case 'thames':
-        return `<b>River Thames</b>`;
-      case 'chalk':
-        return `<b>Chalk Boundary</b><br/><span class="muted">${d.depth} · ${d.description}</span>`;
-      case 'chalk-marker':
-        return `<b>Chalk Boundary</b><br/><span class="muted">${d.label}</span>`;
-      default:
-        return `<b>${d.name || 'Infrastructure'}</b>`;
+        if (_isLikelyOsmAutoName(merged.name)) {
+          return `<b>Reservoir</b>`;
+        }
+        title = 'Reservoir';
+        subtitle = merged.name;
+        break;
     }
+
+    // Per-class table rows.
+    // Rule: numeric depth -> "<n>m"; string depth (e.g. "68-98m" / "~60m") passes through as-is.
+    // Crossrail STATION MARKERS (no tunnelId, smaller geometry) omit diameter row.
+    const rows = [];
+
+    // Diameter row — only when meaningful for the class
+    if (t === 'sewer') {
+      // Sewer diameter stays hardcoded ~4m, labelled approx (Jordan-locked)
+      rows.push(['DIAMETER', '~4m']);
+    } else if (t === 'crossrail') {
+      // Crossrail station markers (have userData.depth but no tunnelId) lack a meaningful
+      // diameter — they're rectangular caverns, not bored tubes. Detect via absence of
+      // tunnelId AND geometry hint (markers are small spheres).
+      const isStationMarker = !ud.tunnelId && mesh.geometry?.type === 'SphereGeometry';
+      if (!isStationMarker && merged.diameter != null) {
+        rows.push(['DIAMETER', `${merged.diameter}m`]);
+      }
+    } else if (merged.diameter != null && t !== 'canal' && t !== 'reservoir') {
+      rows.push(['DIAMETER', `${merged.diameter}m`]);
+    }
+
+    // Depth row
+    if (merged.depth !== null && merged.depth !== undefined && t !== 'canal' && t !== 'reservoir') {
+      const depthVal = (typeof merged.depth === 'number')
+        ? `${Math.round(merged.depth)}m`
+        : String(merged.depth);   // already includes 'm' in registry strings
+      rows.push(['DEPTH', depthVal]);
+    }
+
+    // Installed row
+    if (merged.installed !== null && merged.installed !== undefined) {
+      rows.push(['INSTALLED', String(merged.installed)]);
+    }
+
+    // Reservoir/canal extras (area / length) — surface features, no depth/diameter
+    if (t === 'reservoir' && ud.area != null) {
+      rows.push(['AREA', `${ud.area.toFixed(0)} ha`]);
+    }
+    if (t === 'canal' && ud.length != null) {
+      rows.push(['LENGTH', `${ud.length.toFixed(1)} km`]);
+    }
+
+    const header = subtitle
+      ? `<b>${title}</b><div class="sub">${subtitle}</div>`
+      : `<b>${title}</b>`;
+
+    return header + _renderInfraTable(rows);
   }
 
   function moveInfraTip(ev, mesh) {

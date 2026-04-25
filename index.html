@@ -150,10 +150,34 @@
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
         transform: translate(-9999px, -9999px);
-        white-space: nowrap;
       }
       .hover-tip b { font-weight: 600; }
       .hover-tip .muted { opacity: 0.75; }
+      .hover-tip .sub {
+        font: 10.5px 'IBM Plex Mono', ui-monospace, monospace;
+        color: rgba(255,255,255,0.78);
+        margin-top: 1px;
+        margin-bottom: 3px;
+      }
+      .hover-tip table {
+        font: 9.5px 'IBM Plex Mono', ui-monospace, monospace;
+        border-collapse: collapse;
+        margin-top: 2px;
+      }
+      .hover-tip th {
+        color: rgba(255,255,255,0.55);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 1px 12px 1px 0;
+        text-align: left;
+        font-weight: 400;
+      }
+      .hover-tip td {
+        color: rgba(255,255,255,0.92);
+        text-align: right;
+        padding: 1px 0;
+        font-variant-numeric: tabular-nums;
+      }
 
       /* Compass rose - fixed in bottom right */
       #compass {
