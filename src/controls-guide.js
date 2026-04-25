@@ -57,8 +57,8 @@ function injectStyles() {
       z-index: 28;
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
+      align-items: center;
+      gap: 14px;
       user-select: none;
       font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
       pointer-events: auto;
@@ -67,28 +67,15 @@ function injectStyles() {
     }
     #${ROOT_ID}.ready { opacity: 1; }
 
-    #${ROOT_ID} .row-clusters {
-      display: flex;
-      align-items: flex-start;
-      gap: 18px;
-    }
-
-    #${ROOT_ID} .cluster {
+    #${ROOT_ID} .cluster-arrows,
+    #${ROOT_ID} .cluster-wasd {
       display: flex;
       flex-direction: column;
       gap: 6px;
       align-items: center;
     }
-    #${ROOT_ID} .cluster-wasd { position: relative; }
 
     #${ROOT_ID} .row { display: flex; gap: 6px; }
-
-    #${ROOT_ID} .sep {
-      align-self: stretch;
-      width: 1px;
-      background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,0.10) 30%, rgba(255,255,255,0.10) 70%, transparent 100%);
-      margin-top: 4px;
-    }
 
     /* a5 typographic grid base — borderless, dotted-corner radial gradients,
        Plex Mono glyph at 400 weight. */
@@ -153,10 +140,9 @@ function injectStyles() {
       gap: 3px;
     }
 
-    /* Per-key action labels + cluster role + arrow hint — same caption style. */
+    /* Per-key action labels + cluster role — same caption style. */
     #${ROOT_ID} .action-label,
-    #${ROOT_ID} .cluster-role,
-    #${ROOT_ID} .hint.sub {
+    #${ROOT_ID} .cluster-role {
       font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
       font-size: 9.5px;
       letter-spacing: 0.2em;
@@ -167,20 +153,16 @@ function injectStyles() {
       text-align: center;
     }
     #${ROOT_ID} .cluster-role { margin-bottom: 3px; }
-    #${ROOT_ID} .hint.sub { margin-top: 3px; }
 
-    /* Title "CONTROLS" — 19px (2× caption), centred above QWE.
-       Letter-spacing's trailing-space asymmetry pushes glyphs ~half-a-letter-
-       space LEFT of optical centre under translateX(-50%). The +0.1em right-
-       shift compensates exactly. See CLAUDE.md "letter-spacing trailing-space"
-       trap. */
+    /* Title "CONTROLS" — 11.5px (~40% smaller than the original 19px), sits
+       inline above the QWE row inside cluster-wasd. Centred via the parent's
+       align-items:center; the +0.1em translateX still corrects the letter-
+       spacing trailing-space asymmetry (em-relative so it auto-scales).
+       See CLAUDE.md "letter-spacing trailing-space" trap. */
     #${ROOT_ID} .title {
-      position: absolute;
-      bottom: calc(100% + 6px);
-      left: 50%;
-      transform: translateX(calc(-50% + 0.1em));
+      transform: translateX(0.1em);
       font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
-      font-size: 19px;
+      font-size: 11.5px;
       letter-spacing: 0.2em;
       text-transform: uppercase;
       color: rgba(255,255,255,0.58);
@@ -200,7 +182,8 @@ function injectStyles() {
 
     #${ROOT_ID} .shift-message {
       position: absolute;
-      left: 0;
+      left: 50%;
+      transform: translateX(-50%);
       bottom: calc(100% + 10px);
       font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
       font-size: 14px;
@@ -224,50 +207,46 @@ function buildRoot() {
   root.setAttribute('aria-hidden', 'false');
   root.innerHTML = `
     <div class="shift-message" aria-live="polite">Hold shift to go faster</div>
-    <div class="row-clusters">
-      <div class="cluster cluster-wasd">
-        <div class="title fade-target">Controls</div>
-        <div class="row row-qwe">
-          <div class="key-cell">
-            <span class="key" data-k="q"><span class="glyph">Q</span></span>
-            <span class="action-label fade-target">down</span>
-          </div>
-          <div class="key-cell">
-            <span class="key" data-k="w"><span class="glyph">W</span></span>
-            <span class="action-label fade-target">FWD</span>
-          </div>
-          <div class="key-cell">
-            <span class="key" data-k="e"><span class="glyph">E</span></span>
-            <span class="action-label fade-target">up</span>
-          </div>
+    <div class="cluster-arrows">
+      <div class="cluster-role fade-target">Look</div>
+      <div class="row row-up">
+        <span class="key small" data-k="up"><span class="glyph">&uarr;</span></span>
+      </div>
+      <div class="row row-down">
+        <span class="key small" data-k="left"><span class="glyph">&larr;</span></span>
+        <span class="key small" data-k="down"><span class="glyph">&darr;</span></span>
+        <span class="key small" data-k="right"><span class="glyph">&rarr;</span></span>
+      </div>
+    </div>
+    <div class="cluster-wasd">
+      <div class="title fade-target">Controls</div>
+      <div class="row row-qwe">
+        <div class="key-cell">
+          <span class="key" data-k="q"><span class="glyph">Q</span></span>
+          <span class="action-label fade-target">down</span>
         </div>
-        <div class="row row-asd">
-          <div class="key-cell">
-            <span class="key" data-k="a"><span class="glyph">A</span></span>
-            <span class="action-label fade-target">left</span>
-          </div>
-          <div class="key-cell">
-            <span class="key" data-k="s"><span class="glyph">S</span></span>
-            <span class="action-label fade-target">back</span>
-          </div>
-          <div class="key-cell">
-            <span class="key" data-k="d"><span class="glyph">D</span></span>
-            <span class="action-label fade-target">right</span>
-          </div>
+        <div class="key-cell">
+          <span class="key" data-k="w"><span class="glyph">W</span></span>
+          <span class="action-label fade-target">FWD</span>
+        </div>
+        <div class="key-cell">
+          <span class="key" data-k="e"><span class="glyph">E</span></span>
+          <span class="action-label fade-target">up</span>
         </div>
       </div>
-      <div class="sep" aria-hidden="true"></div>
-      <div class="cluster cluster-arrows">
-        <div class="cluster-role fade-target">Look</div>
-        <div class="row row-up">
-          <span class="key small" data-k="up"><span class="glyph">&uarr;</span></span>
+      <div class="row row-asd">
+        <div class="key-cell">
+          <span class="key" data-k="a"><span class="glyph">A</span></span>
+          <span class="action-label fade-target">left</span>
         </div>
-        <div class="row row-down">
-          <span class="key small" data-k="left"><span class="glyph">&larr;</span></span>
-          <span class="key small" data-k="down"><span class="glyph">&darr;</span></span>
-          <span class="key small" data-k="right"><span class="glyph">&rarr;</span></span>
+        <div class="key-cell">
+          <span class="key" data-k="s"><span class="glyph">S</span></span>
+          <span class="action-label fade-target">back</span>
         </div>
-        <div class="hint sub fade-target">arrows</div>
+        <div class="key-cell">
+          <span class="key" data-k="d"><span class="glyph">D</span></span>
+          <span class="action-label fade-target">right</span>
+        </div>
       </div>
     </div>
   `;

@@ -27,24 +27,6 @@
       body { background: #05070b; overflow: hidden; font-family: 'Railway Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
       #app { position: fixed; inset: 0; }
 
-      .hint {
-        position: fixed;
-        left: 50%;
-        bottom: 12px;
-        transform: translateX(-50%);
-        z-index: 15;
-        font-size: 12px;
-        color: rgba(255,255,255,0.82);
-        background: rgba(20, 24, 34, 0.30);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 999px;
-        padding: 6px 10px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        user-select: none;
-      }
-      .hint b { font-weight: 600; }
-
       /* HTML overlay for station labels */
       #station-overlay {
         position: fixed;
@@ -173,75 +155,6 @@
       .hover-tip b { font-weight: 600; }
       .hover-tip .muted { opacity: 0.75; }
 
-      /* Keyboard help overlay */
-      #helpOverlay {
-        position: fixed;
-        inset: 0;
-        z-index: 100;
-        background: rgba(5, 7, 11, 0.85);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-      }
-      #helpOverlay.visible {
-        display: flex;
-        opacity: 1;
-      }
-      #helpOverlay .panel {
-        background: rgba(20, 24, 34, 0.95);
-        border: 1px solid rgba(255,255,255,0.15);
-        border-radius: 16px;
-        padding: 24px 32px;
-        max-width: 520px;
-        max-height: 80vh;
-        overflow-y: auto;
-        color: rgba(255,255,255,0.9);
-      }
-      #helpOverlay h2 {
-        margin: 0 0 16px 0;
-        font-size: 18px;
-        font-weight: 600;
-        color: #4ade80;
-      }
-      #helpOverlay .section {
-        margin-bottom: 16px;
-      }
-      #helpOverlay .section-title {
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: rgba(255,255,255,0.6);
-        margin-bottom: 8px;
-      }
-      #helpOverlay .key {
-        display: inline-block;
-        background: rgba(255,255,255,0.1);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 4px;
-        padding: 2px 8px;
-        font-family: ui-monospace, monospace;
-        font-size: 12px;
-        margin-right: 4px;
-      }
-      #helpOverlay .row {
-        display: flex;
-        gap: 12px;
-        margin-bottom: 6px;
-        font-size: 13px;
-      }
-      #helpOverlay .dismiss {
-        text-align: center;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid rgba(255,255,255,0.1);
-        font-size: 12px;
-        color: rgba(255,255,255,0.6);
-      }
-
       /* Compass rose - fixed in bottom right */
       #compass {
         position: fixed;
@@ -337,41 +250,6 @@
     </div>
     <div id="netStatus" class="net-status" style="display:none"></div>
     <div id="hoverTip" class="hover-tip" style="display:none"></div>
-
-    <div id="helpOverlay">
-      <div class="panel">
-        <h2>Keyboard Controls</h2>
-        <div class="section">
-          <div class="section-title">Movement</div>
-          <div class="row"><span class="key">S</span> Forward</div>
-          <div class="row"><span class="key">W</span> Fast forward</div>
-          <div class="row"><span class="key">X</span> Backward</div>
-          <div class="row"><span class="key">A</span> / <span class="key">D</span> Strafe left / right</div>
-          <div class="row"><span class="key">Q</span> / <span class="key">E</span> Move up / down</div>
-          <div class="row"><span class="key">Arrows</span> Look direction</div>
-        </div>
-        <div class="section">
-          <div class="section-title">View</div>
-          <div class="row"><span class="key">R</span> Reset to curated view</div>
-          <div class="row"><span class="key">F</span> Focus on line (cycles through)</div>
-          <div class="row"><span class="key">Shift</span> + <span class="key">A</span> Focus on all lines</div>
-          <div class="row"><span class="key">[</span> / <span class="key">]</span> Focal length &minus; / +</div>
-        </div>
-        <div class="section">
-          <div class="section-title">Toggles</div>
-          <div class="row"><span class="key">V</span> Station markers</div>
-          <div class="row"><span class="key">L</span> Labels</div>
-          <div class="row"><span class="key">Shift</span> + <span class="key">S</span> Shafts</div>
-          <div class="row"><span class="key">Space</span> Pause / resume</div>
-        </div>
-        <div class="section">
-          <div class="section-title">Interaction</div>
-          <div class="row"><span class="key">Hover</span> Show line/station info</div>
-          <div class="row"><span class="key">Shift</span> + <span class="key">Click</span> Toggle line visibility</div>
-        </div>
-        <div class="dismiss">Press <span class="key">?</span> or <span class="key">Esc</span> to close</div>
-      </div>
-    </div>
 
     <div id="altimeter">
       <div class="value">0</div>
