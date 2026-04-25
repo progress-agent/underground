@@ -30,6 +30,7 @@ import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 import { initOnboarding } from './onboarding.js';
 import { initLandscapeLock } from './landscape-lock.js';
+import { initControlsGuide } from './controls-guide.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -421,6 +422,13 @@ const onboarding = initOnboarding();
 // silently rejects screen.orientation.lock(), so CSS + matchMedia is the
 // load-bearing path.
 const landscapeLock = initLandscapeLock();
+
+// ---------- Control-guide widget (D-003) ----------
+// Round 4 widget — typographic-grid keys, glow-on-press, timed caption fade,
+// "Hold shift to go faster" reveal. Self-contained — fires on ug:intro-done.
+// Click/touch dispatches synthetic KeyboardEvents so the existing window
+// keydown handler drives fpsControls.keys.
+const controlsGuide = initControlsGuide();
 
 // ---------- Persistent UI prefs (localStorage) ----------
 const PREFS_KEY = 'ug:prefs:v2';
@@ -2283,7 +2291,7 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
-    fpsControls, intro, onboarding, landscapeLock,
+    fpsControls, intro, onboarding, landscapeLock, controlsGuide,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
