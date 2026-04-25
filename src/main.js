@@ -28,7 +28,6 @@ import { createLensSystem } from './lens.js';
 import { initAudio, updateAudio, setMasterVolume, getMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources, getPoolDebug } from './audio.js';
 import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
-import { initOnboarding } from './onboarding.js';
 import { initLandscapeLock } from './landscape-lock.js';
 import { initControlsGuide } from './controls-guide.js';
 
@@ -412,10 +411,6 @@ function updateFpsControls(dt) {
     camera.position.add(delta);
   });
 }
-
-// ---------- Onboarding overlay (Week-1 Step 2) ----------
-// Hint card + persistent ? modal. Self-contained — fires on ug:intro-done.
-const onboarding = initOnboarding();
 
 // ---------- Landscape lock (Week-1 Step 3) ----------
 // Portrait + narrow viewport → full-screen rotate-device overlay. iOS Safari
@@ -2243,6 +2238,19 @@ function tick() {
     : camera.position.y < 0);
   altimeterEl.classList.toggle('underground', isUnderground);
 
+  // Controls-guide reveal: fire once when camera drops within 500 scene units
+  // (~100m altimeter at VE=5) of the terrain surface. forceReveal() is
+  // idempotent — sticky once triggered, so ascending after reveal keeps the
+  // widget visible. Falls back to absolute Y when surfaceY is unavailable
+  // (camera outside terrain mesh) so the widget still reveals at altitude
+  // over central London on the first frame post-intro.
+  if (controlsGuide && !controlsGuide.isRevealed()) {
+    const altSceneUnits = surfaceYAtCamera !== null
+      ? camera.position.y - surfaceYAtCamera
+      : camera.position.y;
+    if (altSceneUnits < 500) controlsGuide.forceReveal();
+  }
+
   // Update surface tile loader (camera-proximity based loading/unloading)
   updateSurfaceLoader(camera.position.x, camera.position.z);
 
@@ -2291,7 +2299,7 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
-    fpsControls, intro, onboarding, landscapeLock, controlsGuide,
+    fpsControls, intro, landscapeLock, controlsGuide,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },

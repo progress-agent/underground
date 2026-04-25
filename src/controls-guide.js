@@ -1,10 +1,15 @@
 // controls-guide.js — Round 4 control-guide widget (D-003).
 //
 // Self-contained — injects own <style id="controls-guide-styles"> and appends
-// #ug-controls-guide to document.body. Mirrors src/onboarding.js pattern.
+// #ug-controls-guide to document.body.
 //
 // Behaviour:
-//   - Hidden until ug:intro-done, then fades in (widget reveal, 400ms).
+//   - Hidden until forceReveal() is called, then fades in (widget reveal,
+//     400ms). main.js polls a per-frame altitude predicate
+//     (camera.position.y - surfaceYAtCamera < 500 scene units, ~100m altimeter
+//     reading at VE=5) and calls forceReveal() once the predicate flips true.
+//     Reveal is one-shot and sticky — once revealed, ascending the camera does
+//     not re-hide it.
 //   - All caption labels visible 30s, then fade out (800ms).
 //   - 200ms after labels begin fading, "Hold shift to go faster" fades in,
 //     holds 5s, fades out.
@@ -323,9 +328,12 @@ export function initControlsGuide() {
   });
 
   // ── Reveal lifecycle ────────────────────────────────────────────────────
-  // Widget is opacity-0 until ug:intro-done. Then `.ready` fades it in over
-  // REVEAL_MS, and the timed caption-fade / shift-message reveal kicks off.
+  // Widget is opacity-0 until forceReveal() is called. main.js drives this
+  // from the per-frame tick loop based on a camera-altitude predicate
+  // (camera near surface). Reveal is one-shot and sticky — subsequent calls
+  // are no-ops, so ascending the camera does not re-hide the widget.
   const timers = [];
+  let revealed = false;
   const startTimedReveal = () => {
     if (noFade) return;
     timers.push(setTimeout(() => {
@@ -339,25 +347,23 @@ export function initControlsGuide() {
     }, showMs + SHIFT_DELAY_MS + SHIFT_HOLD_MS));
   };
 
-  const onIntroDone = () => {
+  const forceReveal = () => {
+    if (revealed) return;
+    revealed = true;
     root.classList.add('ready');
     startTimedReveal();
   };
 
-  // intro.js fires ug:intro-done from both finalize() and the URL-skip fast
-  // path. Handler is once-only — both paths converge here.
-  window.addEventListener('ug:intro-done', onIntroDone, { once: true });
-
-  // If intro already completed before this module mounted (e.g. tests that
-  // dispatch ug:intro-done synchronously), reveal immediately.
-  if (window.__ug && window.__ug.introDoneAlready) onIntroDone();
-
   return {
+    // Public API — main.js per-frame loop calls forceReveal() once the
+    // altitude predicate flips true.
+    forceReveal,
     // Test hooks — direct surface for Playwright, not user-facing.
     _root: root,
     _shiftMessage: shiftMessage,
     _keys: keyEls,
     _held: held,
     _showMs: showMs,
+    isRevealed: () => revealed,
   };
 }

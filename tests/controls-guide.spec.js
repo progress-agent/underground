@@ -1,18 +1,25 @@
 // controls-guide.spec.js — D-003 Round 4 widget coverage.
 //
+// Reveal trigger: per-frame altitude predicate in main.js calls
+// controlsGuide.forceReveal() once the camera is within 500 scene units of
+// the terrain surface (~100m altimeter reading at VE=5). Tests drive the
+// reveal directly via window.__ug.controlsGuide.forceReveal() for
+// deterministic timing — natural reveal would race with async terrain mesh
+// load.
+//
 // Uses ?fast=1 — this URL param does double duty:
-//   1. ANY non-whitelisted query bypasses intro (intro.js fast path), so
-//      ug:intro-done fires immediately on load.
-//   2. Compresses the controls-guide show-window from 30s → 3s so the spec
+//   1. ANY non-whitelisted query bypasses intro (intro.js fast path), so the
+//      cinematic doesn't run.
+//   2. Compresses the controls-guide show-window from 30s to 3s so the spec
 //      finishes in ~10s instead of ~40s.
 //
-// Compressed timeline (with ?fast=1):
-//   t≈0s     widget fades in (.ready), captions opaque
-//   t=3.0s   captions add .is-faded → fade out over 800ms
-//   t=3.2s   shift-message adds .is-visible → fades in over 800ms
-//   t≈4.0s   captions invisible, shift visible
-//   t=8.2s   shift removes .is-visible → fades out
-//   t≈9.0s   shift invisible
+// Compressed timeline (with ?fast=1, after forceReveal()):
+//   t=0      forceReveal called -> .ready added, captions opaque
+//   t=3.0s   captions add .is-faded -> fade out over 800ms
+//   t=3.2s   shift-message adds .is-visible -> fades in over 800ms
+//   t~4.0s   captions invisible, shift visible
+//   t=8.2s   shift removes .is-visible -> fades out
+//   t~9.0s   shift invisible
 //
 // The original 30s/37s design contract is verified implicitly via the
 // compression ratio — show=3000ms, shift hold=5000ms, fade=800ms are all
@@ -22,12 +29,19 @@ import { test, expect } from '@playwright/test';
 
 const FAST = '/?fast=1';
 
-test('widget visible at t=0 with all caption labels opaque', async ({ page }) => {
+// Wait for the dev surface to mount, then trigger the reveal explicitly.
+async function gotoAndReveal(page) {
   await page.goto(FAST);
+  await page.waitForFunction(() => !!(window.__ug && window.__ug.controlsGuide), null, { timeout: 8000 });
+  await page.evaluate(() => window.__ug.controlsGuide.forceReveal());
+}
 
-  // Root reveals via .ready immediately on ug:intro-done.
+test('widget visible after forceReveal with all caption labels opaque', async ({ page }) => {
+  await gotoAndReveal(page);
+
+  // Root reveals via .ready immediately on forceReveal().
   const root = page.locator('#ug-controls-guide');
-  await expect(root).toHaveClass(/ready/, { timeout: 6000 });
+  await expect(root).toHaveClass(/ready/, { timeout: 2000 });
 
   // Captions opaque (not yet faded).
   const fadeTargets = page.locator('#ug-controls-guide .fade-target');
@@ -43,9 +57,9 @@ test('widget visible at t=0 with all caption labels opaque', async ({ page }) =>
   expect(fadedCount).toBe(0);
 });
 
-test('caption labels faded by t=4s (compressed) — assertions wait for is-faded class', async ({ page }) => {
-  await page.goto(FAST);
-  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 6000 });
+test('caption labels faded ~3s after reveal (compressed)', async ({ page }) => {
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
   // Wait for fade trigger (showMs=3000ms with ?fast=1) — assertion uses ample
   // upper bound to absorb scheduler jitter.
@@ -58,9 +72,9 @@ test('caption labels faded by t=4s (compressed) — assertions wait for is-faded
   await expect(page.locator('#ug-controls-guide .title')).toHaveCSS('opacity', '0', { timeout: 1500 });
 });
 
-test('shift-message visible at t≈3.5s (post-fade-trigger + 200ms delay)', async ({ page }) => {
-  await page.goto(FAST);
-  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 6000 });
+test('shift-message visible ~3.2s after reveal', async ({ page }) => {
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
   // Wait for .is-visible to appear on .shift-message (showMs + SHIFT_DELAY_MS
   // = 3200ms with ?fast=1).
@@ -74,12 +88,12 @@ test('shift-message visible at t≈3.5s (post-fade-trigger + 200ms delay)', asyn
   await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '1', { timeout: 1500 });
 });
 
-test('shift-message gone by t≈9.5s (after 5s hold + 800ms fade)', async ({ page }) => {
-  await page.goto(FAST);
-  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 6000 });
+test('shift-message gone ~9s after reveal (after 5s hold + 800ms fade)', async ({ page }) => {
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
   // After SHIFT_HOLD_MS=5000ms, the .is-visible class is removed. Total wall
-  // clock from goto: showMs(3000) + SHIFT_DELAY(200) + SHIFT_HOLD(5000) ≈ 8.2s.
+  // clock from reveal: showMs(3000) + SHIFT_DELAY(200) + SHIFT_HOLD(5000) ~ 8.2s.
   await page.waitForFunction(
     () => document.querySelector('#ug-controls-guide .shift-message')?.classList.contains('is-visible'),
     null,
@@ -96,8 +110,8 @@ test('shift-message gone by t≈9.5s (after 5s hold + 800ms fade)', async ({ pag
 });
 
 test('click on Q key dispatches synthetic KeyboardEvent with code KeyQ', async ({ page }) => {
-  await page.goto(FAST);
-  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 6000 });
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
   // Install a window-level keydown listener that records every event into
   // window.__capturedCodes. We can't share closures with the browser, so we
@@ -123,8 +137,8 @@ test('click on Q key dispatches synthetic KeyboardEvent with code KeyQ', async (
 });
 
 test('arrow key click dispatches ArrowUp', async ({ page }) => {
-  await page.goto(FAST);
-  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 6000 });
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
   await page.evaluate(() => {
     window.__capturedCodes = [];
