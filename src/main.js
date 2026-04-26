@@ -1970,8 +1970,7 @@ window.addEventListener('resize', () => {
         const depthVal = (zone.maxDepth > zone.meanDepth)
           ? `${zone.meanDepth}m mean (${zone.maxDepth}m max)`
           : `${zone.meanDepth}m`;
-        rows.push(['DEPTH', depthVal]);
-        rows.push(['AT TIDE', 'MHWS']);
+        rows.push(['↓', depthVal]);
       }
       const header = subtitle
         ? `<b>${title}</b><div class="sub">${subtitle}</div>`
@@ -2053,17 +2052,17 @@ window.addEventListener('resize', () => {
     // Diameter row — only when meaningful for the class
     if (t === 'sewer') {
       // Sewer diameter stays hardcoded ~4m, labelled approx (Jordan-locked)
-      rows.push(['DIAMETER', '~4m']);
+      rows.push(['↔', '~4m']);
     } else if (t === 'crossrail') {
       // Crossrail station markers (have userData.depth but no tunnelId) lack a meaningful
       // diameter — they're rectangular caverns, not bored tubes. Detect via absence of
       // tunnelId AND geometry hint (markers are small spheres).
       const isStationMarker = !ud.tunnelId && mesh.geometry?.type === 'SphereGeometry';
       if (!isStationMarker && merged.diameter != null) {
-        rows.push(['DIAMETER', `${merged.diameter}m`]);
+        rows.push(['↔', `${merged.diameter}m`]);
       }
     } else if (merged.diameter != null && t !== 'canal' && t !== 'reservoir') {
-      rows.push(['DIAMETER', `${merged.diameter}m`]);
+      rows.push(['↔', `${merged.diameter}m`]);
     }
 
     // Depth row
@@ -2071,12 +2070,12 @@ window.addEventListener('resize', () => {
       const depthVal = (typeof merged.depth === 'number')
         ? `${Math.round(merged.depth)}m`
         : String(merged.depth);   // already includes 'm' in registry strings
-      rows.push(['DEPTH', depthVal]);
+      rows.push(['↓', depthVal]);
     }
 
     // Installed row
     if (merged.installed !== null && merged.installed !== undefined) {
-      rows.push(['INSTALLED', String(merged.installed)]);
+      rows.push(['', String(merged.installed)]);
     }
 
     // Reservoir/canal extras (area / length) — surface features, no depth/diameter

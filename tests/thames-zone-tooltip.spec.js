@@ -1,6 +1,6 @@
 // Thames zone tooltip smoke test
 // Verifies:
-//  (a) zone-aware tooltip renders the tabular WIDTH/DEPTH/AT TIDE rows
+//  (a) zone-aware tooltip renders the tabular WIDTH + depth-arrow rows
 //      via direct formatInfraTooltip-equivalent invocation with synthetic
 //      hitPoint (mirrors Gamma's screenshot pattern - raycaster geometry
 //      is occlusion-fragile, lookup logic is what we actually want to test).
@@ -98,8 +98,7 @@ test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats T
     tip.innerHTML = `<b>River Thames</b><div class="sub">${zone.zoneName}</div>` +
       `<table>` +
         `<tr><th>WIDTH</th><td>~${zone.meanWidth}m</td></tr>` +
-        `<tr><th>DEPTH</th><td>${depthVal}</td></tr>` +
-        `<tr><th>AT TIDE</th><td>MHWS</td></tr>` +
+        `<tr><th>↓</th><td>${depthVal}</td></tr>` +
       `</table>`;
     tip.style.display = 'block';
     tip.style.transform = 'translate(40px, 40px)';

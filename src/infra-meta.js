@@ -25,8 +25,10 @@ function slug(s) {
     .toLowerCase()
     // Normalise dashes (em, en, hyphen-minus) to hyphen-space removable
     .replace(/[–—\-]+/g, ' ')
-    // Strip parenthetical asides
-    .replace(/\([^)]*\)/g, ' ')
+    // Treat parens as separators (preserve their content — registry keys
+    // like 'tideway-tunnel-western-section-acton-carnwath-road' encode the
+    // parenthetical waypoints, so stripping them produced empty slugs).
+    .replace(/[()]/g, ' ')
     // Strip non-alphanumeric punctuation
     .replace(/['".,/\\]/g, '')
     // Collapse whitespace
