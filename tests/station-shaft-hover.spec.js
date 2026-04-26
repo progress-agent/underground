@@ -65,7 +65,7 @@ test('Station shaft userData carries naptanId, name, lines + INFRA_META lookups 
   expect(probe.lineMeta.engineer).toContain('Greathead');
 });
 
-test('Hampstead hover renders tooltip with DEPTH + DATE + WIDTH + ENGINEER rows', async ({ page }) => {
+test('Hampstead station-shaft tooltip renders NAME + LINE + DATE only (no depth/width/engineer)', async ({ page }) => {
   await page.goto('/?skipintro=1');
   await page.waitForFunction(
     () => document.querySelector('#loadingBar')?.classList.contains('done'),
@@ -108,17 +108,60 @@ test('Hampstead hover renders tooltip with DEPTH + DATE + WIDTH + ENGINEER rows'
   // as a render-time variance and fall back to direct formatter check —
   // the previous test already proved the data path.
   if (tip && tip.includes('Hampstead')) {
+    // Post-pivot: depth + width + engineer migrated to tube-line tooltips.
+    // Station-shaft is now name + line list + opening date only.
     expect(tip).toContain('Hampstead');
-    expect(tip).toContain('DEPTH');
-    expect(tip).toContain('59m');           // Math.round(58.5) = 59
     expect(tip).toContain('DATE');
     expect(tip).toContain('1907');
-    expect(tip).toContain('WIDTH');         // From line-northern fallback (3.56m)
-    expect(tip).toContain('3.56m');
-    expect(tip).toContain('ENGINEER');
-    expect(tip).toContain('Greathead');     // line-northern engineer string
     expect(tip).toContain('Northern');      // subtitle line display
+    expect(tip).not.toContain('DEPTH');
+    expect(tip).not.toContain('WIDTH');
+    expect(tip).not.toContain('ENGINEER');
   } else {
     console.log('WARN: hover did not land on Hampstead shaft cleanly. Data-path probe in previous test confirms wiring.');
   }
+});
+
+test('Tube-line tooltip renders LINE NAME + WIDTH + DEPTH from nearest station on hovered line', async ({ page }) => {
+  await page.goto('/?skipintro=1');
+  await page.waitForFunction(
+    () => document.querySelector('#loadingBar')?.classList.contains('done'),
+    { timeout: 90000 },
+  );
+  await page.waitForTimeout(5000);
+
+  // Direct formatter probe — bypasses raycast (tubes are thin and screen
+  // projection of a TubeGeometry strand is fragile). Builds a synthetic
+  // tube-line mesh with userData.lineId + a hitPoint near Hampstead, then
+  // invokes window.__ug.formatInfraTooltip directly.
+  // Hampstead naptan position is the unifiedShaftLayer mesh — use it as the
+  // hit-point so the nearest-station search returns Hampstead.
+  const result = await page.evaluate(async () => {
+    const ug = window.__ug;
+    if (!ug?.formatInfraTooltip) return { error: 'no formatInfraTooltip on __ug — expose it' };
+    const layer = ug.unifiedShaftLayer;
+    const parts = layer?.byId.get('940GZZLUHTD');
+    if (!parts) return { error: 'no Hampstead shaft' };
+
+    const Vec3 = ug.camera.position.constructor;
+    const hp = new Vec3();
+    parts.mesh.getWorldPosition(hp);
+
+    // Synthetic tube-line mesh — only userData fields are read by the formatter.
+    const synthMesh = { userData: { type: 'tube-line', lineId: 'northern' } };
+    const html = ug.formatInfraTooltip(synthMesh, hp);
+    return { html };
+  });
+
+  console.log('Tube-line tooltip:', JSON.stringify(result));
+  expect(result.error).toBeUndefined();
+  const html = result.html || '';
+  expect(html).toContain('Northern');
+  expect(html).toContain('WIDTH');
+  expect(html).toContain('~3.56m');     // line-northern diameter, tilde-prefixed
+  expect(html).toContain('DEPTH');
+  expect(html).toContain('~59m');       // nearest = Hampstead 58.5m -> ~59m
+  // Engineer + DATE are NOT surfaced on tube-line hover (they live on station shafts).
+  expect(html).not.toContain('ENGINEER');
+  expect(html).not.toContain('DATE');
 });

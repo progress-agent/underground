@@ -887,6 +887,8 @@ function snapAllTubesToTerrain() {
       const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
       leftMesh.userData.lineId = lineId;
       rightMesh.userData.lineId = lineId;
+      leftMesh.userData.type = 'tube-line';
+      rightMesh.userData.type = 'tube-line';
 
       newMeshes.push(leftMesh, rightMesh);
       linePickables.push(leftMesh, rightMesh);
@@ -1260,6 +1262,8 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
     leftMesh.userData.lineId = lineId;
     rightMesh.userData.lineId = lineId;
+    leftMesh.userData.type = 'tube-line';
+    rightMesh.userData.type = 'tube-line';
 
     allMeshes.push(leftMesh, rightMesh);
     linePickables.push(leftMesh, rightMesh);
@@ -1706,6 +1710,10 @@ window.addEventListener('resize', () => {
   lensSystem.updateAspect(camera.aspect);
 });
 
+// Module-level reference for the tooltip formatter — populated from inside the
+// bare-block scope below so __ug (and tests) can call it directly.
+let _formatInfraTooltipRef = null;
+
 // ---------- Click-to-focus / shift-click toggle + hover tooltip ----------
 {
   const raycaster = new THREE.Raycaster();
@@ -1857,6 +1865,7 @@ window.addEventListener('resize', () => {
   const INFRA_TIER = {
     'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
     'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2, 'station-shaft': 2,
+    'tube-line': 3,
     'canal': 3, 'reservoir': 3,
     'thames': 4, 'chalk': 4,
   };
@@ -1871,6 +1880,8 @@ window.addEventListener('resize', () => {
     // Chalk mesh excluded via UNPICKABLE_TYPES — 80km² plane intercepts every downward ray.
     // Chalk-marker (small sphere) is kept.
     // thamesMesh now included — small features (shafts/tunnels) beat it via INFRA_TIER.
+    // Tube line meshes (linePickables) are flat-pushed below — they live in lineGroups
+    // but iterating linePickables directly avoids walking every line group.
     const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, unifiedShaftLayer?.group];
     for (const src of sources) {
       if (!src || !src.visible) continue;
@@ -1892,6 +1903,13 @@ window.addEventListener('resize', () => {
         }
       }
     }
+    // Tube line tubes (left+right per branch). Each carries userData.type='tube-line' + lineId.
+    // Parent (lineGroup) visibility controls solo-line filtering — check it, not mesh.visible.
+    for (const m of linePickables) {
+      if (!m || m.userData?.type !== 'tube-line') continue;
+      if (m.parent && m.parent.visible === false) continue;
+      pickables.push(m);
+    }
     return pickables;
   }
 
@@ -1909,6 +1927,8 @@ window.addEventListener('resize', () => {
     for (const src of infraSources) {
       if (src) src.updateMatrixWorld(true);
     }
+    // Tube line meshes live in lineGroups; refresh world matrices so picks land on correct geometry.
+    for (const g of lineGroups.values()) g.updateMatrixWorld(true);
 
     const hits = raycaster.intersectObjects(pickables, true);
     if (hits.length > 0) console.log(`[infra-hover] ${hits.length} hits, best: ${hits[0].object.userData?.type}`);
@@ -1961,6 +1981,7 @@ window.addEventListener('resize', () => {
     return `<table>${trs.join('')}</table>`;
   }
 
+  _formatInfraTooltipRef = formatInfraTooltip;
   function formatInfraTooltip(mesh, hitPoint = null) {
     const ud = mesh.userData;
     const t = ud.type;
@@ -2049,21 +2070,63 @@ window.addEventListener('resize', () => {
         subtitle = merged.name || (ud.tunnelId || null);
         break;
       case 'station-shaft': {
-        // Station shafts: per-station meta (depth + installed) keyed by
-        // naptanId in lookupInfraMeta; per-line meta (diameter + engineer)
-        // via lookupLineMeta fallback for the first line in userData.lines
-        // that has a registry entry. See infra-meta.js Wave 3 section.
-        // Title preference: meta.name (Prog/Wikipedia clean form, e.g.
-        // 'Hampstead') over userData.name (TfL StopPoint form, e.g.
-        // 'Hampstead Underground Station') — the verbose suffix is noise
-        // in a tooltip header.
+        // Station shafts show NAME + LINE LIST + DATE only. Depth + width
+        // live on the line tubes themselves (see 'tube-line' case below) —
+        // a station serving multiple lines has different platform depths
+        // per line, so depth on the station shaft conflates them.
         title = meta.name || merged.name || 'Station';
         const lineNames = (ud.lines || []).map(LINE_DISPLAY).filter(Boolean);
         subtitle = lineNames.length ? lineNames.join(' • ') : null;
-        // Fall back to line-level meta where station-level didn't supply.
-        const lineMeta = lookupLineMeta(ud.lines || []) || {};
-        if (merged.diameter == null && lineMeta.diameter != null) merged.diameter = lineMeta.diameter;
-        if (merged.engineer == null && lineMeta.engineer != null) merged.engineer = lineMeta.engineer;
+        // Force-clear depth/diameter/engineer so the row-emission below skips them.
+        merged.depth = null;
+        merged.diameter = null;
+        merged.engineer = null;
+        break;
+      }
+      case 'tube-line': {
+        // Hover on a Tube line tube: line name + approximate width + approximate
+        // depth at this point. Width comes from line-registry diameter (or null
+        // for sub-surface lines). Depth derived by finding the nearest station
+        // on this line in the unified shaft layer and reading its FOI depth.
+        // "Approximate" by design — Jordan-locked at brief.
+        const lineId = ud.lineId;
+        const lineMeta = lookupLineMeta([lineId]) || {};
+        title = LINE_DISPLAY(lineId) || 'Tube line';
+        subtitle = null;
+        // Width — registry value, formatted with leading tilde to read as approximate.
+        if (lineMeta.diameter != null) {
+          merged.diameter = (typeof lineMeta.diameter === 'number')
+            ? `~${lineMeta.diameter}m`
+            : `~${lineMeta.diameter}`; // string forms (e.g. "3.81-4.35m") already include unit
+        } else {
+          merged.diameter = null;
+        }
+        // Depth — nearest station-shaft on this lineId, by 2D distance to hitPoint.
+        merged.depth = null;
+        if (hitPoint && unifiedShaftLayer?.group) {
+          let bestNaptan = null;
+          let bestDist = Infinity;
+          unifiedShaftLayer.group.traverse(child => {
+            const cud = child.userData;
+            if (cud?.type !== 'station-shaft') return;
+            if (!cud.lines || !cud.lines.includes(lineId)) return;
+            if (!cud.naptanId) return;
+            const dx = child.position.x - hitPoint.x;
+            const dz = child.position.z - hitPoint.z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < bestDist) { bestDist = d2; bestNaptan = cud.naptanId; }
+          });
+          if (bestNaptan) {
+            // Synthesise a fake mesh shape for lookupInfraMeta — it only reads userData.naptanId.
+            const stationMeta = lookupInfraMeta({ userData: { naptanId: bestNaptan } });
+            if (stationMeta && stationMeta.depth != null) {
+              merged.depth = `~${Math.round(stationMeta.depth)}m`;
+            }
+          }
+        }
+        // Engineer + installed not surfaced on line hover (they're on station shafts).
+        merged.engineer = null;
+        merged.installed = null;
         break;
       }
       case 'canal':
@@ -2102,7 +2165,11 @@ window.addEventListener('resize', () => {
         rows.push(['WIDTH', `${merged.diameter}m`]);
       }
     } else if (merged.diameter != null && t !== 'canal' && t !== 'reservoir') {
-      rows.push(['WIDTH', `${merged.diameter}m`]);
+      // Numeric diameter -> append "m"; string diameter -> already formatted (incl. unit).
+      const widthVal = (typeof merged.diameter === 'number')
+        ? `${merged.diameter}m`
+        : String(merged.diameter);
+      rows.push(['WIDTH', widthVal]);
     }
 
     // Depth row
@@ -2498,6 +2565,10 @@ if (import.meta.env.DEV) {
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     cushionLuma: { sample: sampleCushion, reset: resetCushion, state: _cushionState },
+    // formatInfraTooltip is closure-scoped to the tooltip block (~L1714-2268).
+    // _formatInfraTooltipRef is assigned from inside that block and read via
+    // this getter so it lands on __ug after init order resolves.
+    get formatInfraTooltip() { return _formatInfraTooltipRef; },
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
