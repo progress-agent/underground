@@ -32,6 +32,7 @@ import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 import { initLandscapeLock } from './landscape-lock.js';
 import { initControlsGuide } from './controls-guide.js';
+import { initReadout } from './readout.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -118,9 +119,7 @@ function setNetStatus({ kind, text }) {
 
 // ---------- Scene ----------
 const app = document.getElementById('app');
-const compassRose = document.querySelector('#compass .rose');
-const altimeterEl = document.getElementById('altimeter');
-const altimeterValue = altimeterEl.querySelector('.value');
+// #compass and #altimeter replaced by src/readout.js module
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -426,6 +425,7 @@ const landscapeLock = initLandscapeLock();
 // Click/touch dispatches synthetic KeyboardEvents so the existing window
 // keydown handler drives fpsControls.keys.
 const controlsGuide = initControlsGuide();
+const readout = initReadout();
 
 // ---------- Persistent UI prefs (localStorage) ----------
 const PREFS_KEY = 'ug:prefs:v2';
@@ -2367,24 +2367,26 @@ function tick() {
   // otherwise override intro's lookAt(OXC) and desync renderer vs label projection.
   if (!intro.isRunning()) controls.update();
 
-  // Rotate compass rose to match camera azimuth
-  // OrbitControls azimuthal angle increases counter-clockwise (viewed from above).
-  // CSS rotate() is clockwise-positive. The azimuth directly gives the correct
-  // compass rotation: when camera orbits left, north appears to rotate right on screen.
+  // Readout widget — substrate, altitude, compass
   const azimuth = controls.getAzimuthalAngle();
-  compassRose.style.transform = `rotate(${azimuth}rad)`;
-
-  // Update altimeter — divide by VE to show real-world metres
   const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
   const realAltM = surfaceYAtCamera !== null
     ? Math.round((camera.position.y - surfaceYAtCamera) / VERTICAL_EXAGGERATION)
     : Math.round(camera.position.y / VERTICAL_EXAGGERATION);
-  altimeterValue.textContent = realAltM;
   const cameraInsideM25 = isInsideM25(camera.position.x, camera.position.z);
   const isUnderground = cameraInsideM25 && (surfaceYAtCamera !== null
     ? camera.position.y < surfaceYAtCamera
     : camera.position.y < 0);
-  altimeterEl.classList.toggle('underground', isUnderground);
+
+  // Substrate: chalk top ≈ 60m below sea level at VE=5 = -300 scene units (mOD reference)
+  const CHALK_TOP_Y = -60 * VERTICAL_EXAGGERATION;
+  let substrate = 'AIR';
+  if (isUnderground) {
+    if (isInThames(camera.position.x, camera.position.z)) substrate = 'WATER';
+    else if (camera.position.y < CHALK_TOP_Y) substrate = 'CHALK';
+    else substrate = 'CLAY';
+  }
+  readout.update(azimuth, realAltM, substrate);
 
   // Controls-guide reveal: fire once when camera drops within 500 scene units
   // (~100m altimeter at VE=5) of the terrain surface. forceReveal() is
@@ -2447,7 +2449,8 @@ if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
-    fpsControls, intro, landscapeLock, controlsGuide,
+    fpsControls, intro, landscapeLock, controlsGuide, readout,
+    nearestThamesSegment, getZoneAt,
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },

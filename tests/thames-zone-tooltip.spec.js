@@ -60,17 +60,19 @@ test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats T
   expect(tooltipResult.error).toBeUndefined();
   expect(tooltipResult.thamesFound).toBe(true);
 
-  // ---- Check 2: programmatic tooltip render via window-injected helper ----
-  // Inject a small helper that calls the picker's tooltip path with a known
-  // mesh + synthetic hitPoint. We do this via page.evaluate that imports the
-  // module fresh - module side-effects (initThamesZones) already ran from
-  // main.js, so the segments are populated.
-  const tipHtml = await page.evaluate(async () => {
-    const zonesMod = await import('/src/thames-zones.js');
-    if (!zonesMod.nearestThamesSegment) return { error: 'nearestThamesSegment missing' };
-    // Greenwich Reach centreline (waypoint 75 area)
-    const segIdx = zonesMod.nearestThamesSegment(3100, -200);
-    const zone = zonesMod.getZoneAt(segIdx);
+  // ---- Check 2: programmatic tooltip render via window.__ug helpers ----
+  // Use window.__ug.nearestThamesSegment / getZoneAt to guarantee we call
+  // the already-initialised module instance (not a fresh dynamic import that
+  // may have uninitialised _segments).
+  // Coordinate note: scene z = -(BNG_n - 180400), so n=180200 → z = +200
+  // (positive z = south). The Thames is south of Trafalgar Square.
+  const tipHtml = await page.evaluate(() => {
+    const ug = window.__ug;
+    if (!ug?.nearestThamesSegment) return { error: 'nearestThamesSegment not on __ug' };
+    // Greenwich Reach centreline (waypoint 75 area):
+    //   BNG e=533100, n=180200 → x=3100, z=-(180200-180400)=+200
+    const segIdx = ug.nearestThamesSegment(3100, 200);
+    const zone = ug.getZoneAt(segIdx);
     if (!zone) return { error: 'no zone resolved', segIdx };
     return {
       segIdx,
