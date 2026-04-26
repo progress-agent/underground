@@ -15,7 +15,7 @@ import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
-import { lookupInfraMeta } from './infra-meta.js';
+import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
@@ -1839,10 +1839,24 @@ window.addEventListener('resize', () => {
 
   // ---------- Infrastructure hover ----------
 
+  // Display name lookup for line IDs (used in station-shaft tooltip subtitle).
+  // Hyphenated IDs resolve to short, tooltip-friendly names. Unknown ids
+  // fall through to a Title-Case version of the id.
+  const _LINE_DISPLAY_MAP = {
+    'bakerloo': 'Bakerloo', 'central': 'Central', 'circle': 'Circle',
+    'district': 'District', 'hammersmith-city': 'H&C', 'jubilee': 'Jubilee',
+    'metropolitan': 'Met', 'northern': 'Northern', 'piccadilly': 'Piccadilly',
+    'victoria': 'Victoria', 'waterloo-city': 'W&C', 'elizabeth': 'Elizabeth',
+    'dlr': 'DLR',
+  };
+  function LINE_DISPLAY(id) {
+    return _LINE_DISPLAY_MAP[id] || (id ? id.charAt(0).toUpperCase() + id.slice(1) : '');
+  }
+
   // Priority tiers — lower = higher priority (small features beat large surfaces)
   const INFRA_TIER = {
     'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
-    'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2,
+    'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2, 'station-shaft': 2,
     'canal': 3, 'reservoir': 3,
     'thames': 4, 'chalk': 4,
   };
@@ -1857,7 +1871,7 @@ window.addEventListener('resize', () => {
     // Chalk mesh excluded via UNPICKABLE_TYPES — 80km² plane intercepts every downward ray.
     // Chalk-marker (small sphere) is kept.
     // thamesMesh now included — small features (shafts/tunnels) beat it via INFRA_TIER.
-    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh];
+    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, unifiedShaftLayer?.group];
     for (const src of sources) {
       if (!src || !src.visible) continue;
       // Single mesh with userData.type
@@ -1891,7 +1905,7 @@ window.addEventListener('resize', () => {
     // Use recursive:true so child meshes inside any accidentally-collected
     // Groups are still tested, and force-update world matrices on source
     // groups to guarantee transforms are current after async load.
-    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh];
+    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, unifiedShaftLayer?.group];
     for (const src of infraSources) {
       if (src) src.updateMatrixWorld(true);
     }
@@ -2034,6 +2048,24 @@ window.addEventListener('resize', () => {
         title = 'London Sewerage';
         subtitle = merged.name || (ud.tunnelId || null);
         break;
+      case 'station-shaft': {
+        // Station shafts: per-station meta (depth + installed) keyed by
+        // naptanId in lookupInfraMeta; per-line meta (diameter + engineer)
+        // via lookupLineMeta fallback for the first line in userData.lines
+        // that has a registry entry. See infra-meta.js Wave 3 section.
+        // Title preference: meta.name (Prog/Wikipedia clean form, e.g.
+        // 'Hampstead') over userData.name (TfL StopPoint form, e.g.
+        // 'Hampstead Underground Station') — the verbose suffix is noise
+        // in a tooltip header.
+        title = meta.name || merged.name || 'Station';
+        const lineNames = (ud.lines || []).map(LINE_DISPLAY).filter(Boolean);
+        subtitle = lineNames.length ? lineNames.join(' • ') : null;
+        // Fall back to line-level meta where station-level didn't supply.
+        const lineMeta = lookupLineMeta(ud.lines || []) || {};
+        if (merged.diameter == null && lineMeta.diameter != null) merged.diameter = lineMeta.diameter;
+        if (merged.engineer == null && lineMeta.engineer != null) merged.engineer = lineMeta.engineer;
+        break;
+      }
       case 'canal':
         if (_isLikelyOsmAutoName(merged.name)) {
           // Minimal one-row tooltip per Jordan-locked decision

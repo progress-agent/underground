@@ -79,6 +79,20 @@ export function createUnifiedShafts({ scene, registry, getTerrainMeshSurfaceY, v
     mesh.position.set(entry.x, midY, entry.z);
     mesh.renderOrder = 2;
 
+    // userData drives infra-hover tooltips. naptanId is the registry key for
+    // per-station meta lookup in src/infra-meta.js (matches Prog stations.csv
+    // 'naptan' column). Lines array carries the line ids; main.js's
+    // formatInfraTooltip merges per-station depth/installed with per-line
+    // diameter/engineer for Wave 3 station-shaft tooltips.
+    mesh.userData = {
+      type: 'station-shaft',
+      naptanId,
+      name: entry.name,
+      lines: [...entry.lines],
+      lineCount,
+      deepestDepthM: entry.deepestDepthM,
+    };
+
     group.add(mesh);
     byId.set(naptanId, { mesh, groundY, platformY, radius, entry });
   }
