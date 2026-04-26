@@ -32,6 +32,7 @@ import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 import { initLandscapeLock } from './landscape-lock.js';
 import { initControlsGuide } from './controls-guide.js';
+import { initCushionLuma, sampleCushion, resetCushion, _cushionState } from './cushion-luma.js';
 import { initReadout } from './readout.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
@@ -131,6 +132,10 @@ app.appendChild(renderer.domElement);
 // also panning/zooming.
 renderer.domElement.style.touchAction = 'none';
 renderer.domElement.style.webkitTapHighlightColor = 'transparent';
+
+// Per-tooltip framebuffer luma sampler — drives `.cushion-light` polarity
+// on `#hoverTip` so the Halo cushion adapts to the scene under each hover.
+initCushionLuma(renderer);
 
 const scene = new THREE.Scene();
 // Re-enabled fog with lighter color for better above-ground visibility
@@ -1724,6 +1729,7 @@ window.addEventListener('resize', () => {
       tip.style.display = 'none';
       tip.style.transform = 'translate(-9999px, -9999px)';
       lastHoverLineId = null;
+      resetCushion();
       return;
     }
 
@@ -1913,7 +1919,7 @@ window.addEventListener('resize', () => {
   //
   // Single shared formatter (Wave 1 plan §4 — locked):
   //   - Header with optional per-class subtitle
-  //   - Tabular Plex Mono body for {DIAMETER, DEPTH, INSTALLED}
+  //   - Tabular Plex Mono body for {WIDTH, DEPTH, DATE}
   //   - Rows omitted entirely if value is null/undefined
   //   - Unnamed canal/reservoir => minimal one-row tooltip (type only)
   //   - Chalk/chalk-marker keep string-only semantics (special-cased)
@@ -1970,7 +1976,7 @@ window.addEventListener('resize', () => {
         const depthVal = (zone.maxDepth > zone.meanDepth)
           ? `${zone.meanDepth}m mean (${zone.maxDepth}m max)`
           : `${zone.meanDepth}m`;
-        rows.push(['↓', depthVal]);
+        rows.push(['DEPTH', depthVal]);
       }
       const header = subtitle
         ? `<b>${title}</b><div class="sub">${subtitle}</div>`
@@ -2052,17 +2058,17 @@ window.addEventListener('resize', () => {
     // Diameter row — only when meaningful for the class
     if (t === 'sewer') {
       // Sewer diameter stays hardcoded ~4m, labelled approx (Jordan-locked)
-      rows.push(['↔', '~4m']);
+      rows.push(['WIDTH', '~4m']);
     } else if (t === 'crossrail') {
       // Crossrail station markers (have userData.depth but no tunnelId) lack a meaningful
       // diameter — they're rectangular caverns, not bored tubes. Detect via absence of
       // tunnelId AND geometry hint (markers are small spheres).
       const isStationMarker = !ud.tunnelId && mesh.geometry?.type === 'SphereGeometry';
       if (!isStationMarker && merged.diameter != null) {
-        rows.push(['↔', `${merged.diameter}m`]);
+        rows.push(['WIDTH', `${merged.diameter}m`]);
       }
     } else if (merged.diameter != null && t !== 'canal' && t !== 'reservoir') {
-      rows.push(['↔', `${merged.diameter}m`]);
+      rows.push(['WIDTH', `${merged.diameter}m`]);
     }
 
     // Depth row
@@ -2070,12 +2076,12 @@ window.addEventListener('resize', () => {
       const depthVal = (typeof merged.depth === 'number')
         ? `${Math.round(merged.depth)}m`
         : String(merged.depth);   // already includes 'm' in registry strings
-      rows.push(['↓', depthVal]);
+      rows.push(['DEPTH', depthVal]);
     }
 
     // Installed row
     if (merged.installed !== null && merged.installed !== undefined) {
-      rows.push(['', String(merged.installed)]);
+      rows.push(['DATE', String(merged.installed)]);
     }
 
     // Reservoir/canal extras (area / length) — surface features, no depth/diameter
@@ -2439,6 +2445,7 @@ function tick() {
   }
 
   composer.render();
+  sampleCushion();
   requestAnimationFrame(tick);
 }
 
@@ -2451,6 +2458,7 @@ if (import.meta.env.DEV) {
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
+    cushionLuma: { sample: sampleCushion, reset: resetCushion, state: _cushionState },
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },

@@ -100,7 +100,7 @@ test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats T
     tip.innerHTML = `<b>River Thames</b><div class="sub">${zone.zoneName}</div>` +
       `<table>` +
         `<tr><th>WIDTH</th><td>~${zone.meanWidth}m</td></tr>` +
-        `<tr><th>↓</th><td>${depthVal}</td></tr>` +
+        `<tr><th>DEPTH</th><td>${depthVal}</td></tr>` +
       `</table>`;
     tip.style.display = 'block';
     tip.style.transform = 'translate(40px, 40px)';

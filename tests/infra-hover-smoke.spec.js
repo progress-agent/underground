@@ -392,10 +392,10 @@ test('Infrastructure hover: meshes present and raycaster can hit them', async ({
 });
 
 // Wave 2 — Gamma: smoke-check the new tabular tooltip format end-to-end.
-// Hover a Tideway shaft directly, assert the tip contains DIAMETER + DEPTH +
-// INSTALLED rows. The metadata registry (src/infra-meta.js) supplies the
+// Hover a Tideway shaft directly, assert the tip contains WIDTH + DEPTH +
+// DATE rows. The metadata registry (src/infra-meta.js) supplies the
 // installed year; userData supplies depth + diameter.
-test('Tideway shaft tooltip shows DIAMETER / DEPTH / INSTALLED rows', async ({ page }) => {
+test('Tideway shaft tooltip shows WIDTH / DEPTH / DATE rows', async ({ page }) => {
   await page.goto('/?skipintro=1');
 
   await page.waitForFunction(
@@ -451,10 +451,10 @@ test('Tideway shaft tooltip shows DIAMETER / DEPTH / INSTALLED rows', async ({ p
   const tip = await page.locator('#hoverTip').innerHTML().catch(() => '');
   console.log('Tooltip HTML (DOM):', tip);
 
-  if (tip && tip.includes('DIAMETER')) {
-    expect(tip).toContain('DIAMETER');
+  if (tip && tip.includes('WIDTH')) {
+    expect(tip).toContain('WIDTH');
     expect(tip).toContain('DEPTH');
-    expect(tip).toContain('INSTALLED');
+    expect(tip).toContain('DATE');
     return;
   }
 

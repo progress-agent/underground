@@ -137,44 +137,143 @@
       .net-status.warn { border-color: rgba(245, 158, 11, 0.25); }
       .net-status.err { border-color: rgba(239, 68, 68, 0.25); }
 
+      /* Tooltip — Halo variant. Transparent background, no card, no border.
+         Legibility = stacked text-shadow halos around every glyph. Three tiers:
+         header heaviest (3 layers), value medium (2 layers), label lightest (1).
+         Default (`.hover-tip`)        = white ink + dark cushion (works on dark/mid/water).
+         Adaptive (`.cushion-light`)   = dark ink + white cushion (chosen by JS
+                                         luminance sample at tooltip position —
+                                         see src/cushion-luma.js). Per-tooltip
+                                         polarity, no body-class. */
       .hover-tip {
         position: fixed;
         z-index: 25;
         pointer-events: none;
-        font-size: 12px;
-        color: rgba(255,255,255,0.90);
-        background: rgba(14, 17, 25, 0.92);
-        border: 1px solid rgba(255,255,255,0.12);
-        border-radius: 10px;
-        padding: 6px 8px;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font-family: 'IBM Plex Sans', system-ui, sans-serif;
+        color: #ffffff;
+        max-width: 280px;
         transform: translate(-9999px, -9999px);
+        text-shadow:
+          0 0 3px rgba(0,0,0,0.85),
+          0 0 7px rgba(0,0,0,0.55),
+          0 1px 2px rgba(0,0,0,0.65);
       }
-      .hover-tip b { font-weight: 600; }
-      .hover-tip .muted { opacity: 0.75; }
+      .hover-tip b {
+        display: block;
+        font: 600 12px/1.2 'IBM Plex Mono', ui-monospace, monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: #ffffff;
+        margin: 0 0 3px;
+        text-shadow:
+          0 0 4px rgba(0,0,0,0.95),
+          0 0 10px rgba(0,0,0,0.70),
+          0 0 18px rgba(0,0,0,0.40),
+          0 1px 2px rgba(0,0,0,0.80);
+      }
       .hover-tip .sub {
-        font: 10.5px 'IBM Plex Mono', ui-monospace, monospace;
-        color: rgba(255,255,255,0.78);
-        margin-top: 1px;
-        margin-bottom: 3px;
+        font: 500 9.5px/1.25 'IBM Plex Mono', ui-monospace, monospace;
+        color: #c9b896;
+        text-transform: uppercase;
+        letter-spacing: 0.13em;
+        margin: 0 0 5px;
+        text-shadow:
+          0 0 3px rgba(0,0,0,0.90),
+          0 0 8px rgba(0,0,0,0.55),
+          0 1px 2px rgba(0,0,0,0.70);
+      }
+      .hover-tip .muted {
+        display: block;
+        font: 400 10px/1.4 'IBM Plex Mono', ui-monospace, monospace;
+        color: rgba(255,255,255,0.82);
+        margin: 2px 0 0;
+        letter-spacing: 0.02em;
+        text-shadow:
+          0 0 3px rgba(0,0,0,0.85),
+          0 0 7px rgba(0,0,0,0.50),
+          0 1px 2px rgba(0,0,0,0.60);
       }
       .hover-tip table {
-        font: 9.5px 'IBM Plex Mono', ui-monospace, monospace;
         border-collapse: collapse;
-        margin-top: 2px;
+        margin: 1px 0 0;
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
       }
       .hover-tip th {
-        color: rgba(255,255,255,0.55);
+        color: rgba(255,255,255,0.62);
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        padding: 1px 12px 1px 0;
+        letter-spacing: 0.13em;
+        padding: 1px 14px 1px 0;
         text-align: left;
         font-weight: 400;
+        font-size: 9px;
+        line-height: 1.45;
+        white-space: nowrap;
+        vertical-align: middle;
+        text-shadow:
+          0 0 3px rgba(0,0,0,0.80),
+          0 1px 1px rgba(0,0,0,0.55);
       }
       .hover-tip td {
-        color: rgba(255,255,255,0.92);
-        text-align: right;
+        color: #ffffff;
+        text-align: left;
         padding: 1px 0;
         font-variant-numeric: tabular-nums;
+        font-weight: 500;
+        font-size: 10px;
+        line-height: 1.45;
+        white-space: nowrap;
+        text-shadow:
+          0 0 3px rgba(0,0,0,0.92),
+          0 0 8px rgba(0,0,0,0.55),
+          0 1px 2px rgba(0,0,0,0.70);
+      }
+
+      /* Adaptive: light cushion + dark ink for tooltips over bright scene
+         pixels (chalk surface, daylit terrain). Class toggled per-tooltip by
+         src/cushion-luma.js after framebuffer luma sample. */
+      .hover-tip.cushion-light {
+        color: #0a0d18;
+        text-shadow:
+          0 0 3px rgba(255,255,255,0.55),
+          0 0 7px rgba(255,255,255,0.35),
+          0 1px 1px rgba(0,0,0,0.30);
+      }
+      .hover-tip.cushion-light b {
+        color: #0a0d18;
+        text-shadow:
+          0 0 3px rgba(255,255,255,0.65),
+          0 0 9px rgba(255,255,255,0.45),
+          0 0 18px rgba(255,255,255,0.25),
+          0 1px 2px rgba(0,0,0,0.45);
+      }
+      .hover-tip.cushion-light .sub {
+        color: #5a4720;
+        text-shadow:
+          0 0 3px rgba(255,255,255,0.60),
+          0 0 7px rgba(255,255,255,0.35),
+          0 1px 1px rgba(0,0,0,0.30);
+      }
+      .hover-tip.cushion-light .muted {
+        color: rgba(10,13,24,0.78);
+        text-shadow:
+          0 0 3px rgba(255,255,255,0.55),
+          0 1px 1px rgba(0,0,0,0.30);
+      }
+      .hover-tip.cushion-light th {
+        color: rgba(10,13,24,0.55);
+        text-shadow:
+          0 0 2px rgba(255,255,255,0.55),
+          0 1px 1px rgba(0,0,0,0.25);
+      }
+      .hover-tip.cushion-light td {
+        color: #0a0d18;
+        text-shadow:
+          0 0 3px rgba(255,255,255,0.60),
+          0 0 7px rgba(255,255,255,0.35),
+          0 1px 2px rgba(0,0,0,0.40);
       }
 
       /* Compass + altimeter replaced by src/readout.js (#ug-readout) */
