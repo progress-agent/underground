@@ -44,6 +44,8 @@ function slug(s) {
 //   depth      number|string — metres below ground; string allowed for
 //                        ranges ('68-98m') and descriptive depths ('~60m')
 //   installed  number|string — year, or year-range string
+//   engineer   string  — chief engineer / authority (currently sewer-only;
+//                        any class can adopt — emit code in main.js is generic)
 
 export const INFRA_META = {
   // ============================================================
@@ -198,21 +200,28 @@ export const INFRA_META = {
   // ============================================================
   // SEWER TUNNELS — Bazalgette interceptor system + outfalls
   // ============================================================
-  // Source: Wikipedia (London sewerage system / individual tunnels) +
-  //   Stephen Halliday, "The Great Stink of London" (1999).
-  // Per Jordan: diameter STAYS hardcoded at 4m in tooltip ("approx").
-  // Meta supplies installed year only (per-tunnel construction date).
+  // Source: Wikipedia (London sewerage system / Northern Outfall Sewer) for
+  //   Bazalgette/MBW attribution and the 1859-1865 overall construction
+  //   span; Halliday, "The Great Stink of London" (1999) for individual
+  //   commissioning years (Crossness 1865, Beckton 1868, Embankment Low
+  //   Levels 1875). Per-tunnel diameter and depth are NOT in the registry:
+  //   Wikipedia does not document either, and the previous tooltip's
+  //   uniform 4m label was the rendering geometry (radius * 2 from
+  //   sewers.js), not authoritative — real sections vary 1.5-4.5m and are
+  //   egg-shaped. Future agent with primary-source access (Halliday print
+  //   appendices / Thames Water heritage technical notes) can add diameter
+  //   and depth_range fields per tunnel — registry-merge will pick them up.
   // Keyed by tunnelId (matches sewers.js tunnels[] keys).
-  'northern-outfall':     { installed: 1868 },  // Bazalgette completed 1868
-  'southern-outfall':     { installed: 1865 },  // Crossness PS opened Apr 1865
-  'northern-high-level':  { installed: 1868 },  // Hampstead -> Wick Lane
-  'northern-middle-1':    { installed: 1868 },
-  'northern-middle-2':    { installed: 1868 },
-  'northern-low-1':       { installed: 1875 },  // Embankment intercept, opened with Embankment
-  'northern-low-2':       { installed: 1875 },
-  'southern-high-level':  { installed: 1865 },
-  'southern-middle':      { installed: 1865 },
-  'southern-low':         { installed: 1865 },
+  'northern-outfall':     { installed: 1868, engineer: 'Bazalgette (MBW)' },  // Beckton STW commissioning
+  'southern-outfall':     { installed: 1865, engineer: 'Bazalgette (MBW)' },  // Crossness PS opened Apr 1865
+  'northern-high-level':  { installed: 1868, engineer: 'Bazalgette (MBW)' },  // Hampstead -> Wick Lane
+  'northern-middle-1':    { installed: 1868, engineer: 'Bazalgette (MBW)' },
+  'northern-middle-2':    { installed: 1868, engineer: 'Bazalgette (MBW)' },
+  'northern-low-1':       { installed: 1875, engineer: 'Bazalgette (MBW)' },  // Embankment intercept, opened with Embankment
+  'northern-low-2':       { installed: 1875, engineer: 'Bazalgette (MBW)' },
+  'southern-high-level':  { installed: 1865, engineer: 'Bazalgette (MBW)' },
+  'southern-middle':      { installed: 1865, engineer: 'Bazalgette (MBW)' },
+  'southern-low':         { installed: 1865, engineer: 'Bazalgette (MBW)' },
 
   // ============================================================
   // NAMED CANALS (~10-25 of 200+; unnamed render minimal)

@@ -1991,6 +1991,7 @@ window.addEventListener('resize', () => {
       diameter: ud.diameter ?? meta.diameter,
       depth: ud.depth ?? meta.depth,
       installed: ud.installed ?? meta.installed,
+      engineer: ud.engineer ?? meta.engineer,
     };
 
     // Per-class header (title + optional subtitle):
@@ -2055,11 +2056,12 @@ window.addEventListener('resize', () => {
     // Crossrail STATION MARKERS (no tunnelId, smaller geometry) omit diameter row.
     const rows = [];
 
-    // Diameter row — only when meaningful for the class
-    if (t === 'sewer') {
-      // Sewer diameter stays hardcoded ~4m, labelled approx (Jordan-locked)
-      rows.push(['WIDTH', '~4m']);
-    } else if (t === 'crossrail') {
+    // Diameter row — only when meaningful for the class.
+    // Sewer userData no longer carries the rendering-geometry diameter (4m
+    // uniform was misleading; real Bazalgette sections vary 1.5-4.5m and are
+    // egg-shaped). Sewers fall through to the generic merged.diameter check
+    // below and emit WIDTH only when the registry supplies a verified value.
+    if (t === 'crossrail') {
       // Crossrail station markers (have userData.depth but no tunnelId) lack a meaningful
       // diameter — they're rectangular caverns, not bored tubes. Detect via absence of
       // tunnelId AND geometry hint (markers are small spheres).
@@ -2082,6 +2084,11 @@ window.addEventListener('resize', () => {
     // Installed row
     if (merged.installed !== null && merged.installed !== undefined) {
       rows.push(['DATE', String(merged.installed)]);
+    }
+
+    // Engineer row (currently sewer-only; registry-driven so any class can adopt)
+    if (merged.engineer) {
+      rows.push(['ENGINEER', String(merged.engineer)]);
     }
 
     // Reservoir/canal extras (area / length) — surface features, no depth/diameter

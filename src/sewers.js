@@ -113,7 +113,11 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
       type: 'sewer',
       tunnelId,
       name: colorScheme.name,
-      diameter: radius * 2,
+      // No diameter on userData. The 4m render geometry (radius * 2) is a uniform
+      // simplification, not authoritative — real Bazalgette sections vary 1.5-4.5m
+      // and are mostly egg-shaped. If per-tunnel verified diameters are sourced
+      // (Halliday print appendices / Thames Water heritage), add them to
+      // infra-meta.js keyed by tunnelId — registry-merge will pick them up.
     };
     group.add(tunnelMesh);
     
