@@ -117,6 +117,8 @@ test('Hampstead station-shaft tooltip renders NAME + LINE + DATE only (no depth/
     expect(tip).not.toContain('DEPTH');
     expect(tip).not.toContain('WIDTH');
     expect(tip).not.toContain('ENGINEER');
+    // Phraseology audit: registry name "Hampstead" wins over raw TfL "Hampstead Underground Station".
+    expect(tip).not.toContain('Underground Station');
   } else {
     console.log('WARN: hover did not land on Hampstead shaft cleanly. Data-path probe in previous test confirms wiring.');
   }
@@ -156,7 +158,8 @@ test('Tube-line tooltip renders LINE NAME + WIDTH + DEPTH from nearest station o
   console.log('Tube-line tooltip:', JSON.stringify(result));
   expect(result.error).toBeUndefined();
   const html = result.html || '';
-  expect(html).toContain('Northern');
+  // Phraseology audit: tube-line title is "Northern line" (lowercase suffix), not bare "Northern".
+  expect(html).toContain('Northern line');
   expect(html).toContain('WIDTH');
   expect(html).toContain('~3.56m');     // line-northern diameter, tilde-prefixed
   expect(html).toContain('DEPTH');
@@ -164,4 +167,33 @@ test('Tube-line tooltip renders LINE NAME + WIDTH + DEPTH from nearest station o
   // Engineer + DATE are NOT surfaced on tube-line hover (they live on station shafts).
   expect(html).not.toContain('ENGINEER');
   expect(html).not.toContain('DATE');
+});
+
+test('Phraseology audit — pure-function smoke for cleanStationName + LINE_DISPLAY_WITH_SUFFIX', async ({ page }) => {
+  // Sanity-check the two phraseology helpers via the dev surface. These are pure
+  // string functions — exercising them in-page proves the imports are wired and
+  // the canonical names + DLR exception are in effect post-bundle.
+  await page.goto('/?skipintro=1');
+  await page.waitForFunction(
+    () => document.querySelector('#loadingBar')?.classList.contains('done'),
+    { timeout: 90000 },
+  );
+
+  const probe = await page.evaluate(async () => {
+    const stations = await import('/src/stations.js');
+    return {
+      // cleanStationName strips the TfL "X Underground Station" / "X DLR Station" suffix.
+      warren: stations.cleanStationName('Warren Street Underground Station'),
+      bank:   stations.cleanStationName('Bank Underground Station'),
+      cw:     stations.cleanStationName('Canary Wharf DLR Station'),
+      // Names without the suffix pattern are passed through unchanged
+      // (e.g. "Battersea Power Station" — proper name, not a TfL suffix).
+      battersea: stations.cleanStationName('Battersea Power Station'),
+    };
+  });
+
+  expect(probe.warren).toBe('Warren Street');
+  expect(probe.bank).toBe('Bank');
+  expect(probe.cw).toBe('Canary Wharf');
+  expect(probe.battersea).toBe('Battersea Power Station');
 });

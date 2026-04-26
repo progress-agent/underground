@@ -4,7 +4,7 @@ import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './terrain.js';
-import { createStationMarkers } from './stations.js';
+import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
@@ -1725,10 +1725,10 @@ let _formatInfraTooltipRef = null;
   function prettyLineName(lineId) {
     const raw = String(lineId || '').replace(/-/g, ' ');
     if (raw === 'dlr') return 'DLR';
-    if (raw === 'hammersmith city') return 'Hammersmith & City Line';
-    if (raw === 'waterloo city') return 'Waterloo & City Line';
+    if (raw === 'hammersmith city') return 'Hammersmith & City line';
+    if (raw === 'waterloo city') return 'Waterloo & City line';
     const titled = raw.replace(/\b\w/g, c => c.toUpperCase());
-    return titled + ' Line';
+    return titled + ' line';
   }
 
   function moveTip(ev, lineId) {
@@ -1836,7 +1836,7 @@ let _formatInfraTooltipRef = null;
     const depthM = station.depthM;
     const depthLabel = depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
 
-    tip.innerHTML = `<b>${station.name}</b><br/><span class="muted">${depthLabel}</span>`;
+    tip.innerHTML = `<b>${cleanStationName(station.name)}</b><br/><span class="muted">${depthLabel}</span>`;
     tip.style.display = 'block';
     lastHoverLineId = null; // Reset so transition back to line hover updates text
 
@@ -1847,18 +1847,30 @@ let _formatInfraTooltipRef = null;
 
   // ---------- Infrastructure hover ----------
 
-  // Display name lookup for line IDs (used in station-shaft tooltip subtitle).
-  // Hyphenated IDs resolve to short, tooltip-friendly names. Unknown ids
-  // fall through to a Title-Case version of the id.
+  // Display name lookup for line IDs.
+  //   LINE_DISPLAY(id)             -> bare canonical name ("Northern", "Hammersmith & City", "DLR").
+  //                                   Used in station-shaft tooltip subtitle (multi-line list — the
+  //                                   word "line" is implicit in context, suppressed here for compactness).
+  //   LINE_DISPLAY_WITH_SUFFIX(id) -> bare canonical name + lowercase " line" suffix
+  //                                   ("Northern line", "Hammersmith & City line"), EXCEPT DLR which
+  //                                   stays bare (it's a Light Railway, not a Line — TfL convention).
+  //                                   Used as the title on tube-line tooltips.
+  // Unknown ids fall through to a Title-Case version of the id.
   const _LINE_DISPLAY_MAP = {
     'bakerloo': 'Bakerloo', 'central': 'Central', 'circle': 'Circle',
-    'district': 'District', 'hammersmith-city': 'H&C', 'jubilee': 'Jubilee',
-    'metropolitan': 'Met', 'northern': 'Northern', 'piccadilly': 'Piccadilly',
-    'victoria': 'Victoria', 'waterloo-city': 'W&C', 'elizabeth': 'Elizabeth',
+    'district': 'District', 'hammersmith-city': 'Hammersmith & City', 'jubilee': 'Jubilee',
+    'metropolitan': 'Metropolitan', 'northern': 'Northern', 'piccadilly': 'Piccadilly',
+    'victoria': 'Victoria', 'waterloo-city': 'Waterloo & City', 'elizabeth': 'Elizabeth',
     'dlr': 'DLR',
   };
   function LINE_DISPLAY(id) {
     return _LINE_DISPLAY_MAP[id] || (id ? id.charAt(0).toUpperCase() + id.slice(1) : '');
+  }
+  function LINE_DISPLAY_WITH_SUFFIX(id) {
+    const base = LINE_DISPLAY(id);
+    if (!base) return '';
+    if (id === 'dlr') return base; // DLR is a Light Railway, not a Line
+    return `${base} line`;
   }
 
   // Priority tiers — lower = higher priority (small features beat large surfaces)
@@ -2091,7 +2103,7 @@ let _formatInfraTooltipRef = null;
         // "Approximate" by design — Jordan-locked at brief.
         const lineId = ud.lineId;
         const lineMeta = lookupLineMeta([lineId]) || {};
-        title = LINE_DISPLAY(lineId) || 'Tube line';
+        title = LINE_DISPLAY_WITH_SUFFIX(lineId) || 'Tube line';
         subtitle = null;
         // Width — registry value, formatted with leading tilde to read as approximate.
         if (lineMeta.diameter != null) {

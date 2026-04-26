@@ -9,7 +9,7 @@ const _labelledNamesUG = new Set();
 // read every frame by each layer's update() so slider changes apply instantly.
 let _labelMaxDistance = 9000;
 
-function cleanStationName(name) {
+export function cleanStationName(name) {
   return name.replace(/\s+(Underground|DLR) Station$/i, '');
 }
 
