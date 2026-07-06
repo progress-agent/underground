@@ -150,3 +150,25 @@ test('arrow key click dispatches ArrowUp', async ({ page }) => {
   const codes = await page.evaluate(() => window.__capturedCodes);
   expect(codes).toContain('ArrowUp');
 });
+
+test('clicking W tile feeds fpsControls.keys with "w" (synthetic key carries .key)', async ({ page }) => {
+  await gotoAndReveal(page);
+  await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
+
+  // A full click dispatches keydown then keyup, so fpsControls.keys is emptied
+  // again by the time we read it. Snapshot the Set at the instant of keydown —
+  // that captures the mutation the synthetic event drives. If the synthetic
+  // event omitted `key`, main.js's e.key.toLowerCase() listener would add
+  // `undefined`-derived garbage (never 'w'), so this asserts the fix directly.
+  await page.evaluate(() => {
+    window.__keysAtDown = [];
+    window.addEventListener('keydown', () => {
+      window.__keysAtDown = Array.from(window.__ug.fpsControls.keys);
+    });
+  });
+
+  await page.locator('#ug-controls-guide .key[data-k="w"]').click();
+
+  const keysAtDown = await page.evaluate(() => window.__keysAtDown);
+  expect(keysAtDown).toContain('w');
+});

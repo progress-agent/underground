@@ -50,6 +50,16 @@ const ID_FOR_CODE = Object.fromEntries(
   Object.entries(KEY_CODE_FOR).map(([id, code]) => [code, id])
 );
 
+// KeyboardEvent.code → .key. main.js's flight listeners key off e.key
+// (.toLowerCase()), NOT e.code, so synthetic events MUST carry `key` or the
+// on-screen keys light up but never move the camera. Letters map to their
+// lowercase char; arrows keep their KeyboardEvent.key names (toLowerCase in
+// main.js yields 'arrowup' etc., matching fpsControls' key set).
+const KEY_FOR_CODE = {
+  KeyQ: 'q', KeyW: 'w', KeyE: 'e', KeyA: 'a', KeyS: 's', KeyD: 'd',
+  ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+};
+
 function injectStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const s = document.createElement('style');
@@ -309,15 +319,16 @@ export function initControlsGuide() {
     const code = KEY_CODE_FOR[id];
     if (!code) return;
 
+    const key = KEY_FOR_CODE[code];
     const down = (ev) => {
       ev.preventDefault();
       try { el.setPointerCapture(ev.pointerId); } catch (_) { /* not all envs */ }
-      window.dispatchEvent(new KeyboardEvent('keydown', { code }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { code, key }));
     };
     const up = () => {
       // Guard against duplicate keyup (pointerleave fires after pointerup).
       if (held.has(id)) {
-        window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code, key }));
       }
     };
 

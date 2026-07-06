@@ -238,6 +238,29 @@ const fpsControls = {
   active: false,             // true when any movement key is held
 };
 
+// Hoisted scratch for updateFpsControls — zero per-frame allocation while a
+// movement key is held (was 4×Vector3 + Euler + quaternion clone per frame).
+const _fwd = new THREE.Vector3();
+const _fwdXZ = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _moveDir = new THREE.Vector3();
+const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _rotFwd = new THREE.Vector3();
+const _surfQuery = { x: 0, z: 0 }; // reused arg for getTerrainMeshSurfaceY
+
+// D-002 substrate speed multiplier — applied in the movement funnel. Default
+// 1.0 (no effect); a later wave (chalk slowdown) drives it via window.__ug.
+let substrateSpeedFactor = 1.0;
+
+// Left-button (ROTATE) drag flag. r161 OrbitControls has no getState(); we
+// track the drag locally. Set on a capture-phase left pointerdown (before
+// OrbitControls dispatches 'start'), cleared on pointerup/cancel/blur.
+// Consumed by the rotate re-pivot (gate) and the hover cascade (skip mid-drag).
+let _dragActive = false;
+
+// Rising-edge tracker for the fps damping handover (see tick()).
+let _fpsWasActive = false;
+
 window.addEventListener('keydown', (e) => {
   fpsControls.keys.add(e.key.toLowerCase());
 });
@@ -278,33 +301,49 @@ function updateFpsControls(dt) {
   const sprinting = keys.has('shift') || fpsControls.flightToggle;
   const speedMult = sprinting ? fpsControls.sprintMultiplier : 1.0;
 
+  // D-002 speed regimes (design LOCKED). Above ground, horizontal reach scales
+  // with real altitude (0.3×–20× of base) so low flying is precise and high
+  // flying covers ground fast. Below ground, constant base (no depth scaling) —
+  // chalk slowdown will later come via substrateSpeedFactor. surfaceY===null
+  // (terrain not yet loaded, or outside the mesh) falls to the constant base.
+  _surfQuery.x = camera.position.x;
+  _surfQuery.z = camera.position.z;
+  const surfaceY = getTerrainMeshSurfaceY(_surfQuery);
+  let regimeSpeed = moveSpeed;
+  if (surfaceY !== null && camera.position.y >= surfaceY) {
+    const alt = (camera.position.y - surfaceY) / VERTICAL_EXAGGERATION; // real m
+    regimeSpeed = moveSpeed * THREE.MathUtils.clamp(alt / 500, 0.3, 20);
+  }
+  const effectiveSpeed = regimeSpeed * speedMult * substrateSpeedFactor;
+
   // Get camera's current forward direction (from camera matrix)
-  const forward = new THREE.Vector3();
-  camera.getWorldDirection(forward);
+  camera.getWorldDirection(_fwd);
 
   // Project forward onto XZ plane for movement (keep Y separate)
-  const forwardXZ = new THREE.Vector3(forward.x, 0, forward.z).normalize();
+  _fwdXZ.set(_fwd.x, 0, _fwd.z).normalize();
 
   // Right vector is perpendicular to forward in XZ plane
-  const right = new THREE.Vector3(-forward.z, 0, forward.x).normalize();
+  _right.set(-_fwd.z, 0, _fwd.x).normalize();
 
   // Calculate movement direction (standard FPS convention: W forward, S back)
-  const moveDir = new THREE.Vector3();
-  if (keys.has('w')) moveDir.add(forwardXZ);
-  if (keys.has('s')) moveDir.sub(forwardXZ);
-  if (keys.has('a')) moveDir.sub(right);
-  if (keys.has('d')) moveDir.add(right);
-  if (keys.has('e')) moveDir.y += 1;
-  if (keys.has('q')) moveDir.y -= 1;
+  _moveDir.set(0, 0, 0);
+  if (keys.has('w')) _moveDir.add(_fwdXZ);
+  if (keys.has('s')) _moveDir.sub(_fwdXZ);
+  if (keys.has('a')) _moveDir.sub(_right);
+  if (keys.has('d')) _moveDir.add(_right);
+  if (keys.has('e')) _moveDir.y += 1;
+  if (keys.has('q')) _moveDir.y -= 1;
 
   // Apply movement — translate-together preserves controls offset invariant
   // so minDistance/maxDistance/polar clamps survive (see
   // _REPORTS/24Apr26f/sources/consult-0109/loopback-gemini-target.md §3).
-  if (moveDir.lengthSq() > 0) {
-    moveDir.normalize();
-    const displacement = moveDir.multiplyScalar(moveSpeed * speedMult * dt);
-    // Halve vertical (Q/E) motion — horizontal (WASD) unchanged
-    displacement.y *= 0.5;
+  if (_moveDir.lengthSq() > 0) {
+    _moveDir.normalize();
+    // Single funnel for all speed (regime × sprint × substrate).
+    const displacement = _moveDir.multiplyScalar(effectiveSpeed * dt);
+    // Vertical (Q/E) scaled by 0.5×VE=2.5 so real vertical speed is half of
+    // real horizontal speed (Y has VE=5, so /5 gives real metres).
+    displacement.y *= 2.5;
     camera.position.add(displacement);
     controls.target.add(displacement);
   }
@@ -322,24 +361,22 @@ function updateFpsControls(dt) {
   if (keys.has('arrowdown')) pitch -= pitchSpeed * dt;
 
   if (yaw !== 0 || pitch !== 0) {
-    // Get current rotation
-    const quaternion = camera.quaternion.clone();
-    const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
+    // Get current rotation (reuse hoisted Euler; no quaternion clone)
+    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
 
     // Apply yaw (Y axis rotation)
-    euler.y += yaw;
+    _euler.y += yaw;
 
     // Apply pitch (X axis rotation) with clamping
-    euler.x += pitch;
-    euler.x = THREE.MathUtils.clamp(euler.x, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
+    _euler.x = THREE.MathUtils.clamp(_euler.x + pitch, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
 
     // Set new rotation
-    camera.quaternion.setFromEuler(euler);
+    camera.quaternion.setFromEuler(_euler);
 
     // Update OrbitControls target to match new look direction
     const lookDistance = camera.position.distanceTo(controls.target);
-    const newForward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    controls.target.copy(camera.position).add(newForward.multiplyScalar(lookDistance));
+    _rotFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    controls.target.copy(camera.position).add(_rotFwd.multiplyScalar(lookDistance));
   }
 }
 
@@ -388,6 +425,22 @@ function updateFpsControls(dt) {
   renderer.domElement.addEventListener('pointerdown', updateNdcFromEvent);
   renderer.domElement.addEventListener('pointermove', updateNdcFromEvent);
 
+  // Track left-button drag state locally (r161 has no controls.getState()).
+  // Capture phase so the flag is set BEFORE OrbitControls' own bubble-phase
+  // pointerdown handler fires and dispatches its synchronous 'start' event —
+  // otherwise the re-pivot handler below would read a stale (false) flag.
+  // button 0 === controls.mouseButtons.LEFT === THREE.MOUSE.ROTATE. Restrict
+  // to pointerType 'mouse' so a touch pinch/pan (whose pointerdown also reports
+  // button 0) does not spuriously re-pivot — the previous getState() gate was
+  // dead code, so this behaviour is entirely new and must not regress touch.
+  controls.domElement.addEventListener('pointerdown', (ev) => {
+    if (ev.button === 0 && ev.pointerType === 'mouse') _dragActive = true;
+  }, true);
+  const clearDrag = () => { _dragActive = false; };
+  window.addEventListener('pointerup', clearDrag, true);
+  window.addEventListener('pointercancel', clearDrag, true);
+  window.addEventListener('blur', clearDrag);
+
   // Candidate targets: terrain first (broad, reliable hit), then surface
   // buildings, then line tubes. Stations/shafts/infra are fine fallbacks but
   // terrain+buildings cover ~all visible frames.
@@ -405,10 +458,10 @@ function updateFpsControls(dt) {
   };
 
   controls.addEventListener('start', () => {
-    // OrbitControls STATE: NONE=-1, ROTATE=0, DOLLY=1, PAN=2, TOUCH_*=3..6
-    // Only re-pivot on mouse ROTATE (state 0). Pan/dolly preserve pivot.
-    const state = typeof controls.getState === 'function' ? controls.getState() : -1;
-    if (state !== 0) return;
+    // Only re-pivot on a left-button ROTATE drag. r161 OrbitControls exposes no
+    // getState(); _dragActive is set true only for button 0 (LEFT === ROTATE),
+    // so a middle/right dolly or pan leaves it false and preserves the pivot.
+    if (!_dragActive) return;
     if (!haveNdc) return;
     if (intro.isRunning?.()) return;
 
@@ -1788,19 +1841,23 @@ let _formatInfraTooltipRef = null;
 
   // Station pickables for hover detection
   const stationPickables = [];
-  
+
+  // Hoisted out of pickStationUnderPointer — refilled in place each call so a
+  // per-pointermove raycast allocates no array.
+  const _allStationMeshes = [];
+
   function pickStationUnderPointer(ev) {
     getMouseNdc(ev);
     raycaster.setFromCamera(mouse, camera);
     // Check station markers from all line shaft layers
-    const allStationMeshes = [];
+    _allStationMeshes.length = 0;
     for (const [, layers] of lineShaftLayers) {
       if (layers.stationsLayer?.mesh) {
-        allStationMeshes.push(layers.stationsLayer.mesh);
+        _allStationMeshes.push(layers.stationsLayer.mesh);
       }
     }
-    if (allStationMeshes.length === 0) return null;
-    const hits = raycaster.intersectObjects(allStationMeshes, false);
+    if (_allStationMeshes.length === 0) return null;
+    const hits = raycaster.intersectObjects(_allStationMeshes, false);
     if (!hits || hits.length === 0) return null;
     const hit = hits[0];
     const mesh = hit.object;
@@ -1953,7 +2010,6 @@ let _formatInfraTooltipRef = null;
     for (const g of lineGroups.values()) g.updateMatrixWorld(true);
 
     const hits = raycaster.intersectObjects(pickables, true);
-    if (hits.length > 0) console.log(`[infra-hover] ${hits.length} hits, best: ${hits[0].object.userData?.type}`);
     if (!hits || hits.length === 0) return null;
 
     // Sort by priority tier first, then distance
@@ -2238,6 +2294,14 @@ let _formatInfraTooltipRef = null;
   }
 
   function onPointerMove(ev) {
+    // Skip the whole hover cascade (up to three full-scene raycasts) while a
+    // rotate drag is active — tooltips are irrelevant mid-drag and the raycasts
+    // are the dominant per-move cost. Clear any lingering tip on the way in.
+    if (_dragActive) {
+      setHoverHighlight(null);
+      return;
+    }
+
     // Tier 1: Station hover (highest priority)
     const station = pickStationUnderPointer(ev);
     if (station) {
@@ -2499,7 +2563,25 @@ function tick() {
   // Skip OrbitControls update while the intro owns the camera — controls.enabled=false
   // only blocks input handlers, not update() itself, whose final lookAt(target) would
   // otherwise override intro's lookAt(OXC) and desync renderer vs label projection.
-  if (!intro.isRunning()) controls.update();
+  //
+  // Damping handover: while fps controls are actively moving the camera, do NOT
+  // run controls.update() — residual OrbitControls damping momentum would bleed
+  // into fps-driven frames. On the rising edge of fps activation, flush any
+  // pending damping deltas exactly once with damping disabled (so update() zeroes
+  // sphericalDelta/panOffset instead of decaying them), which prevents a visible
+  // kick when control hands back on key release.
+  if (fpsControls.active) {
+    if (!_fpsWasActive) {
+      const prevDamping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      controls.enableDamping = prevDamping;
+    }
+    // else: fps owns the camera this frame — skip update() entirely.
+  } else if (!intro.isRunning()) {
+    controls.update();
+  }
+  _fpsWasActive = fpsControls.active;
 
   // Readout widget — substrate, altitude, compass
   const azimuth = controls.getAzimuthalAngle();
@@ -2586,6 +2668,10 @@ if (import.meta.env.DEV) {
     trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
+    // D-002 substrate speed multiplier — read live, settable by a later wave
+    // (chalk slowdown) to throttle movement through dense strata.
+    get substrateSpeedFactor() { return substrateSpeedFactor; },
+    set substrateSpeedFactor(v) { substrateSpeedFactor = v; },
     cushionLuma: { sample: sampleCushion, reset: resetCushion, state: _cushionState },
     // formatInfraTooltip is closure-scoped to the tooltip block (~L1714-2268).
     // _formatInfraTooltipRef is assigned from inside that block and read via

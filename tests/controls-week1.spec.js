@@ -63,6 +63,20 @@ test.describe('Week-1 desktop keyboard controls', () => {
     await page.goto('http://localhost:5173/?skip=1');
     await waitForUg(page);
     await waitForIntroDone(page);
+    // D-002 speed regimes make horizontal reach altitude-dependent above ground
+    // (0.3x-20x of base), which compounds nonlinearly over a multi-frame key
+    // hold and makes displacement-ratio assertions position-dependent. ?skip=1
+    // leaves the camera at INITIAL_VIEW (y=85, just above the ~75 surface), in
+    // that scaled regime. Drop camera + target by an equal delta into the
+    // constant-base BELOW-ground regime (offset preserved so OrbitControls does
+    // not reorient) — there speed is a clean base x sprint, exactly what these
+    // Week-1 tests are asserting.
+    await page.evaluate(() => {
+      const dy = -4000;
+      window.__ug.camera.position.y += dy;
+      window.__ug.controls.target.y += dy;
+      window.__ug.camera.updateMatrixWorld(true);
+    });
   });
 
   test('W moves forward, S moves back (symmetric)', async ({ page }) => {
