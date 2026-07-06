@@ -22,6 +22,7 @@ import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } f
 import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats } from './surface-loader.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
 import { initThamesZones, getZoneAt, nearestThamesSegment } from './thames-zones.js';
+import { RENDER_ORDER } from './render-layers.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -952,6 +953,8 @@ function snapAllTubesToTerrain() {
       rightMesh.userData.lineId = lineId;
       leftMesh.userData.type = 'tube-line';
       rightMesh.userData.type = 'tube-line';
+      leftMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
+      rightMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
 
       newMeshes.push(leftMesh, rightMesh);
       linePickables.push(leftMesh, rightMesh);
@@ -1327,6 +1330,8 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     rightMesh.userData.lineId = lineId;
     leftMesh.userData.type = 'tube-line';
     rightMesh.userData.type = 'tube-line';
+    leftMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
+    rightMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
 
     allMeshes.push(leftMesh, rightMesh);
     linePickables.push(leftMesh, rightMesh);

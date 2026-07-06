@@ -2,6 +2,7 @@
 // Flat blue polygons at terrain surface height
 
 import * as THREE from 'three';
+import { RENDER_ORDER, RESERVOIR_LIFT, RESERVOIR_EDGE_LIFT } from './render-layers.js';
 
 // Ray-cast point-in-polygon test (even-odd rule) on the XZ plane.
 function pointInPolygon(x, z, coords) {
@@ -87,7 +88,7 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     // Find the maximum terrain height across all vertices — the polygon must
     // clear every terrain peak within the basin to avoid z-fighting.
     // ShapeGeometry interior triangles are too sparse to drape per-vertex.
-    const SURFACE_LIFT = 5; // scene units above highest terrain point
+    const SURFACE_LIFT = RESERVOIR_LIFT; // scene units above highest terrain point (render-layers.js)
     const pos = shapeGeometry.attributes.position;
     let maxY = surfaceY;
     for (let i = 0; i < pos.count; i++) {
@@ -113,22 +114,32 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
     pos.needsUpdate = true;
     
     const mesh = new THREE.Mesh(shapeGeometry, waterMaterial);
-    mesh.userData = { 
-      type: 'reservoir', 
-      name: feature.name, 
-      area: feature.area_ha 
+    mesh.userData = {
+      type: 'reservoir',
+      name: feature.name,
+      area: feature.area_ha
     };
+    // Distinct tier from the M25 road (SURFACE_ROAD) and drawn strictly
+    // before its own edge outline below — see WATER_EDGE.
+    mesh.renderOrder = RENDER_ORDER.SURFACE_WATER;
     group.add(mesh);
-    
+
     // Add subtle edge highlight for larger reservoirs
     if (feature.area_ha > 50) {
       const edges = new THREE.EdgesGeometry(shapeGeometry);
-      const lineMaterial = new THREE.LineBasicMaterial({ 
-        color: 0x60a5fa, 
-        transparent: true, 
-        opacity: 0.4 
+      const lineMaterial = new THREE.LineBasicMaterial({
+        color: 0x60a5fa,
+        transparent: true,
+        opacity: 0.4
       });
       const edgeLines = new THREE.LineSegments(edges, lineMaterial);
+      // Reservoir flicker fix: the outline previously shared the reservoir
+      // mesh's exact Y and had no renderOrder, so the two coplanar
+      // transparent surfaces flipped distance-sort order every frame.
+      // Give the outline both a deliberately later tier AND a small extra
+      // lift so it's unambiguously above the water polygon on both axes.
+      edgeLines.renderOrder = RENDER_ORDER.WATER_EDGE;
+      edgeLines.position.y = RESERVOIR_EDGE_LIFT;
       group.add(edgeLines);
     }
   }

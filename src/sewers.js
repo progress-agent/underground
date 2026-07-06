@@ -3,6 +3,7 @@
 // Includes: Northern/Southern Outfall Sewers, 8 Victorian interceptor sewers
 
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 let sewerData = null;
 
@@ -109,6 +110,7 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     const tunnelMesh = new THREE.Mesh(tubeGeometry, tunnelMaterial);
     tunnelMesh.castShadow = true;
     tunnelMesh.receiveShadow = true;
+    tunnelMesh.renderOrder = RENDER_ORDER.SEWER;
     tunnelMesh.userData = {
       type: 'sewer',
       tunnelId,
@@ -129,6 +131,7 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
       opacity: 0.12
     });
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+    glowMesh.renderOrder = RENDER_ORDER.SEWER;
     group.add(glowMesh);
     
     // Add depth markers at key points (start, end, and some intermediates)
@@ -145,6 +148,7 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
         });
         const marker = new THREE.Mesh(markerGeometry, markerMaterial);
         marker.position.set(xz.x, y, xz.z);
+        marker.renderOrder = RENDER_ORDER.SEWER;
         group.add(marker);
       }
     });

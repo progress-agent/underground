@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
+import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 
 let canalData = null;
 
@@ -38,7 +39,7 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
     depthWrite: false,
   });
 
-  const SURFACE_LIFT = 2;    // scene units above terrain (matches Thames SURFACE_LIFT)
+  const SURFACE_LIFT = WATER_LIFT; // scene units above terrain (shared with Thames — render-layers.js)
   const HALF_WIDTH = 5;      // scene units — canals ~10m wide visually
   const SAMPLES_PER_POINT = 4; // interpolation density along the curve
 
@@ -142,7 +143,7 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
     geometry.computeVertexNormals();
 
     const mesh = new THREE.Mesh(geometry, canalMaterial);
-    mesh.renderOrder = 1; // render after terrain to prevent z-fighting
+    mesh.renderOrder = RENDER_ORDER.SURFACE_WATER; // render after terrain to prevent z-fighting
     mesh.userData = {
       type: 'canal',
       name: feature.name,

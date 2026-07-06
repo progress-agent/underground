@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { fbmNoise } from './noise.js';
 import { generateChalkGrainTexture, generateChalkRoughnessTexture } from './textures.js';
+import { RENDER_ORDER, GEOLOGY_WIRE_LIFT } from './render-layers.js';
 
 // --- Main strata creation ---
 
@@ -77,6 +78,10 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
 
   const chalkMesh = new THREE.Mesh(geom, mat);
   chalkMesh.position.y = chalkTopY;
+  // Deliberate choice: infra tunnels (INFRA_TUNNEL/SEWER, tier 2) draw AFTER
+  // geology (tier 1) so deep infra sitting below the 60m chalk plane (e.g.
+  // Lee Tunnel at 68-98m) is never stably hidden by a distance-sort tie.
+  chalkMesh.renderOrder = RENDER_ORDER.GEOLOGY;
   chalkMesh.userData = {
     type: 'chalk',
     name: 'Chalk Boundary',
@@ -94,7 +99,10 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
     opacity: 0.06,
   });
   const wireMesh = new THREE.Mesh(wireGeom, wireMat);
-  wireMesh.position.y = chalkTopY + 0.5; // Slight offset to reduce z-fighting
+  wireMesh.position.y = chalkTopY + GEOLOGY_WIRE_LIFT; // Slight offset to reduce z-fighting
+  // Wireframe overlay draws after (and sits above) the chalk face it outlines —
+  // same coplanar-flicker pattern as the reservoir edge outline.
+  wireMesh.renderOrder = RENDER_ORDER.GEOLOGY;
   group.add(wireMesh);
 
   // Depth label marker
@@ -106,6 +114,7 @@ export function createGeologicalStrata(bounds, verticalScale = 3.0) {
   });
   const marker = new THREE.Mesh(markerGeometry, markerMaterial);
   marker.position.set(18000, chalkTopY, 18000);
+  marker.renderOrder = RENDER_ORDER.GEOLOGY;
   marker.userData = { type: 'chalk-marker', isStrataMarker: true, label: '60m — Chalk bedrock boundary' };
   group.add(marker);
 

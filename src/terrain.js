@@ -7,6 +7,7 @@ import {
   generateUndersideGrainTexture,
   generateUndersideNormalMap,
 } from './textures.js';
+import { RENDER_ORDER } from './render-layers.js';
 
 // BNG reference point for the scene ORIGIN (51.5074°N, 0.1278°W)
 // Trafalgar Square ≈ TQ 300 804 ≈ E 530000, N 180400 in British National Grid
@@ -533,12 +534,12 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const mesh = new THREE.Mesh(geom, topMat);
     mesh.position.set(centerX, 0, centerZ);
     mesh.name = 'terrainMesh';
-    mesh.renderOrder = -1;
+    mesh.renderOrder = RENDER_ORDER.TERRAIN;
 
     const undersideMesh = new THREE.Mesh(undersideGeom, undersideMat);
     undersideMesh.position.set(centerX, 0, centerZ);
     undersideMesh.name = 'terrainUnderside';
-    undersideMesh.renderOrder = -1;
+    undersideMesh.renderOrder = RENDER_ORDER.TERRAIN;
 
     terrainState.mesh = mesh; // for vertex sampling in getTerrainMeshSurfaceY
     terrainState.undersideMesh = undersideMesh;

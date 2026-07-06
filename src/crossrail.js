@@ -5,6 +5,7 @@
 // Route splits at Whitechapel: south-east to Abbey Wood, north-east to Shenfield
 
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 let crossrailData = null;
 
@@ -85,6 +86,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     mesh.userData = {
       type: 'crossrail',
       name: branchName || 'Crossrail / Elizabeth Line',
@@ -95,7 +97,9 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     // Glow for deep sections
     if (opacity >= 0.7) {
       const glowGeo = new THREE.TubeGeometry(curve, Math.floor(segments * 0.7), radius + 1, 12, false);
-      group.add(new THREE.Mesh(glowGeo, glowMaterial.clone()));
+      const glowMesh = new THREE.Mesh(glowGeo, glowMaterial.clone());
+      glowMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
+      group.add(glowMesh);
     }
   };
 
@@ -133,6 +137,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     });
     const marker = new THREE.Mesh(markerGeo, markerMat);
     marker.position.copy(pos);
+    marker.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     marker.userData = { name: p.name, depth: p.depth, type: 'crossrail' };
     group.add(marker);
   }

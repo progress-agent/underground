@@ -5,6 +5,7 @@
 // Connection spurs: Frogmore (1.1km) and Greenwich (4.6km)
 
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 let tidewayRouteData = null;
 let tidewayShaftData = null;
@@ -291,6 +292,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
 
     const tunnel = new THREE.Mesh(result.tubeGeo, makeTidewayTunnelMaterial());
     tunnel.name = `tideway-tunnel-${sec.name}`;
+    tunnel.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     tunnel.userData = {
       type: 'tideway-tunnel',
       name: SECTION_DISPLAY_NAMES[sec.name] || `Tideway ${sec.name}`,
@@ -300,12 +302,14 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
 
     const glow = new THREE.Mesh(result.glowGeo, makeTidewayGlowMaterial());
     glow.name = `tideway-glow-${sec.name}`;
+    glow.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     group.add(glow);
   }
 
   // ---- 2b. Vertical shaft cylinders (Tideway) ----
   const tidewayShaftsGroup = new THREE.Group();
   tidewayShaftsGroup.name = 'tideway-shafts';
+  tidewayShaftsGroup.renderOrder = RENDER_ORDER.SHAFT;
 
   for (const site of data.sites.sites) {
     // Skip system modifications (no deep cylindrical shaft)
@@ -315,6 +319,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     const mat = makeTidewayShaftMaterial(isMainDrive);
     const mesh = buildShaftCylinder(site, llToXZ, VE, mat);
     mesh.userData.type = 'tideway-shaft';
+    mesh.renderOrder = RENDER_ORDER.SHAFT;
     tidewayShaftsGroup.add(mesh);
     shaftMeshes.push(mesh);
   }
@@ -332,6 +337,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
   if (frogmore) {
     const frogmoreMesh = new THREE.Mesh(frogmore.tubeGeo, makeSpurMaterial());
     frogmoreMesh.name = 'tideway-spur-frogmore';
+    frogmoreMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     frogmoreMesh.userData = {
       type: 'tideway-tunnel',
       name: 'Frogmore Connection Spur',
@@ -351,6 +357,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
   if (greenwich) {
     const greenwichMesh = new THREE.Mesh(greenwich.tubeGeo, makeSpurMaterial());
     greenwichMesh.name = 'tideway-spur-greenwich';
+    greenwichMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     greenwichMesh.userData = {
       type: 'tideway-tunnel',
       name: 'Greenwich Connection Spur',
@@ -366,6 +373,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     if (leeResult) {
       const leeTunnel = new THREE.Mesh(leeResult.tubeGeo, makeLeeTunnelMaterial());
       leeTunnel.name = 'lee-tunnel';
+      leeTunnel.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       leeTunnel.userData = {
         type: 'lee-tunnel',
         name: 'Lee Tunnel',
@@ -377,18 +385,21 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
 
       const leeGlow = new THREE.Mesh(leeResult.glowGeo, makeLeeGlowMaterial());
       leeGlow.name = 'lee-glow';
+      leeGlow.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       group.add(leeGlow);
     }
 
     // Lee Tunnel shafts (brown-tinted)
     const leeShaftsGroup = new THREE.Group();
     leeShaftsGroup.name = 'lee-shafts';
+    leeShaftsGroup.renderOrder = RENDER_ORDER.SHAFT;
 
     for (const entry of data.lee.entries) {
       if (entry.type !== 'shaft') continue;
       const mat = makeLeeShaftMaterial();
       const mesh = buildShaftCylinder(entry, llToXZ, VE, mat);
       mesh.userData.type = 'lee-shaft';
+      mesh.renderOrder = RENDER_ORDER.SHAFT;
       leeShaftsGroup.add(mesh);
       shaftMeshes.push(mesh);
     }

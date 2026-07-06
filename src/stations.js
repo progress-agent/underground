@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 // Track which station names already have a label to avoid duplicates
 // when the same station appears on multiple lines (e.g. Farringdon on Circle + Metropolitan + H&C)
@@ -60,7 +61,7 @@ export function createStationMarkers({
 
   const mesh = new THREE.InstancedMesh(geo, mat, stations.length);
   mesh.frustumCulled = true;
-  mesh.renderOrder = 5;
+  mesh.renderOrder = RENDER_ORDER.STATION;
   mesh.userData.kind = 'station-markers';
   mesh.userData.stations = stations; // Store for raycasting lookup
 

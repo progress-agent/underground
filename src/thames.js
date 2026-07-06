@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
+import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 
 // River Thames data and 3D volume rendering
 // Coordinates are in EPSG:27700 (British National Grid)
@@ -51,7 +52,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   } = options;
 
   const VE = VERTICAL_EXAGGERATION;
-  const SURFACE_LIFT = 2;   // small lift above carved terrain to prevent z-fighting
+  const SURFACE_LIFT = WATER_LIFT; // small lift above carved terrain to prevent z-fighting (render-layers.js)
 
   // ── 1. Convert all points (no terrain filtering needed) ───────────────
   const validPoints = [];
@@ -223,7 +224,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'thamesRiver';
   mesh.userData = { type: 'thames', name: 'River Thames' };
-  mesh.renderOrder = 1; // draw after terrain so top face wins depth test at boundaries
+  mesh.renderOrder = RENDER_ORDER.SURFACE_WATER; // draw after terrain so top face wins depth test at boundaries
 
   console.log(`Thames volume: ${validPoints.length} data points → ${vertCount} vertices, ${triCount} triangles`);
 

@@ -2,6 +2,7 @@
 // sized by interchange complexity (line count).
 
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 const BASE_RADIUS = 9;        // ~2x tunnel width for single-line stations
 const PLATFORM_CLEARANCE = 5;  // metres below deepest platform
@@ -53,7 +54,7 @@ export async function loadLineShafts(lineId) {
 export function createUnifiedShafts({ scene, registry, getTerrainMeshSurfaceY, verticalScale }) {
   const group = new THREE.Group();
   group.userData.kind = 'unified-shafts';
-  group.renderOrder = 2;
+  group.renderOrder = RENDER_ORDER.SHAFT;
 
   // naptanId -> { mesh, groundY, platformY, radius, entry }
   const byId = new Map();
@@ -77,7 +78,7 @@ export function createUnifiedShafts({ scene, registry, getTerrainMeshSurfaceY, v
     const mesh = new THREE.Mesh(unitCylinderGeo, frostedGlassMat);
     mesh.scale.set(radius, height, radius);
     mesh.position.set(entry.x, midY, entry.z);
-    mesh.renderOrder = 2;
+    mesh.renderOrder = RENDER_ORDER.SHAFT;
 
     // userData drives infra-hover tooltips. naptanId is the registry key for
     // per-station meta lookup in src/infra-meta.js (matches Prog stations.csv

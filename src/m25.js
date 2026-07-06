@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RENDER_ORDER } from './render-layers.js';
 
 // BNG reference — must match terrain.js
 const BNG_REF_E = 530000;
@@ -237,7 +238,7 @@ export function createM25Road(points, getSurfaceY, options = {}) {
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'm25Road';
-  mesh.renderOrder = 0;
+  mesh.renderOrder = RENDER_ORDER.SURFACE_ROAD;
 
   console.log(`M25 road: ${scenePts.length} points, ${triCount} triangles, ${width}m wide`);
   return mesh;
@@ -454,7 +455,7 @@ void main() {`
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `thamesWaterfall_${ep.dirSign > 0 ? 'east' : 'west'}`;
-    mesh.renderOrder = 1;
+    mesh.renderOrder = RENDER_ORDER.SURFACE_WATER;
     group.add(mesh);
   }
 
