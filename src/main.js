@@ -133,6 +133,12 @@ const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+// Filmic tone mapping (applied by OutputPass at the end of the composer
+// chain — scene renders linear HDR into the HalfFloat target). AgX chosen
+// over ACES after A/B: preserves the warm terracotta/gold identity and
+// ceiling detail underground where ACES crushes mids to black.
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.15;
 // Use a lighter background so scene is visible even if nothing renders
 renderer.setClearColor(0x1a1a2e, 1);
 app.appendChild(renderer.domElement);

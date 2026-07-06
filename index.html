@@ -44,10 +44,12 @@
         font-size: 11px;
         line-height: 1.2;
         color: rgba(255,255,255,0.92);
-        background: rgba(8, 12, 18, 0.55);
+        /* No backdrop-filter: with up to ~60 chips visible the per-chip blur
+           dominates compositor paint time, and blur over a coloured scene at
+           low opacity bleeds scene hues (same trap as the tooltip card).
+           Higher-opacity flat fill reads identically at 11px. */
+        background: rgba(8, 12, 18, 0.82);
         border: 1px solid rgba(255,255,255,0.12);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
         white-space: nowrap;
         text-shadow: 0 1px 2px rgba(0,0,0,0.35);
       }
