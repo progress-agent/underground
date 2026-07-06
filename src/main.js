@@ -12,7 +12,7 @@ import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25 } from './m25.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
-import { createGeologicalStrata, addGeologyToLegend } from './geology.js';
+import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
@@ -768,6 +768,16 @@ const thamesDataPromise = loadThamesData();
         if (result.topMat) applyM25Mask(result.topMat, maskTex);
         if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
 
+        // Chalk floor — build now that the M25 ring is available (rim-flatten),
+        // then clip it with the same mask as the terrain (same UV→world map).
+        geologyGroup = createGeologicalStrata(m25Data.points, sim.verticalScale);
+        if (geologyGroup) {
+          scene.add(geologyGroup);
+          if (geologyGroup.userData.chalkMat) applyM25Mask(geologyGroup.userData.chalkMat, maskTex);
+          addGeologyToLegend();
+          dbg('Chalk floor added to scene');
+        }
+
         // M25 road ring
         m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
         if (m25Road) scene.add(m25Road);
@@ -1063,12 +1073,10 @@ loadCrossrailData().then(crossrailData => {
 });
 
 // ---------- Geological Strata (London Clay & Chalk bedrock) ----------
-const geologyGroup = createGeologicalStrata(null, sim.verticalScale);
-if (geologyGroup) {
-  scene.add(geologyGroup);
-  addGeologyToLegend();
-  dbg('Geological strata added to scene');
-}
+// Created inside the M25 promise (see terrain .then chain) so the chalk floor
+// can be rim-flattened against the M25 ring and clipped by the same mask as
+// the terrain. Declared here at module scope; assigned once M25 data resolves.
+let geologyGroup = null;
 
 // ---------- Reservoirs (surface water polygons) ----------
 // Data fetch starts immediately; creation deferred until terrain is ready (see terrain .then() chain)
@@ -2683,6 +2691,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    getChalkSurfaceY, CHALK_TOP_Y,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,

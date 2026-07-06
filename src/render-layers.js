@@ -56,4 +56,5 @@ export const RENDER_ORDER = {
 export const WATER_LIFT = 2;             // Thames volume + canal ribbons above carved terrain
 export const RESERVOIR_LIFT = 5;         // Reservoir polygon above highest terrain point in the basin
 export const RESERVOIR_EDGE_LIFT = 0.5;  // Reservoir EdgesGeometry outline, additional lift above the reservoir mesh
-export const GEOLOGY_WIRE_LIFT = 0.5;    // Chalk wireframe overlay, additional lift above the chalk mesh
+// (GEOLOGY_WIRE_LIFT retired — the 0.06-opacity chalk wireframe overlay was
+//  deleted in the Wave-2 chalk-floor rewrite; it contributed nothing.)

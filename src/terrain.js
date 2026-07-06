@@ -495,10 +495,13 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     });
 
     // ── Underside geometry + vertex colours (rock face, viewed from below) ─
+    // Deepened (~24% darker) so the overhead mass reads as damp soil/rock and
+    // sits clearly ABOVE the bright chalk floor in the clay-zone sandwich —
+    // dark earth ceiling, glowing white floor. (Geology-vision D4.2.)
     const undersideGeom = geom.clone();
-    const undersideLowCol = new THREE.Color(0x7a6044);
-    const undersideMidCol = new THREE.Color(0x8d7456);
-    const undersideHighCol = new THREE.Color(0x9e8868);
+    const undersideLowCol = new THREE.Color(0x5c4834);
+    const undersideMidCol = new THREE.Color(0x6b5842);
+    const undersideHighCol = new THREE.Color(0x796651);
     const usColArr = new Float32Array(pos.count * 3);
     const usTmpCol = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
@@ -520,8 +523,8 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       vertexColors: true,
       map: undersideGrainTex,
       normalMap: undersideNormalTex,
-      normalScale: new THREE.Vector2(0.8, 0.8),
-      roughness: 0.92,
+      normalScale: new THREE.Vector2(1.5, 1.5), // stronger grain — soil texture at grazing angle
+      roughness: 0.95,
       metalness: 0.0,
       transparent: false,
       opacity: opacity,
