@@ -281,6 +281,55 @@ function findRayM25Intersection(originX, originZ, dirX, dirZ, m25ScenePts) {
 }
 
 /**
+ * Robust fallback for a Thames endpoint whose directed flow ray misses every
+ * M25 segment. The west endpoint sits almost tangent to the ring, so its
+ * outward ray slips past the polygon and `findRayM25Intersection` returns null
+ * — that's why only the east ribbon used to render. Here we instead take the
+ * nearest point on the M25 polyline to the endpoint and derive an OUTWARD flow
+ * direction (segment normal, signed away from the polygon centroid).
+ *
+ * @returns {{x,z,surfaceY,dirX,dirZ}|null}
+ */
+function nearestM25Boundary(px, pz, m25Scene, centroid) {
+  let best = Infinity;
+  let out = null;
+  for (let i = 0; i < m25Scene.length - 1; i++) {
+    const p0 = m25Scene[i];
+    const p1 = m25Scene[i + 1];
+    const dx = p1.x - p0.x, dz = p1.z - p0.z;
+    const len2 = dx * dx + dz * dz || 1;
+    let t = ((px - p0.x) * dx + (pz - p0.z) * dz) / len2;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    const qx = p0.x + t * dx, qz = p0.z + t * dz;
+    const ex = px - qx, ez = pz - qz;
+    const d2 = ex * ex + ez * ez;
+    if (d2 < best) {
+      best = d2;
+      // Outward-facing segment normal (perpendicular to the edge tangent),
+      // flipped if it points toward the centroid.
+      let nx = -dz, nz = dx;
+      const nl = Math.hypot(nx, nz) || 1;
+      nx /= nl; nz /= nl;
+      if (nx * (qx - centroid.x) + nz * (qz - centroid.z) < 0) { nx = -nx; nz = -nz; }
+      out = {
+        x: qx, z: qz,
+        surfaceY: p0.surfaceY + t * (p1.surfaceY - p0.surfaceY),
+        dirX: nx, dirZ: nz,
+      };
+    }
+  }
+  return out;
+}
+
+/** Mean XZ of a scene-space point list (M25 polygon centroid). */
+function sceneCentroid(pts) {
+  let cx = 0, cz = 0;
+  for (const p of pts) { cx += p.x; cz += p.z; }
+  const n = pts.length || 1;
+  return { x: cx / n, z: cz / n };
+}
+
+/**
  * Compute where the Thames crosses the M25 boundary (west + east ends) in
  * scene coordinates. Shared by the waterfall builder and the clay disc skirt
  * (geology-exterior.js) so the skirt can leave a clean notch exactly where
@@ -301,6 +350,7 @@ export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
     const y = getSurfaceY({ x, z });
     return { x, z, surfaceY: y !== null ? y : 50 };
   });
+  const centroid = sceneCentroid(m25Scene);
 
   const endpoints = [
     { pt: thamesPoints[0], next: thamesPoints[1],
@@ -322,11 +372,17 @@ export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
     const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
     dirX /= dirLen; dirZ /= dirLen;
 
-    const intersection = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
-    if (!intersection) continue;
+    let cross = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
+    let cdirX = dirX, cdirZ = dirZ;
+    if (!cross) {
+      // Directed ray missed (west endpoint) — fall back to nearest boundary.
+      const fb = nearestM25Boundary(epX, epZ, m25Scene, centroid);
+      if (!fb) continue;
+      cross = fb; cdirX = fb.dirX; cdirZ = fb.dirZ;
+    }
     crossings.push({
-      x: intersection.x, z: intersection.z, surfaceY: intersection.surfaceY,
-      dirX, dirZ, width: ep.width, side: ep.dirSign > 0 ? 'east' : 'west',
+      x: cross.x, z: cross.z, surfaceY: cross.surfaceY,
+      dirX: cdirX, dirZ: cdirZ, width: ep.width, side: ep.dirSign > 0 ? 'east' : 'west',
     });
   }
   return crossings;
@@ -354,6 +410,7 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
     const y = getSurfaceY({ x, z });
     return { x, z, surfaceY: y !== null ? y : 50 };
   });
+  const centroid = sceneCentroid(m25Scene);
 
   // Thames endpoints and flow directions
   const endpoints = [
@@ -389,9 +446,17 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
     dirX /= dirLen;
     dirZ /= dirLen;
 
-    // Find where the flow direction ray hits the M25 boundary
-    const intersection = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
-    if (!intersection) continue;
+    // Find where the flow direction ray hits the M25 boundary. If the directed
+    // ray misses (the west endpoint sits near-tangent to the ring), fall back
+    // to the nearest boundary point with an outward flow direction — so BOTH
+    // ribbons render, not just the east one.
+    let intersection = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
+    if (!intersection) {
+      const fb = nearestM25Boundary(epX, epZ, m25Scene, centroid);
+      if (!fb) continue;
+      intersection = { x: fb.x, z: fb.z, surfaceY: fb.surfaceY };
+      dirX = fb.dirX; dirZ = fb.dirZ;
+    }
 
     // Build waterfall arc: horizontal approach → 90° curve → vertical fall
     const surfaceY = intersection.surfaceY;
@@ -426,12 +491,12 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
         py = surfaceY + 2 - arcOffsetY;
         alpha = 1.0;
       } else {
-        // Vertical fall section
+        // Vertical fall section — fades out down the outside of the disc.
         const fallT = (i - ARC_SAMPLES) / FALL_SAMPLES;
         px = intersection.x + dirX * arcRadius;
         pz = intersection.z + dirZ * arcRadius;
         py = surfaceY + 2 - arcRadius - fallT * fallLength;
-        alpha = 1.0; // no fade — falls into infinity
+        alpha = Math.pow(1 - fallT, 1.5); // lingers near the lip, dissolves deep
       }
 
       // Taper width during fall
@@ -498,9 +563,11 @@ void main() {`
         `varying float vAlpha;
 void main() {`
       );
+      // r161 chunk is <opaque_fragment> (was <output_fragment> in older three);
+      // the old name silently no-ops the injection, so the fall never faded.
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <output_fragment>',
-        `#include <output_fragment>
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
   gl_FragColor.a *= vAlpha;`
       );
     };

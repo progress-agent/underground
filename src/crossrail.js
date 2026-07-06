@@ -9,6 +9,47 @@ import { RENDER_ORDER } from './render-layers.js';
 
 let crossrailData = null;
 
+// Fade a material's alpha to zero over a view-distance band [near, far], so
+// distant edge-on crossrail tubes stop compositing into a yellow band along the
+// clay-zone horizon (D4.3). A broadside close-up (task's 1-2km read) sits inside
+// the near cutoff and is untouched; only the far, edge-on-converging part of the
+// line fades. Injected in view space, so it's orientation-independent. Lowers
+// alpha only — no emissive raised, so the glow-through-terrain mitigation stack
+// is respected. onBeforeCompile survives Material.clone(), so per-tube clones
+// keep the effect.
+function makeDistanceFade(material, near, far) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uFadeNear = { value: near };
+    shader.uniforms.uFadeFar = { value: far };
+    shader.vertexShader = shader.vertexShader.replace(
+      'void main() {',
+      `varying float vFadeViewDepth;
+void main() {`
+    ).replace(
+      '#include <begin_vertex>',
+      // Euclidean camera distance, NOT view-space -z. An E-W tube at constant
+      // north-distance has near-constant -z across the whole width, so a -z fade
+      // dims it uniformly (the full-width band survives). Euclidean distance
+      // makes the far left/right of the band recede and fade, collapsing it.
+      `#include <begin_vertex>
+  vFadeViewDepth = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );`
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      'void main() {',
+      `uniform float uFadeNear;
+uniform float uFadeFar;
+varying float vFadeViewDepth;
+void main() {`
+    ).replace(
+      // r161 chunk name — NOT <output_fragment>, which silently no-ops here.
+      '#include <opaque_fragment>',
+      `#include <opaque_fragment>
+  gl_FragColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vFadeViewDepth );`
+    );
+  };
+  material.needsUpdate = true;
+}
+
 export async function loadCrossrailData() {
   try {
     const response = await fetch('/data/crossrail_depths.csv');
@@ -67,7 +108,10 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: 0xffe066,
     transparent: true,
-    opacity: 0.2
+    opacity: 0.2,
+    // Fog-aware so the underground fog dims the glow with distance. (Explicit
+    // even though MeshBasicMaterial defaults fog:true.)
+    fog: true,
   });
 
   // Convert a point to 3D position
@@ -83,6 +127,13 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     const geo = new THREE.TubeGeometry(curve, segments, radius, 12, false);
     const mat = tunnelMaterial.clone();
     mat.opacity = opacity;
+    // The bright gold horizon band in clay-zone views is the tunnel tube seen
+    // edge-on at range (fog.far is wide underground, so fog can't dim it). Fade
+    // it out by euclidean camera distance so the far band collapses while a
+    // segment viewed broadside from ~1-2km still reads full. Applied to the
+    // CLONE — Material.clone() does NOT copy onBeforeCompile, so setting it on
+    // the base tunnelMaterial would never reach the rendered tubes.
+    makeDistanceFade(mat, 1100, 3200);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -97,7 +148,9 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     // Glow for deep sections
     if (opacity >= 0.7) {
       const glowGeo = new THREE.TubeGeometry(curve, Math.floor(segments * 0.7), radius + 1, 12, false);
-      const glowMesh = new THREE.Mesh(glowGeo, glowMaterial.clone());
+      const glowMat = glowMaterial.clone();
+      makeDistanceFade(glowMat, 900, 2600); // fade on the clone (see note above)
+      const glowMesh = new THREE.Mesh(glowGeo, glowMat);
       glowMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       group.add(glowMesh);
     }

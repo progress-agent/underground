@@ -45,7 +45,7 @@ test('chalk column is FrontSide, transparent, fogged, with a vertex-alpha ramp',
   expect(m.vertexColors).toBe(true);
 });
 
-test('chalk column spans chalk top (~-300) down to the fade-out depth (~-15000)', async ({ page }) => {
+test('chalk column spans chalk top (~-300) down to the fade-out depth (~-19000)', async ({ page }) => {
   await gotoAndWait(page);
   const bb = await page.evaluate(() => {
     const col = window.__ug.scene.getObjectByName('chalkColumn');
@@ -55,8 +55,8 @@ test('chalk column spans chalk top (~-300) down to the fade-out depth (~-15000)'
   });
   expect(bb.maxY).toBeGreaterThan(-400);  // top ring at CHALK_TOP_Y = -300
   expect(bb.maxY).toBeLessThan(-200);
-  expect(bb.minY).toBeLessThan(-14000);   // descends toward -15000
-  expect(bb.minY).toBeGreaterThan(-16000);
+  expect(bb.minY).toBeLessThan(-18000);   // descends toward -19000 (deep column)
+  expect(bb.minY).toBeGreaterThan(-20000);
 });
 
 test('clay skirt is FrontSide and vertex-coloured (strata banding)', async ({ page }) => {

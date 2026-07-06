@@ -10,11 +10,12 @@
 //      so it is invisible from inside the disc. Notched where the two Thames
 //      waterfall ribbons spill over the edge.
 //
-//   2. Chalk column     — a gently tapering ring wall from CHALK_TOP_Y down to
-//      ~-15000, following the smoothed M25 footprint at the top and narrowing
-//      to ~60% radius at the fade-out depth. Chalk white, subtle vertical
-//      striation, fog:true, vertex-alpha ramp opaque→0 with depth. FrontSide.
-//      "Receding into abstraction" = taper + alpha fade + fog.
+//   2. Chalk column     — a tall, slender tapering ring wall from CHALK_TOP_Y
+//      down to ~-19000, following the smoothed M25 footprint (inset ~600m at
+//      the top so the disc overhangs) and narrowing to ~45% radius at the
+//      geometric bottom. Chalk white, subtle vertical striation, fog:true,
+//      vertex-alpha ramp opaque→0 over a deep fade (-2500 → -18000). FrontSide.
+//      "Receding into abstraction" = deep taper + long alpha fade + fog.
 //
 // NOT a pool cue — no tip geometry, no ferrule banding. An indicator of shape
 // and tip-depth only (Jordan's 06Jul26m correction).
@@ -241,12 +242,18 @@ function smoothRing(ringXZ, count = 128, smoothPasses = 2) {
  */
 function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   const {
-    bottomY = -15000,       // geometry extent (fades out well above this)
-    levels = 56,            // vertical divisions
-    bottomTaper = 0.58,     // radius at the bottom (fraction of the top ring)
+    bottomY = -19000,       // geometry extent (fades out just above this)
+    levels = 64,            // vertical divisions (raised with the deeper column)
+    bottomTaper = 0.45,     // radius at the bottom (fraction of the top ring) —
+                            // a distinctly slender tip, not a cylinder
     ringCount = 128,        // smoothed footprint resolution
-    fadeTop = -1200,        // opaque above this depth (just below the disc)
-    fadeBottom = -6000,     // fully dissolved by this depth
+    fadeTop = -2500,        // opaque above this depth → the visible column runs
+                            // deep before it starts dissolving (no bowl/saucer)
+    fadeBottom = -18000,    // fully dissolved by this depth (receding to nothing)
+    topInset = 600,         // shrink the top ring this many metres inside the
+                            // M25 line so the clay disc subtly overhangs the
+                            // column (chalk floor is rim-flattened for 800m, so
+                            // no seam opens; skirt stays at the true boundary)
   } = opts;
 
   const rawRing = m25Points.map(p => bngToScene(p.e, p.n));
@@ -257,6 +264,16 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   let cx = 0, cz = 0;
   for (const r of ring) { cx += r.x; cz += r.z; }
   cx /= M; cz /= M;
+
+  // Inset ring: each footprint point pulled toward the centroid by `topInset`
+  // metres. The taper below is applied relative to THIS inset ring, so the
+  // whole column sits a touch inside the disc rim — the overhang read.
+  const insetRing = ring.map(r => {
+    const vx = cx - r.x, vz = cz - r.z;
+    const d = Math.hypot(vx, vz) || 1;
+    const s = Math.min(topInset, d * 0.5) / d;
+    return { x: r.x + vx * s, z: r.z + vz * s };
+  });
 
   const positions = [];
   const colors = [];
@@ -271,16 +288,19 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   const vAt = (ri, lj) => ri * (levels + 1) + lj;
 
   for (let ri = 0; ri < M; ri++) {
-    const r = ring[ri];
-    // Around-ring striation factor (independent of depth).
-    const stri = fbmNoise(ri / 5.5, 17.0, 2);   // 0..1
+    const ir = insetRing[ri];
+    // Around-ring striation factor (independent of depth). Sampled on a CIRCLE
+    // so it wraps seamlessly at ri=0/M — a linear ri/5.5 term jumps at the wrap
+    // and paints a visible vertical seam down the column.
+    const ang = (ri / M) * Math.PI * 2;
+    const stri = fbmNoise(Math.cos(ang) * 2.4 + 5, Math.sin(ang) * 2.4 + 5, 2); // 0..1
     const striShade = 0.90 + stri * 0.14;        // 0.90 .. 1.04
     for (let lj = 0; lj <= levels; lj++) {
       const t = lj / levels;                     // 0 top, 1 bottom
       const y = THREE.MathUtils.lerp(chalkTopY, bottomY, t);
       const taper = THREE.MathUtils.lerp(1.0, bottomTaper, t); // gentle, linear
-      const x = cx + (r.x - cx) * taper;
-      const z = cz + (r.z - cz) * taper;
+      const x = cx + (ir.x - cx) * taper;
+      const z = cz + (ir.z - cz) * taper;
       positions.push(x, y, z);
       tc.copy(chalkBase).multiplyScalar(striShade);
       colors.push(tc.r, tc.g, tc.b);
@@ -362,7 +382,7 @@ export function createGeologyExterior(m25Points, chalkTopY, getSurfaceY, crossin
 
   console.log(
     `Geology exterior: skirt ${skirt ? 'on' : 'off'} (${crossings.length} notches), ` +
-    `chalk column ${column ? 'on' : 'off'} → -15000`
+    `chalk column ${column ? 'on' : 'off'} → -19000`
   );
   return group;
 }
