@@ -185,7 +185,7 @@ function generateContourLines(geometry, intervalCount = 12) {
  * @param {number}       neSceneX     East edge scene X
  * @param {number}       swSceneZ     South edge scene Z (positive)
  * @param {number}       neSceneZ     North edge scene Z (negative)
- * @param {Array}        riverSegments [{x, z, halfW}, ...] in scene coords
+ * @param {Array}        riverSegments [{x, z, halfW, d}, ...] in scene coords
  * @param {object}       [options]
  */
 export function carveRiverChannel(
@@ -197,10 +197,9 @@ export function carveRiverChannel(
   const {
     riverLevelM = 2,      // water surface in metres OD
     falloffM = 250,       // bank slope width in metres
-    channelDepthM = 3,    // depth below water level to carve
+    channelDepthM = 3,    // fallback depth below water level if point d is absent
   } = options;
 
-  const carveElev = riverLevelM - channelDepthM; // target elevation at channel bottom
   const terrainW = neSceneX - swSceneX;
   const terrainH = swSceneZ - neSceneZ;
 
@@ -248,6 +247,7 @@ export function carveRiverChannel(
 
       let bestDist = Infinity;
       let bestHalfW = 0;
+      let bestDepthM = channelDepthM;
 
       for (let si = 0; si < segs.length; si++) {
         const s = segs[si];
@@ -271,15 +271,20 @@ export function carveRiverChannel(
 
         // Interpolate halfW at projection point
         const hw = a.halfW + t * (b.halfW - a.halfW);
+        const da = Number.isFinite(a.d) ? a.d : channelDepthM;
+        const db = Number.isFinite(b.d) ? b.d : channelDepthM;
+        const depthM = da + t * (db - da);
 
         if (dist < bestDist) {
           bestDist = dist;
           bestHalfW = hw;
+          bestDepthM = depthM;
         }
       }
 
       const idx = row * vertexCols + col;
       const orig = elevations[idx];
+      const carveElev = riverLevelM - bestDepthM;
 
       if (bestDist <= bestHalfW) {
         // Inside river channel: full carve
@@ -399,6 +404,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
         x: pt.e - BNG_REF_E,
         z: -(pt.n - BNG_REF_N),
         halfW: (pt.w || 100) / 2,
+        d: Number.isFinite(pt.d) ? pt.d : 3,
       }));
       carveRiverChannel(
         elevations, segments + 1, segments + 1,
@@ -688,4 +694,3 @@ export function getTerrainMeshSurfaceY({ x, z } = {}) {
        + y01 * (1 - u) * v
        + y11 * u * v;
 }
-

@@ -19,3 +19,7 @@ tests/screenshots/
 
 # Local Cloudflare Wrangler folder
 .wrangler
+
+# Codex delegate artifacts
+RESULT.md
+.codex-last-message.txt

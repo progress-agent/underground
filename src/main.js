@@ -9,6 +9,7 @@ import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
+import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
@@ -688,6 +689,7 @@ scene.add(rim);
 
 // ---------- Thames (flat-level 3D volume) ----------
 let thamesMesh = null;
+let thamesProfileSampler = null;
 const thamesDataPromise = loadThamesData();
 
 // ---------- Ground (terrain if available, else debug grid) ----------
@@ -713,6 +715,7 @@ const thamesDataPromise = loadThamesData();
   
   // Thames data must load before terrain so we can carve the river valley
   thamesDataPromise.then(thamesData => {
+    thamesProfileSampler = createThamesProfileSampler(thamesData?.points);
     tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData }).then(result => {
       if (!result) {
         grid.visible = true;
@@ -722,6 +725,13 @@ const thamesDataPromise = loadThamesData();
       scene.add(result.mesh);
       if (result.undersideMesh) scene.add(result.undersideMesh);
       if (result.contourLines) scene.add(result.contourLines);
+
+      // Initialise Thames river corridor helpers before snapping tubes, because
+      // the river-bed clearance clamp depends on the same corridor mask.
+      if (thamesData?.points) {
+        initThamesMask(thamesData.points);
+        initThamesZones(thamesData.points);
+      }
 
       // Reposition tubes + stations to terrain-relative depth, then snap shafts.
       snapAllTubesToTerrain();
@@ -736,12 +746,6 @@ const thamesDataPromise = loadThamesData();
         });
         if (thamesMesh) {
           scene.add(thamesMesh);
-        }
-        // Initialise Thames river corridor mask for building exclusion
-        if (thamesData.points) {
-          initThamesMask(thamesData.points);
-          // Init zone segments for hover-tooltip nearest-segment lookup
-          initThamesZones(thamesData.points);
         }
 
         // Register spatial audio sources (trains added dynamically, Thames static)
@@ -908,46 +912,69 @@ function snapAllTubesToTerrain() {
     }
   }
 
-  // 4a-ii. River-clearance clamp: ensure tubes pass below water surface
+  // 4a-ii. River-clearance clamp: ensure tubes pass below local river bed
   const VE = sim.verticalScale;
-  const MIN_RIVER_CLEARANCE_M = 8; // metres below water surface
+  const RIVER_BED_CLEARANCE_M = 2; // metres below local bathymetric bed
   const waterY = WATER_LEVEL_M * VE;
-  const minRiverY = waterY - MIN_RIVER_CLEARANCE_M * VE;
+  const SYNTHETIC_RIVER_SAMPLE_M = 35;
+
+  function riverClearanceY(x, z) {
+    const prof = thamesProfileSampler?.sampleAt(x, z);
+    const localDepthM = prof?.d ?? 3;
+    return {
+      y: waterY - (localDepthM + RIVER_BED_CLEARANCE_M) * VE,
+      depthM: localDepthM,
+    };
+  }
+
+  function isRiverCorridorPoint(x, z) {
+    if (isInThames(x, z)) return true;
+    const surfaceY = getTerrainMeshSurfaceY({ x, z });
+    return surfaceY !== null && surfaceY <= waterY;
+  }
 
   for (const [lineId, branches] of lineBranchCenterPts) {
     for (const branchPts of branches) {
       for (const pt of branchPts) {
-        const surfaceY = getTerrainMeshSurfaceY({ x: pt.x, z: pt.z });
-        // If terrain surface is at or below water level, this point is over the river
-        if (surfaceY !== null && surfaceY <= waterY) {
-          pt.y = Math.min(pt.y, minRiverY);
+        if (isRiverCorridorPoint(pt.x, pt.z)) {
+          const clearance = riverClearanceY(pt.x, pt.z);
+          pt.y = Math.min(pt.y, clearance.y);
         }
       }
     }
   }
 
-  // 4a-iii. Synthetic mid-river control points: prevent CatmullRom arcing above water
+  // 4a-iii. Synthetic river-bed control points: prevent CatmullRom arcing into the river volume
   for (const [lineId, branches] of lineBranchCenterPts) {
     for (const branchPts of branches) {
       for (let i = branchPts.length - 2; i >= 0; i--) {
         const a = branchPts[i];
         const b = branchPts[i + 1];
-        const midX = (a.x + b.x) / 2;
-        const midZ = (a.z + b.z) / 2;
-        const midSurfaceY = getTerrainMeshSurfaceY({ x: midX, z: midZ });
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const horizontalLen = Math.sqrt(dx * dx + dz * dz);
+        const sampleCount = Math.max(2, Math.ceil(horizontalLen / SYNTHETIC_RIVER_SAMPLE_M));
+        const inserts = [];
 
-        // Only act if the midpoint is over the river
-        if (midSurfaceY === null || midSurfaceY > waterY) continue;
+        for (let j = 1; j < sampleCount; j++) {
+          const t = j / sampleCount;
+          const x = a.x + dx * t;
+          const z = a.z + dz * t;
+          if (!isRiverCorridorPoint(x, z)) continue;
 
-        // Check if linear interpolation between a and b would sit above clearance
-        const midLerpY = (a.y + b.y) / 2;
-        if (midLerpY <= minRiverY) continue;
+          const clearance = riverClearanceY(x, z);
+          const lerpY = a.y + (b.y - a.y) * t;
+          if (lerpY <= clearance.y) continue;
 
-        // Splice in a synthetic control point clamped below water
-        const synPt = new THREE.Vector3(midX, minRiverY, midZ);
-        synPt._depthM = MIN_RIVER_CLEARANCE_M;
-        synPt._synthetic = true;
-        branchPts.splice(i + 1, 0, synPt);
+          const synPt = new THREE.Vector3(x, clearance.y, z);
+          synPt._depthM = clearance.depthM + RIVER_BED_CLEARANCE_M;
+          synPt._synthetic = true;
+          inserts.push(synPt);
+        }
+
+        if (inserts.length > 0) {
+          branchPts.splice(i + 1, 0, ...inserts);
+        }
       }
     }
   }
@@ -2769,6 +2796,7 @@ if (import.meta.env.DEV) {
     trainSystem, composer, bloomPass, lensSystem, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
+    isInThames,
     // D-002 substrate speed multiplier — read live, settable by a later wave
     // (chalk slowdown) to throttle movement through dense strata.
     get substrateSpeedFactor() { return substrateSpeedFactor; },
@@ -2780,6 +2808,9 @@ if (import.meta.env.DEV) {
     get formatInfraTooltip() { return _formatInfraTooltipRef; },
     // Getters so live values are read (set after async loading)
     get unifiedShaftLayer() { return unifiedShaftLayer; },
+    get lineCenterPoints() { return lineCenterPoints; },
+    get lineBranchCenterPts() { return lineBranchCenterPts; },
+    get thamesProfileSampler() { return thamesProfileSampler; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
     // Sum of populated instance counts across all per-tile building InstancedMeshes.

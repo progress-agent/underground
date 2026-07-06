@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
+import { buildThamesProfiles, lerpThamesProfile } from './thames-profile.js';
 
 // River Thames data and 3D volume rendering
 // Coordinates are in EPSG:27700 (British National Grid)
@@ -74,41 +75,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
 
   // ── 3. Build width / depth / surfaceY profiles ───────────────────────
   // Assign each data point a u value based on cumulative polyline distance.
-  let cumDist = 0;
-  const cumDists = [0];
-  for (let i = 1; i < validPoints.length; i++) {
-    const dx = validPoints[i].x - validPoints[i - 1].x;
-    const dz = validPoints[i].z - validPoints[i - 1].z;
-    cumDist += Math.sqrt(dx * dx + dz * dz);
-    cumDists.push(cumDist);
-  }
-
-  const profiles = validPoints.map((p, i) => ({
-    u: cumDist > 0 ? cumDists[i] / cumDist : 0,
-    w: p.w,
-    d: p.d,
-  }));
-
-  // Linear interpolation between bracketing profiles
-  function lerpProfile(u) {
-    if (u <= profiles[0].u) return profiles[0];
-    if (u >= profiles[profiles.length - 1].u) return profiles[profiles.length - 1];
-
-    // Binary search for bracketing pair
-    let lo = 0;
-    let hi = profiles.length - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (profiles[mid].u <= u) lo = mid;
-      else hi = mid;
-    }
-
-    const t = (u - profiles[lo].u) / (profiles[hi].u - profiles[lo].u || 1);
-    return {
-      w: profiles[lo].w + t * (profiles[hi].w - profiles[lo].w),
-      d: profiles[lo].d + t * (profiles[hi].d - profiles[lo].d),
-    };
-  }
+  const profiles = buildThamesProfiles(validPoints);
 
   // ── 4. Sample cross-sections along the spline ────────────────────────
   const SAMPLES = 600;
@@ -129,7 +96,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     const normZ = nz / nLen;
 
     // Interpolate width, depth from profiles
-    const prof = lerpProfile(u);
+    const prof = lerpThamesProfile(profiles, u);
     const halfW = prof.w / 2;
 
     const leftX  = pos.x + normX * halfW;
