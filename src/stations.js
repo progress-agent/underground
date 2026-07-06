@@ -10,6 +10,99 @@ const _labelledNamesUG = new Set();
 // read every frame by each layer's update() so slider changes apply instantly.
 let _labelMaxDistance = 9000;
 
+// ---- Shared screen-space declutter grid (surface labels, all layers) ----
+// The above-ground label set spans many per-line layers, each calling update()
+// independently within a single render tick. To dedupe "walls of text" across
+// ALL layers we keep ONE module-level coarse screen grid, reset once per render
+// frame (keyed on renderer.info.render.frame). Cell arrays are preallocated and
+// marked stale by a per-frame stamp — no per-frame clearing/allocation.
+const CELL_W = 92;
+const CELL_H = 46;
+let _gridCols = 0;
+let _gridRows = 0;
+let _gridStamp = null;    // Int32Array — frame stamp that last claimed each cell
+let _gridPriority = null; // Int8Array  — incumbent priority tier per cell
+let _gridDist = null;     // Float64Array — incumbent effective (sticky) distance
+let _gridEl = null;       // Array — incumbent element per cell
+let _frameToken = -1;     // last seen renderer frame number
+let _frameStamp = 0;      // monotonic per-frame stamp used to mark live cells
+
+// Shared per-frame surface (above-ground) policy — computed once per frame.
+let _surfCutoff = 0;      // hard distance cutoff (scene units), altitude-scaled
+let _surfFadeStart = 0;   // distance at which opacity starts fading
+let _surfMinPriority = 0; // minimum priority tier allowed to show
+
+const STICKY = 0.9;       // incumbent-from-last-frame treated as 10% closer
+const CHALLENGER_MARGIN = 0.9; // same-tier challenger must be clearly closer
+
+function ensureGrid(w, h) {
+  const cols = Math.max(1, Math.ceil(w / CELL_W));
+  const rows = Math.max(1, Math.ceil(h / CELL_H));
+  if (cols !== _gridCols || rows !== _gridRows || !_gridStamp) {
+    _gridCols = cols;
+    _gridRows = rows;
+    const n = cols * rows;
+    _gridStamp = new Int32Array(n);
+    _gridPriority = new Int8Array(n);
+    _gridDist = new Float64Array(n);
+    _gridEl = new Array(n).fill(null);
+  }
+}
+
+// Detect a new render frame and, if so, recompute shared surface policy + mark
+// the grid stale. Cheap short-circuit for the 2nd..Nth layer within one tick.
+function beginLabelFrameIfNeeded(camera, renderer, terrainSurfaceY, w, h) {
+  const token = renderer?.info?.render?.frame ?? (_frameToken + 1);
+  if (token === _frameToken) return;
+  _frameToken = token;
+  _frameStamp++; // stamp mismatch marks every cell empty — no clearing needed
+  ensureGrid(w, h);
+
+  const surfY = Number.isFinite(terrainSurfaceY) ? terrainSurfaceY : 0;
+  const altY = Math.max(0, camera.position.y - surfY);
+  const HIGH_ALT = 12000; // scene units above ground → priority-tier-only regime
+  // Cutoff reaches full-network range once well off the deck (~6k) so elevated
+  // BUT distant framings (e.g. the oblique beauty pose) still reach the centre;
+  // street level stays tight so only nearby labels show. Screen grid + priority
+  // filter do the actual decluttering from there.
+  const reachT = Math.min(1, altY / 6000);
+  _surfCutoff = 2500 + Math.pow(reachT, 1.2) * (60000 - 2500);
+  _surfFadeStart = _surfCutoff * 0.62;
+  // At high altitude only interchanges/termini survive (fading with distance).
+  _surfMinPriority = altY >= HIGH_ALT ? 1 : 0;
+}
+
+// Importance tier used for both the altitude priority filter and grid arbitration:
+// 2 = terminus / major hub (3+ lines), 1 = interchange (2 lines), 0 = minor stop.
+// Gold styling (isTerminus) rides on top; this drives declutter precedence.
+function labelPriority(st) {
+  const lc = st.lineCount || 1;
+  if (st.isTerminus || lc >= 3) return 2;
+  if (lc >= 2) return 1;
+  return 0;
+}
+
+// ---- Dirty-checked DOM writes (only touch style on real change) ----
+function showLabel(el, x, y, opacity) {
+  if (el._dispShown !== true) { el.style.display = 'block'; el._dispShown = true; }
+  if (el._txSet !== true) { el.style.transform = 'translate(-50%, -50%)'; el._txSet = true; }
+  const lx = x.toFixed(1);
+  if (el._lx !== lx) { el.style.left = `${lx}px`; el._lx = lx; }
+  const ly = y.toFixed(1);
+  if (el._ly !== ly) { el.style.top = `${ly}px`; el._ly = ly; }
+  const op = opacity >= 0.999 ? '1' : opacity.toFixed(3);
+  if (el._op !== op) { el.style.opacity = op; el._op = op; }
+}
+
+function hideLabel(el) {
+  if (el._dispShown !== false) { el.style.display = 'none'; el._dispShown = false; }
+}
+
+function setLayerDisplay(layerEl, show) {
+  const v = show ? 'block' : 'none';
+  if (layerEl._dispState !== v) { layerEl.style.display = v; layerEl._dispState = v; }
+}
+
 export function cleanStationName(name) {
   return name.replace(/\s+(Underground|DLR) Station$/i, '');
 }
@@ -96,8 +189,13 @@ export function createStationMarkers({
         const surfEl = document.createElement('div');
         surfEl.className = 'station-label station-label-surface';
         surfEl.textContent = name;
-        surfEl.style.fontSize = `${Math.max(7, 11 * lineSizeMultiplier(st.lineCount || 1, st.isTerminus)).toFixed(1)}px`;
+        const surfFontPx = Math.max(7, 11 * lineSizeMultiplier(st.lineCount || 1, st.isTerminus));
+        surfEl.style.fontSize = `${surfFontPx.toFixed(1)}px`;
         if (st.isTerminus) surfEl.style.color = '#f5e6a3';
+        surfEl._priority = labelPriority(st);
+        // Estimated on-screen half-width (px) — drives width-aware grid claiming
+        // so wide central hub labels reserve the cells they physically cover.
+        surfEl._estHalfPx = 0.26 * surfFontPx * name.length + 6;
         surfaceLayer.appendChild(surfEl);
         surfaceEls.push(surfEl);
       }
@@ -111,6 +209,7 @@ export function createStationMarkers({
         ugEl.className = 'station-label station-label-underground';
         ugEl.textContent = name;
         ugEl._sizeMultiplier = lineSizeMultiplier(st.lineCount || 1, st.isTerminus);
+        ugEl._priority = labelPriority(st);
         if (st.isTerminus) ugEl.style.color = '#f5e6a3';
         undergroundLayer.appendChild(ugEl);
         undergroundEls.push(ugEl);
@@ -142,65 +241,123 @@ export function createStationMarkers({
       ? camera.position.y >= terrainSurfaceY
       : camera.position.y >= 0);
 
-    // Toggle layer visibility based on camera position
-    surfaceLayer.style.display = cameraAboveGround ? 'block' : 'none';
-    undergroundLayer.style.display = cameraAboveGround ? 'none' : 'block';
+    // Reset shared declutter grid + surface policy once per render frame
+    // (first layer to run this tick does the work; the rest short-circuit).
+    beginLabelFrameIfNeeded(camera, renderer, terrainSurfaceY, w, h);
 
-    // Only project labels for the active layer
-    const activeEls = cameraAboveGround ? surfaceEls : undergroundEls;
+    // Toggle layer visibility based on camera position (dirty-checked)
+    setLayerDisplay(surfaceLayer, cameraAboveGround);
+    setLayerDisplay(undergroundLayer, !cameraAboveGround);
+
+    if (cameraAboveGround) {
+      updateSurface(camera, w, h);
+    } else {
+      updateUnderground(camera, w, h);
+    }
+  }
+
+  // ---- Above-ground branch: altitude-aware distance policy + screen grid ----
+  function updateSurface(camera, w, h) {
+    const cutoff = _surfCutoff;
+    const fadeStart = _surfFadeStart;
+    const fadeRange = Math.max(1, cutoff - fadeStart);
+    const minPriority = _surfMinPriority;
 
     for (let i = 0; i < stations.length; i++) {
-      const el = activeEls[i];
+      const el = surfaceEls[i];
       if (!el) continue;
+      const st = stations[i];
+      const priority = el._priority || 0;
 
+      // Cheap 3D pre-cull BEFORE any projection: altitude priority + distance.
+      if (priority < minPriority) { hideLabel(el); continue; }
+      const d = camera.position.distanceTo(st.pos);
+      if (d > cutoff) { hideLabel(el); continue; }
+
+      // Project station XZ at terrain surface (or Y=0 fallback)
+      tmpSurface.set(st.pos.x, st.surfaceY ?? 0, st.pos.z);
+      tmpSurface.project(camera);
+      if (tmpSurface.z > 1) { hideLabel(el); continue; }
+
+      const x = (tmpSurface.x * 0.5 + 0.5) * w;
+      const y = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+      if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { hideLabel(el); continue; }
+
+      // Screen-space declutter: at most one label per covered grid cell.
+      // Priority wins; then nearer-to-camera. Stickiness biases the currently
+      // visible label. Wide labels claim the horizontal run of cells they cover.
+      const eff = d * (el._dispShown ? STICKY : 1.0);
+      let col = (x / CELL_W) | 0;
+      if (col < 0) col = 0; else if (col >= _gridCols) col = _gridCols - 1;
+      let row = (y / CELL_H) | 0;
+      if (row < 0) row = 0; else if (row >= _gridRows) row = _gridRows - 1;
+
+      let span = ((el._estHalfPx || 0) / CELL_W) | 0;
+      if (span > 2) span = 2; // bound the per-label cost
+      let c0 = col - span; if (c0 < 0) c0 = 0;
+      let c1 = col + span; if (c1 >= _gridCols) c1 = _gridCols - 1;
+
+      // Decide against every covered cell before claiming any.
+      let win = true;
+      for (let c = c0; c <= c1 && win; c++) {
+        const j = row * _gridCols + c;
+        if (_gridStamp[j] !== _frameStamp) continue;
+        const ip = _gridPriority[j];
+        if (priority < ip) { win = false; break; }
+        if (priority === ip) {
+          const margin = c === col ? CHALLENGER_MARGIN : 1.0;
+          if (eff >= _gridDist[j] * margin) { win = false; break; }
+        }
+      }
+      if (!win) { hideLabel(el); continue; }
+
+      // Challenger wins — evict prior incumbents and claim every covered cell.
+      for (let c = c0; c <= c1; c++) {
+        const j = row * _gridCols + c;
+        if (_gridStamp[j] === _frameStamp) {
+          const prev = _gridEl[j];
+          if (prev && prev !== el) hideLabel(prev);
+        }
+        _gridStamp[j] = _frameStamp;
+        _gridPriority[j] = priority;
+        _gridDist[j] = eff;
+        _gridEl[j] = el;
+      }
+
+      const alpha = d <= fadeStart ? 1.0
+        : THREE.MathUtils.clamp(1.0 - (d - fadeStart) / fadeRange, 0.0, 1.0);
+      showLabel(el, x, y, alpha);
+    }
+  }
+
+  // ---- Below-ground branch: unchanged visual behaviour, dirty-checked writes ----
+  function updateUnderground(camera, w, h) {
+    for (let i = 0; i < stations.length; i++) {
+      const el = undergroundEls[i];
+      if (!el) continue;
       const st = stations[i];
 
-      if (cameraAboveGround) {
-        // Surface: project station XZ at terrain surface (or Y=0 fallback)
-        tmpSurface.set(st.pos.x, st.surfaceY ?? 0, st.pos.z);
-        tmpSurface.project(camera);
+      const d = camera.position.distanceTo(st.pos);
+      if (d > _labelMaxDistance) { hideLabel(el); continue; }
 
-        if (tmpSurface.z > 1) { el.style.display = 'none'; continue; }
+      tmpUnderground.copy(st.pos);
+      tmpUnderground.project(camera);
+      if (tmpUnderground.z > 1) { hideLabel(el); continue; }
 
-        const x = (tmpSurface.x * 0.5 + 0.5) * w;
-        const y = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+      const x = (tmpUnderground.x * 0.5 + 0.5) * w;
+      const y = (1 - (tmpUnderground.y * 0.5 + 0.5)) * h;
+      if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { hideLabel(el); continue; }
 
-        if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
+      const fadeRange = _labelMaxDistance - 150;
+      const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / fadeRange, 0.0, 1.0);
+      const baseFontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
+      const fontSize = baseFontSize * (el._sizeMultiplier || 1);
 
-        el.style.display = 'block';
-        el.style.left = `${x.toFixed(1)}px`;
-        el.style.top = `${y.toFixed(1)}px`;
-        el.style.transform = 'translate(-50%, -50%)';
-        el.style.opacity = '1';
-      } else {
-        // Underground: project at actual station depth
-        tmpUnderground.copy(st.pos);
-        tmpUnderground.project(camera);
-
-        if (tmpUnderground.z > 1) { el.style.display = 'none'; continue; }
-
-        const x = (tmpUnderground.x * 0.5 + 0.5) * w;
-        const y = (1 - (tmpUnderground.y * 0.5 + 0.5)) * h;
-
-        if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { el.style.display = 'none'; continue; }
-
-        const d = camera.position.distanceTo(st.pos);
-
-        if (d > _labelMaxDistance) { el.style.display = 'none'; continue; }
-
-        const fadeRange = _labelMaxDistance - 150;
-        const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / fadeRange, 0.0, 1.0);
-        const baseFontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
-        const fontSize = baseFontSize * (el._sizeMultiplier || 1);
-
-        el.style.display = 'block';
-        el.style.left = `${x.toFixed(1)}px`;
-        el.style.top = `${y.toFixed(1)}px`;
-        el.style.transform = 'translate(-50%, -50%)';
-        el.style.opacity = alpha.toFixed(3);
-        el.style.fontSize = `${fontSize.toFixed(1)}px`;
-        el.style.zIndex = Math.max(1, Math.floor(10000 - d));
-      }
+      showLabel(el, x, y, alpha);
+      const fs = `${fontSize.toFixed(1)}px`;
+      if (el._fs !== fs) { el.style.fontSize = fs; el._fs = fs; }
+      const z = Math.max(1, Math.floor(10000 - d));
+      if (el._zi !== z) { el.style.zIndex = z; el._zi = z; }
     }
   }
 
