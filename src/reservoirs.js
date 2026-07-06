@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { RENDER_ORDER, RESERVOIR_LIFT, RESERVOIR_EDGE_LIFT } from './render-layers.js';
+import { createWaterMaterial } from './water-material.js';
 
 // Ray-cast point-in-polygon test (even-odd rule) on the XZ plane.
 function pointInPolygon(x, z, coords) {
@@ -38,16 +39,8 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
   const group = new THREE.Group();
   group.name = 'reservoirs';
   
-  // Material for water - similar to Thames but flatter
-  const waterMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x3b82f6, // Blue
-    transparent: true,
-    opacity: 0.6,
-    roughness: 0.2,
-    metalness: 0.1,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  });
+  // Shared living-water family, tuned mirror-calm for reservoirs.
+  const waterMaterial = createWaterMaterial('reservoir');
   
   for (const feature of data.features) {
     if (!feature.coords || feature.coords.length < 3) continue;
@@ -112,6 +105,24 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
       pos.setY(i, waterY);
     }
     pos.needsUpdate = true;
+
+    let maxRadius = 1;
+    for (let i = 0; i < pos.count; i++) {
+      const dx = pos.getX(i) - centroidX;
+      const dz = pos.getZ(i) - centroidZ;
+      maxRadius = Math.max(maxRadius, Math.sqrt(dx * dx + dz * dz));
+    }
+    const waterDepths = new Float32Array(pos.count);
+    const waterEdges = new Float32Array(pos.count);
+    const reservoirDepth = THREE.MathUtils.clamp((feature.area_ha || 25) / 40, 1.5, 8);
+    for (let i = 0; i < pos.count; i++) {
+      const dx = pos.getX(i) - centroidX;
+      const dz = pos.getZ(i) - centroidZ;
+      waterDepths[i] = reservoirDepth;
+      waterEdges[i] = THREE.MathUtils.clamp(Math.sqrt(dx * dx + dz * dz) / maxRadius, 0, 1);
+    }
+    shapeGeometry.setAttribute('waterDepth', new THREE.BufferAttribute(waterDepths, 1));
+    shapeGeometry.setAttribute('waterEdge', new THREE.BufferAttribute(waterEdges, 1));
     
     const mesh = new THREE.Mesh(shapeGeometry, waterMaterial);
     mesh.userData = {

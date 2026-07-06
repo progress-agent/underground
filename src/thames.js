@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 import { buildThamesProfiles, lerpThamesProfile } from './thames-profile.js';
+import { createWaterMaterial, updateWater } from './water-material.js';
 
 // River Thames data and 3D volume rendering
 // Coordinates are in EPSG:27700 (British National Grid)
@@ -9,6 +10,7 @@ import { buildThamesProfiles, lerpThamesProfile } from './thames-profile.js';
 
 // Water surface level in metres OD — flat water surface
 export const WATER_LEVEL_M = 2;
+export { updateWater };
 
 // BNG reference — must match terrain.js (Trafalgar Square ≈ TQ 300 804)
 const BNG_REF_E = 530000;
@@ -48,8 +50,8 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   if (!thamesData?.points?.length) return null;
 
   const {
-    color = 0x1a3d5c,
-    opacity = 0.45,
+    color,
+    opacity,
   } = options;
 
   const VE = VERTICAL_EXAGGERATION;
@@ -82,6 +84,8 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   // 4 vertices per cross-section: topLeft, topRight, bottomLeft, bottomRight
   const vertCount = (SAMPLES + 1) * 4;
   const positions = new Float32Array(vertCount * 3);
+  const waterDepths = new Float32Array(vertCount);
+  const waterEdges = new Float32Array(vertCount);
 
   for (let i = 0; i <= SAMPLES; i++) {
     const u = i / SAMPLES;
@@ -125,6 +129,18 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     positions[base + 9]  = rightX;
     positions[base + 10] = bottomY;
     positions[base + 11] = rightZ;
+
+    const depth = prof.d;
+    const vBase = i * 4;
+    waterDepths[vBase] = depth;
+    waterDepths[vBase + 1] = depth;
+    waterDepths[vBase + 2] = depth;
+    waterDepths[vBase + 3] = depth;
+    // Across-water coordinate: -1/1 at banks, interpolating through 0 mid-river.
+    waterEdges[vBase] = -1.0;
+    waterEdges[vBase + 1] = 1.0;
+    waterEdges[vBase + 2] = -1.0;
+    waterEdges[vBase + 3] = 1.0;
   }
 
   // ── 5. Build index buffer ────────────────────────────────────────────
@@ -169,23 +185,15 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   // ── 6. Assemble geometry ─────────────────────────────────────────────
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('waterDepth', new THREE.BufferAttribute(waterDepths, 1));
+  geometry.setAttribute('waterEdge', new THREE.BufferAttribute(waterEdges, 1));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
 
   // ── 7. Material ──────────────────────────────────────────────────────
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    transparent: true,
-    opacity,
-    roughness: 0.3,
-    metalness: 0.05,
-    emissive: 0x0a1e3d,
-    emissiveIntensity: 0.25,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -4,
+  const material = createWaterMaterial('thames', {
+    ...(color ? { baseColor: color } : {}),
+    ...(opacity ? { opacity } : {}),
   });
 
   const mesh = new THREE.Mesh(geometry, material);

@@ -268,6 +268,55 @@ export function generateTerrainNormalMap(heightFloats, hmWidth, hmHeight, output
 }
 
 /**
+ * Tileable calm-water normal map. Low-frequency crossed ripples only, intended
+ * for slow scrolling in the water shader rather than baked busy wave detail.
+ */
+export function generateWaterNormalMap(size = 256, strength = 1.6) {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const height = new Float32Array(size * size);
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size;
+      const v = y / size;
+      const slow = fbmNoise(u * 3.0, v * 3.0, 4);
+      const cross = Math.sin((u * 2.0 + v * 0.72) * Math.PI * 2);
+      const counter = Math.sin((u * -0.52 + v * 2.6) * Math.PI * 2 + 1.7);
+      height[y * size + x] = slow * 0.58 + cross * 0.08 + counter * 0.05;
+    }
+  }
+
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  const sample = (x, y) => height[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const dx = (sample(x + 1, y) - sample(x - 1, y)) * strength;
+      const dy = (sample(x, y + 1) - sample(x, y - 1)) * strength;
+      const nz = 1.0;
+      const len = Math.sqrt(dx * dx + dy * dy + nz * nz);
+
+      d[i]     = Math.floor((-dx / len * 0.5 + 0.5) * 255);
+      d[i + 1] = Math.floor((-dy / len * 0.5 + 0.5) * 255);
+      d[i + 2] = Math.floor((nz / len * 0.5 + 0.5) * 255);
+      d[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+
+/**
  * Chalk grain — powdery chalk with flint inclusions.
  * 512px, tiled 12×12.
  */

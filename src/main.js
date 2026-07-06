@@ -8,7 +8,7 @@ import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting } fr
 import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
-import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
+import { loadThamesData, createThamesVolume, WATER_LEVEL_M, updateWater } from './thames.js';
 import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
@@ -38,6 +38,7 @@ import { initLandscapeLock } from './landscape-lock.js';
 import { initControlsGuide } from './controls-guide.js';
 import { initCushionLuma, sampleCushion, resetCushion, _cushionState } from './cushion-luma.js';
 import { initReadout } from './readout.js';
+import { getWaterTuningSurface } from './water-material.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -740,10 +741,7 @@ const thamesDataPromise = loadThamesData();
 
       // Build Thames 3D volume (flat water level, no terrain sampling needed)
       if (thamesData) {
-        thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY, {
-          color: 0x1a3d5c,
-          opacity: 0.45,
-        });
+        thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY);
         if (thamesMesh) {
           scene.add(thamesMesh);
         }
@@ -2750,6 +2748,9 @@ function tick() {
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
 
+  // Update living-water shader uniforms.
+  updateWater(dt);
+
   // Update station label projections for ALL lines
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
@@ -2797,6 +2798,9 @@ if (import.meta.env.DEV) {
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     isInThames,
+    water: getWaterTuningSurface(),
+    get waterParams() { return getWaterTuningSurface().params; },
+    setWaterParams: (next) => getWaterTuningSurface().setWaterParams(next),
     // D-002 substrate speed multiplier — read live, settable by a later wave
     // (chalk slowdown) to throttle movement through dense strata.
     get substrateSpeedFactor() { return substrateSpeedFactor; },

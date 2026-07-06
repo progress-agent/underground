@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
+import { createWaterMaterial } from './water-material.js';
 
 let canalData = null;
 
@@ -27,17 +28,8 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
   group.name = 'canals';
   const VE = VERTICAL_EXAGGERATION;
 
-  // Flat ribbon material — sits on terrain like Thames water surface
-  // depthWrite:false + renderOrder prevent z-fighting with terrain
-  const canalMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2563eb,
-    transparent: true,
-    opacity: 0.7,
-    roughness: 0.3,
-    metalness: 0.1,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  // Shared living-water family, tuned nearly still for canals.
+  const canalMaterial = createWaterMaterial('canal');
 
   const SURFACE_LIFT = WATER_LIFT; // scene units above terrain (shared with Thames — render-layers.js)
   const HALF_WIDTH = 5;      // scene units — canals ~10m wide visually
@@ -96,6 +88,8 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
     const sampleCount = Math.min(rawPoints.length * SAMPLES_PER_POINT, 200);
     const vertCount = (sampleCount + 1) * 2;
     const positions = new Float32Array(vertCount * 3);
+    const waterDepths = new Float32Array(vertCount);
+    const waterEdges = new Float32Array(vertCount);
 
     for (let i = 0; i <= sampleCount; i++) {
       const u = i / sampleCount;
@@ -122,6 +116,12 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
       positions[base + 3] = pos.x - normX * HALF_WIDTH;
       positions[base + 4] = topY;
       positions[base + 5] = pos.z - normZ * HALF_WIDTH;
+
+      const vBase = i * 2;
+      waterDepths[vBase] = 1.5;
+      waterDepths[vBase + 1] = 1.5;
+      waterEdges[vBase] = -1.0;
+      waterEdges[vBase + 1] = 1.0;
     }
 
     // Build index buffer — triangle strip as indexed triangles
@@ -139,6 +139,8 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('waterDepth', new THREE.BufferAttribute(waterDepths, 1));
+    geometry.setAttribute('waterEdge', new THREE.BufferAttribute(waterEdges, 1));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.computeVertexNormals();
 
