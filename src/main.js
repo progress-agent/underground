@@ -207,6 +207,10 @@ controls.touches = {
 const _baseZoomSpeed = controls.zoomSpeed;
 const _basePanSpeed = controls.panSpeed;
 
+// D6: half-width of the CLAY/CHALK readout hysteresis band (total ~10 units)
+// around getChalkSurfaceY(x,z).
+const CHALK_HYSTERESIS_HALF = 5;
+
 // ── Finish EffectComposer setup now that camera exists ──
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(
@@ -272,6 +276,11 @@ const _surfQuery = { x: 0, z: 0 }; // reused arg for getTerrainMeshSurfaceY
 // D-002 substrate speed multiplier — applied in the movement funnel. Default
 // 1.0 (no effect); a later wave (chalk slowdown) drives it via window.__ug.
 let substrateSpeedFactor = 1.0;
+
+// D6: CLAY/CHALK readout hysteresis state. Persists the last flip direction
+// so the HUD label doesn't chatter when the camera sits right on the
+// getChalkSurfaceY boundary — see the substrate classification in tick().
+let _substrateInChalk = false;
 
 // Left-button (ROTATE) drag flag. r161 OrbitControls has no getState(); we
 // track the drag locally. Set on a capture-phase left pointerdown (before
@@ -2643,23 +2652,46 @@ function tick() {
     ? camera.position.y < surfaceYAtCamera
     : camera.position.y < 0);
 
-  // Substrate: chalk top ≈ 60m below sea level at VE=5 = -300 scene units (mOD reference)
-  const CHALK_TOP_Y = -60 * VERTICAL_EXAGGERATION;
+  // D6: substrate readout. Below-surface is independent of M25 membership —
+  // the earlier "AIR at -1076m outside the M25" contradiction came from
+  // gating on isUnderground (which requires cameraInsideM25). Outside the
+  // disc there is no modelled chalk shaft, but the depth-vs-chalk-datum
+  // classification (CLAY above chalk top, CHALK below) still makes sense and
+  // beats the false "AIR" reading. Only genuinely above the local terrain
+  // surface is AIR, regardless of M25 state.
+  const belowSurface = surfaceYAtCamera !== null
+    ? camera.position.y < surfaceYAtCamera
+    : camera.position.y < 0;
+
+  // Shared analytic chalk surface (D3.1) — same function the atmosphere's
+  // chalkBlend and the visible displaced floor use, so felt/seen/read agree.
+  const chalkSurfaceY = getChalkSurfaceY(camera.position.x, camera.position.z);
+
   let substrate = 'AIR';
-  if (isUnderground) {
-    if (isInThames(camera.position.x, camera.position.z)) substrate = 'WATER';
-    else if (camera.position.y < CHALK_TOP_Y) substrate = 'CHALK';
-    else substrate = 'CLAY';
+  if (belowSurface) {
+    if (isInThames(camera.position.x, camera.position.z)) {
+      substrate = 'WATER';
+      _substrateInChalk = false;
+    } else {
+      // CLAY/CHALK flip with a ~10-unit hysteresis band around chalkSurfaceY
+      // so the label doesn't chatter right at the boundary. Direction-aware:
+      // must overshoot the last-crossed side by CHALK_HYSTERESIS_HALF before
+      // flipping back.
+      const flipY = _substrateInChalk
+        ? chalkSurfaceY + CHALK_HYSTERESIS_HALF
+        : chalkSurfaceY - CHALK_HYSTERESIS_HALF;
+      _substrateInChalk = camera.position.y < flipY;
+      substrate = _substrateInChalk ? 'CHALK' : 'CLAY';
+    }
+  } else {
+    _substrateInChalk = false;
   }
   readout.update(azimuth, realAltM, substrate);
 
   // ── Chalk-entry regime (D3.2/D3.3) + M25 edge blend (D5) ──────────────────
-  // chalkBlend: smoothstep over camera Y crossing the LOCAL displaced chalk
-  // surface ±30 (the same analytic surface the floor is built from, so felt =
-  // seen). insideness: continuous M25 membership over a ~1500m band. The chalk
+  // insideness: continuous M25 membership over a ~1500m band. The chalk
   // white-out and slowdown are gated by insideness so they only happen within
   // the disc — outside, there is no chalk stratum to cloud or slow through.
-  const chalkSurfaceY = getChalkSurfaceY(camera.position.x, camera.position.z);
   const insideness = sampleM25Insideness(camera.position.x, camera.position.z);
   const chalkBlend = (1 - THREE.MathUtils.smoothstep(
     camera.position.y, chalkSurfaceY - 30, chalkSurfaceY + 30

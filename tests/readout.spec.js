@@ -77,6 +77,25 @@ test('substrate changes to CHALK when camera is very deep', async ({ page }) => 
   await expect(page.locator('#ug-readout-sub')).toHaveText('CHALK');
 });
 
+test('outside M25 below surface never reads AIR (D6 substrate coherence)', async ({ page }) => {
+  await gotoAndWait(page);
+  // (30000, -1000, 0) is outside the M25 disc, well below the local terrain
+  // surface. Before D6 this fell through the isUnderground(=cameraInsideM25
+  // && belowSurface) gate and read AIR — a contradiction with "below ground".
+  // The fix classifies purely on belowSurface + depth-vs-chalk-datum,
+  // independent of M25 membership.
+  await page.evaluate(() => {
+    window.__ug.camera.position.set(30000, -1000, 0);
+    window.__ug.controls.target.set(30000, -1000, 500);
+  });
+  await page.waitForFunction(() => {
+    const el = document.getElementById('ug-readout');
+    return el && el.dataset.substrate && el.dataset.substrate !== 'AIR';
+  }, null, { timeout: 3000 });
+  const substrate = await page.locator('#ug-readout').getAttribute('data-substrate');
+  expect(['CLAY', 'CHALK', 'WATER']).toContain(substrate);
+});
+
 test('heading is valid 000–359° format', async ({ page }) => {
   await gotoAndWait(page);
   await page.waitForFunction(() => {
