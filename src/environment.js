@@ -44,31 +44,61 @@ export const ENV_CONFIG = {
   lightFullY: 90,
 };
 
-// Create sky dome (simple gradient hemisphere)
+// Create sky dome — a camera-following "abyss cap" (D1.4).
+//
+// IMPORTANT geometry note: the camera far plane is 50000, so an 80000-radius
+// dome fixed at the origin is almost entirely FRUSTUM-CLIPPED — the sky/void
+// the viewer actually sees is the renderer CLEAR COLOUR, not the dome. That is
+// why darkening the dome texture alone did nothing to the below-horizon void.
+//
+// This dome therefore (a) has radius 45000 (< far plane) and (b) is recentred
+// on the camera every frame in updateEnvironment, so it always renders and its
+// equator always sits on the viewer's true horizon. Its job is ONLY the abyss:
+//   • ABOVE the horizon (v > 0.5) the texture alpha is 0 → fully transparent →
+//     the existing clear-colour sky shows through UNCHANGED (the good overview
+//     look is preserved; we deliberately do not re-tint the upper sky).
+//   • BELOW the horizon (v < 0.5) the texture ramps to an OPAQUE deep slate →
+//     near-black at nadir, hiding the bright steel-blue clear colour so the
+//     white chalk shaft + warm clay disc read against a dark abyss.
+// depthWrite:false + a very negative renderOrder make it a pure background: all
+// scene geometry (opaque or transparent) draws over it, so it never occludes
+// the terrain/city/column. Master fade (altitude/underground/chalk) rides on
+// material.opacity in updateEnvironment, so it vanishes underground and in the
+// chalk white-out, leaving those regimes' clear-colour handling untouched.
 export function createSkyDome(scene) {
-  const geometry = new THREE.SphereGeometry(80000, 32, 32);
+  const geometry = new THREE.SphereGeometry(45000, 32, 32);
 
-  // Create a simple gradient texture for the sky
+  // Texture row 0 → top pole (CanvasTexture flipY=true → sphere v=1); row 512 →
+  // bottom pole (nadir). So canvas t: 0 = zenith, 0.5 = horizon, 1 = nadir.
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
+  canvas.width = 4;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
-  const gradient = ctx.createLinearGradient(0, 0, 0, 512);
-  gradient.addColorStop(0, '#4a90d9'); // Deep blue at top
-  gradient.addColorStop(0.5, '#87CEEB'); // Sky blue at middle
-  gradient.addColorStop(1, '#e8f4f8'); // Light near horizon
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 512, 512);
+  const grad = ctx.createLinearGradient(0, 0, 0, 512);
+  // AgX tone-mapping lifts shadows, so the slate is pushed dark and the ramp
+  // reaches near-black quickly below the horizon — otherwise the visible abyss
+  // reads as mid-grey.
+  grad.addColorStop(0.00, 'rgba(120,132,146,0.00)'); // zenith — transparent (sky = clear colour)
+  grad.addColorStop(0.49, 'rgba(120,132,146,0.00)'); // just above horizon — still transparent
+  grad.addColorStop(0.50, 'rgba(70,78,88,0.00)');    // horizon line — transparent
+  grad.addColorStop(0.52, 'rgba(40,46,54,1.00)');    // just below horizon — OPAQUE slate (abyss begins)
+  grad.addColorStop(0.57, 'rgba(18,21,27,1.00)');    // darkening fast
+  grad.addColorStop(0.64, 'rgba(9,11,15,1.00)');     // deep slate
+  grad.addColorStop(1.00, 'rgba(4,5,8,1.00)');       // near-black (nadir abyss)
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 4, 512);
   const texture = new THREE.CanvasTexture(canvas);
 
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     side: THREE.BackSide,
     transparent: true,
-    opacity: 0.0, // Start invisible, fade in based on camera
+    opacity: 0.0,        // Start invisible; master fade driven in updateEnvironment
+    depthWrite: false,   // pure background — never occlude scene geometry
     fog: false,
   });
   const sky = new THREE.Mesh(geometry, material);
+  sky.renderOrder = -1000; // draw first in the transparent queue (background)
   sky.name = 'skyDome';
   scene.add(sky);
   return sky;
@@ -134,8 +164,16 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   }
 
   // Update sky visibility — hidden underground and inside the chalk clouding.
+  // The 0.45 above-horizon blend is now baked into the texture alpha (see
+  // createSkyDome), so the master opacity is just the altitude/underground/chalk
+  // fade. Above ground it saturates to ~surfaceBlend, letting the baked
+  // per-hemisphere alpha decide the actual coverage: ~0.45 above the horizon
+  // (unchanged blue sky) and ~1.0 at the nadir (opaque dark abyss, D1.4).
   if (sky) {
-    sky.material.opacity = surfaceBlend * 0.45 * (1 - chalkBlend);
+    // Recentre the abyss-cap on the camera so its equator tracks the true
+    // horizon and it always renders within the 50000 far plane (see createSkyDome).
+    sky.position.copy(camera.position);
+    sky.material.opacity = surfaceBlend * (1 - chalkBlend);
     sky.visible = surfaceBlend > 0.01 && chalkBlend < 0.99;
   }
 

@@ -47,6 +47,19 @@ export const RENDER_ORDER = {
                        // (renderOrder 2) rendered after everything else that
                        // was left at the implicit default of 0.
   STATION: 5,         // stations.js InstancedMesh markers — drawn last
+
+  // ── Exterior tapered column (D1) — geology-exterior.js ─────────────────
+  EXTERIOR_SKIRT: 0,  // Clay disc skirt: an OPAQUE vertical wall on the M25
+                       // boundary (local surface → chalk top). Opaque, so the
+                       // renderOrder is documentary — depth sorts it. Kept at 0
+                       // alongside SURFACE_ROAD (it never overlaps the road).
+  EXTERIOR_COLUMN: 1, // Fading chalk column below the disc: TRANSPARENT (vertex
+                       // alpha ramp opaque→0 with depth). Tier 1 shares GEOLOGY/
+                       // SURFACE_WATER — it meets the chalk floor at the rim and
+                       // sits behind the Thames waterfalls (which spill in front,
+                       // resolved by the back-to-front distance sort within the
+                       // tier: the near falling ribbon draws after the far column
+                       // wall). It never spatially overlaps infra (tier 2+).
 };
 
 // Anti-z-fight Y lifts (scene units) — previously four separate uncoordinated

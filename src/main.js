@@ -9,7 +9,8 @@ import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
-import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
+import { createGeologyExterior } from './geology-exterior.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y } from './geology.js';
@@ -789,9 +790,23 @@ const thamesDataPromise = loadThamesData();
         if (m25Road) scene.add(m25Road);
 
         // Thames waterfalls at disc edge (needs both Thames and M25 data)
+        let thamesCrossings = [];
         if (thamesData?.points?.length) {
           const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
           if (waterfalls) scene.add(waterfalls);
+          // Boundary crossings feed the skirt notch so water spills over cleanly.
+          thamesCrossings = computeThamesCrossings(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
+        }
+
+        // Exterior tapered column (D1): clay disc skirt + fading chalk column.
+        // FrontSide-outward, so invisible from inside the disc; the skirt is
+        // notched at the Thames crossings so the waterfalls spill over the edge.
+        geologyExteriorGroup = createGeologyExterior(
+          m25Data.points, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings
+        );
+        if (geologyExteriorGroup) {
+          geologyExteriorGroup.visible = geologyGroup ? geologyGroup.visible : true;
+          scene.add(geologyExteriorGroup);
         }
 
         dbg('M25 world boundary applied');
@@ -1083,6 +1098,7 @@ loadCrossrailData().then(crossrailData => {
 // can be rim-flattened against the M25 ring and clipped by the same mask as
 // the terrain. Declared here at module scope; assigned once M25 data resolves.
 let geologyGroup = null;
+let geologyExteriorGroup = null;
 
 // ---------- Reservoirs (surface water polygons) ----------
 // Data fetch starts immediately; creation deferred until terrain is ready (see terrain .then() chain)
@@ -1542,6 +1558,7 @@ async function buildNetworkMvp() {
       if (tidewayMesh) tidewayMesh.visible = val === 'all' || val === 'tideway';
       if (crossrailMesh) crossrailMesh.visible = val === 'all' || val === 'crossrail';
       if (geologyGroup) geologyGroup.visible = val === 'all' || val === 'geology';
+      if (geologyExteriorGroup) geologyExteriorGroup.visible = val === 'all' || val === 'geology';
       if (reservoirsMesh) reservoirsMesh.visible = val === 'all' || val === 'reservoirs';
       if (canalsMesh) canalsMesh.visible = val === 'all' || val === 'canals';
       if (sewersMesh) sewersMesh.visible = val === 'all' || val === 'sewers';

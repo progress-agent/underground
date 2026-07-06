@@ -281,6 +281,58 @@ function findRayM25Intersection(originX, originZ, dirX, dirZ, m25ScenePts) {
 }
 
 /**
+ * Compute where the Thames crosses the M25 boundary (west + east ends) in
+ * scene coordinates. Shared by the waterfall builder and the clay disc skirt
+ * (geology-exterior.js) so the skirt can leave a clean notch exactly where
+ * each ribbon spills over the edge. Returns [{ x, z, surfaceY, dirX, dirZ,
+ * width, side }, ...] — same crossing points the waterfalls arc through.
+ *
+ * @param {Array<{e,n,w,d}>} thamesPoints  Thames BNG waypoints
+ * @param {Array<{e,n}>}     m25Points     M25 BNG waypoints
+ * @param {function}         getSurfaceY   (x,z) → world Y
+ * @returns {Array<object>}
+ */
+export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
+  const crossings = [];
+  if (!thamesPoints?.length || !m25Points?.length) return crossings;
+
+  const m25Scene = m25Points.map(p => {
+    const { x, z } = bngToScene(p.e, p.n);
+    const y = getSurfaceY({ x, z });
+    return { x, z, surfaceY: y !== null ? y : 50 };
+  });
+
+  const endpoints = [
+    { pt: thamesPoints[0], next: thamesPoints[1],
+      dirSign: -1, width: thamesPoints[0].w || 100 },
+    { pt: thamesPoints[thamesPoints.length - 1], prev: thamesPoints[thamesPoints.length - 2],
+      dirSign: 1, width: thamesPoints[thamesPoints.length - 1].w || 300 },
+  ];
+
+  for (const ep of endpoints) {
+    const { x: epX, z: epZ } = bngToScene(ep.pt.e, ep.pt.n);
+    let dirX, dirZ;
+    if (ep.next) {
+      const { x: nx, z: nz } = bngToScene(ep.next.e, ep.next.n);
+      dirX = epX - nx; dirZ = epZ - nz;
+    } else {
+      const { x: px, z: pz } = bngToScene(ep.prev.e, ep.prev.n);
+      dirX = epX - px; dirZ = epZ - pz;
+    }
+    const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
+    dirX /= dirLen; dirZ /= dirLen;
+
+    const intersection = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
+    if (!intersection) continue;
+    crossings.push({
+      x: intersection.x, z: intersection.z, surfaceY: intersection.surfaceY,
+      dirX, dirZ, width: ep.width, side: ep.dirSign > 0 ? 'east' : 'west',
+    });
+  }
+  return crossings;
+}
+
+/**
  * Create Thames waterfall geometry at the disc edge.
  * The Thames flows off the M25 boundary at two points (east and west).
  * Each waterfall is a ribbon that arcs from horizontal to vertical, fading out.
