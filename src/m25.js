@@ -477,6 +477,93 @@ let _m25ScenePolygon = null;
 export function initM25Boundary(points) {
   if (!points?.length) return;
   _m25ScenePolygon = points.map(p => bngToScene(p.e, p.n));
+  buildM25EdgeField();
+}
+
+// ── M25 signed-distance edge field (D5) ────────────────────────────────────
+// A coarse grid of SIGNED distance (positive inside the disc, negative outside)
+// from the M25 polygon, precomputed once. The atmosphere blend samples it per
+// frame (bilinear) to turn the old binary inside/outside switch into a smooth
+// ~1500m gradient — killing the hard render-mode seam at the disc edge.
+//
+// The grid spans the terrain scene extent (same bounds terrain.js/geology.js
+// use). 256² cells brute-forced against ~270 polygon segments is a one-off
+// ~18M-op build at boot — trivially fast and never touched again.
+const SDF_MIN_X = TERRAIN_BNG.minE - BNG_REF_E;   // -40000
+const SDF_MAX_X = TERRAIN_BNG.maxE - BNG_REF_E;   //  30000
+const SDF_MIN_Z = -(TERRAIN_BNG.maxN - BNG_REF_N); // -24600 (north)
+const SDF_MAX_Z = -(TERRAIN_BNG.minN - BNG_REF_N); //  25400 (south)
+const SDF_EDGE_BAND = 1500; // scene units — full inside↔outside blend width
+
+let _m25Sdf = null;   // Float32Array(N*N) signed distance
+let _sdfN = 0;
+
+function buildM25EdgeField(gridN = 256) {
+  const poly = _m25ScenePolygon;
+  if (!poly || poly.length < 3) return;
+  _sdfN = gridN;
+  _m25Sdf = new Float32Array(gridN * gridN);
+  const n = poly.length;
+  for (let gz = 0; gz < gridN; gz++) {
+    const z = SDF_MIN_Z + (SDF_MAX_Z - SDF_MIN_Z) * (gz / (gridN - 1));
+    for (let gx = 0; gx < gridN; gx++) {
+      const x = SDF_MIN_X + (SDF_MAX_X - SDF_MIN_X) * (gx / (gridN - 1));
+      // Unsigned min distance to any polygon edge.
+      let best = Infinity;
+      let inside = false;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const xi = poly[i].x, zi = poly[i].z;
+        const xj = poly[j].x, zj = poly[j].z;
+        // even-odd inside test
+        if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) {
+          inside = !inside;
+        }
+        // point-to-segment distance
+        const dx = xj - xi, dz = zj - zi;
+        const len2 = dx * dx + dz * dz || 1;
+        let t = ((x - xi) * dx + (z - zi) * dz) / len2;
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        const ex = x - (xi + t * dx), ez = z - (zi + t * dz);
+        const d2 = ex * ex + ez * ez;
+        if (d2 < best) best = d2;
+      }
+      const d = Math.sqrt(best);
+      _m25Sdf[gz * gridN + gx] = inside ? d : -d;
+    }
+  }
+}
+
+function _smoothstep01(x) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Continuous M25 membership at scene (x, z): 1 deep inside the disc, 0 well
+ * outside, smoothly graded over SDF_EDGE_BAND around the boundary. Returns 1
+ * when the field is not yet built (graceful — matches isInsideM25's fallback,
+ * so early frames render as above-ground/inside exactly as before).
+ * Allocation-free, bilinear — safe per frame.
+ */
+export function sampleM25Insideness(x, z) {
+  const N = _sdfN;
+  if (!_m25Sdf || N === 0) return 1;
+  const fx = ((x - SDF_MIN_X) / (SDF_MAX_X - SDF_MIN_X)) * (N - 1);
+  const fz = ((z - SDF_MIN_Z) / (SDF_MAX_Z - SDF_MIN_Z)) * (N - 1);
+  let x0 = Math.floor(fx), z0 = Math.floor(fz);
+  if (x0 < 0) x0 = 0; else if (x0 > N - 2) x0 = N - 2;
+  if (z0 < 0) z0 = 0; else if (z0 > N - 2) z0 = N - 2;
+  const tx = Math.min(1, Math.max(0, fx - x0));
+  const tz = Math.min(1, Math.max(0, fz - z0));
+  const s = _m25Sdf;
+  const d00 = s[z0 * N + x0], d10 = s[z0 * N + x0 + 1];
+  const d01 = s[(z0 + 1) * N + x0], d11 = s[(z0 + 1) * N + x0 + 1];
+  const dTop = d00 + (d10 - d00) * tx;
+  const dBot = d01 + (d11 - d01) * tx;
+  const signedDist = dTop + (dBot - dTop) * tz;
+  // Map signed distance (± band/2) → [0,1].
+  return _smoothstep01(signedDist / SDF_EDGE_BAND + 0.5);
 }
 
 /**

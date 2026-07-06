@@ -9,7 +9,7 @@ import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M } from './thames.js';
-import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25 } from './m25.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y } from './geology.js';
@@ -199,6 +199,12 @@ controls.touches = {
   ONE: THREE.TOUCH.PAN,
   TWO: THREE.TOUCH.DOLLY_ROTATE,
 };
+
+// D-002 chalk slowdown base speeds. Zoom/pan are scaled by substrateSpeedFactor
+// per-frame in tick() so mouse users feel the same drag as keyboard flight.
+// Captured ONCE (never compounded) — the tick multiplies base × factor.
+const _baseZoomSpeed = controls.zoomSpeed;
+const _basePanSpeed = controls.panSpeed;
 
 // ── Finish EffectComposer setup now that camera exists ──
 composer.addPass(new RenderPass(scene, camera));
@@ -2630,6 +2636,25 @@ function tick() {
   }
   readout.update(azimuth, realAltM, substrate);
 
+  // ── Chalk-entry regime (D3.2/D3.3) + M25 edge blend (D5) ──────────────────
+  // chalkBlend: smoothstep over camera Y crossing the LOCAL displaced chalk
+  // surface ±30 (the same analytic surface the floor is built from, so felt =
+  // seen). insideness: continuous M25 membership over a ~1500m band. The chalk
+  // white-out and slowdown are gated by insideness so they only happen within
+  // the disc — outside, there is no chalk stratum to cloud or slow through.
+  const chalkSurfaceY = getChalkSurfaceY(camera.position.x, camera.position.z);
+  const insideness = sampleM25Insideness(camera.position.x, camera.position.z);
+  const chalkBlend = (1 - THREE.MathUtils.smoothstep(
+    camera.position.y, chalkSurfaceY - 30, chalkSurfaceY + 30
+  )) * insideness;
+
+  // D-002 chalk slowdown: 1.0 (clay/air) → 0.5 (full chalk), lerped by chalkBlend
+  // so it never snaps. Drives keyboard flight (movement funnel) AND mouse
+  // zoom/pan (scaled from captured base values — multiply, never compound).
+  substrateSpeedFactor = 1.0 - 0.5 * chalkBlend;
+  controls.zoomSpeed = _baseZoomSpeed * substrateSpeedFactor;
+  controls.panSpeed = _basePanSpeed * substrateSpeedFactor;
+
   // Controls-guide reveal: fire once when camera drops within 500 scene units
   // (~100m altimeter at VE=5) of the terrain surface. forceReveal() is
   // idempotent — sticky once triggered, so ascending after reveal keeps the
@@ -2663,11 +2688,11 @@ function tick() {
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
-    updateEnvironment(camera, scene, skyDome, renderer, { insideM25: cameraInsideM25 });
+    updateEnvironment(camera, scene, skyDome, renderer, { insideness, chalkBlend });
   }
 
   // Update lighting based on camera position
-  updateLighting(camera, atmosphereLights, { insideM25: cameraInsideM25 });
+  updateLighting(camera, atmosphereLights, { insideness, chalkBlend });
 
   // Update spatial audio (ambient crossfades, filter sweeps, wind)
   if (isAudioReady()) {

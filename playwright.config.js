@@ -9,7 +9,12 @@ export default defineConfig({
   fullyParallel: false,
   use: {
     baseURL: 'http://localhost:5173',
-    headless: false, // WebGL needs GPU — headless SwiftShader can't create context
+    // Headless WITH real GPU: with the ANGLE Metal args below, headless Chromium
+    // gets the actual Apple GPU (verified 06Jul26: UNMASKED_RENDERER = "ANGLE Metal
+    // Renderer: Apple M2 Max" and the full scene renders identically to headed).
+    // The old "headless SwiftShader can't create WebGL" note is stale. Headless
+    // also stops test windows stealing keyboard focus from the user's session.
+    headless: true,
     launchOptions: {
       args: ['--use-gl=angle', '--use-angle=metal'], // macOS Metal backend for WebGL
     },
