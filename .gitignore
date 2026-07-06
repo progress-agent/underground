@@ -17,5 +17,5 @@ public/data/surface/
 test-results/
 tests/screenshots/
 
-# Local Netlify folder
-.netlify
+# Local Cloudflare Wrangler folder
+.wrangler

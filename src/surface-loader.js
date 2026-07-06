@@ -121,13 +121,6 @@ export function updateSurfaceLoader(camX, camZ) {
 }
 
 /**
- * Enable or disable the tile loader (e.g. when surface mode is toggled off).
- */
-export function setSurfaceLoaderEnabled(flag) {
-  enabled = flag;
-}
-
-/**
  * Get the full scene bounding box of all tiles (for texture UV mapping).
  */
 export function getFullSceneBBox() {

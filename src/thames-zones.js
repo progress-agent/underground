@@ -248,8 +248,3 @@ export function nearestThamesSegment(x, z) {
   }
   return bestIdx;
 }
-
-// Test/debug export
-export function _segmentsForTests() {
-  return _segments;
-}

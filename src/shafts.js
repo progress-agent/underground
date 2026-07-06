@@ -30,18 +30,6 @@ const frostedGlassMat = new THREE.MeshPhysicalMaterial({
 const unitCylinderGeo = new THREE.CylinderGeometry(1, 1, 1, 16);
 
 /**
- * Keep loadLineShafts for backward compat — loads prebuilt shaft JSON.
- * No longer called from main.js but other consumers may reference it.
- */
-export async function loadLineShafts(lineId) {
-  const id = String(lineId || '').trim().toLowerCase();
-  if (!id) return null;
-  const res = await fetch(`/data/${encodeURIComponent(id)}/shafts.json`, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-/**
  * Create one frosted glass cylinder per unique station from the shaft registry.
  *
  * @param {Object} opts

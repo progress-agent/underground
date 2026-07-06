@@ -11,13 +11,16 @@
 
 import { test, expect } from '@playwright/test';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Save screenshots outside the repo to the Wisdom project working area.
-const SCREENSHOT_DIR = '/Users/jc/Wisdom/WORK/PROJECTS/UnderGround/Working/phase0-screenshots';
+// Save screenshots under the repo (machine-portable) instead of a hardcoded
+// per-machine Wisdom project path.
+const SCREENSHOT_DIR = path.join(__dirname, '..', 'test-results', 'phase0-screenshots');
+fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 async function waitForLoadingIdle(page, timeoutMs = 20000) {
   await page.waitForFunction(

@@ -143,9 +143,3 @@ export function addGeologyToLegend() {
   `;
   legend.appendChild(chalkItem);
 }
-
-export function toggleGeologyVisibility(group, visible) {
-  if (group) {
-    group.visible = visible;
-  }
-}

@@ -645,6 +645,3 @@ export function lookupLineMeta(lineIds) {
   }
   return null;
 }
-
-// Export slug for tests / debugging
-export { slug as _slugForTests };

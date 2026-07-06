@@ -46,13 +46,3 @@ export function getShaftRegistry() {
   return registry;
 }
 
-/** Get line count for a specific station (for external consumers). */
-export function getLineCountForStation(naptanId) {
-  const entry = registry.get(String(naptanId).trim());
-  return entry ? Math.max(entry.lineCount, entry.lines.size) : 1;
-}
-
-/** Clear the registry (useful for hot-reload scenarios). */
-export function clearShaftRegistry() {
-  registry.clear();
-}

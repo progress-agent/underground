@@ -26,7 +26,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "cache:tfl": "node scripts/cache-tfl.mjs",
-    "test": "node -e \"console.log('No tests defined.');\""
+    "test": "playwright test --workers=1"
   },
   "dependencies": {
     "proj4": "^2.20.2",

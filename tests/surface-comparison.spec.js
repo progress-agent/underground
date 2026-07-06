@@ -3,6 +3,12 @@
 // Produces 6 PNGs in tests/screenshots/ (2 approaches × 3 altitudes)
 
 import { test, expect } from '@playwright/test';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test('Surface A/B comparison screenshots', async ({ page }) => {
   // Collect console output for debugging
@@ -66,7 +72,8 @@ test('Surface A/B comparison screenshots', async ({ page }) => {
     { value: 'surface-geometry', label: 'geometry' },
   ];
 
-  const screenshotDir = '/Users/jc/repos/underground/tests/screenshots';
+  const screenshotDir = path.join(__dirname, 'screenshots');
+  fs.mkdirSync(screenshotDir, { recursive: true });
 
   for (const approach of approaches) {
     // Select the approach from dropdown — triggers applySoloSelection + camera move

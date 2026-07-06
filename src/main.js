@@ -29,7 +29,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { createLensSystem } from './lens.js';
-import { initAudio, updateAudio, setMasterVolume, getMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources, getPoolDebug } from './audio.js';
+import { initAudio, updateAudio, setMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources } from './audio.js';
 import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 import { initLandscapeLock } from './landscape-lock.js';
@@ -90,13 +90,19 @@ window.addEventListener('error', (e) => {
   };
   
   // Expose show() for error handlers to use even when debug not enabled
-  window.mobileDebug = { 
+  window.mobileDebug = {
     show: (msg) => {
       createDebugDiv();
       show(msg);
     }
   };
 })();
+
+// Boot-log gate: verbose "X added to scene" style logs only when ?debug=1
+const __ugDebugEnabled = new URLSearchParams(location.search).get('debug') === '1';
+function dbg(...args) {
+  if (__ugDebugEnabled) console.log(...args);
+}
 
 // Real-world tube tunnels are built as parallel bores roughly 5–10 m apart (centre-to-centre).
 // With 4.5m radius tubes, we need ~6-8m half-spacing to show clear separation.
@@ -730,7 +736,7 @@ const thamesDataPromise = loadThamesData();
           if (reservoirsMesh) {
             scene.add(reservoirsMesh);
             addReservoirsToLegend();
-            console.log('Reservoirs added to scene');
+            dbg('Reservoirs added to scene');
           }
         }
       });
@@ -742,7 +748,7 @@ const thamesDataPromise = loadThamesData();
           if (canalsMesh) {
             scene.add(canalsMesh);
             addCanalsToLegend();
-            console.log('Canals added to scene');
+            dbg('Canals added to scene');
           }
         }
       });
@@ -766,7 +772,7 @@ const thamesDataPromise = loadThamesData();
           if (waterfalls) scene.add(waterfalls);
         }
 
-        console.log('M25 world boundary applied');
+        dbg('M25 world boundary applied');
 
         // ── Surface features: tiled progressive loading ──
         // Create parent group for per-tile building meshes
@@ -819,7 +825,7 @@ const thamesDataPromise = loadThamesData();
           }
 
           surfaceDataLoaded = true;
-          console.log(`Surface loader ready: ${manifest.tiles.length} tiles, ${manifest.cols}×${manifest.rows} grid`);
+          dbg(`Surface loader ready: ${manifest.tiles.length} tiles, ${manifest.cols}×${manifest.rows} grid`);
         }).catch(err => console.warn('Surface loader failed:', err.message));
       });
     });
@@ -1004,7 +1010,7 @@ function snapAllTubesToTerrain() {
     unifiedShaftLayer.updatePlatformYPositions(lineCenterPoints);
   }
 
-  console.log(`snapAllTubesToTerrain: ${snappedTubes} tube branches, ${snappedStations} stations repositioned to terrain-relative depth`);
+  dbg(`snapAllTubesToTerrain: ${snappedTubes} tube branches, ${snappedStations} stations repositioned to terrain-relative depth`);
 }
 
 // ---------- M25 world boundary ----------
@@ -1032,7 +1038,7 @@ loadTidewayData().then(tidewayData => {
       scene.add(tidewayMesh);
       addTidewayToLegend();
       if (terrain) snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
-      console.log('Tideway + Lee Tunnel system added to scene');
+      dbg('Tideway + Lee Tunnel system added to scene');
     }
   }
 });
@@ -1045,7 +1051,7 @@ loadCrossrailData().then(crossrailData => {
     if (crossrailMesh) {
       scene.add(crossrailMesh);
       addCrossrailToLegend();
-      console.log('Crossrail added to scene');
+      dbg('Crossrail added to scene');
     }
   }
 });
@@ -1055,7 +1061,7 @@ const geologyGroup = createGeologicalStrata(null, sim.verticalScale);
 if (geologyGroup) {
   scene.add(geologyGroup);
   addGeologyToLegend();
-  console.log('Geological strata added to scene');
+  dbg('Geological strata added to scene');
 }
 
 // ---------- Reservoirs (surface water polygons) ----------
@@ -1076,7 +1082,7 @@ loadSewerData().then(data => {
     if (sewersMesh) {
       scene.add(sewersMesh);
       addSewersToLegend();
-      console.log('Sewer tunnels added to scene');
+      dbg('Sewer tunnels added to scene');
     }
   }
 });
@@ -1361,12 +1367,13 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
 
 // Victoria station markers/labels (legacy - now per-line tracking below)
 let victoriaStationsLayer = null;
-let victoriaStationsVisible = prefs.victoriaStationsVisible ?? true;
-let victoriaLabelsVisible = prefs.victoriaLabelsVisible ?? true;
+// prefs keys migrated from victoria*Visible -> generic *Visible (04Jul26 sweep);
+// fall back to the old key so existing localStorage prefs still apply.
+let stationsVisible = prefs.stationsVisible ?? prefs.victoriaStationsVisible ?? true;
+let labelsVisible = prefs.labelsVisible ?? prefs.victoriaLabelsVisible ?? true;
 
-// Victoria station shafts (legacy - now per-line tracking below)
-let victoriaShaftsLayer = null;
-let victoriaShaftsVisible = prefs.victoriaShaftsVisible ?? true;
+// Victoria station shafts visibility (legacy - now per-line tracking below)
+let shaftsVisible = prefs.shaftsVisible ?? prefs.victoriaShaftsVisible ?? true;
 
 // Per-line station layer tracking (supports all 11 Underground lines + DLR)
 const lineShaftLayers = new Map(); // lineId -> { stationsLayer }
@@ -1638,8 +1645,8 @@ async function buildNetworkMvp() {
             size: 6.0,
             labels: true,
           });
-          const sv = lineStationsVisible.get(id) ?? victoriaStationsVisible;
-          const lv = lineLabelsVisible.get(id) ?? victoriaLabelsVisible;
+          const sv = lineStationsVisible.get(id) ?? stationsVisible;
+          const lv = lineLabelsVisible.get(id) ?? labelsVisible;
           stationsLayer.setLabelsVisible(lv);
           stationsLayer.mesh.visible = sv;
 
@@ -1662,11 +1669,11 @@ async function buildNetworkMvp() {
           // Keep HUD checkboxes in sync
           if (id === 'victoria') {
             const stCb = document.getElementById('victoriaStations');
-            if (stCb) stCb.checked = victoriaStationsVisible;
+            if (stCb) stCb.checked = stationsVisible;
             const lbCb = document.getElementById('victoriaLabels');
-            if (lbCb) lbCb.checked = victoriaLabelsVisible;
+            if (lbCb) lbCb.checked = labelsVisible;
             const shCb = document.getElementById('victoriaShafts');
-            if (shCb) shCb.checked = victoriaShaftsVisible;
+            if (shCb) shCb.checked = shaftsVisible;
           }
         }
 
@@ -1685,9 +1692,9 @@ async function buildNetworkMvp() {
       verticalScale: sim.verticalScale,
     });
     if (unifiedShaftLayer?.group) {
-      unifiedShaftLayer.group.visible = victoriaShaftsVisible;
+      unifiedShaftLayer.group.visible = shaftsVisible;
     }
-    console.log(`Unified shafts: ${getShaftRegistry().size} stations from shaft registry`);
+    dbg(`Unified shafts: ${getShaftRegistry().size} stations from shaft registry`);
 
     // If terrain already loaded, snap tubes to terrain-relative depth.
     // (Handles race condition: terrain may load before or after network.)
@@ -2403,31 +2410,30 @@ function toggleSimPaused() {
   setSimPaused(!sim.paused);
 }
 
-function setVictoriaStationsVisible(v) {
-  victoriaStationsVisible = !!v;
-  // Toggle visibility for ALL lines with stations, not just Victoria
+function setStationsVisible(v) {
+  stationsVisible = !!v;
+  // Toggle visibility for ALL lines with stations
   for (const [lineId, layers] of lineShaftLayers) {
-    if (layers.stationsLayer?.mesh) layers.stationsLayer.mesh.visible = victoriaStationsVisible;
+    if (layers.stationsLayer?.mesh) layers.stationsLayer.mesh.visible = stationsVisible;
   }
-  prefs.victoriaStationsVisible = victoriaStationsVisible;
+  prefs.stationsVisible = stationsVisible;
   savePrefs(prefs);
 }
-function setVictoriaLabelsVisible(v) {
-  victoriaLabelsVisible = !!v;
-  // Toggle labels for ALL lines, not just Victoria
+function setLabelsVisible(v) {
+  labelsVisible = !!v;
+  // Toggle labels for ALL lines
   for (const [lineId, layers] of lineShaftLayers) {
-    layers.stationsLayer?.setLabelsVisible?.(victoriaLabelsVisible);
+    layers.stationsLayer?.setLabelsVisible?.(labelsVisible);
   }
-  prefs.victoriaLabelsVisible = victoriaLabelsVisible;
+  prefs.labelsVisible = labelsVisible;
   savePrefs(prefs);
 }
 
-function setVictoriaShaftsVisible(v) {
-  victoriaShaftsVisible = !!v;
+function setShaftsVisible(v) {
+  shaftsVisible = !!v;
   // Toggle unified shaft layer visibility
-  if (unifiedShaftLayer?.group) unifiedShaftLayer.group.visible = victoriaShaftsVisible;
-  if (victoriaShaftsLayer?.group) victoriaShaftsLayer.group.visible = victoriaShaftsVisible;
-  prefs.victoriaShaftsVisible = victoriaShaftsVisible;
+  if (unifiedShaftLayer?.group) unifiedShaftLayer.group.visible = shaftsVisible;
+  prefs.shaftsVisible = shaftsVisible;
   savePrefs(prefs);
 }
 
@@ -2435,19 +2441,19 @@ function setVictoriaShaftsVisible(v) {
 {
   const stCb = document.getElementById('victoriaStations');
   if (stCb) {
-    stCb.checked = victoriaStationsVisible;
-    stCb.addEventListener('change', () => setVictoriaStationsVisible(stCb.checked));
+    stCb.checked = stationsVisible;
+    stCb.addEventListener('change', () => setStationsVisible(stCb.checked));
   }
   const lbCb = document.getElementById('victoriaLabels');
   if (lbCb) {
-    lbCb.checked = victoriaLabelsVisible;
-    lbCb.addEventListener('change', () => setVictoriaLabelsVisible(lbCb.checked));
+    lbCb.checked = labelsVisible;
+    lbCb.addEventListener('change', () => setLabelsVisible(lbCb.checked));
   }
 
   const shCb = document.getElementById('victoriaShafts');
   if (shCb) {
-    shCb.checked = victoriaShaftsVisible;
-    shCb.addEventListener('change', () => setVictoriaShaftsVisible(shCb.checked));
+    shCb.checked = shaftsVisible;
+    shCb.addEventListener('change', () => setShaftsVisible(shCb.checked));
   }
 
   // ── Audio volume HUD ──
@@ -2671,7 +2677,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
-    trainSystem, composer, bloomPass, lensSystem, isAudioReady, getPoolDebug,
+    trainSystem, composer, bloomPass, lensSystem, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     // D-002 substrate speed multiplier — read live, settable by a later wave
