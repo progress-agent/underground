@@ -142,7 +142,17 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 
 // ── Bloom post-processing (makes headlight beams glow) ──
-const composer = new EffectComposer(renderer);
+// EffectComposer's default render target is single-sampled, so
+// renderer's antialias:true flag never reaches the screen once RenderPass
+// draws into it. Build the target explicitly with samples:4 (MSAA) so
+// geometry edges are anti-aliased before bloom/output passes run.
+const composerPixelRatio = renderer.getPixelRatio();
+const composerRenderTarget = new THREE.WebGLRenderTarget(
+  window.innerWidth * composerPixelRatio,
+  window.innerHeight * composerPixelRatio,
+  { samples: 4, type: THREE.HalfFloatType }
+);
+const composer = new EffectComposer(renderer, composerRenderTarget);
 // RenderPass and camera added after camera creation (below)
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1.0, 50000);
