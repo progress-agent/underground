@@ -56,10 +56,15 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
     const baseY = getTerrainMeshSurfaceY({ x: b.cx, z: b.cz });
     if (baseY === null || baseY === undefined || Number.isNaN(baseY)) continue;
 
-    // Guard against 0-area OSM polygons: a zero-length scale axis makes the
-    // instance normal matrix divide by zero → NaN normal → black fragment.
+    // Guard against degenerate OSM data: a zero-length scale axis (zero area
+    // OR zero/negative height — 76 zero-height + 1 negative-height buildings
+    // exist in the tile set) makes the instance normal matrix divide by zero
+    // → NaN normal. One NaN fragment in view poisons the whole frame through
+    // UnrealBloom's blur on some drivers (M5 headless ANGLE: full black frame
+    // at altitude), so these guards are load-bearing, not cosmetic.
+    if (!Number.isFinite(b.height) || !Number.isFinite(b.area)) continue;
     const side = Math.max(Math.sqrt(b.area), 0.1);
-    const h = b.height * VE;
+    const h = Math.max(b.height, 0.5) * VE;
 
     dummy.position.set(b.cx, baseY + h / 2, b.cz);
     dummy.scale.set(side, h, side);

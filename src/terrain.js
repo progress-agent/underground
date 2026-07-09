@@ -524,9 +524,17 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     undersideGeom.setAttribute('color', new THREE.BufferAttribute(usColArr, 3));
 
     // ── Underside material (rock face with normal map for relief) ────
+    // emissive keeps exposed earth visible where nothing overdraws it.
+    // Underground ambient (0.25) x the dark vertex colours lands near zero
+    // through AgX, so buildingless regions (parks, beyond tile radius) read
+    // as void-black rectangles from below — Hyde Park was a "black box".
+    // Same pattern as the chalk floor's emissive lift; BackSide means this
+    // is invisible from above ground.
     const undersideMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       vertexColors: true,
+      emissive: 0x6b5842,
+      emissiveIntensity: 0.2,
       map: undersideGrainTex,
       normalMap: undersideNormalTex,
       normalScale: new THREE.Vector2(1.5, 1.5), // stronger grain — soil texture at grazing angle

@@ -60,7 +60,7 @@ function dist(a, b) {
 
 test.describe('Week-1 desktop keyboard controls', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:5173/?skip=1');
+    await page.goto('/?skip=1');
     await waitForUg(page);
     await waitForIntroDone(page);
     // D-002 speed regimes make horizontal reach altitude-dependent above ground
