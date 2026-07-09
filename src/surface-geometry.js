@@ -18,10 +18,15 @@ const buildingMat = new THREE.MeshStandardMaterial({
   metalness: 0.1,
 });
 
-// -- Height-dependent building colour palette ---------------------------------
-
-const COLOR_LOW  = new THREE.Color(0x706b66);  // darker at ground level
-const COLOR_HIGH = new THREE.Color(0xb0aaa4);  // lighter for tall buildings
+// NOTE: buildings use a single flat colour, NOT per-instance `setColorAt`.
+// The old height-graded instanceColor tint (COLOR_LOW..COLOR_HIGH) triggered
+// the `USE_INSTANCING_COLOR` shader path, which Apple's newer Metal/ANGLE
+// driver (M5-era) mis-binds — it reads `instanceColor` as ~0 and multiplies
+// every building to solid black (huge black boxes at altitude). The M2 Max
+// driver binds it correctly, so the bug was machine-specific and invisible on
+// the dev machine. Proven live on M5: dropping instanceColor renders buildings
+// correctly on both GPUs. Do NOT reintroduce setColorAt without a per-tile
+// vertex-colour bake instead. (Diagnosed 09Jul26h — see project CLAUDE.md.)
 
 // -- Per-tile building creation -----------------------------------------------
 
@@ -45,14 +50,15 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
   const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, unique.length);
 
   const dummy = new THREE.Object3D();
-  const color = new THREE.Color();
   let idx = 0;
 
   for (const b of unique) {
     const baseY = getTerrainMeshSurfaceY({ x: b.cx, z: b.cz });
-    if (baseY === null || baseY === undefined) continue;
+    if (baseY === null || baseY === undefined || Number.isNaN(baseY)) continue;
 
-    const side = Math.sqrt(b.area);
+    // Guard against 0-area OSM polygons: a zero-length scale axis makes the
+    // instance normal matrix divide by zero → NaN normal → black fragment.
+    const side = Math.max(Math.sqrt(b.area), 0.1);
     const h = b.height * VE;
 
     dummy.position.set(b.cx, baseY + h / 2, b.cz);
@@ -60,17 +66,12 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
     dummy.updateMatrix();
     mesh.setMatrixAt(idx, dummy.matrix);
 
-    // Height-based colour: normalise against 80m real-world range
-    const t = Math.min(b.height / 80, 1);
-    color.lerpColors(COLOR_LOW, COLOR_HIGH, t);
-    mesh.setColorAt(idx, color);
-
     idx++;
   }
 
   mesh.count = idx; // trim to actual placed instances
+  if (idx === 0) { boxGeo.dispose(); return null; } // no placed instances → don't add an empty mesh
   mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
   return mesh;
 }
