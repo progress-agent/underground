@@ -54,13 +54,20 @@
 // per-reach real-world facts and carry over unchanged.
 //
 // Coverage: chainage 0 → Infinity with no gaps (verified by getZoneAt fallthrough).
+//
+// Endpoint alignment (10Jul26f, second pass): the course was re-clipped to the
+// M25 boundary crossings (west end extended ~2.5km to the ring, east end
+// trimmed ~2.7km back to it, both inset 25m so the waterfall ray-cast hits
+// cleanly). The west extension moved the chainage origin, so every finite
+// boundary below carries a constant +2467m shift (old v2 origin projected
+// onto the re-clipped course by build-thames-v2.mjs).
 
 export const THAMES_ZONES = [
   {
     id: 'upper-tideway',
     name: 'Upper Tideway',
     chainStartM: 0,
-    chainEndM: 36724,
+    chainEndM: 39191,
     meanWidth: 45,
     meanDepth: 2.5,
     maxDepth: 3,
@@ -69,8 +76,8 @@ export const THAMES_ZONES = [
   {
     id: 'putney-hammersmith',
     name: 'Putney & Hammersmith Reach',
-    chainStartM: 36724,
-    chainEndM: 42234,
+    chainStartM: 39191,
+    chainEndM: 44701,
     meanWidth: 60,
     meanDepth: 4,
     maxDepth: 4,
@@ -79,8 +86,8 @@ export const THAMES_ZONES = [
   {
     id: 'battersea-reach',
     name: 'Battersea Reach',
-    chainStartM: 42234,
-    chainEndM: 46421,
+    chainStartM: 44701,
+    chainEndM: 48888,
     meanWidth: 62,
     meanDepth: 4.5,
     maxDepth: 5,
@@ -89,8 +96,8 @@ export const THAMES_ZONES = [
   {
     id: 'westminster-reach',
     name: 'Westminster Reach',
-    chainStartM: 46421,
-    chainEndM: 50638,
+    chainStartM: 48888,
+    chainEndM: 53105,
     meanWidth: 82,
     meanDepth: 5.5,
     maxDepth: 6,
@@ -99,8 +106,8 @@ export const THAMES_ZONES = [
   {
     id: 'pool-of-london',
     name: 'Pool of London',
-    chainStartM: 50638,
-    chainEndM: 54571,
+    chainStartM: 53105,
+    chainEndM: 57038,
     meanWidth: 140,
     meanDepth: 7.5,
     maxDepth: 9,
@@ -109,8 +116,8 @@ export const THAMES_ZONES = [
   {
     id: 'limehouse-reach',
     name: 'Limehouse Reach',
-    chainStartM: 54571,
-    chainEndM: 58415,
+    chainStartM: 57038,
+    chainEndM: 60882,
     meanWidth: 210,
     meanDepth: 10,
     maxDepth: 10,
@@ -119,8 +126,8 @@ export const THAMES_ZONES = [
   {
     id: 'greenwich-reach',
     name: 'Greenwich Reach',
-    chainStartM: 58415,
-    chainEndM: 63756,
+    chainStartM: 60882,
+    chainEndM: 66223,
     meanWidth: 255,
     meanDepth: 11.5,
     maxDepth: 13,
@@ -129,8 +136,8 @@ export const THAMES_ZONES = [
   {
     id: 'blackwall-woolwich',
     name: 'Blackwall & Woolwich Reach',
-    chainStartM: 63756,
-    chainEndM: 69311,
+    chainStartM: 66223,
+    chainEndM: 71778,
     meanWidth: 285,
     meanDepth: 13.5,
     maxDepth: 14,
@@ -139,8 +146,8 @@ export const THAMES_ZONES = [
   {
     id: 'gallions-erith',
     name: 'Gallions & Erith Reach',
-    chainStartM: 69311,
-    chainEndM: 77177,
+    chainStartM: 71778,
+    chainEndM: 79644,
     meanWidth: 340,
     meanDepth: 15,
     maxDepth: 16,
@@ -149,7 +156,7 @@ export const THAMES_ZONES = [
   {
     id: 'thames-estuary-mouth',
     name: 'Thames Estuary Mouth',
-    chainStartM: 77177,
+    chainStartM: 79644,
     chainEndM: Infinity,
     meanWidth: 580,
     meanDepth: 16,
