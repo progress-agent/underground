@@ -205,6 +205,19 @@ export function carveRiverChannel(
   const terrainW = neSceneX - swSceneX;
   const terrainH = swSceneZ - neSceneZ;
 
+  // Edge shelf (10Jul26f "swollen river" fix): no in-channel vertex within one
+  // vertex-cell diagonal of the waterline may sit below ~riverLevelM. At 512^2
+  // the cells are ~137x98m; bilinear interpolation from a bed vertex (down to
+  // riverLevelM - 14 at Greenwich) to a bank vertex smears sub-water terrain up
+  // to a full cell BEYOND the waterline, exposing the water volume's side walls
+  // (8-11m proud of adjacent land = the "swollen/aqueduct" read). Any vertex
+  // whose cell can cross the waterline goes on a shelf just below the plane;
+  // true bathymetric depth survives only where dist <= halfW - edgeBand.
+  const cellW = terrainW / (vertexCols - 1);
+  const cellH = terrainH / (vertexRows - 1);
+  const edgeBandM = Math.hypot(cellW, cellH);   // one vertex-cell diagonal
+  const shelfElevM = riverLevelM - 0.15;        // just below the water plane
+
   // ── Spatial bucketing: group segments by X-range for O(1) lookup ──
   const BUCKET_SIZE = 500; // metres
   const minX = swSceneX - falloffM;
@@ -286,11 +299,16 @@ export function carveRiverChannel(
 
       const idx = row * vertexCols + col;
       const orig = elevations[idx];
-      const carveElev = riverLevelM - bestDepthM;
 
       if (bestDist <= bestHalfW) {
-        // Inside river channel: full carve to the bed
-        elevations[idx] = Math.min(orig, carveElev);
+        if (bestDist <= bestHalfW - edgeBandM) {
+          // Deep channel interior: full carve to the bathymetric bed.
+          elevations[idx] = Math.min(orig, riverLevelM - bestDepthM);
+        } else {
+          // Edge shelf: ASSIGN (not Math.min) so raw DEM water pixels that
+          // already sit below the plane are lifted onto the shelf too.
+          elevations[idx] = shelfElevM;
+        }
         carved++;
       } else if (bestDist < bestHalfW + falloffM) {
         // Falloff zone: blend from BANK level to original — never from the bed.
@@ -298,10 +316,14 @@ export function carveRiverChannel(
         // water surface (the 10Jul26f "flooded Thames": buildings placed on
         // carved terrain stood waist-deep beside the volume). Bed elevation is
         // exclusive to the channel; outside it the floor is water + freeboard.
+        // The blend is TWO-SIDED: it cuts high banks toward bankElev AND fills
+        // genuinely low DEM land (raw DEM water strip, low marsh) up to bankElev
+        // at the channel edge, tapering to orig at falloffM — a Math.min here
+        // left sub-water DEM pixels beside the channel (swollen-river residual).
         const bankElev = riverLevelM + bankFreeboardM;
         const blend = smoothstep((bestDist - bestHalfW) / falloffM);
         const blended = bankElev + blend * (orig - bankElev);
-        elevations[idx] = Math.min(orig, blended);
+        elevations[idx] = blended;
         carved++;
       }
     }
