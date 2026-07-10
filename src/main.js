@@ -433,13 +433,21 @@ function updateFpsControls(dt) {
 }
 
 // ---------- OrbitControls ROTATE-start re-pivot ----------
-// When the user begins a rotate drag, adopt whatever is under the pointer as
-// the new pivot. Preserves offset by translating camera.position by the same
-// delta as controls.target — no visual jump (Cesium/Mapbox pattern).
-// See _REPORTS/24Apr26f/sources/consult-0109/loopback-gemini-target.md §6.
+// When the user begins a rotate drag, adopt the DEPTH of whatever is under the
+// pointer as the new orbit radius: controls.target is re-placed on the CURRENT
+// view ray at the clicked point's depth. Only the target moves, and it stays
+// on the view axis, so update()'s lookAt(target) is a no-op — zero camera
+// translation AND zero rotation on engage. (The earlier translate-both
+// approach — moving target AND camera by hit.point - target — preserved the
+// OFFSET but not the VIEW: it teleported the camera by |hit - target|, ~25km
+// at altitude, because target is habitually re-synced to a fixed 1000 units
+// ahead of the camera by the FPS hand-back and intro finalize. The consult
+// doc's "no visual jump" claim for that pattern was wrong.)
 {
   const repivotRaycaster = new THREE.Raycaster();
   const lastNdc = new THREE.Vector2(0, 0);
+  const _repivotDir = new THREE.Vector3();
+  const _repivotTmp = new THREE.Vector3();
   let haveNdc = false;
 
   const updateNdcFromEvent = (ev) => {
@@ -466,7 +474,13 @@ function updateFpsControls(dt) {
   // button 0) does not spuriously re-pivot — the previous getState() gate was
   // dead code, so this behaviour is entirely new and must not regress touch.
   controls.domElement.addEventListener('pointerdown', (ev) => {
-    if (ev.button === 0 && ev.pointerType === 'mouse') _dragActive = true;
+    if (ev.button === 0 && ev.pointerType === 'mouse') {
+      // Refresh NDC here (capture fires before OrbitControls' bubble handler
+      // dispatches 'start') so the raycast uses THIS click's pixel even when
+      // no pointermove preceded it, e.g. first click after alt-tab.
+      updateNdcFromEvent(ev);
+      _dragActive = true;
+    }
   }, true);
   const clearDrag = () => { _dragActive = false; };
   window.addEventListener('pointerup', clearDrag, true);
@@ -504,12 +518,17 @@ function updateFpsControls(dt) {
     const hits = repivotRaycaster.intersectObjects(targets, true);
     if (!hits || hits.length === 0) return;
 
-    // Translate both camera and target by the same delta → offset preserved,
-    // no spherical discontinuity, no clamp violation.
-    const delta = hits[0].point.clone().sub(controls.target);
-    if (delta.lengthSq() < 1e-6) return;
-    controls.target.add(delta);
-    camera.position.add(delta);
+    // Re-pivot along the CURRENT view ray at the clicked point's depth. Only
+    // controls.target moves, and it stays on the view axis, so update()'s
+    // lookAt(target) is a no-op: zero camera motion on engage. Offset
+    // DIRECTION is unchanged, so polar/azimuth clamps are untouched; clamping
+    // the depth ourselves prevents update()'s internal radius clamp from
+    // dollying the camera when a hit lies beyond maxDistance.
+    camera.getWorldDirection(_repivotDir);
+    const depth = _repivotTmp.copy(hits[0].point).sub(camera.position).dot(_repivotDir);
+    if (!(depth > 0)) return; // degenerate / behind-camera guard
+    const d = THREE.MathUtils.clamp(depth, controls.minDistance, controls.maxDistance);
+    controls.target.copy(camera.position).addScaledVector(_repivotDir, d);
   });
 }
 
