@@ -13,7 +13,8 @@ import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
-import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend, updateCrossrailClarity } from './crossrail.js';
+import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
+import { getInfraHazeStrength } from './infra-materials.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
@@ -2816,11 +2817,12 @@ function tick() {
   updateLighting(camera, atmosphereLights,
     { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity });
 
-  // Inside-chalk clarity: push the Crossrail distance-fade thresholds out
-  // beyond the scene extent while in chalk (no-op when the scale is unchanged),
-  // and release the chalk sheet itself (opacity + depthWrite) so the network
-  // above is visible looking up. Both are 0-gated above the chalk surface.
-  updateCrossrailClarity(_chalkClarity);
+  // Inside-chalk clarity: release the chalk sheet (opacity + depthWrite) so
+  // the network above is visible looking up. 0-gated above the chalk surface.
+  // (The old updateCrossrailClarity fade-threshold scaling is retired: the
+  // infra haze that replaced the Crossrail alpha fade is driven to ZERO in
+  // chalk by updateEnvironment, so distance visibility needs no per-module
+  // release any more — see infra-materials.js.)
   updateGeologyClarity(_chalkClarity);
 
   // Update spatial audio (ambient crossfades, filter sweeps, wind)
@@ -2864,6 +2866,9 @@ if (import.meta.env.DEV) {
     set clayClarityRamp(v) { _clayClarityRamp = Math.max(1, v); },
     get chalkClarityRamp() { return _chalkClarityRamp; },
     set chalkClarityRamp(v) { _chalkClarityRamp = Math.max(1, v); },
+    // Infra haze strength (read-only) — driven by updateEnvironment each tick;
+    // 1 in clay underground, 0 above ground / outside the disc / inside chalk.
+    get infraHazeStrength() { return getInfraHazeStrength(); },
     cushionLuma: { sample: sampleCushion, reset: resetCushion, state: _cushionState },
     // formatInfraTooltip is closure-scoped to the tooltip block (~L1714-2268).
     // _formatInfraTooltipRef is assigned from inside that block and read via

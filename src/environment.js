@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { setInfraHazeStrength } from './infra-materials.js';
 
 // Environment configuration for above/below ground differentiation
 export const ENV_CONFIG = {
@@ -199,6 +200,19 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     scene.fog.near = fogNear;
     scene.fog.far = fogFar;
   }
+
+  // Infra haze strength (one uniform, one owner — see infra-materials.js).
+  // Active only for underground cameras inside the disc and outside the chalk:
+  // that is the clay regime, whose wide fog.far (25000) is what let distant
+  // edge-on Crossrail composite into the yellow horizon band (D4.3). Uses the
+  // UN-lifted verticalBlend deliberately — clayLift brightens the shallow clay
+  // column, but the band mechanism (long sightlines underground) is unchanged
+  // there. Zero in chalk by BOTH gates, so the atmosphere pass's inside-chalk
+  // perfect-clarity ("visible at ANY distance") holds with no extra wiring;
+  // a future chalk-look-up mode can force 0 through this same call.
+  setInfraHazeStrength(
+    (1 - verticalBlend) * insideness * (1 - chalkBlend) * (1 - chalkClarity)
+  );
 
   // Update sky visibility — hidden underground and inside the chalk clouding.
   // The 0.45 above-horizon blend is now baked into the texture alpha (see

@@ -25,8 +25,15 @@ export const RENDER_ORDER = {
   GEOLOGY: 1,         // geology.js chalk boundary plane + wireframe + marker.
                        // Deliberate choice: infra tunnels (tier 2) draw AFTER
                        // geology so deep infra (e.g. Lee Tunnel at 98m, below
-                       // the 60m chalk plane) never gets stably hidden behind
-                       // the chalk sheet by a distance-sort tie.
+                       // the 60m chalk plane) never flips order with the sheet
+                       // on a distance-sort tie. NOTE (10Jul26f): tier order
+                       // does NOT prevent depth-culling — the chalk sheet has
+                       // depthWrite:true, so once drawn, any infra BEHIND it
+                       // (from the camera) fails the depth test regardless of
+                       // renderOrder. From above the chalk this hides all
+                       // below-chalk infra (accepted); from INSIDE the chalk,
+                       // updateGeologyClarity releases sheet opacity+depthWrite
+                       // so the up-view network is visible (Item B).
   SURFACE_WATER: 1,   // thames.js river volume, canals.js ribbons,
                        // reservoirs.js water polygon, m25.js Thames waterfalls
   WATER_EDGE: 2,      // reservoirs.js EdgesGeometry outline — must draw AFTER
@@ -35,7 +42,12 @@ export const RENDER_ORDER = {
                        // water polygon are coplanar-in-distance and flicker
                        // order every frame. This IS the reservoir flicker fix.
   INFRA_TUNNEL: 2,    // tube tunnels (main.js frostedTubeMaterial), tideway.js
-                       // tunnels/glow/spurs, crossrail.js tunnels/glow/markers
+                       // tunnels/glow/spurs, crossrail.js tunnels/glow/markers.
+                       // Convention (10Jul26f): glow SHELLS are depthWrite:false
+                       // (createGlowMaterial) — a depth-writing shell would
+                       // depth-cull the tunnel it encloses. Tunnel walls are
+                       // FrontSide + depthWrite:true (createTunnelMaterial) so
+                       // exactly one wall layer composites at every angle.
   SEWER: 2,           // sewers.js tunnels/glow/markers — same tier as
                        // INFRA_TUNNEL (named separately for call-site clarity;
                        // sewers don't spatially overlap the deep-bore infra)

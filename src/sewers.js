@@ -4,6 +4,10 @@
 
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
+import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
+
+// Infra haze band (see infra-materials.js) — coherence with Crossrail/Tideway.
+const HAZE_BAND = { near: 2500, far: 9000 };
 
 let sewerData = null;
 
@@ -98,15 +102,19 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     
     const tubeGeometry = new THREE.TubeGeometry(curve, 100, radius, 10, false);
     
-    const tunnelMaterial = new THREE.MeshPhysicalMaterial({
+    // Angle-stable factory material (infra-materials.js). emissiveIntensity
+    // 0.25 is the contrast floor against the dark terrain underside, where the
+    // old unlit 0.55-alpha brown vanished broadside (judge via AgX screenshots,
+    // not hex — diag sewer2-A vs sewer2-C).
+    const tunnelMaterial = injectInfraHaze(createTunnelMaterial({
       color: colorScheme.base,
-      transparent: true,
-      opacity: 0.55,
+      opacity: 0.6,
+      emissiveIntensity: 0.25,
       roughness: 0.5,
       metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-    
+    }), HAZE_BAND);
+
+
     const tunnelMesh = new THREE.Mesh(tubeGeometry, tunnelMaterial);
     tunnelMesh.castShadow = true;
     tunnelMesh.receiveShadow = true;
@@ -125,11 +133,8 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     
     // Glow effect for visibility
     const glowGeometry = new THREE.TubeGeometry(curve, 80, radius * 1.3, 10, false);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: colorScheme.glow,
-      transparent: true,
-      opacity: 0.12
-    });
+    const glowMaterial = injectInfraHaze(
+      createGlowMaterial({ color: colorScheme.glow, opacity: 0.12 }), HAZE_BAND);
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
     glowMesh.renderOrder = RENDER_ORDER.SEWER;
     group.add(glowMesh);
@@ -144,7 +149,10 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
         const markerMaterial = new THREE.MeshBasicMaterial({
           color: colorScheme.glow,
           transparent: true,
-          opacity: 0.5
+          opacity: 0.5,
+          // Markers sit ON the tunnel wall — depth-writing 0.5-alpha spheres
+          // punch angle-dependent holes in the tube behind them.
+          depthWrite: false,
         });
         const marker = new THREE.Mesh(markerGeometry, markerMaterial);
         marker.position.set(xz.x, y, xz.z);

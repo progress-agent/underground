@@ -7,16 +7,19 @@ import { RENDER_ORDER } from './render-layers.js';
 const BASE_RADIUS = 9;        // ~2x tunnel width for single-line stations
 const PLATFORM_CLEARANCE = 5;  // metres below deepest platform
 
-// Shared frosted glass material for all shafts
+// Shared frosted glass material for all shafts.
+// DoubleSide + depthWrite:false stays (the camera can be INSIDE a shaft, and
+// the stable 2-layer composite at this low alpha is fine) but transmission is
+// gone (10Jul26f transparency pass): it was fresnel view-angle dependent and
+// its pass samples only the opaque scene, so shafts flipped between glassy and
+// milky with camera angle. Opacity 0.27 -> 0.33 compensates the lost
+// transmitted light. emissiveIntensity must stay <= 0.05 (CLAUDE.md trap).
 const frostedGlassMat = new THREE.MeshPhysicalMaterial({
   color: 0xffffff,
   transparent: true,
-  opacity: 0.27,
+  opacity: 0.33,
   roughness: 0.55,
   metalness: 0.0,
-  transmission: 0.78,
-  thickness: 1.2,
-  ior: 1.45,
   clearcoat: 0.15,
   clearcoatRoughness: 0.7,
   emissive: 0xffffff,

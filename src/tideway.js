@@ -6,6 +6,12 @@
 
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
+import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
+
+// Infra haze band (see infra-materials.js). Wider than Crossrail's — Tideway
+// and Lee are shorter features that never formed a horizon band; the haze is
+// applied for distance-treatment coherence with Crossrail, not as a band kill.
+const HAZE_BAND = { near: 2500, far: 9000 };
 
 let tidewayRouteData = null;
 let tidewayShaftData = null;
@@ -36,90 +42,61 @@ const SECTION_DISPLAY_NAMES = {
 };
 
 // ---------- Materials ----------
+// All from the shared angle-stable factory (infra-materials.js): FrontSide +
+// depthWrite:true means exactly one wall layer composites at every view angle
+// (the old DoubleSide materials read opaque axially, ghost-faint broadside).
+// Emissive lift gives a contrast floor over the bright chalk floor, where the
+// old 0.5-alpha navy washed out at every underground distance.
 
 function makeTidewayTunnelMaterial() {
-  return new THREE.MeshPhysicalMaterial({
-    color: 0x1d4ed8,
-    transparent: true,
-    opacity: 0.5,
-    roughness: 0.4,
-    metalness: 0.2,
-    side: THREE.DoubleSide,
-  });
+  return injectInfraHaze(
+    createTunnelMaterial({ color: 0x1d4ed8, opacity: 0.6 }), HAZE_BAND);
 }
 
 function makeTidewayGlowMaterial() {
-  return new THREE.MeshBasicMaterial({
-    color: 0x3b82f6,
-    transparent: true,
-    opacity: 0.15,
-  });
+  return injectInfraHaze(
+    createGlowMaterial({ color: 0x3b82f6, opacity: 0.15 }), HAZE_BAND);
 }
 
+// Shafts: NO transmission — MeshPhysicalMaterial transmission is fresnel
+// view-angle dependent (opaque navy at 200m, washed-out at range in the old
+// look) and its transmission pass samples only the opaque scene. A fixed
+// opacity + mild emissive is angle- and distance-stable.
 function makeTidewayShaftMaterial(isMainDrive = false) {
-  return new THREE.MeshPhysicalMaterial({
+  return createTunnelMaterial({
     color: 0x1d4ed8,
-    transparent: true,
-    opacity: 0.45,
+    opacity: 0.5,
+    emissiveIntensity: isMainDrive ? 0.10 : 0.07,
     roughness: 0.5,
     metalness: 0.0,
-    transmission: 0.35,
-    thickness: 1.5,
-    ior: 1.45,
-    clearcoat: 0.1,
-    emissive: 0x1d4ed8,
-    emissiveIntensity: isMainDrive ? 0.10 : 0.07,
-    side: THREE.DoubleSide,
-    depthWrite: true,
   });
 }
 
 function makeLeeShaftMaterial() {
-  return new THREE.MeshPhysicalMaterial({
+  return createTunnelMaterial({
     color: 0x6b4423,
-    transparent: true,
-    opacity: 0.45,
-    roughness: 0.5,
-    metalness: 0.0,
-    transmission: 0.35,
-    thickness: 1.5,
-    ior: 1.45,
-    clearcoat: 0.1,
+    opacity: 0.5,
     emissive: 0x4a3728,
     emissiveIntensity: 0.07,
-    side: THREE.DoubleSide,
-    depthWrite: true,
+    roughness: 0.5,
+    metalness: 0.0,
   });
 }
 
 function makeLeeTunnelMaterial() {
-  return new THREE.MeshPhysicalMaterial({
-    color: 0x6b4423,
-    transparent: true,
-    opacity: 0.5,
-    roughness: 0.4,
-    metalness: 0.2,
-    side: THREE.DoubleSide,
-  });
+  return injectInfraHaze(
+    createTunnelMaterial({ color: 0x6b4423, opacity: 0.6 }), HAZE_BAND);
 }
 
 function makeLeeGlowMaterial() {
-  return new THREE.MeshBasicMaterial({
-    color: 0x8b6914,
-    transparent: true,
-    opacity: 0.15,
-  });
+  return injectInfraHaze(
+    createGlowMaterial({ color: 0x8b6914, opacity: 0.15 }), HAZE_BAND);
 }
 
 function makeSpurMaterial() {
-  return new THREE.MeshPhysicalMaterial({
-    color: 0x1d4ed8,
-    transparent: true,
-    opacity: 0.4,
-    roughness: 0.5,
-    metalness: 0.1,
-    side: THREE.DoubleSide,
-  });
+  return injectInfraHaze(
+    createTunnelMaterial({ color: 0x1d4ed8, opacity: 0.5, roughness: 0.5, metalness: 0.1 }),
+    HAZE_BAND);
 }
 
 // ---------- CSV Parsers ----------

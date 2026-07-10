@@ -6,73 +6,17 @@
 
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
+import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
 
 let crossrailData = null;
 
-// Fade a material's alpha to zero over a view-distance band [near, far], so
-// distant edge-on crossrail tubes stop compositing into a yellow band along the
-// clay-zone horizon (D4.3). A broadside close-up (task's 1-2km read) sits inside
-// the near cutoff and is untouched; only the far, edge-on-converging part of the
-// line fades. Injected in view space, so it's orientation-independent. Lowers
-// alpha only — no emissive raised, so the glow-through-terrain mitigation stack
-// is respected. onBeforeCompile survives Material.clone(), so per-tube clones
-// keep the effect.
-// Every distance-fade clone registers its shader uniforms here at
-// onBeforeCompile time so updateCrossrailClarity can scale the fade thresholds
-// live (Item B). onBeforeCompile stays per-clone — Material.clone() does not
-// copy it — so each compiled clone contributes its own uniform set.
-const _fadeUniformSets = [];
-let _lastFadeScale = 1.0;
-
-// Inside-chalk clarity (Item B): the D4.3 distance fade zeroes tunnel alpha by
-// ~3200m regardless of fog, which would violate "perfect clarity at any
-// distance" for a camera inside the chalk looking up. Scale both thresholds by
-// 1 + 19*chalkClarity (fade lands at ~61km/22km — beyond the scene extent).
-// From the clay side chalkClarity = 0, so the yellow-band kill is byte-identical.
-export function updateCrossrailClarity(chalkClarity = 0) {
-  const scale = 1 + 19 * Math.max(0, Math.min(1, chalkClarity));
-  if (scale === _lastFadeScale) return;
-  _lastFadeScale = scale;
-  for (const uniforms of _fadeUniformSets) {
-    if (uniforms.uFadeScale) uniforms.uFadeScale.value = scale;
-  }
-}
-
-function makeDistanceFade(material, near, far) {
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uFadeNear = { value: near };
-    shader.uniforms.uFadeFar = { value: far };
-    shader.uniforms.uFadeScale = { value: _lastFadeScale };
-    _fadeUniformSets.push(shader.uniforms);
-    shader.vertexShader = shader.vertexShader.replace(
-      'void main() {',
-      `varying float vFadeViewDepth;
-void main() {`
-    ).replace(
-      '#include <begin_vertex>',
-      // Euclidean camera distance, NOT view-space -z. An E-W tube at constant
-      // north-distance has near-constant -z across the whole width, so a -z fade
-      // dims it uniformly (the full-width band survives). Euclidean distance
-      // makes the far left/right of the band recede and fade, collapsing it.
-      `#include <begin_vertex>
-  vFadeViewDepth = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );`
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      'void main() {',
-      `uniform float uFadeNear;
-uniform float uFadeFar;
-uniform float uFadeScale;
-varying float vFadeViewDepth;
-void main() {`
-    ).replace(
-      // r161 chunk name — NOT <output_fragment>, which silently no-ops here.
-      '#include <opaque_fragment>',
-      `#include <opaque_fragment>
-  gl_FragColor.a *= 1.0 - smoothstep( uFadeNear * uFadeScale, uFadeFar * uFadeScale, vFadeViewDepth );`
-    );
-  };
-  material.needsUpdate = true;
-}
+// Yellow-band-on-the-clay-horizon (D4.3) is handled by the shared infra haze
+// (infra-materials.js): RGB converges to the fog colour over this Euclidean
+// view-distance band, alpha untouched, strength zero inside the chalk. This
+// REPLACED the old view-distance ALPHA fade, which erased the whole line past
+// ~3200m from every angle (diag 10Jul26f: 8.02% pixel footprint at 400m ->
+// 0.06% at 4000m).
+const HAZE_BAND = { near: 1500, far: 6000 };
 
 export async function loadCrossrailData() {
   try {
@@ -120,24 +64,6 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   const group = new THREE.Group();
   group.name = 'crossrail-tunnel';
 
-  const tunnelMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xffd300,
-    transparent: true,
-    opacity: 0.75,
-    roughness: 0.3,
-    metalness: 0.4,
-    side: THREE.DoubleSide
-  });
-
-  const glowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffe066,
-    transparent: true,
-    opacity: 0.2,
-    // Fog-aware so the underground fog dims the glow with distance. (Explicit
-    // even though MeshBasicMaterial defaults fog:true.)
-    fog: true,
-  });
-
   // Convert a point to 3D position
   const toVec3 = (p) => {
     const xz = latLonToXZ(p.lat, p.lon);
@@ -149,15 +75,11 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     if (pts.length < 2) return;
     const curve = new THREE.CatmullRomCurve3(pts.map(toVec3));
     const geo = new THREE.TubeGeometry(curve, segments, radius, 12, false);
-    const mat = tunnelMaterial.clone();
-    mat.opacity = opacity;
-    // The bright gold horizon band in clay-zone views is the tunnel tube seen
-    // edge-on at range (fog.far is wide underground, so fog can't dim it). Fade
-    // it out by euclidean camera distance so the far band collapses while a
-    // segment viewed broadside from ~1-2km still reads full. Applied to the
-    // CLONE — Material.clone() does NOT copy onBeforeCompile, so setting it on
-    // the base tunnelMaterial would never reach the rendered tubes.
-    makeDistanceFade(mat, 1100, 3200);
+    // Fresh factory material per tube (no clone — Material.clone() would drop
+    // the onBeforeCompile haze injection anyway). Angle-stable: FrontSide +
+    // depthWrite:true, emissive lift for readability at depth.
+    const mat = createTunnelMaterial({ color: 0xffd300, opacity });
+    injectInfraHaze(mat, HAZE_BAND);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -172,8 +94,8 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     // Glow for deep sections
     if (opacity >= 0.7) {
       const glowGeo = new THREE.TubeGeometry(curve, Math.floor(segments * 0.7), radius + 1, 12, false);
-      const glowMat = glowMaterial.clone();
-      makeDistanceFade(glowMat, 900, 2600); // fade on the clone (see note above)
+      const glowMat = createGlowMaterial({ color: 0xffe066, opacity: 0.2 });
+      injectInfraHaze(glowMat, HAZE_BAND);
       const glowMesh = new THREE.Mesh(glowGeo, glowMat);
       glowMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       group.add(glowMesh);
@@ -186,7 +108,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Main trunk: Heathrow to Whitechapel (full diameter tunnel)
   if (mainPts.length >= 2) {
-    buildTube(mainPts, 9.0, 150, 0.75, 'Crossrail — Main Tunnel');
+    buildTube(mainPts, 9.0, 150, 0.72, 'Crossrail — Main Tunnel');
   }
 
   // Get Whitechapel (last main trunk point) as branch junction
@@ -194,7 +116,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Abbey Wood branch: prepend junction point for visual continuity
   if (abbeyWoodPts.length >= 1 && junction) {
-    buildTube([junction, ...abbeyWoodPts], 9.0, 60, 0.75, 'Crossrail — Abbey Wood Branch');
+    buildTube([junction, ...abbeyWoodPts], 9.0, 60, 0.72, 'Crossrail — Abbey Wood Branch');
   }
 
   // Shenfield branch: surface railway, slightly thinner & more transparent
