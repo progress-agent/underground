@@ -42,7 +42,11 @@ export const RENDER_ORDER = {
                        // water polygon are coplanar-in-distance and flicker
                        // order every frame. This IS the reservoir flicker fix.
   INFRA_TUNNEL: 2,    // tube tunnels (main.js frostedTubeMaterial), tideway.js
-                       // tunnels/glow/spurs, crossrail.js tunnels/glow/markers.
+                       // tunnels/glow/spurs, crossrail.js tunnels/glow/markers,
+                       // crown ribbons (crown-ribbon.js). NOTE: ribbons are
+                       // OPAQUE, so for them the tier is documentary only —
+                       // depth testing does the occlusion work; they draw in
+                       // the opaque queue where renderOrder barely matters.
                        // Convention (10Jul26f): glow SHELLS are depthWrite:false
                        // (createGlowMaterial) — a depth-writing shell would
                        // depth-cull the tunnel it encloses. Tunnel walls are

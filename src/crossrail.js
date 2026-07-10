@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
+import { createCrownRibbonGeometry, createRibbonMaterial, ELIZABETH_LINE_COLOUR } from './crown-ribbon.js';
 
 let crossrailData = null;
 
@@ -100,6 +101,21 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
       glowMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       group.add(glowMesh);
     }
+
+    // Crown ribbon (Item A): Elizabeth line CANONICAL purple — deliberately
+    // NOT the legacy gold of the tunnel body (Jordan spec: canonical line
+    // colour; purple luma ~0.12 is a flagged borderline casing candidate).
+    // Opaque, so NO makeDistanceFade-style alpha treatment; the shared infra
+    // haze (RGB-toward-fog, alpha untouched) keeps the D4.3 horizon band dead
+    // and is zeroed inside the chalk by updateEnvironment (perfect clarity).
+    const ribbonGeo = createCrownRibbonGeometry(curve, { segments, baseRadius: radius - 0.1 });
+    const ribbonMat = createRibbonMaterial(ELIZABETH_LINE_COLOUR);
+    injectInfraHaze(ribbonMat, HAZE_BAND);
+    const ribbonMesh = new THREE.Mesh(ribbonGeo, ribbonMat);
+    ribbonMesh.name = 'ribbon:elizabeth';
+    ribbonMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
+    ribbonMesh.userData = { ...mesh.userData }; // pickable as 'crossrail' with branch name
+    group.add(ribbonMesh);
   };
 
   const mainPts = data.branches['main'] || [];

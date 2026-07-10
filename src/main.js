@@ -15,6 +15,7 @@ import { createGeologyExterior } from './geology-exterior.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { getInfraHazeStrength } from './infra-materials.js';
+import { buildCrownRibbons } from './crown-ribbon.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
@@ -1031,6 +1032,14 @@ function snapAllTubesToTerrain() {
       const idx = linePickables.indexOf(m);
       if (idx >= 0) linePickables.splice(idx, 1);
     }
+    // ...including crown ribbons (their geometry/material were already
+    // disposed by the group-children sweep above; this is the bookkeeping).
+    const oldRibbons = lineRibbonsById.get(lineId) || [];
+    for (const m of oldRibbons) {
+      const idx = linePickables.indexOf(m);
+      if (idx >= 0) linePickables.splice(idx, 1);
+    }
+    lineRibbonsById.delete(lineId);
 
     // Remove old trains for this line from sim.trains
     sim.trains = sim.trains.filter(t => {
@@ -1041,6 +1050,7 @@ function snapAllTubesToTerrain() {
     // Rebuild per branch
     const newMeshes = [];
     const mergedCenterPts = [];
+    const ribbonCurves = [];
 
     for (const centerPts of branches) {
       if (centerPts.length < 2) continue;
@@ -1064,12 +1074,17 @@ function snapAllTubesToTerrain() {
       newMeshes.push(leftMesh, rightMesh);
       linePickables.push(leftMesh, rightMesh);
       group.add(leftMesh, rightMesh);
+      ribbonCurves.push({ curve: leftCurve, segments: segs }, { curve: rightCurve, segments: segs });
 
       // Recreate trains on new curves (density scales with track length)
       const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
       sim.trains.push(...branchTrains);
       snappedTubes++;
     }
+
+    // Rebuild crown ribbons on the snapped curves (same helper as the
+    // initial build in addLineFromStopPoints — keep the two sites in lockstep).
+    attachCrownRibbons(lineId, colour, group, ribbonCurves);
 
     lineMeshesById.set(lineId, newMeshes);
     lineCenterPoints.set(lineId, mergedCenterPts);
@@ -1198,6 +1213,10 @@ const LINE_COLOURS = {
   piccadilly: 0x0019a8,
   victoria: 0x0098d4,
   'waterloo-city': 0x93ceba,
+  // TfL canonical DLR teal. Added 10Jul26f (Item A) — DLR previously fell
+  // through to the 0xffffff white fallback, so this also re-tints the DLR
+  // tunnels themselves (deliberate, flagged).
+  dlr: 0x00a4a7,
 };
 
 // Persisted line visibility (defaults to all-on)
@@ -1215,6 +1234,11 @@ const lineColoursById = new Map();     // lineId -> hex colour
 const linePickables = [];
 // Track meshes by lineId for hover highlight.
 const lineMeshesById = new Map();
+// Crown ribbon meshes by lineId (colour ribbon + optional casing). SEPARATE
+// from lineMeshesById on purpose: setHoverHighlight hard-resets every mesh in
+// that map with glass-material values (opacity 0.42 / thickness 0.6) that
+// would stomp the opaque ribbon material.
+const lineRibbonsById = new Map();
 
 
 function setLineVisible(lineId, visible) {
@@ -1385,6 +1409,27 @@ function extractBranches(sequences) {
   return { branches, allStops };
 }
 
+// Crown ribbons (Item A): one merged colour-ribbon mesh per line (+ one
+// casing mesh for CASING_LINES), built over the SAME offset curves as the
+// tunnels — one ribbon per tunnel crown, left AND right (both carry trains).
+// Shared by addLineFromStopPoints AND the snapAllTubesToTerrain 4b rebuild so
+// the two sites cannot drift. Ribbons are pickable (Tier-2/3 hover from
+// above) and live in lineRibbonsById, NOT lineMeshesById (hover-stomp trap).
+function attachCrownRibbons(lineId, colour, group, ribbonCurves) {
+  const ribbons = buildCrownRibbons({
+    lineId,
+    colour,
+    curves: ribbonCurves,
+    userData: { lineId, type: 'tube-line' },
+  });
+  for (const rm of ribbons) {
+    group.add(rm);
+    linePickables.push(rm);
+  }
+  lineRibbonsById.set(lineId, ribbons);
+  return ribbons;
+}
+
 function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { branches = null } = {}) {
   // If branches provided, build one tube per branch. Otherwise treat stopPoints as single branch.
   const branchArrays = branches && branches.length > 0 ? branches : [stopPoints];
@@ -1398,6 +1443,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
   const allBranchCenterPts = []; // per-branch (for terrain snap rebuild)
   const allMeshes = [];
   const allTrains = [];
+  const ribbonCurves = []; // per-tunnel-crown curves for the merged ribbon build
 
   for (const branchStops of branchArrays) {
     const validStopPoints = branchStops.filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon));
@@ -1440,12 +1486,17 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     allMeshes.push(leftMesh, rightMesh);
     linePickables.push(leftMesh, rightMesh);
     group.add(leftMesh, rightMesh);
+    ribbonCurves.push({ curve: leftCurve, segments: segs }, { curve: rightCurve, segments: segs });
 
     // Trains per branch (density scales with track length)
     const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
     sim.trains.push(...branchTrains);
     allTrains.push(...branchTrains);
   }
+
+  // Crown ribbons: merged per line, added to the line group so the solo-line
+  // dropdown filters them for free.
+  attachCrownRibbons(lineId, colour, group, ribbonCurves);
 
   // Keep merged center points for camera focus
   lineCenterPoints.set(lineId, allCenterPts);
@@ -1989,6 +2040,14 @@ let _formatInfraTooltipRef = null;
         m.material.thickness = 0.6;
       }
     }
+    // Crown ribbons keep their own baselines (opaque material — never touch
+    // opacity/thickness, only the emissive affordance).
+    for (const ribbons of lineRibbonsById.values()) {
+      for (const m of ribbons) {
+        if (!m?.material) continue;
+        m.material.emissiveIntensity = m.userData._baseEmissive ?? 0.22;
+      }
+    }
 
     if (!lineId) return;
     const meshes = lineMeshesById.get(lineId);
@@ -2001,6 +2060,13 @@ let _formatInfraTooltipRef = null;
       m.material.emissiveIntensity = isVeryDark ? 0.55 : 0.22;
       m.material.opacity = 0.70;
       m.material.thickness = 1.35;
+    }
+    const ribbons = lineRibbonsById.get(lineId);
+    if (ribbons) {
+      for (const m of ribbons) {
+        if (!m?.material) continue;
+        m.material.emissiveIntensity = m.userData._hoverEmissive ?? 0.45;
+      }
     }
   }
 
@@ -2878,6 +2944,11 @@ if (import.meta.env.DEV) {
     get unifiedShaftLayer() { return unifiedShaftLayer; },
     get lineCenterPoints() { return lineCenterPoints; },
     get lineBranchCenterPts() { return lineBranchCenterPts; },
+    // Crown ribbon registry (Item A) — colour ribbon + optional casing per line.
+    get lineRibbonsById() { return lineRibbonsById; },
+    // Exposed so specs can force a tube rebuild and assert ribbon bookkeeping
+    // (idempotent; runs in normal boot whenever terrain + network both load).
+    snapAllTubesToTerrain,
     get thamesProfileSampler() { return thamesProfileSampler; },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
