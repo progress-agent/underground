@@ -198,6 +198,8 @@ export function carveRiverChannel(
     riverLevelM = 2,      // water surface in metres OD
     falloffM = 250,       // bank slope width in metres
     channelDepthM = 3,    // fallback depth below water level if point d is absent
+    bankFreeboardM = 1,   // falloff floor above the water surface — land outside
+                          // the channel must never be carved below water level
   } = options;
 
   const terrainW = neSceneX - swSceneX;
@@ -287,13 +289,18 @@ export function carveRiverChannel(
       const carveElev = riverLevelM - bestDepthM;
 
       if (bestDist <= bestHalfW) {
-        // Inside river channel: full carve
+        // Inside river channel: full carve to the bed
         elevations[idx] = Math.min(orig, carveElev);
         carved++;
       } else if (bestDist < bestHalfW + falloffM) {
-        // Falloff zone: blend from carveElev to original
+        // Falloff zone: blend from BANK level to original — never from the bed.
+        // Blending from carveElev here dragged riverside land metres below the
+        // water surface (the 10Jul26f "flooded Thames": buildings placed on
+        // carved terrain stood waist-deep beside the volume). Bed elevation is
+        // exclusive to the channel; outside it the floor is water + freeboard.
+        const bankElev = riverLevelM + bankFreeboardM;
         const blend = smoothstep((bestDist - bestHalfW) / falloffM);
-        const blended = carveElev + blend * (orig - carveElev);
+        const blended = bankElev + blend * (orig - bankElev);
         elevations[idx] = Math.min(orig, blended);
         carved++;
       }
