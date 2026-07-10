@@ -229,9 +229,20 @@ export function createStationMarkers({
   const tmpUnderground = new THREE.Vector3();
   let updateCount = 0;
 
-  function update({ camera, renderer, terrainSurfaceY, insideM25 = true }) {
+  function update({ camera, renderer, terrainSurfaceY, insideM25 = true, hideForChalk = false }) {
     updateCount++;
     if (!labelsVisible) return;
+
+    // Item B: while the camera is inside the chalk, ALL station labels hide —
+    // one dirty-checked layer-level write per layer covers both paths, and
+    // display restores automatically next frame when the flag drops. Hover
+    // tooltips (#hoverTip) are a separate path and stay active.
+    if (hideForChalk) {
+      setLayerDisplay(surfaceLayer, false);
+      setLayerDisplay(undergroundLayer, false);
+      return;
+    }
+
     if (surfaceEls.length === 0) return;
 
     const w = renderer.domElement.clientWidth;

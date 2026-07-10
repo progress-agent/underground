@@ -4,7 +4,7 @@ import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION } from './terrain.js';
-import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting } from './environment.js';
+import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
 import { createStationMarkers, cleanStationName } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -13,8 +13,8 @@ import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
-import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
-import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y } from './geology.js';
+import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend, updateCrossrailClarity } from './crossrail.js';
+import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
@@ -278,6 +278,13 @@ const _surfQuery = { x: 0, z: 0 }; // reused arg for getTerrainMeshSurfaceY
 // D-002 substrate speed multiplier — applied in the movement funnel. Default
 // 1.0 (no effect); a later wave (chalk slowdown) drives it via window.__ug.
 let substrateSpeedFactor = 1.0;
+
+// Item B clarity signals (chalk-relative, computed each tick — see tick()).
+// Ramps are mutable so they can be tuned live via window.__ug without a reload.
+let _clayClarityRamp = ENV_CONFIG.clayClarityRamp;   // scene units above chalk to full daylight
+let _chalkClarityRamp = ENV_CONFIG.chalkClarityRamp; // scene units below chalk to full clarity
+let _clayLift = 1;      // last computed clay clarity gradient [0,1]
+let _chalkClarity = 0;  // last computed inside-chalk clarity [0,1]
 
 // D6: CLAY/CHALK readout hysteresis state. Persists the last flip direction
 // so the HUD label doesn't chatter when the camera sits right on the
@@ -2741,6 +2748,18 @@ function tick() {
     camera.position.y, chalkSurfaceY - 30, chalkSurfaceY + 30
   )) * insideness;
 
+  // ── Item B clarity signals (both chalk-relative via getChalkSurfaceY) ──────
+  // clayLift: 0 at the chalk boundary (today's darkness) → 1 a ramp above it
+  // (the existing daylight endpoint). chalkSurfaceY ≈ -300 ± ~120, so the ramp
+  // top sits near street depth and any above-ground camera is 1 by construction.
+  _clayLift = THREE.MathUtils.clamp(
+    (camera.position.y - chalkSurfaceY) / _clayClarityRamp, 0, 1);
+  // chalkClarity: 0 at/above the chalk surface (the clay-side white-out is
+  // untouched by construction), 1 a short ramp below it. Gated by insideness —
+  // outside the disc there is no modelled chalk interior.
+  _chalkClarity = THREE.MathUtils.clamp(
+    (chalkSurfaceY - camera.position.y) / _chalkClarityRamp, 0, 1) * insideness;
+
   // D-002 chalk slowdown: 1.0 (clay/air) → 0.5 (full chalk), lerped by chalkBlend
   // so it never snaps. Drives keyboard flight (movement funnel) AND mouse
   // zoom/pan (scaled from captured base values — multiply, never compound).
@@ -2774,7 +2793,12 @@ function tick() {
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.stationsLayer?.update) {
-      layers.stationsLayer.update({ camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25 });
+      layers.stationsLayer.update({
+        camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25,
+        // Inside chalk every label hides (Item B); hover tooltips live in the
+        // separate #hoverTip path and stay active.
+        hideForChalk: _chalkClarity > 0.5,
+      });
       updateCallCount++;
     }
   }
@@ -2784,11 +2808,20 @@ function tick() {
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
-    updateEnvironment(camera, scene, skyDome, renderer, { insideness, chalkBlend });
+    updateEnvironment(camera, scene, skyDome, renderer,
+      { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity });
   }
 
   // Update lighting based on camera position
-  updateLighting(camera, atmosphereLights, { insideness, chalkBlend });
+  updateLighting(camera, atmosphereLights,
+    { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity });
+
+  // Inside-chalk clarity: push the Crossrail distance-fade thresholds out
+  // beyond the scene extent while in chalk (no-op when the scale is unchanged),
+  // and release the chalk sheet itself (opacity + depthWrite) so the network
+  // above is visible looking up. Both are 0-gated above the chalk surface.
+  updateCrossrailClarity(_chalkClarity);
+  updateGeologyClarity(_chalkClarity);
 
   // Update spatial audio (ambient crossfades, filter sweeps, wind)
   if (isAudioReady()) {
@@ -2824,6 +2857,13 @@ if (import.meta.env.DEV) {
     // (chalk slowdown) to throttle movement through dense strata.
     get substrateSpeedFactor() { return substrateSpeedFactor; },
     set substrateSpeedFactor(v) { substrateSpeedFactor = v; },
+    // Item B clarity signals (read-only) + runtime-tunable ramps.
+    get clayLift() { return _clayLift; },
+    get chalkClarity() { return _chalkClarity; },
+    get clayClarityRamp() { return _clayClarityRamp; },
+    set clayClarityRamp(v) { _clayClarityRamp = Math.max(1, v); },
+    get chalkClarityRamp() { return _chalkClarityRamp; },
+    set chalkClarityRamp(v) { _chalkClarityRamp = Math.max(1, v); },
     cushionLuma: { sample: sampleCushion, reset: resetCushion, state: _cushionState },
     // formatInfraTooltip is closure-scoped to the tooltip block (~L1714-2268).
     // _formatInfraTooltipRef is assigned from inside that block and read via

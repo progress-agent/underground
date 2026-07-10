@@ -17,10 +17,33 @@ let crossrailData = null;
 // alpha only — no emissive raised, so the glow-through-terrain mitigation stack
 // is respected. onBeforeCompile survives Material.clone(), so per-tube clones
 // keep the effect.
+// Every distance-fade clone registers its shader uniforms here at
+// onBeforeCompile time so updateCrossrailClarity can scale the fade thresholds
+// live (Item B). onBeforeCompile stays per-clone — Material.clone() does not
+// copy it — so each compiled clone contributes its own uniform set.
+const _fadeUniformSets = [];
+let _lastFadeScale = 1.0;
+
+// Inside-chalk clarity (Item B): the D4.3 distance fade zeroes tunnel alpha by
+// ~3200m regardless of fog, which would violate "perfect clarity at any
+// distance" for a camera inside the chalk looking up. Scale both thresholds by
+// 1 + 19*chalkClarity (fade lands at ~61km/22km — beyond the scene extent).
+// From the clay side chalkClarity = 0, so the yellow-band kill is byte-identical.
+export function updateCrossrailClarity(chalkClarity = 0) {
+  const scale = 1 + 19 * Math.max(0, Math.min(1, chalkClarity));
+  if (scale === _lastFadeScale) return;
+  _lastFadeScale = scale;
+  for (const uniforms of _fadeUniformSets) {
+    if (uniforms.uFadeScale) uniforms.uFadeScale.value = scale;
+  }
+}
+
 function makeDistanceFade(material, near, far) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uFadeNear = { value: near };
     shader.uniforms.uFadeFar = { value: far };
+    shader.uniforms.uFadeScale = { value: _lastFadeScale };
+    _fadeUniformSets.push(shader.uniforms);
     shader.vertexShader = shader.vertexShader.replace(
       'void main() {',
       `varying float vFadeViewDepth;
@@ -38,13 +61,14 @@ void main() {`
       'void main() {',
       `uniform float uFadeNear;
 uniform float uFadeFar;
+uniform float uFadeScale;
 varying float vFadeViewDepth;
 void main() {`
     ).replace(
       // r161 chunk name — NOT <output_fragment>, which silently no-ops here.
       '#include <opaque_fragment>',
       `#include <opaque_fragment>
-  gl_FragColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vFadeViewDepth );`
+  gl_FragColor.a *= 1.0 - smoothstep( uFadeNear * uFadeScale, uFadeFar * uFadeScale, vFadeViewDepth );`
     );
   };
   material.needsUpdate = true;

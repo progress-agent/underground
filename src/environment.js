@@ -30,6 +30,19 @@ export const ENV_CONFIG = {
   chalkFogFar: 2200,       // clouded visibility ceiling
   chalkAmbient: 0.35,      // raise toward bright white-tinted (NOT darkness)
 
+  // ── Clay clarity gradient + inside-chalk clarity (Item B, 10Jul26f) ────────
+  // clayLift keys underground brightness/fog on camera height ABOVE the local
+  // chalk surface (getChalkSurfaceY), not on absolute Y: daylight-like clarity
+  // at the top of the clay column, today's darkness at the chalk boundary.
+  // chalkClarity releases fog for a camera INSIDE the chalk so every
+  // subterranean feature is visible at any distance looking up. Both are
+  // computed in main.js's tick; ramps are tunable at runtime via window.__ug.
+  clayClarityRamp: 300,      // scene units above chalk surface to full daylight
+  chalkClarityRamp: 40,      // scene units below chalk surface to full clarity
+  chalkClarityAmbient: 0.55, // ambient inside chalk — up-view features lit, not just unfogged
+  clarityFogNear: 20000,     // fog effectively off for anything the camera can see
+  clarityFogFar: 60000,      // > scene diagonal
+
   // ── Street-level fill (D7) ──────────────────────────────────────────────
   // Hemisphere light (warm sky / cool-earth ground bounce) that lifts building
   // faces at eye level. Gated to low altitude so the overview is untouched.
@@ -121,15 +134,29 @@ const _cChalk = new THREE.Color(ENV_CONFIG.chalkFogColor);
  * @param chalkBlend  Chalk stratum membership [0,1] (D3.2) — 0 in clay/air, 1
  *   well inside the chalk. Drives the dusty white-out. Already gated by
  *   insideness upstream, so it is naturally 0 outside the disc.
+ * @param clayLift    Clay clarity gradient [0,1] (Item B) — camera height above
+ *   the local chalk surface / clayClarityRamp. 1 = top of the clay column
+ *   (daylight-like), 0 = at the chalk boundary (today's darkness). Above ground
+ *   it is 1 by construction, so the surface regime is seamless.
+ * @param chalkClarity Inside-chalk clarity [0,1] (Item B) — 0 at/above the
+ *   chalk surface (the from-above white-out is untouched by construction),
+ *   1 by chalkClarityRamp units below it. Releases fog distances so everything
+ *   the camera can see looking up is unfogged; colour/bg stay chalk white.
  */
-export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1, chalkBlend = 0 } = {}) {
+export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0 } = {}) {
   const y = camera.position.y;
 
   // Vertical blend (0 = below ground, 1 = above ground/sky). Outside the disc
   // (insideness→0) we force above-ground appearance, exactly as the old binary
   // switch did — but now continuously, so the M25 edge blends instead of snaps.
   const verticalBlend = Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / (ENV_CONFIG.skyStartY * 0.6)));
-  const surfaceBlend = THREE.MathUtils.lerp(1.0, verticalBlend, insideness);
+  // Clay clarity lift (Item B): the fog/bg regime rides the LIFTED blend so the
+  // clay column is a chalk-relative gradient up to the daylight endpoint. The
+  // sky dome stays on the UN-lifted blend below — otherwise the camera-following
+  // abyss dome renders underground.
+  const verticalBlendLifted = Math.max(verticalBlend, clayLift);
+  const surfaceBlend = THREE.MathUtils.lerp(1.0, verticalBlendLifted, insideness);
+  const skyBlend = THREE.MathUtils.lerp(1.0, verticalBlend, insideness);
 
   // Base fog colour: airy-clay graphite underground → warm-grey toward sky.
   _fogColor.copy(_cGround).lerp(_cSky, surfaceBlend);
@@ -158,6 +185,16 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
       fogFar = THREE.MathUtils.lerp(fogFar, ENV_CONFIG.chalkFogFar, chalkBlend);
     }
 
+    // Inside-chalk perfect clarity (Item B): release fog DISTANCES only, after
+    // the white-out lerp. Colour stays chalk white and the bg stays 0xded6c4,
+    // so the void below still reads chalky while every up-view feature is
+    // unfogged at any distance. chalkClarity is 0 for any camera above the
+    // chalk surface, so the from-above (clay-side) white-out is byte-identical.
+    if (chalkClarity > 0) {
+      fogNear = THREE.MathUtils.lerp(fogNear, ENV_CONFIG.clarityFogNear, chalkClarity);
+      fogFar = THREE.MathUtils.lerp(fogFar, ENV_CONFIG.clarityFogFar, chalkClarity);
+    }
+
     scene.fog.color.copy(_fogColor);
     scene.fog.near = fogNear;
     scene.fog.far = fogFar;
@@ -172,9 +209,11 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   if (sky) {
     // Recentre the abyss-cap on the camera so its equator tracks the true
     // horizon and it always renders within the 50000 far plane (see createSkyDome).
+    // UN-lifted skyBlend here (not surfaceBlend): clayLift must brighten
+    // fog/lights only — the abyss dome has no business rendering underground.
     sky.position.copy(camera.position);
-    sky.material.opacity = surfaceBlend * (1 - chalkBlend);
-    sky.visible = surfaceBlend > 0.01 && chalkBlend < 0.99;
+    sky.material.opacity = skyBlend * (1 - chalkBlend);
+    sky.visible = skyBlend > 0.01 && chalkBlend < 0.99;
   }
 
   // Background colour: clay graphite → sky; then flooded dusty white in chalk so
@@ -226,8 +265,9 @@ export function createAtmosphere(scene) {
 }
 
 // Update lighting based on camera position.
-// insideness (D5) + chalkBlend (D3.3) mirror updateEnvironment's params.
-export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0 } = {}) {
+// insideness (D5) + chalkBlend (D3.3) + clayLift/chalkClarity (Item B) mirror
+// updateEnvironment's params.
+export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0 } = {}) {
   if (!lights) return;
 
   const y = camera.position.y;
@@ -237,18 +277,27 @@ export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0 
   // altitude views are already at 1 either way, so the overview is unchanged.
   const groundRamp = Math.max(0, Math.min(1, (y - ENV_CONFIG.surfaceY) / ENV_CONFIG.lightFullY));
   const lightBlend = THREE.MathUtils.lerp(1.0, groundRamp, insideness);
+  // Clay clarity lift (Item B): ambient/sun/fill ride the lifted blend so the
+  // clay column brightens toward the daylight endpoint near street depth.
+  // The HEMISPHERE light stays on the ORIGINAL groundRamp-based blend — hemi
+  // is a street-level building-face device; a warm sky-bounce on tunnel
+  // ceilings would read wrong.
+  const lightBlendLifted = Math.max(lightBlend, clayLift * insideness);
 
   // Adjust ambient light intensity, then raise toward the bright white-tinted
   // chalk clouding (D3.3) — chalk is a BRIGHT clouding, opposite of clay's dark.
-  let ambient = THREE.MathUtils.lerp(ENV_CONFIG.ambientBelow, ENV_CONFIG.ambientAbove, lightBlend);
+  let ambient = THREE.MathUtils.lerp(ENV_CONFIG.ambientBelow, ENV_CONFIG.ambientAbove, lightBlendLifted);
   ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.chalkAmbient, chalkBlend);
+  // Inside chalk (Item B): lift ambient further so up-view features are
+  // actually LIT, not just unfogged. 0 above the chalk surface by construction.
+  ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.chalkClarityAmbient, chalkClarity);
   lights.ambient.intensity = ambient;
 
   // Sun becomes stronger above ground
-  lights.sun.intensity = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, lightBlend);
+  lights.sun.intensity = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, lightBlendLifted);
 
   // Underground light fades as we go up
-  lights.underground.intensity = THREE.MathUtils.lerp(0.15, 0, lightBlend);
+  lights.underground.intensity = THREE.MathUtils.lerp(0.15, 0, lightBlendLifted);
 
   // Street-level hemisphere fill (D7): full at eye level, faded out by altitude
   // so the overview is untouched. Zeroed underground via groundRamp.

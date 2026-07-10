@@ -106,6 +106,30 @@ export function getChalkSurfaceY(x, z) {
   return CHALK_TOP_Y + chalkDisplacement(x, z);
 }
 
+// ── Inside-chalk clarity (Item B) ──────────────────────────────────────────
+// From INSIDE the chalk (camera below the chalk surface) the 0.92-opacity
+// sheet is a near-opaque ceiling AND — because it draws at renderOrder GEOLOGY
+// with depthWrite:true, before INFRA_TUNNEL — it depth-culls every transparent
+// tunnel behind it. "Perfect clarity of all subterranean features looking up"
+// therefore needs the sheet itself released, not just the fog. Gated on
+// chalkClarity, which is 0 for any camera at/above the chalk surface, so the
+// from-above white-out look (opacity 0.92, depthWrite:true) is byte-identical.
+const CHALK_BASE_OPACITY = 0.92;
+const CHALK_CLARITY_OPACITY = 0.12; // faint membrane — boundary still reads
+let _chalkClarityMat = null;
+
+export function updateGeologyClarity(chalkClarity = 0) {
+  if (!_chalkClarityMat) return;
+  const t = Math.max(0, Math.min(1, chalkClarity));
+  const opacity = CHALK_BASE_OPACITY + (CHALK_CLARITY_OPACITY - CHALK_BASE_OPACITY) * t;
+  if (opacity !== _chalkClarityMat.opacity) {
+    _chalkClarityMat.opacity = opacity;
+    // Depth write must release with the fade or the sheet still depth-culls
+    // the tube network behind it (no shader recompile — cheap per-frame flip).
+    _chalkClarityMat.depthWrite = t < 0.5;
+  }
+}
+
 // --- Main strata creation ---
 
 /**
@@ -257,6 +281,7 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   // Expose the material so main.js can apply the M25 mask the same way it does
   // for terrain (applyM25Mask), keeping the clip in one place.
   group.userData.chalkMat = mat;
+  _chalkClarityMat = mat; // registered for the inside-chalk clarity release
 
   const buildMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   console.log(

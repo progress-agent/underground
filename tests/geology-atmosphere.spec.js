@@ -87,9 +87,12 @@ test('chalk depth: fog shifts to dusty white and speed factor drops below 0.7', 
   // Warm bias preserved (r > g > b).
   expect(fog.r).toBeGreaterThan(fog.g);
   expect(fog.g).toBeGreaterThan(fog.b);
-  // Visibility clamped tight (the white-out).
-  expect(fog.near).toBeLessThan(80);
-  expect(fog.far).toBeLessThan(3000);
+  // Item B inside-chalk clarity: -700 is INSIDE the chalk, so fog distances are
+  // RELEASED (near 20000 / far 60000) — perfect clarity looking up. The tight
+  // white-out (near<80/far<3000) now applies only from ABOVE the chalk surface;
+  // that regime is asserted in chalk-clarity.spec.js.
+  expect(fog.near).toBeGreaterThan(15000);
+  expect(fog.far).toBeGreaterThan(50000);
 });
 
 test('crossing clay -> chalk brightens the fog (white-out is a transition)', async ({ page }) => {
