@@ -10,14 +10,38 @@ const _labelledNamesUG = new Set();
 // read every frame by each layer's update() so slider changes apply instantly.
 let _labelMaxDistance = 9000;
 
+// ---- Item C: half-scale IM Fell English labels + per-priority distance tiers ----
+// Surface font: was max(7, 11 * mult) -> 16.5/11/8.25px. Half scale with a
+// legibility floor. FLAG: 6px is at the floor for an antiqua face — Jordan
+// judges by screenshot; expect a possible nudge of SURF_MIN_PX to 7.
+const SURF_BASE_PX = 5.5;
+const SURF_MIN_PX = 6;
+// Underground font: was lerp(13, 8) over the fade window. Halved, with a hard
+// floor applied AFTER the per-station size multiplier.
+const UG_FONT_NEAR_PX = 6.5;
+const UG_FONT_FAR_PX = 4;
+const UG_FONT_MIN_PX = 5;
+// Estimated glyph half-width per px of font size — IM Fell English runs
+// slightly wider than Railway Sans at small sizes (0.26 -> 0.30).
+const EST_HALF_COEF = 0.30;
+// Distance-tier multipliers indexed by labelPriority():
+//   0 = single-line stop (culls at ~55% of the shared reach)
+//   1 = interchange (unchanged)
+//   2 = terminus / 3+ line hub (reaches ~145%)
+const PRIO_DIST_MULT = [0.55, 1.0, 1.45];
+// Cap the boosted priority-2 surface reach so labels stay inside the fog.
+const SURF_CUTOFF_CAP = 65000;
+
 // ---- Shared screen-space declutter grid (surface labels, all layers) ----
 // The above-ground label set spans many per-line layers, each calling update()
 // independently within a single render tick. To dedupe "walls of text" across
 // ALL layers we keep ONE module-level coarse screen grid, reset once per render
 // frame (keyed on renderer.info.render.frame). Cell arrays are preallocated and
 // marked stale by a per-frame stamp — no per-frame clearing/allocation.
-const CELL_W = 92;
-const CELL_H = 46;
+// Sized for the half-scale labels (was 92x46 for 11px chips). Width is a
+// little over half because IM Fell English needs breathing room.
+const CELL_W = 56;
+const CELL_H = 28;
 let _gridCols = 0;
 let _gridRows = 0;
 let _gridStamp = null;    // Int32Array — frame stamp that last claimed each cell
@@ -101,6 +125,23 @@ function hideLabel(el) {
 function setLayerDisplay(layerEl, show) {
   const v = show ? 'block' : 'none';
   if (layerEl._dispState !== v) { layerEl.style.display = v; layerEl._dispState = v; }
+}
+
+// Test/tuning introspection: the live per-frame surface policy plus the Item C
+// named constants. Read-only snapshot — exposed on window.__ug.labelPolicy.
+export function getLabelPolicy() {
+  return {
+    surfCutoff: _surfCutoff,
+    surfFadeStart: _surfFadeStart,
+    surfMinPriority: _surfMinPriority,
+    surfCutoffCap: SURF_CUTOFF_CAP,
+    labelMaxDistance: _labelMaxDistance,
+    prioDistMult: [...PRIO_DIST_MULT],
+    cellW: CELL_W,
+    cellH: CELL_H,
+    surfBasePx: SURF_BASE_PX,
+    surfMinPx: SURF_MIN_PX,
+  };
 }
 
 export function cleanStationName(name) {
@@ -189,13 +230,14 @@ export function createStationMarkers({
         const surfEl = document.createElement('div');
         surfEl.className = 'station-label station-label-surface';
         surfEl.textContent = name;
-        const surfFontPx = Math.max(7, 11 * lineSizeMultiplier(st.lineCount || 1, st.isTerminus));
+        const surfFontPx = Math.max(SURF_MIN_PX,
+          SURF_BASE_PX * lineSizeMultiplier(st.lineCount || 1, st.isTerminus));
         surfEl.style.fontSize = `${surfFontPx.toFixed(1)}px`;
         if (st.isTerminus) surfEl.style.color = '#f5e6a3';
         surfEl._priority = labelPriority(st);
         // Estimated on-screen half-width (px) — drives width-aware grid claiming
         // so wide central hub labels reserve the cells they physically cover.
-        surfEl._estHalfPx = 0.26 * surfFontPx * name.length + 6;
+        surfEl._estHalfPx = EST_HALF_COEF * surfFontPx * name.length + 6;
         surfaceLayer.appendChild(surfEl);
         surfaceEls.push(surfEl);
       }
@@ -269,9 +311,6 @@ export function createStationMarkers({
 
   // ---- Above-ground branch: altitude-aware distance policy + screen grid ----
   function updateSurface(camera, w, h) {
-    const cutoff = _surfCutoff;
-    const fadeStart = _surfFadeStart;
-    const fadeRange = Math.max(1, cutoff - fadeStart);
     const minPriority = _surfMinPriority;
 
     for (let i = 0; i < stations.length; i++) {
@@ -281,7 +320,13 @@ export function createStationMarkers({
       const priority = el._priority || 0;
 
       // Cheap 3D pre-cull BEFORE any projection: altitude priority + distance.
+      // Per-priority reach: singles cull sooner, termini/hubs reach further
+      // (capped so the boosted reach stays inside the fog).
       if (priority < minPriority) { hideLabel(el); continue; }
+      const distMult = PRIO_DIST_MULT[priority] ?? 1.0;
+      const cutoff = Math.min(_surfCutoff * distMult, SURF_CUTOFF_CAP);
+      const fadeStart = _surfFadeStart * distMult;
+      const fadeRange = Math.max(1, cutoff - fadeStart);
       const d = camera.position.distanceTo(st.pos);
       if (d > cutoff) { hideLabel(el); continue; }
 
@@ -348,8 +393,11 @@ export function createStationMarkers({
       if (!el) continue;
       const st = stations[i];
 
+      // Per-priority reach mirrors the surface path: singles cull sooner,
+      // termini / 3+-line hubs stay visible further into the dark.
+      const effMax = _labelMaxDistance * (PRIO_DIST_MULT[el._priority || 0] ?? 1.0);
       const d = camera.position.distanceTo(st.pos);
-      if (d > _labelMaxDistance) { hideLabel(el); continue; }
+      if (d > effMax) { hideLabel(el); continue; }
 
       tmpUnderground.copy(st.pos);
       tmpUnderground.project(camera);
@@ -359,10 +407,13 @@ export function createStationMarkers({
       const y = (1 - (tmpUnderground.y * 0.5 + 0.5)) * h;
       if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { hideLabel(el); continue; }
 
-      const fadeRange = _labelMaxDistance - 150;
-      const alpha = d <= 150 ? 1.0 : THREE.MathUtils.clamp(1.0 - (d - 150) / fadeRange, 0.0, 1.0);
-      const baseFontSize = d <= 150 ? 13 : THREE.MathUtils.lerp(13, 8, (d - 150) / fadeRange);
-      const fontSize = baseFontSize * (el._sizeMultiplier || 1);
+      const fadeStart = Math.max(150, effMax * 0.02);
+      const fadeRange = Math.max(1, effMax - fadeStart);
+      const fadeT = d <= fadeStart ? 0
+        : THREE.MathUtils.clamp((d - fadeStart) / fadeRange, 0.0, 1.0);
+      const alpha = 1.0 - fadeT;
+      const baseFontSize = THREE.MathUtils.lerp(UG_FONT_NEAR_PX, UG_FONT_FAR_PX, fadeT);
+      const fontSize = Math.max(UG_FONT_MIN_PX, baseFontSize * (el._sizeMultiplier || 1));
 
       showLabel(el, x, y, alpha);
       const fs = `${fontSize.toFixed(1)}px`;

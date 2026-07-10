@@ -5,7 +5,7 @@ import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } fr
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION } from './terrain.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
-import { createStationMarkers, cleanStationName } from './stations.js';
+import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M, updateWater } from './thames.js';
@@ -2932,6 +2932,9 @@ if (import.meta.env.DEV) {
     set clayClarityRamp(v) { _clayClarityRamp = Math.max(1, v); },
     get chalkClarityRamp() { return _chalkClarityRamp; },
     set chalkClarityRamp(v) { _chalkClarityRamp = Math.max(1, v); },
+    // Item C: live station-label policy snapshot (surface cutoff/fade, priority
+    // distance multipliers, declutter cell size) — for specs and tuning.
+    get labelPolicy() { return getLabelPolicy(); },
     // Infra haze strength (read-only) — driven by updateEnvironment each tick;
     // 1 in clay underground, 0 above ground / outside the disc / inside chalk.
     get infraHazeStrength() { return getInfraHazeStrength(); },

@@ -15,6 +15,11 @@
     <title>UnderGround — 248 stations across 11 lines + infrastructure</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
+    <!-- IM Fell English for station labels (Item C). Regular + italic; the
+         italic is loaded for a possible terminus treatment (flagged, not on). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet" />
     <style>
       @font-face {
         font-family: 'Railway Sans';
@@ -39,19 +44,20 @@
         left: 0;
         top: 0;
         transform: translate(-9999px, -9999px);
-        padding: 2px 6px;
-        border-radius: 999px;
-        font-size: 11px;
+        font-family: 'IM Fell English', 'Railway Sans', ui-sans-serif, system-ui, serif;
+        font-size: 6px; /* per-label inline font-size overrides (Item C half scale) */
         line-height: 1.2;
         color: rgba(255,255,255,0.92);
-        /* No backdrop-filter: with up to ~60 chips visible the per-chip blur
-           dominates compositor paint time, and blur over a coloured scene at
-           low opacity bleeds scene hues (same trap as the tooltip card).
-           Higher-opacity flat fill reads identically at 11px. */
-        background: rgba(8, 12, 18, 0.82);
-        border: 1px solid rgba(255,255,255,0.12);
         white-space: nowrap;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+        /* Chipless (Item C): no background, no border. Legibility comes from a
+           stacked dark halo cushion — the inverse of the proven
+           .hover-tip.cushion-light stack. NO backdrop-filter (trap-listed:
+           per-chip blur dominates compositor paint AND bleeds scene hues). */
+        text-shadow:
+          0 0 2px rgba(4,6,10,0.95),
+          0 0 5px rgba(4,6,10,0.72),
+          0 0 10px rgba(4,6,10,0.45),
+          0 1px 2px rgba(0,0,0,0.6);
       }
 
       .hud {
