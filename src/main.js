@@ -2161,8 +2161,8 @@ let _formatInfraTooltipRef = null;
       // not yet initialised.
       let zone = null;
       if (hitPoint) {
-        const segIdx = nearestThamesSegment(hitPoint.x, hitPoint.z);
-        if (segIdx !== null) zone = getZoneAt(segIdx);
+        const chainM = nearestThamesSegment(hitPoint.x, hitPoint.z);
+        if (chainM !== null) zone = getZoneAt(chainM);
       }
       const title = 'River Thames';
       const subtitle = zone ? zone.name : null;

@@ -1,6 +1,9 @@
 // thames-zones.js — Named reach zones for Thames hover tooltips.
 //
-// 10 zones spanning the 126-waypoint Thames centreline (Wave 1 plan locked).
+// 10 zones spanning the Thames centreline (Wave 1 plan locked), addressed by
+// CHAINAGE (metres along the centreline polyline) rather than waypoint index,
+// so the zone table survives centreline re-densification (10Jul26f: thames.json
+// went 126 → 393 points when the course was rebuilt from the OSM centreline).
 // Tooltip width/depth values quote MHWS (Mean High Water Springs) — the tide
 // convention chosen for visual intuition (matches the "fat" Thames a viewer
 // sees from a London bridge in daylight).
@@ -37,21 +40,27 @@
 // Schema:
 //   id          string  - kebab-case identifier (stable, used as React key etc.)
 //   name        string  - human-readable reach name (rendered in tooltip)
-//   indexStart  number  - first thames.json waypoint index (inclusive)
-//   indexEnd    number  - last thames.json waypoint index (inclusive)
+//   chainStartM number  - zone start, metres of chainage along the centreline (inclusive)
+//   chainEndM   number  - zone end, metres of chainage (exclusive; Infinity on the last zone)
 //   meanWidth   number  - representative width in metres (at MHWS)
 //   meanDepth   number  - representative mean fairway depth in metres (at MHWS)
 //   maxDepth    number  - deepest fairway sounding in metres (at MHWS)
 //   landmark    string  - anchor landmark for the zone
 //
-// Coverage: indices 0-125 with no gaps (verified by getZoneAt fallthrough).
+// Boundary provenance (10Jul26f): the original zone boundaries were defined as
+// v1 waypoint index ranges; each boundary point was projected onto the rebuilt
+// OSM-derived centreline and its chainage taken (all projections landed within
+// ~400m of the new course, monotonic). Zone width/depth/landmark stats are
+// per-reach real-world facts and carry over unchanged.
+//
+// Coverage: chainage 0 → Infinity with no gaps (verified by getZoneAt fallthrough).
 
 export const THAMES_ZONES = [
   {
     id: 'upper-tideway',
     name: 'Upper Tideway',
-    indexStart: 0,
-    indexEnd: 9,
+    chainStartM: 0,
+    chainEndM: 36724,
     meanWidth: 45,
     meanDepth: 2.5,
     maxDepth: 3,
@@ -60,8 +69,8 @@ export const THAMES_ZONES = [
   {
     id: 'putney-hammersmith',
     name: 'Putney & Hammersmith Reach',
-    indexStart: 10,
-    indexEnd: 19,
+    chainStartM: 36724,
+    chainEndM: 42234,
     meanWidth: 60,
     meanDepth: 4,
     maxDepth: 4,
@@ -70,8 +79,8 @@ export const THAMES_ZONES = [
   {
     id: 'battersea-reach',
     name: 'Battersea Reach',
-    indexStart: 20,
-    indexEnd: 31,
+    chainStartM: 42234,
+    chainEndM: 46421,
     meanWidth: 62,
     meanDepth: 4.5,
     maxDepth: 5,
@@ -80,8 +89,8 @@ export const THAMES_ZONES = [
   {
     id: 'westminster-reach',
     name: 'Westminster Reach',
-    indexStart: 32,
-    indexEnd: 43,
+    chainStartM: 46421,
+    chainEndM: 50638,
     meanWidth: 82,
     meanDepth: 5.5,
     maxDepth: 6,
@@ -90,8 +99,8 @@ export const THAMES_ZONES = [
   {
     id: 'pool-of-london',
     name: 'Pool of London',
-    indexStart: 44,
-    indexEnd: 53,
+    chainStartM: 50638,
+    chainEndM: 54571,
     meanWidth: 140,
     meanDepth: 7.5,
     maxDepth: 9,
@@ -100,8 +109,8 @@ export const THAMES_ZONES = [
   {
     id: 'limehouse-reach',
     name: 'Limehouse Reach',
-    indexStart: 54,
-    indexEnd: 65,
+    chainStartM: 54571,
+    chainEndM: 58415,
     meanWidth: 210,
     meanDepth: 10,
     maxDepth: 10,
@@ -110,8 +119,8 @@ export const THAMES_ZONES = [
   {
     id: 'greenwich-reach',
     name: 'Greenwich Reach',
-    indexStart: 66,
-    indexEnd: 83,
+    chainStartM: 58415,
+    chainEndM: 63756,
     meanWidth: 255,
     meanDepth: 11.5,
     maxDepth: 13,
@@ -120,8 +129,8 @@ export const THAMES_ZONES = [
   {
     id: 'blackwall-woolwich',
     name: 'Blackwall & Woolwich Reach',
-    indexStart: 84,
-    indexEnd: 99,
+    chainStartM: 63756,
+    chainEndM: 69311,
     meanWidth: 285,
     meanDepth: 13.5,
     maxDepth: 14,
@@ -130,8 +139,8 @@ export const THAMES_ZONES = [
   {
     id: 'gallions-erith',
     name: 'Gallions & Erith Reach',
-    indexStart: 100,
-    indexEnd: 117,
+    chainStartM: 69311,
+    chainEndM: 77177,
     meanWidth: 340,
     meanDepth: 15,
     maxDepth: 16,
@@ -140,8 +149,8 @@ export const THAMES_ZONES = [
   {
     id: 'thames-estuary-mouth',
     name: 'Thames Estuary Mouth',
-    indexStart: 118,
-    indexEnd: 125,
+    chainStartM: 77177,
+    chainEndM: Infinity,
     meanWidth: 580,
     meanDepth: 16,
     maxDepth: 16,
@@ -152,16 +161,16 @@ export const THAMES_ZONES = [
 // ---------- Lookups ----------
 
 /**
- * Map a thames.json waypoint index to its zone.
+ * Map a centreline chainage (metres) to its zone.
  * O(N) over 10 zones — trivially fast, no binary search needed.
  *
- * @param {number} waypointIndex  Integer index into thames.json points[]
- * @returns {object|null}         Matching zone, or null if out of range
+ * @param {number} chainM  Metres along the Thames centreline (from nearestThamesSegment)
+ * @returns {object|null}  Matching zone, or null if input invalid
  */
-export function getZoneAt(waypointIndex) {
-  if (typeof waypointIndex !== 'number' || !Number.isFinite(waypointIndex)) return null;
+export function getZoneAt(chainM) {
+  if (typeof chainM !== 'number' || !Number.isFinite(chainM)) return null;
   for (const zone of THAMES_ZONES) {
-    if (waypointIndex >= zone.indexStart && waypointIndex <= zone.indexEnd) {
+    if (chainM >= zone.chainStartM && chainM < zone.chainEndM) {
       return zone;
     }
   }
@@ -171,8 +180,8 @@ export function getZoneAt(waypointIndex) {
 // ---------- Nearest-segment helper ----------
 //
 // Refactored from thames-mask.js's isInThames() inner loop. Pre-computed
-// at module load for O(N) per-call cost over 125 segments (~50us — fine
-// for hover-rate calls).
+// at module load for O(N) per-call cost over the centreline segments
+// (~50us at 400 segments — fine for hover-rate calls).
 //
 // BNG reference must match terrain.js / thames.js / thames-mask.js / m25.js.
 
@@ -195,6 +204,7 @@ export function initThamesZones(points) {
     return;
   }
   const segs = [];
+  let chainM = 0;
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
     const b = points[i + 1];
@@ -205,27 +215,28 @@ export function initThamesZones(points) {
     const dx = bx - ax;
     const dz = bz - az;
     const lenSq = dx * dx + dz * dz;
-    segs.push({ ax, az, dx, dz, lenSq, startIndex: i });
+    const len = Math.sqrt(lenSq);
+    segs.push({ ax, az, dx, dz, lenSq, len, startChainM: chainM });
+    chainM += len;
   }
   _segments = segs;
-  console.log(`Thames zones: ${segs.length} segments initialised, ${THAMES_ZONES.length} zones`);
+  console.log(`Thames zones: ${segs.length} segments initialised (${(chainM / 1000).toFixed(1)}km), ${THAMES_ZONES.length} zones`);
 }
 
 /**
- * Find the index of the Thames waypoint segment closest to a point in
- * scene coordinates. Returns the START waypoint index of the closest
- * segment (i.e. the lower of the two waypoint indices framing it).
+ * Find the chainage (metres along the centreline) of the point on the
+ * Thames centreline closest to a scene-coordinate position.
  *
- * Use the returned index with getZoneAt() to derive the zone.
+ * Use the returned chainage with getZoneAt() to derive the zone.
  *
  * @param {number} x  Scene X coordinate
  * @param {number} z  Scene Z coordinate
- * @returns {number|null}  Start waypoint index of closest segment, or null
- *                         if Thames data unavailable.
+ * @returns {number|null}  Chainage in metres of the closest centreline
+ *                         point, or null if Thames data unavailable.
  */
 export function nearestThamesSegment(x, z) {
   if (!_segments) return null;
-  let bestIdx = 0;
+  let bestChainM = 0;
   let bestDistSq = Infinity;
   for (const seg of _segments) {
     let t;
@@ -243,8 +254,8 @@ export function nearestThamesSegment(x, z) {
     const distSq = ex * ex + ez * ez;
     if (distSq < bestDistSq) {
       bestDistSq = distSq;
-      bestIdx = seg.startIndex;
+      bestChainM = seg.startChainM + t * seg.len;
     }
   }
-  return bestIdx;
+  return bestChainM;
 }
