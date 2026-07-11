@@ -1,0 +1,1204 @@
+{
+  "name": "Thames bridges",
+  "source": "OSM bridge ways crossing the thames.json centreline (Overpass, cached in scripts/.cache/); archetypes, canonical names and clearances from curated table per D-019 (coherent and recognisable, not survey-accurate)",
+  "crs": "EPSG:27700",
+  "description": "Bridge crossings of the River Thames inside the M25, west to east. chainM is metres along the thames.json centreline (same datum as THAMES_ZONES). Axis endpoints are BNG; convert to scene via x = e - 530000, z = -(n - 180400).",
+  "osmSnapshot": "2026-07-11T01:17:07Z",
+  "count": 41,
+  "bridges": [
+    {
+      "name": "M25 Runnymede Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "runnymede",
+      "chainM": 4198,
+      "axis": {
+        "a": {
+          "e": 501916,
+          "n": 171907
+        },
+        "b": {
+          "e": 501981,
+          "n": 171986
+        },
+        "bearingDeg": 39
+      },
+      "deckWidthM": 34,
+      "spanM": 42,
+      "clearanceM": 6,
+      "source": {
+        "osmWayIds": [
+          140304392,
+          151534533,
+          155422483,
+          413976132
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Staines Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "staines",
+      "chainM": 5532,
+      "axis": {
+        "a": {
+          "e": 503163,
+          "n": 171482
+        },
+        "b": {
+          "e": 503227,
+          "n": 171561
+        },
+        "bearingDeg": 39
+      },
+      "deckWidthM": 10,
+      "spanM": 42,
+      "clearanceM": 5,
+      "source": {
+        "osmWayIds": [
+          420619059
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Staines Railway Bridge",
+      "kind": "rail",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "staines-rail",
+      "chainM": 6026,
+      "axis": {
+        "a": {
+          "e": 503548,
+          "n": 171205
+        },
+        "b": {
+          "e": 503636,
+          "n": 171257
+        },
+        "bearingDeg": 59
+      },
+      "deckWidthM": 11,
+      "spanM": 42,
+      "clearanceM": 5.5,
+      "source": {
+        "osmWayIds": [
+          4534150,
+          167126849
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "M3 Thames Bridge",
+      "kind": "road",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "m3",
+      "chainM": 11202,
+      "axis": {
+        "a": {
+          "e": 505444,
+          "n": 167197
+        },
+        "b": {
+          "e": 505343,
+          "n": 167209
+        },
+        "bearingDeg": 277
+      },
+      "deckWidthM": 34,
+      "spanM": 42,
+      "clearanceM": 6,
+      "source": {
+        "osmWayIds": [
+          146370080,
+          146370081
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Chertsey Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "chertsey",
+      "chainM": 11785,
+      "axis": {
+        "a": {
+          "e": 505495,
+          "n": 166621
+        },
+        "b": {
+          "e": 505393,
+          "n": 166624
+        },
+        "bearingDeg": 272
+      },
+      "deckWidthM": 10,
+      "spanM": 42,
+      "clearanceM": 4.5,
+      "source": {
+        "osmWayIds": [
+          156480962
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Walton Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "walton",
+      "chainM": 17882,
+      "axis": {
+        "a": {
+          "e": 509326,
+          "n": 166495
+        },
+        "b": {
+          "e": 509231,
+          "n": 166541
+        },
+        "bearingDeg": 296
+      },
+      "deckWidthM": 10,
+      "spanM": 45,
+      "clearanceM": 5.5,
+      "source": {
+        "osmWayIds": [
+          162832802
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Hampton Court Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "hampton-court",
+      "chainM": 25582,
+      "axis": {
+        "a": {
+          "e": 515368,
+          "n": 168433
+        },
+        "b": {
+          "e": 515411,
+          "n": 168532
+        },
+        "bearingDeg": 23
+      },
+      "deckWidthM": 17,
+      "spanM": 48,
+      "clearanceM": 4.5,
+      "source": {
+        "osmWayIds": [
+          4864117
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Kingston Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "kingston",
+      "chainM": 30191,
+      "axis": {
+        "a": {
+          "e": 517770,
+          "n": 169367
+        },
+        "b": {
+          "e": 517661,
+          "n": 169380
+        },
+        "bearingDeg": 277
+      },
+      "deckWidthM": 20.5,
+      "spanM": 50,
+      "clearanceM": 4.8,
+      "source": {
+        "osmWayIds": [
+          156254624
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Kingston Railway Bridge",
+      "kind": "rail",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "kingston-rail",
+      "chainM": 30452,
+      "axis": {
+        "a": {
+          "e": 517787,
+          "n": 169626
+        },
+        "b": {
+          "e": 517678,
+          "n": 169643
+        },
+        "bearingDeg": 279
+      },
+      "deckWidthM": 11,
+      "spanM": 50,
+      "clearanceM": 5,
+      "source": {
+        "osmWayIds": [
+          22905917,
+          145751144
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Teddington Lock Footbridges",
+      "kind": "foot",
+      "archetype": "suspension",
+      "group": null,
+      "curatedSlug": "teddington-foot",
+      "chainM": 32911,
+      "axis": {
+        "a": {
+          "e": 516756,
+          "n": 171480
+        },
+        "b": {
+          "e": 516791,
+          "n": 171585
+        },
+        "bearingDeg": 18
+      },
+      "deckWidthM": 3,
+      "spanM": 50,
+      "clearanceM": 4,
+      "source": {
+        "osmWayIds": [
+          363151027
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Richmond Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "richmond",
+      "chainM": 37295,
+      "axis": {
+        "a": {
+          "e": 517677,
+          "n": 174477
+        },
+        "b": {
+          "e": 517760,
+          "n": 174556
+        },
+        "bearingDeg": 46
+      },
+      "deckWidthM": 10,
+      "spanM": 55,
+      "clearanceM": 5.2,
+      "source": {
+        "osmWayIds": [
+          22957506
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Richmond Railway Bridge",
+      "kind": "rail",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "richmond-rail",
+      "chainM": 37837,
+      "axis": {
+        "a": {
+          "e": 517232,
+          "n": 174768
+        },
+        "b": {
+          "e": 517304,
+          "n": 174855
+        },
+        "bearingDeg": 40
+      },
+      "deckWidthM": 11,
+      "spanM": 54,
+      "clearanceM": 5.3,
+      "source": {
+        "osmWayIds": [
+          4841040,
+          160599618
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Twickenham Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "twickenham",
+      "chainM": 37905,
+      "axis": {
+        "a": {
+          "e": 517179,
+          "n": 174808
+        },
+        "b": {
+          "e": 517250,
+          "n": 174897
+        },
+        "bearingDeg": 39
+      },
+      "deckWidthM": 17,
+      "spanM": 54,
+      "clearanceM": 5.5,
+      "source": {
+        "osmWayIds": [
+          4775542
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Richmond Lock & Footbridge",
+      "kind": "foot",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "richmond-lock-foot",
+      "chainM": 38187,
+      "axis": {
+        "a": {
+          "e": 516964,
+          "n": 174997
+        },
+        "b": {
+          "e": 517041,
+          "n": 175080
+        },
+        "bearingDeg": 43
+      },
+      "deckWidthM": 4,
+      "spanM": 54,
+      "clearanceM": 8,
+      "source": {
+        "osmWayIds": [
+          24966558,
+          506036850
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Kew Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "kew",
+      "chainM": 42155,
+      "axis": {
+        "a": {
+          "e": 519007,
+          "n": 177747
+        },
+        "b": {
+          "e": 519000,
+          "n": 177888
+        },
+        "bearingDeg": 357
+      },
+      "deckWidthM": 13.5,
+      "spanM": 81,
+      "clearanceM": 5.3,
+      "source": {
+        "osmWayIds": [
+          4004743
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Kew Railway Bridge",
+      "kind": "rail",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "kew-rail",
+      "chainM": 42812,
+      "axis": {
+        "a": {
+          "e": 519526,
+          "n": 177444
+        },
+        "b": {
+          "e": 519609,
+          "n": 177579
+        },
+        "bearingDeg": 32
+      },
+      "deckWidthM": 11,
+      "spanM": 98,
+      "clearanceM": 5.5,
+      "source": {
+        "osmWayIds": [
+          23112609,
+          160588937
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Chiswick Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "chiswick",
+      "chainM": 44204,
+      "axis": {
+        "a": {
+          "e": 520216,
+          "n": 176278
+        },
+        "b": {
+          "e": 520310,
+          "n": 176378
+        },
+        "bearingDeg": 43
+      },
+      "deckWidthM": 17,
+      "spanM": 77,
+      "clearanceM": 5.3,
+      "source": {
+        "osmWayIds": [
+          4004735
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Barnes Railway Bridge",
+      "kind": "rail+foot",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "barnes-rail",
+      "chainM": 45441,
+      "axis": {
+        "a": {
+          "e": 521420,
+          "n": 176267
+        },
+        "b": {
+          "e": 521302,
+          "n": 176375
+        },
+        "bearingDeg": 312
+      },
+      "deckWidthM": 13,
+      "spanM": 100,
+      "clearanceM": 5.4,
+      "source": {
+        "osmWayIds": [
+          3992084,
+          153339810
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Hammersmith Bridge",
+      "kind": "road",
+      "archetype": "suspension",
+      "group": null,
+      "curatedSlug": "hammersmith",
+      "chainM": 48357,
+      "axis": {
+        "a": {
+          "e": 522908,
+          "n": 177986
+        },
+        "b": {
+          "e": 522998,
+          "n": 178131
+        },
+        "bearingDeg": 32
+      },
+      "deckWidthM": 13,
+      "spanM": 111,
+      "clearanceM": 3.7,
+      "source": {
+        "osmWayIds": [
+          7587403,
+          38526078,
+          292738369,
+          1378418472
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Putney Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "putney",
+      "chainM": 51139,
+      "axis": {
+        "a": {
+          "e": 524166,
+          "n": 175632
+        },
+        "b": {
+          "e": 524294,
+          "n": 175830
+        },
+        "bearingDeg": 33
+      },
+      "deckWidthM": 10,
+      "spanM": 176,
+      "clearanceM": 5.5,
+      "source": {
+        "osmWayIds": [
+          739664513
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Fulham Railway Bridge",
+      "kind": "rail+foot",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "fulham-rail",
+      "chainM": 51396,
+      "axis": {
+        "a": {
+          "e": 524427,
+          "n": 175501
+        },
+        "b": {
+          "e": 524500,
+          "n": 175748
+        },
+        "bearingDeg": 16
+      },
+      "deckWidthM": 13,
+      "spanM": 198,
+      "clearanceM": 5.9,
+      "source": {
+        "osmWayIds": [
+          34012792,
+          145761931
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Wandsworth Bridge",
+      "kind": "road",
+      "archetype": "cantilever",
+      "group": null,
+      "curatedSlug": "wandsworth",
+      "chainM": 52963,
+      "axis": {
+        "a": {
+          "e": 526037,
+          "n": 175468
+        },
+        "b": {
+          "e": 525921,
+          "n": 175651
+        },
+        "bearingDeg": 328
+      },
+      "deckWidthM": 15,
+      "spanM": 156,
+      "clearanceM": 5.9,
+      "source": {
+        "osmWayIds": [
+          24951888
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Battersea Railway Bridge",
+      "kind": "rail",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "battersea-rail",
+      "chainM": 54085,
+      "axis": {
+        "a": {
+          "e": 526639,
+          "n": 176432
+        },
+        "b": {
+          "e": 526448,
+          "n": 176537
+        },
+        "bearingDeg": 299
+      },
+      "deckWidthM": 11,
+      "spanM": 157,
+      "clearanceM": 6.7,
+      "source": {
+        "osmWayIds": [
+          4077834,
+          153173983
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Battersea Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "battersea",
+      "chainM": 55128,
+      "axis": {
+        "a": {
+          "e": 527065,
+          "n": 177268
+        },
+        "b": {
+          "e": 526930,
+          "n": 177495
+        },
+        "bearingDeg": 329
+      },
+      "deckWidthM": 10,
+      "spanM": 203,
+      "clearanceM": 5.4,
+      "source": {
+        "osmWayIds": [
+          23017704
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Albert Bridge",
+      "kind": "road",
+      "archetype": "suspension",
+      "group": null,
+      "curatedSlug": "albert",
+      "chainM": 55555,
+      "axis": {
+        "a": {
+          "e": 527432,
+          "n": 177420
+        },
+        "b": {
+          "e": 527360,
+          "n": 177632
+        },
+        "bearingDeg": 341
+      },
+      "deckWidthM": 12,
+      "spanM": 164,
+      "clearanceM": 4.9,
+      "source": {
+        "osmWayIds": [
+          591291859
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Chelsea Bridge",
+      "kind": "road",
+      "archetype": "suspension",
+      "group": null,
+      "curatedSlug": "chelsea",
+      "chainM": 56757,
+      "axis": {
+        "a": {
+          "e": 528583,
+          "n": 177689
+        },
+        "b": {
+          "e": 528551,
+          "n": 177901
+        },
+        "bearingDeg": 351
+      },
+      "deckWidthM": 15,
+      "spanM": 155,
+      "clearanceM": 6.8,
+      "source": {
+        "osmWayIds": [
+          536527430
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Grosvenor Railway Bridge",
+      "kind": "rail",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "grosvenor-rail",
+      "chainM": 56924,
+      "axis": {
+        "a": {
+          "e": 528736,
+          "n": 177709
+        },
+        "b": {
+          "e": 528731,
+          "n": 177913
+        },
+        "bearingDeg": 359
+      },
+      "deckWidthM": 30,
+      "spanM": 144,
+      "clearanceM": 5.9,
+      "source": {
+        "osmWayIds": [
+          125623853,
+          125623857,
+          125623864,
+          125623883,
+          536488859,
+          536488865,
+          536488869,
+          536488881,
+          536488889
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Vauxhall Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "vauxhall",
+      "chainM": 58478,
+      "axis": {
+        "a": {
+          "e": 530235,
+          "n": 178114
+        },
+        "b": {
+          "e": 530020,
+          "n": 178260
+        },
+        "bearingDeg": 304
+      },
+      "deckWidthM": 20.5,
+      "spanM": 200,
+      "clearanceM": 5.6,
+      "source": {
+        "osmWayIds": [
+          749336136
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Lambeth Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "lambeth",
+      "chainM": 59308,
+      "axis": {
+        "a": {
+          "e": 530521,
+          "n": 178943
+        },
+        "b": {
+          "e": 530297,
+          "n": 178974
+        },
+        "bearingDeg": 278
+      },
+      "deckWidthM": 13.5,
+      "spanM": 166,
+      "clearanceM": 6.5,
+      "source": {
+        "osmWayIds": [
+          201619353
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Westminster Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "westminster",
+      "chainM": 60014,
+      "axis": {
+        "a": {
+          "e": 530598,
+          "n": 179660
+        },
+        "b": {
+          "e": 530328,
+          "n": 179665
+        },
+        "bearingDeg": 271
+      },
+      "deckWidthM": 26,
+      "spanM": 208,
+      "clearanceM": 5.4,
+      "source": {
+        "osmWayIds": [
+          216998718
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Hungerford Bridge",
+      "kind": "rail",
+      "archetype": "beam-girder",
+      "group": "hungerford",
+      "curatedSlug": "hungerford-rail",
+      "chainM": 60620,
+      "axis": {
+        "a": {
+          "e": 530682,
+          "n": 180197
+        },
+        "b": {
+          "e": 530427,
+          "n": 180316
+        },
+        "bearingDeg": 295
+      },
+      "deckWidthM": 11,
+      "spanM": 217,
+      "clearanceM": 8.4,
+      "source": {
+        "osmWayIds": [
+          256367743,
+          256367744,
+          360591627,
+          360591630,
+          622907359
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Golden Jubilee Bridges",
+      "kind": "foot",
+      "archetype": "cable-stayed",
+      "group": "hungerford",
+      "curatedSlug": "golden-jubilee-foot",
+      "chainM": 60622,
+      "axis": {
+        "a": {
+          "e": 530683,
+          "n": 180199
+        },
+        "b": {
+          "e": 530427,
+          "n": 180318
+        },
+        "bearingDeg": 295
+      },
+      "deckWidthM": 4.7,
+      "spanM": 217,
+      "clearanceM": 8.4,
+      "source": {
+        "osmWayIds": [
+          4254120,
+          4254123
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Waterloo Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "waterloo",
+      "chainM": 60990,
+      "axis": {
+        "a": {
+          "e": 530856,
+          "n": 180408
+        },
+        "b": {
+          "e": 530701,
+          "n": 180671
+        },
+        "bearingDeg": 329
+      },
+      "deckWidthM": 6.5,
+      "spanM": 235,
+      "clearanceM": 8.7,
+      "source": {
+        "osmWayIds": [
+          200596577,
+          200598186
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Blackfriars Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "blackfriars",
+      "chainM": 61886,
+      "axis": {
+        "a": {
+          "e": 531649,
+          "n": 180550
+        },
+        "b": {
+          "e": 531647,
+          "n": 180842
+        },
+        "bearingDeg": 360
+      },
+      "deckWidthM": 10,
+      "spanM": 225,
+      "clearanceM": 7,
+      "source": {
+        "osmWayIds": [
+          227377667,
+          413851675
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Blackfriars Railway Bridge",
+      "kind": "rail",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "blackfriars-rail",
+      "chainM": 61962,
+      "axis": {
+        "a": {
+          "e": 531724,
+          "n": 180550
+        },
+        "b": {
+          "e": 531725,
+          "n": 180840
+        },
+        "bearingDeg": 0
+      },
+      "deckWidthM": 25,
+      "spanM": 223,
+      "clearanceM": 7,
+      "source": {
+        "osmWayIds": [
+          24936317,
+          154246738,
+          365171833,
+          365171835
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Millennium Bridge",
+      "kind": "foot",
+      "archetype": "suspension",
+      "group": null,
+      "curatedSlug": "millennium-foot",
+      "chainM": 62293,
+      "axis": {
+        "a": {
+          "e": 532052,
+          "n": 180548
+        },
+        "b": {
+          "e": 532056,
+          "n": 180802
+        },
+        "bearingDeg": 1
+      },
+      "deckWidthM": 4,
+      "spanM": 194,
+      "clearanceM": 10.5,
+      "source": {
+        "osmWayIds": [
+          7225371
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Southwark Bridge",
+      "kind": "road",
+      "archetype": "arch",
+      "group": null,
+      "curatedSlug": "southwark",
+      "chainM": 62614,
+      "axis": {
+        "a": {
+          "e": 532329,
+          "n": 180494
+        },
+        "b": {
+          "e": 532402,
+          "n": 180711
+        },
+        "bearingDeg": 19
+      },
+      "deckWidthM": 10,
+      "spanM": 169,
+      "clearanceM": 7.4,
+      "source": {
+        "osmWayIds": [
+          2700151
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Cannon Street Railway Bridge",
+      "kind": "rail",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "cannon-street-rail",
+      "chainM": 62779,
+      "axis": {
+        "a": {
+          "e": 532515,
+          "n": 180444
+        },
+        "b": {
+          "e": 532535,
+          "n": 180676
+        },
+        "bearingDeg": 5
+      },
+      "deckWidthM": 11,
+      "spanM": 173,
+      "clearanceM": 7,
+      "source": {
+        "osmWayIds": [
+          3978945,
+          82770815,
+          82770867,
+          111786030,
+          140208768,
+          140208769,
+          140208770,
+          140208771,
+          622994245,
+          622994249,
+          1028919313,
+          1028919316,
+          1028919317
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "London Bridge",
+      "kind": "road",
+      "archetype": "beam-girder",
+      "group": null,
+      "curatedSlug": "london",
+      "chainM": 63069,
+      "axis": {
+        "a": {
+          "e": 532784,
+          "n": 180382
+        },
+        "b": {
+          "e": 532834,
+          "n": 180635
+        },
+        "bearingDeg": 11
+      },
+      "deckWidthM": 10,
+      "spanM": 197,
+      "clearanceM": 8.9,
+      "source": {
+        "osmWayIds": [
+          3709270,
+          849624791
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Tower Bridge",
+      "kind": "road",
+      "archetype": "bascule",
+      "group": null,
+      "curatedSlug": "tower",
+      "chainM": 63971,
+      "axis": {
+        "a": {
+          "e": 533613,
+          "n": 180113
+        },
+        "b": {
+          "e": 533732,
+          "n": 180416
+        },
+        "bearingDeg": 21
+      },
+      "deckWidthM": 18,
+      "spanM": 250,
+      "clearanceM": 8.6,
+      "source": {
+        "osmWayIds": [
+          97440715
+        ],
+        "nameFrom": "curated"
+      }
+    },
+    {
+      "name": "Queen Elizabeth II Bridge",
+      "kind": "road",
+      "archetype": "cable-stayed",
+      "group": null,
+      "curatedSlug": "qe2",
+      "chainM": 95561,
+      "axis": {
+        "a": {
+          "e": 556768,
+          "n": 175935
+        },
+        "b": {
+          "e": 557232,
+          "n": 176830
+        },
+        "bearingDeg": 27
+      },
+      "deckWidthM": 20,
+      "spanM": 776,
+      "clearanceM": 54,
+      "source": {
+        "osmWayIds": [
+          20003982
+        ],
+        "nameFrom": "curated"
+      }
+    }
+  ]
+}
