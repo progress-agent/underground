@@ -7,7 +7,7 @@ import {
   generateUndersideGrainTexture,
   generateUndersideNormalMap,
 } from './textures.js';
-import { RENDER_ORDER } from './render-layers.js';
+import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 
 // BNG reference point for the scene ORIGIN (51.5074°N, 0.1278°W)
 // Trafalgar Square ≈ TQ 300 804 ≈ E 530000, N 180400 in British National Grid
@@ -205,23 +205,36 @@ export function carveRiverChannel(
   const terrainW = neSceneX - swSceneX;
   const terrainH = swSceneZ - neSceneZ;
 
-  // Edge shelf (10Jul26f "swollen river" fix): no in-channel vertex within one
-  // vertex-cell diagonal of the waterline may sit below ~riverLevelM. At 512^2
-  // the cells are ~137x98m; bilinear interpolation from a bed vertex (down to
-  // riverLevelM - 14 at Greenwich) to a bank vertex smears sub-water terrain up
-  // to a full cell BEYOND the waterline, exposing the water volume's side walls
-  // (8-11m proud of adjacent land = the "swollen/aqueduct" read). Any vertex
-  // whose cell can cross the waterline goes on a shelf just below the plane;
-  // true bathymetric depth survives only where dist <= halfW - edgeBand.
+  // Edge shelf (10Jul26f "swollen river" fix; re-derived 11Jul26s "water low"
+  // fix). The 512^2 grid's ~137x98m cells cannot hold a sharp waterline: the
+  // shelf/bank transition cell renders as an artefact on whichever side of the
+  // waterline it sits. v1 (shelf inside, bank floor 3m OD at the first outside
+  // vertex) smeared 30-70m bands of ABOVE-water terrain INTO the channel —
+  // Jordan's "water levels reading low" mudflats. The shelf therefore extends
+  // one cell-diagonal BEYOND the waterline so the shelf->bank interpolation
+  // cell lies fully OUTSIDE the water volume: the waterline cell renders flat
+  // and submerged, and the beach rises outside the volume from just below the
+  // surface (worst case ~0.25m of exposed volume side wall vs the old 8-11m
+  // "swollen" walls or the 3m OD mud bands).
+  //
+  // CRITICAL: the shelf is derived from the RENDERED water top — the volume
+  // renders at riverLevelM*VE + WATER_LIFT (z-fight lift, render-layers.js),
+  // an effective 2.4m OD, not the 2.0m data constant. A shelf pinned to the
+  // data plane (v1: 1.85m OD) sat 0.55m under the rendered surface while the
+  // 3m bank floor stood 0.6m proud of it.
+  // True bathymetric depth still survives only where dist <= halfW - edgeBand.
   const cellW = terrainW / (vertexCols - 1);
   const cellH = terrainH / (vertexRows - 1);
   const edgeBandM = Math.hypot(cellW, cellH);   // one vertex-cell diagonal
-  const shelfElevM = riverLevelM - 0.15;        // just below the water plane
+  const waterTopMOD = riverLevelM + WATER_LIFT / VERTICAL_EXAGGERATION;
+  const shelfElevM = waterTopMOD - 0.25;        // just below the RENDERED surface
 
   // ── Spatial bucketing: group segments by X-range for O(1) lookup ──
   const BUCKET_SIZE = 500; // metres
-  const minX = swSceneX - falloffM;
-  const maxX = neSceneX + falloffM;
+  // Slack must cover the full influence radius: halfW + edgeBand + falloff.
+  const reachSlackM = falloffM + edgeBandM;
+  const minX = swSceneX - reachSlackM;
+  const maxX = neSceneX + reachSlackM;
   const bucketCount = Math.ceil((maxX - minX) / BUCKET_SIZE) + 1;
   const buckets = new Array(bucketCount);
   for (let i = 0; i < bucketCount; i++) buckets[i] = [];
@@ -230,8 +243,8 @@ export function carveRiverChannel(
   for (let s = 0; s < riverSegments.length - 1; s++) {
     const a = riverSegments[s];
     const b = riverSegments[s + 1];
-    const segMinX = Math.min(a.x, b.x) - Math.max(a.halfW, b.halfW) - falloffM;
-    const segMaxX = Math.max(a.x, b.x) + Math.max(a.halfW, b.halfW) + falloffM;
+    const segMinX = Math.min(a.x, b.x) - Math.max(a.halfW, b.halfW) - reachSlackM;
+    const segMaxX = Math.max(a.x, b.x) + Math.max(a.halfW, b.halfW) + reachSlackM;
     const b0 = Math.max(0, Math.floor((segMinX - minX) / BUCKET_SIZE));
     const b1 = Math.min(bucketCount - 1, Math.floor((segMaxX - minX) / BUCKET_SIZE));
     for (let bi = b0; bi <= b1; bi++) {
@@ -300,17 +313,19 @@ export function carveRiverChannel(
       const idx = row * vertexCols + col;
       const orig = elevations[idx];
 
-      if (bestDist <= bestHalfW) {
+      if (bestDist <= bestHalfW + edgeBandM) {
         if (bestDist <= bestHalfW - edgeBandM) {
           // Deep channel interior: full carve to the bathymetric bed.
           elevations[idx] = Math.min(orig, riverLevelM - bestDepthM);
         } else {
-          // Edge shelf: ASSIGN (not Math.min) so raw DEM water pixels that
-          // already sit below the plane are lifted onto the shelf too.
+          // Edge shelf — extends one cell-diagonal PAST the waterline (see
+          // header note) so the rise to bank level happens in a cell that is
+          // fully outside the water volume. ASSIGN (not Math.min) so raw DEM
+          // water pixels that already sit below the plane are lifted too.
           elevations[idx] = shelfElevM;
         }
         carved++;
-      } else if (bestDist < bestHalfW + falloffM) {
+      } else if (bestDist < bestHalfW + edgeBandM + falloffM) {
         // Falloff zone: blend from BANK level to original — never from the bed.
         // Blending from carveElev here dragged riverside land metres below the
         // water surface (the 10Jul26f "flooded Thames": buildings placed on
@@ -321,7 +336,7 @@ export function carveRiverChannel(
         // at the channel edge, tapering to orig at falloffM — a Math.min here
         // left sub-water DEM pixels beside the channel (swollen-river residual).
         const bankElev = riverLevelM + bankFreeboardM;
-        const blend = smoothstep((bestDist - bestHalfW) / falloffM);
+        const blend = smoothstep((bestDist - (bestHalfW + edgeBandM)) / falloffM);
         const blended = bankElev + blend * (orig - bankElev);
         elevations[idx] = blended;
         carved++;

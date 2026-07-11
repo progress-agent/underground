@@ -114,14 +114,23 @@ test('bridges: decks sit above Thames water and landmark heights read correctly'
       samples[slug] = {
         a: u.getTerrainMeshSurfaceY(rec.deckEndpoints.a),
         b: u.getTerrainMeshSurfaceY(rec.deckEndpoints.b),
+        aInRiver: u.isInThames(rec.deckEndpoints.a.x, rec.deckEndpoints.a.z),
+        bInRiver: u.isInThames(rec.deckEndpoints.b.x, rec.deckEndpoints.b.z),
       };
     }
     return samples;
   });
 
+  // Landing contract (11Jul26s shoreline re-derivation): a deck end lands
+  // OUTSIDE the water volume on terrain at beach level or higher. The carve's
+  // edge shelf sits ~1.25 scene units below the rendered water top just
+  // beyond the waterline, so "dry land" starts at waterSurfaceY - 1.5, not
+  // above the surface.
   for (const [slug, entry] of Object.entries(state.entries)) {
-    expect(deckEndTerrain[slug].a, `${slug} deck end A lands on bank`).toBeGreaterThan(entry.waterSurfaceY);
-    expect(deckEndTerrain[slug].b, `${slug} deck end B lands on bank`).toBeGreaterThan(entry.waterSurfaceY);
+    expect(deckEndTerrain[slug].aInRiver, `${slug} deck end A is outside the river`).toBe(false);
+    expect(deckEndTerrain[slug].bInRiver, `${slug} deck end B is outside the river`).toBe(false);
+    expect(deckEndTerrain[slug].a, `${slug} deck end A lands on bank`).toBeGreaterThan(entry.waterSurfaceY - 1.5);
+    expect(deckEndTerrain[slug].b, `${slug} deck end B lands on bank`).toBeGreaterThan(entry.waterSurfaceY - 1.5);
   }
 
   const towerBounds = await objectWorldBounds(page, 'tower');

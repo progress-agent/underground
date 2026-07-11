@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { WATER_LEVEL_M } from './thames.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
+import { isInThames } from './thames-mask.js';
 
 const BNG_REF_E = 530000;
 const BNG_REF_N = 180400;
@@ -110,7 +111,13 @@ function probeDeckEndExtension(bridge, frame, getTerrainMeshSurfaceY, waterSurfa
     return { extensionM: 0, status: 'terrain-unavailable' };
   }
 
-  const thresholdY = waterSurfaceY + BANK_LANDING_MARGIN_Y;
+  // Landing criterion (re-derived 11Jul26s with the carve's extended edge
+  // shelf): terrain height alone can no longer tell in-channel shelf from the
+  // dry beach ring — both sit just below the rendered water top. A deck end
+  // has landed when the sample is OUTSIDE the Thames mask (past the water
+  // volume's edge) on terrain at beach level or higher. The height floor
+  // guards against mask gaps over open water.
+  const thresholdY = waterSurfaceY - 1.5;
   let lastValidDistance = 0;
   let runStartDistance = null;
   let previousLanded = false;
@@ -128,7 +135,7 @@ function probeDeckEndExtension(bridge, frame, getTerrainMeshSurfaceY, waterSurfa
     }
 
     lastValidDistance = d;
-    const landed = terrainY > thresholdY;
+    const landed = !isInThames(world.x, world.z) && terrainY > thresholdY;
     if (landed) {
       if (!previousLanded) runStartDistance = d;
       if (previousLanded) {
