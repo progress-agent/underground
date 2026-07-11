@@ -20,6 +20,7 @@ import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { createBridges } from './bridges.js';
+import { createOverground } from './overground.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
@@ -792,6 +793,17 @@ const thamesDataPromise = loadThamesData();
         console.warn('Could not create Thames bridges:', err.message);
       });
 
+      // Overground surface rail — needs the terrain mesh for at-grade Y (D-019)
+      createOverground({ getTerrainMeshSurfaceY }).then(group => {
+        if (group) {
+          overgroundGroup = group;
+          scene.add(overgroundGroup);
+          dbg('Overground rail added to scene');
+        }
+      }).catch(err => {
+        console.warn('Could not create Overground rail:', err.message);
+      });
+
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
       reservoirDataPromise.then(data => {
         if (data) {
@@ -1199,6 +1211,9 @@ const canalDataPromise = loadCanalData();
 
 // ---------- Thames bridges ----------
 let bridgesGroup = null;
+
+// ---------- Overground surface rail (D-019) ----------
+let overgroundGroup = null;
 
 // ---------- Sewer Tunnels (underground infrastructure) ----------
 let sewersMesh = null;
@@ -2867,6 +2882,9 @@ function tick() {
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
 
+  // Overground trains (simple ping-pong runners, distance-culled)
+  if (overgroundGroup) overgroundGroup.userData.update(dt, camera);
+
   // Update living-water shader uniforms.
   updateWater(dt);
 
@@ -2932,6 +2950,7 @@ if (import.meta.env.DEV) {
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     isInThames,
+    get overground() { return overgroundGroup; },
     water: getWaterTuningSurface(),
     get waterParams() { return getWaterTuningSurface().params; },
     setWaterParams: (next) => getWaterTuningSurface().setWaterParams(next),
