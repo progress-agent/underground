@@ -22,6 +22,9 @@
 export const RENDER_ORDER = {
   TERRAIN: -1,        // terrain.js top + underside meshes — always drawn first
   SURFACE_ROAD: 0,    // m25.js road ribbon (opaque; value kept for documentation)
+  SURFACE_BRIDGE: 0,  // bridges.js Thames crossings (opaque above-ground features;
+                       // shares the road tier because depth testing, not
+                       // transparency sorting, resolves their visibility)
   GEOLOGY: 1,         // geology.js chalk boundary plane + wireframe + marker.
                        // Deliberate choice: infra tunnels (tier 2) draw AFTER
                        // geology so deep infra (e.g. Lee Tunnel at 98m, below

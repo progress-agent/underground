@@ -19,6 +19,7 @@ import { buildCrownRibbons } from './crown-ribbon.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity } from './geology.js';
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
+import { createBridges } from './bridges.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
@@ -781,6 +782,16 @@ const thamesDataPromise = loadThamesData();
         });
       }
 
+      createBridges({ getTerrainMeshSurfaceY }).then(group => {
+        if (group) {
+          bridgesGroup = group;
+          scene.add(bridgesGroup);
+          dbg('Bridges added to scene');
+        }
+      }).catch(err => {
+        console.warn('Could not create Thames bridges:', err.message);
+      });
+
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
       reservoirDataPromise.then(data => {
         if (data) {
@@ -1185,6 +1196,9 @@ const reservoirDataPromise = loadReservoirData();
 // Data fetch starts immediately; creation deferred until terrain is ready (see terrain .then() chain)
 let canalsMesh = null;
 const canalDataPromise = loadCanalData();
+
+// ---------- Thames bridges ----------
+let bridgesGroup = null;
 
 // ---------- Sewer Tunnels (underground infrastructure) ----------
 let sewersMesh = null;
@@ -2953,6 +2967,8 @@ if (import.meta.env.DEV) {
     // (idempotent; runs in normal boot whenever terrain + network both load).
     snapAllTubesToTerrain,
     get thamesProfileSampler() { return thamesProfileSampler; },
+    get bridgesGroup() { return bridgesGroup; },
+    get bridgeRegistry() { return bridgesGroup?.userData?.registry ?? new Map(); },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
     // Sum of populated instance counts across all per-tile building InstancedMeshes.
