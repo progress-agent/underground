@@ -5,9 +5,17 @@
 // Route splits at Whitechapel: south-east to Abbey Wood, north-east to Shenfield
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
-import { createCrownRibbonGeometry, createRibbonMaterial, ELIZABETH_LINE_COLOUR } from './crown-ribbon.js';
+import {
+  CASING_DROP,
+  createCasingGeometries,
+  createCasingMaterial,
+  createCrownRibbonGeometry,
+  createRibbonMaterial,
+  ELIZABETH_LINE_COLOUR,
+} from './crown-ribbon.js';
 
 let crossrailData = null;
 
@@ -116,6 +124,17 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
     ribbonMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     ribbonMesh.userData = { ...mesh.userData }; // pickable as 'crossrail' with branch name
     group.add(ribbonMesh);
+
+    const casingGeos = createCasingGeometries(curve, { segments, baseRadius: radius - 0.1 - CASING_DROP });
+    const casingGeo = mergeGeometries(casingGeos, false);
+    for (const g of casingGeos) g.dispose(); // merge copies data
+    const casingMat = createCasingMaterial();
+    injectInfraHaze(casingMat, HAZE_BAND);
+    const casingMesh = new THREE.Mesh(casingGeo, casingMat);
+    casingMesh.name = 'ribbon-casing:elizabeth';
+    casingMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
+    casingMesh.userData = { ...mesh.userData, _baseEmissive: 0.15, _hoverEmissive: 0.3 };
+    group.add(casingMesh);
   };
 
   const mainPts = data.branches['main'] || [];

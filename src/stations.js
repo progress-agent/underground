@@ -15,7 +15,7 @@ let _labelMaxDistance = 9000;
 // legibility floor. FLAG: 6px is at the floor for an antiqua face — Jordan
 // judges by screenshot; expect a possible nudge of SURF_MIN_PX to 7.
 const SURF_BASE_PX = 5.5;
-const SURF_MIN_PX = 6;
+const SURF_MIN_PX = 7;
 // Underground font: was lerp(13, 8) over the fade window. Halved, with a hard
 // floor applied AFTER the per-station size multiplier.
 const UG_FONT_NEAR_PX = 6.5;

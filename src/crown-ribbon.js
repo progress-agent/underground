@@ -50,7 +50,7 @@ export const LINE_RIBBON_LIFT = {
 // metropolitan 0x9b0056 (~0.076), district 0x00782a (~0.13 borderline),
 // elizabeth 0x6950a1 (~0.12 borderline). Extending is a one-token change —
 // screenshot a clay-depth pose first and let Jordan decide.
-export const CASING_LINES = new Set(['northern', 'jubilee']);
+export const CASING_LINES = new Set(['northern', 'jubilee', 'piccadilly', 'metropolitan', 'district', 'elizabeth']); // crossrail.js consumes Elizabeth casing directly.
 
 // TfL canonical Elizabeth line purple — NOT the legacy gold (0xffd300) used
 // by the crossrail tunnel body/glow.
