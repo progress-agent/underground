@@ -6,6 +6,10 @@ import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 
 const BNG_REF_E = 530000;
 const BNG_REF_N = 180400;
+const BANK_SAMPLE_STEP_M = 12;
+const BANK_LANDING_MARGIN_Y = 0.6 * VERTICAL_EXAGGERATION;
+const BANK_OVERSHOOT_M = 25;
+const BANK_MAX_EXTENSION_M = 450;
 
 const COLOURS_BY_SLUG = {
   hammersmith: { steel: 0x315f4d },
@@ -101,6 +105,79 @@ function worldFromLocal(frame, x, z) {
   };
 }
 
+function probeDeckEndExtension(bridge, frame, getTerrainMeshSurfaceY, waterSurfaceY, side) {
+  if (typeof getTerrainMeshSurfaceY !== 'function') {
+    return { extensionM: 0, status: 'terrain-unavailable' };
+  }
+
+  const thresholdY = waterSurfaceY + BANK_LANDING_MARGIN_Y;
+  let lastValidDistance = 0;
+  let runStartDistance = null;
+  let previousLanded = false;
+
+  for (let d = 0; d <= BANK_MAX_EXTENSION_M; d += BANK_SAMPLE_STEP_M) {
+    const localX = side * (frame.length / 2 + d);
+    const world = worldFromLocal(frame, localX, 0);
+    const terrainY = getTerrainMeshSurfaceY({ x: world.x, z: world.z });
+
+    if (!Number.isFinite(terrainY)) {
+      return {
+        extensionM: lastValidDistance,
+        status: 'null-terrain',
+      };
+    }
+
+    lastValidDistance = d;
+    const landed = terrainY > thresholdY;
+    if (landed) {
+      if (!previousLanded) runStartDistance = d;
+      if (previousLanded) {
+        return {
+          extensionM: Math.min(runStartDistance + BANK_OVERSHOOT_M, BANK_MAX_EXTENSION_M),
+          status: 'landed',
+        };
+      }
+    } else {
+      runStartDistance = null;
+    }
+    previousLanded = landed;
+  }
+
+  console.warn(`Bridge deck bank extension hit ${BANK_MAX_EXTENSION_M}m cap: ${bridge.name}`);
+  return {
+    extensionM: BANK_MAX_EXTENSION_M,
+    status: 'cap',
+  };
+}
+
+function resolveDeckSpan(bridge, frame, getTerrainMeshSurfaceY, waterSurfaceY) {
+  const aProbe = probeDeckEndExtension(bridge, frame, getTerrainMeshSurfaceY, waterSurfaceY, -1);
+  const bProbe = probeDeckEndExtension(bridge, frame, getTerrainMeshSurfaceY, waterSurfaceY, 1);
+  const aX = -frame.length / 2 - aProbe.extensionM;
+  const bX = frame.length / 2 + bProbe.extensionM;
+  const centerX = (aX + bX) / 2;
+  const length = bX - aX;
+
+  return {
+    aX,
+    bX,
+    centerX,
+    length,
+    endpoints: {
+      a: worldFromLocal(frame, aX, 0),
+      b: worldFromLocal(frame, bX, 0),
+    },
+    extensionsM: {
+      a: aProbe.extensionM,
+      b: bProbe.extensionM,
+    },
+    statuses: {
+      a: aProbe.status,
+      b: bProbe.status,
+    },
+  };
+}
+
 function footingY(getTerrainMeshSurfaceY, frame, x, z, deckBottomY) {
   const world = worldFromLocal(frame, x, z);
   const y = getTerrainMeshSurfaceY?.({ x: world.x, z: world.z });
@@ -130,14 +207,22 @@ function addPier(geoms, getTerrainMeshSurfaceY, frame, x, z, widthX, depthZ, dec
   geoms.push(box(widthX, height, depthZ, x, foot + height / 2, z));
 }
 
-function addDeck(geoms, length, width, deckY, thicknessY, isRail = false) {
+function addDeck(geoms, length, width, deckY, thicknessY, isRail = false, x = 0, z = 0) {
   const depth = isRail ? Math.max(3.2, width) : width;
-  geoms.push(box(length, thicknessY, depth, 0, deckY, 0));
+  geoms.push(box(length, thicknessY, depth, x, deckY, z));
 
   if (isRail) {
     const railY = deckY + thicknessY * 0.72;
-    geoms.push(box(length, thicknessY * 0.55, 0.9, 0, railY, depth / 2 - 0.35));
-    geoms.push(box(length, thicknessY * 0.55, 0.9, 0, railY, -depth / 2 + 0.35));
+    geoms.push(box(length, thicknessY * 0.55, 0.9, x, railY, z + depth / 2 - 0.35));
+    geoms.push(box(length, thicknessY * 0.55, 0.9, x, railY, z - depth / 2 + 0.35));
+  }
+}
+
+function addDeckEndPiers(geoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY, widthX = 4.4) {
+  for (const x of [deckSpan.aX, deckSpan.bX]) {
+    for (const z of deckOffsets) {
+      addPier(geoms, getTerrainMeshSurfaceY, frame, x, z, widthX, Math.min(width + 4, 24), deckBottomY);
+    }
   }
 }
 
@@ -150,11 +235,12 @@ function supportPositions(spanM, length, preferredSpacing = 55) {
 }
 
 function buildArchBridge(ctx) {
-  const { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
+  const { bridge, frame, deckSpan, deckOffsets, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
   const geoms = [];
   const length = frame.length;
   const width = Math.max(bridge.deckWidthM, bridge.kind.includes('rail') ? 11 : 8);
-  addDeck(geoms, length, width, deckY, deckThicknessY, bridge.kind.includes('rail'));
+  addDeck(geoms, deckSpan.length, width, deckY, deckThicknessY, bridge.kind.includes('rail'), deckSpan.centerX);
+  addDeckEndPiers(geoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY, 4.2);
 
   const supports = supportPositions(bridge.spanM, length, 42);
   for (const x of supports) {
@@ -182,16 +268,17 @@ function buildArchBridge(ctx) {
 }
 
 function buildBeamBridge(ctx, options = {}) {
-  const { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
+  const { bridge, frame, deckSpan, deckOffsets, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
   const geoms = [];
   const isRail = bridge.kind.includes('rail');
   const length = frame.length;
   const width = Math.max(bridge.deckWidthM, isRail ? 11 : 9);
   const thickness = deckThicknessY * (options.cantilever ? 1.55 : 1.25);
 
-  addDeck(geoms, length, width, deckY, thickness, isRail);
-  geoms.push(box(length, thickness * 1.15, 0.75, 0, deckY - thickness * 0.25, width / 2 + 0.45));
-  geoms.push(box(length, thickness * 1.15, 0.75, 0, deckY - thickness * 0.25, -width / 2 - 0.45));
+  addDeck(geoms, deckSpan.length, width, deckY, thickness, isRail, deckSpan.centerX);
+  geoms.push(box(deckSpan.length, thickness * 1.15, 0.75, deckSpan.centerX, deckY - thickness * 0.25, width / 2 + 0.45));
+  geoms.push(box(deckSpan.length, thickness * 1.15, 0.75, deckSpan.centerX, deckY - thickness * 0.25, -width / 2 - 0.45));
+  addDeckEndPiers(geoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY);
 
   const supports = supportPositions(bridge.spanM, length, 60);
   for (const x of supports.slice(1, -1)) {
@@ -205,12 +292,13 @@ function buildBeamBridge(ctx, options = {}) {
 }
 
 function buildSuspensionBridge(ctx) {
-  const { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
+  const { bridge, frame, deckSpan, deckOffsets, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
   const solidGeoms = [];
   const cableGeoms = [];
   const length = frame.length;
   const width = Math.max(bridge.deckWidthM, 4);
-  addDeck(solidGeoms, length, width, deckY, deckThicknessY, false);
+  addDeck(solidGeoms, deckSpan.length, width, deckY, deckThicknessY, false, deckSpan.centerX);
+  addDeckEndPiers(solidGeoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY, 3.6);
 
   const towerHeightM = {
     hammersmith: 22,
@@ -256,7 +344,7 @@ function buildSuspensionBridge(ctx) {
 }
 
 function buildCableStayedBridge(ctx) {
-  const { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY, deckOffsets } = ctx;
+  const { bridge, frame, deckSpan, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY, deckOffsets } = ctx;
   const solidGeoms = [];
   const cableGeoms = [];
   const length = frame.length;
@@ -269,11 +357,9 @@ function buildCableStayedBridge(ctx) {
     : [-Math.min(length * 0.22, bridge.spanM * 0.22), Math.min(length * 0.22, bridge.spanM * 0.22)];
 
   for (const offset of deckOffsets) {
-    addDeck(solidGeoms, length, width, deckY, deckThicknessY, false);
-    if (offset !== 0) {
-      solidGeoms[solidGeoms.length - 1].translate(0, 0, offset);
-    }
+    addDeck(solidGeoms, deckSpan.length, width, deckY, deckThicknessY, false, deckSpan.centerX, offset);
   }
+  addDeckEndPiers(solidGeoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY, isQe2 ? 8 : 3.6);
 
   for (const x of pylonXs) {
     addPier(solidGeoms, getTerrainMeshSurfaceY, frame, x, 0, isQe2 ? 8 : 3.2, isQe2 ? 7 : 3.2, deckBottomY);
@@ -300,7 +386,7 @@ function buildCableStayedBridge(ctx) {
 }
 
 function buildTowerBridge(ctx) {
-  const { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
+  const { bridge, frame, deckSpan, deckOffsets, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
   const stoneGeoms = [];
   const steelGeoms = [];
   const length = frame.length;
@@ -308,9 +394,10 @@ function buildTowerBridge(ctx) {
   const towerX = Math.min(length * 0.28, bridge.spanM * 0.3);
   const towerHeight = 44 * VERTICAL_EXAGGERATION;
 
-  steelGeoms.push(box(length, deckThicknessY * 1.25, width, 0, deckY, 0));
+  steelGeoms.push(box(deckSpan.length, deckThicknessY * 1.25, width, deckSpan.centerX, deckY, 0));
   steelGeoms.push(box(towerX * 1.72, deckThicknessY * 1.5, 1.1, 0, deckY + deckThicknessY, width / 2 + 0.8));
   steelGeoms.push(box(towerX * 1.72, deckThicknessY * 1.5, 1.1, 0, deckY + deckThicknessY, -width / 2 - 0.8));
+  addDeckEndPiers(stoneGeoms, getTerrainMeshSurfaceY, frame, deckSpan, deckOffsets, width, deckBottomY, 7);
 
   for (const x of [-towerX, towerX]) {
     addPier(stoneGeoms, getTerrainMeshSurfaceY, frame, x, 0, 17, width + 8, deckBottomY);
@@ -336,9 +423,11 @@ function createBridgeMeshes(bridge, getTerrainMeshSurfaceY) {
   const deckY = (WATER_LEVEL_M + bridge.clearanceM) * VERTICAL_EXAGGERATION + WATER_LIFT;
   const deckThicknessY = 1.2 * VERTICAL_EXAGGERATION;
   const deckBottomY = deckY - deckThicknessY / 2;
+  const waterSurfaceY = WATER_LEVEL_M * VERTICAL_EXAGGERATION + WATER_LIFT;
   const deckOffsets = bridge.curatedSlug === 'golden-jubilee-foot' ? [-11, 11] : [0];
   const frame = axisFrame(bridge, 0);
-  const ctx = { bridge, frame, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY, deckOffsets };
+  const deckSpan = resolveDeckSpan(bridge, frame, getTerrainMeshSurfaceY, waterSurfaceY);
+  const ctx = { bridge, frame, deckSpan, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY, deckOffsets };
 
   let parts;
   if (bridge.archetype === 'arch') parts = buildArchBridge(ctx);
@@ -389,8 +478,10 @@ function createBridgeMeshes(bridge, getTerrainMeshSurfaceY) {
     meshes,
     deckMesh: meshes.find(m => m.name.endsWith(':deck')) ?? meshes[0] ?? null,
     deckY,
-    waterSurfaceY: WATER_LEVEL_M * VERTICAL_EXAGGERATION + WATER_LIFT,
+    waterSurfaceY,
     midpoint: frame.midpoint,
+    deckEndpoints: deckSpan.endpoints,
+    deckSpan,
   };
 }
 
@@ -415,6 +506,8 @@ export async function createBridges({ getTerrainMeshSurfaceY } = {}) {
       deckY: built.deckY,
       waterSurfaceY: built.waterSurfaceY,
       midpoint: built.midpoint,
+      deckEndpoints: built.deckEndpoints,
+      deckSpan: built.deckSpan,
     });
   }
 

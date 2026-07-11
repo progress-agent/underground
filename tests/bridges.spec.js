@@ -37,6 +37,7 @@ async function bridgeState(page) {
         deckY: rec.deckY,
         waterSurfaceY: rec.waterSurfaceY,
         midpoint: rec.midpoint,
+        deckEndpoints: rec.deckEndpoints,
         deckUserData: rec.deckMesh?.userData ?? null,
         groupChildCount: rec.group?.children?.length ?? 0,
       };
@@ -104,6 +105,23 @@ test('bridges: decks sit above Thames water and landmark heights read correctly'
 
   for (const [slug, entry] of Object.entries(state.entries)) {
     expect(entry.deckY, `${slug} deck above water`).toBeGreaterThan(entry.waterSurfaceY);
+  }
+
+  const deckEndTerrain = await page.evaluate(() => {
+    const u = window.__ug;
+    const samples = {};
+    for (const [slug, rec] of u.bridgeRegistry.entries()) {
+      samples[slug] = {
+        a: u.getTerrainMeshSurfaceY(rec.deckEndpoints.a),
+        b: u.getTerrainMeshSurfaceY(rec.deckEndpoints.b),
+      };
+    }
+    return samples;
+  });
+
+  for (const [slug, entry] of Object.entries(state.entries)) {
+    expect(deckEndTerrain[slug].a, `${slug} deck end A lands on bank`).toBeGreaterThan(entry.waterSurfaceY);
+    expect(deckEndTerrain[slug].b, `${slug} deck end B lands on bank`).toBeGreaterThan(entry.waterSurfaceY);
   }
 
   const towerBounds = await objectWorldBounds(page, 'tower');
