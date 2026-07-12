@@ -358,6 +358,12 @@ function updateFpsControls(dt) {
   const sprinting = keys.has('shift') || fpsControls.flightToggle;
   const speedMult = sprinting ? fpsControls.sprintMultiplier : 1.0;
 
+  // Submerged check (12Jul26u): inside the Thames water volume the terrain
+  // query below returns the CARVED BED, so the camera reads as "above ground"
+  // at tiny altitude and the D-002 clamp pins speed to the 0.3× crawl. A
+  // submerged camera is an underground-style regime: constant base speed.
+  const submerged = isSubmergedAt(camera.position.x, camera.position.y, camera.position.z);
+
   // D-002 speed regimes (design LOCKED). Above ground, horizontal reach scales
   // with real altitude (0.3×–20× of base) so low flying is precise and high
   // flying covers ground fast. Below ground, constant base (no depth scaling) —
@@ -367,7 +373,7 @@ function updateFpsControls(dt) {
   _surfQuery.z = camera.position.z;
   const surfaceY = getTerrainMeshSurfaceY(_surfQuery);
   let regimeSpeed = moveSpeed;
-  if (surfaceY !== null && camera.position.y >= surfaceY) {
+  if (!submerged && surfaceY !== null && camera.position.y >= surfaceY) {
     const alt = (camera.position.y - surfaceY) / VERTICAL_EXAGGERATION; // real m
     regimeSpeed = moveSpeed * THREE.MathUtils.clamp(alt / 500, 0.3, 20);
   }
@@ -398,9 +404,11 @@ function updateFpsControls(dt) {
     _moveDir.normalize();
     // Single funnel for all speed (regime × sprint × substrate).
     const displacement = _moveDir.multiplyScalar(effectiveSpeed * dt);
-    // Vertical (Q/E) scaled by 0.5×VE=2.5 so real vertical speed is half of
-    // real horizontal speed (Y has VE=5, so /5 gives real metres).
-    displacement.y *= 2.5;
+    // Vertical (Q/E) parity (12Jul26u, Jordan-locked): 1.0 — ON-SCREEN
+    // scene-unit parity with horizontal. The old 2.5 factor compensated for
+    // real-metre speed under VE=5, but what the eye tracks is scene units,
+    // and unequal on-screen rates made Q/E feel sluggish next to WASD.
+    displacement.y *= 1.0;
     camera.position.add(displacement);
     controls.target.add(displacement);
   }
