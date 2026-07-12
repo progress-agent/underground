@@ -8,7 +8,7 @@ import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
-import { loadThamesData, createThamesVolume, WATER_LEVEL_M, updateWater } from './thames.js';
+import { loadThamesData, createThamesVolume, WATER_LEVEL_M, WATER_TOP_Y, updateWater } from './thames.js';
 import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
@@ -289,6 +289,20 @@ let _clayClarityRamp = ENV_CONFIG.clayClarityRamp;   // scene units above chalk 
 let _chalkClarityRamp = ENV_CONFIG.chalkClarityRamp; // scene units below chalk to full clarity
 let _clayLift = 1;      // last computed clay clarity gradient [0,1]
 let _chalkClarity = 0;  // last computed inside-chalk clarity [0,1]
+
+// ── Submerged (Thames water volume, 12Jul26u) ──────────────────────────────
+// THE single inside-the-river predicate — shared by the substrate readout,
+// the atmosphere regime, the interior-shell visibility toggle, and (build 3)
+// the speed regime. True anywhere in the Thames corridor below the rendered
+// water top (WATER_TOP_Y = 12 scene units = effective 2.4m OD). Deliberately
+// no bed check: below the carved bed inside the corridor is soil under the
+// river, which the readout has always classed WATER.
+function isSubmergedAt(x, y, z) {
+  return y < WATER_TOP_Y && isInThames(x, z);
+}
+// Last computed submerged blend [0,1] — short spatial smoothstep below the
+// water top (see tick()); drives fog/lighting/audio and __ug exposure.
+let _submergedBlend = 0;
 
 // D6: CLAY/CHALK readout hysteresis state. Persists the last flip direction
 // so the HUD label doesn't chatter when the camera sits right on the
@@ -2814,22 +2828,27 @@ function tick() {
   // chalkBlend and the visible displaced floor use, so felt/seen/read agree.
   const chalkSurfaceY = getChalkSurfaceY(camera.position.x, camera.position.z);
 
+  // Submerged first (12Jul26u): the shared isSubmergedAt predicate covers the
+  // whole water column (bed → rendered top). The old belowSurface gate was
+  // semantically inverted for water — inside the channel the terrain mesh IS
+  // the carved bed, so a camera actually IN the water read AIR and only a
+  // camera in the soil under the bed read WATER.
+  const submerged = isSubmergedAt(camera.position.x, camera.position.y, camera.position.z);
+
   let substrate = 'AIR';
-  if (belowSurface) {
-    if (isInThames(camera.position.x, camera.position.z)) {
-      substrate = 'WATER';
-      _substrateInChalk = false;
-    } else {
-      // CLAY/CHALK flip with a ~10-unit hysteresis band around chalkSurfaceY
-      // so the label doesn't chatter right at the boundary. Direction-aware:
-      // must overshoot the last-crossed side by CHALK_HYSTERESIS_HALF before
-      // flipping back.
-      const flipY = _substrateInChalk
-        ? chalkSurfaceY + CHALK_HYSTERESIS_HALF
-        : chalkSurfaceY - CHALK_HYSTERESIS_HALF;
-      _substrateInChalk = camera.position.y < flipY;
-      substrate = _substrateInChalk ? 'CHALK' : 'CLAY';
-    }
+  if (submerged) {
+    substrate = 'WATER';
+    _substrateInChalk = false;
+  } else if (belowSurface) {
+    // CLAY/CHALK flip with a ~10-unit hysteresis band around chalkSurfaceY
+    // so the label doesn't chatter right at the boundary. Direction-aware:
+    // must overshoot the last-crossed side by CHALK_HYSTERESIS_HALF before
+    // flipping back.
+    const flipY = _substrateInChalk
+      ? chalkSurfaceY + CHALK_HYSTERESIS_HALF
+      : chalkSurfaceY - CHALK_HYSTERESIS_HALF;
+    _substrateInChalk = camera.position.y < flipY;
+    substrate = _substrateInChalk ? 'CHALK' : 'CLAY';
   } else {
     _substrateInChalk = false;
   }
@@ -2855,6 +2874,21 @@ function tick() {
   // outside the disc there is no modelled chalk interior.
   _chalkClarity = THREE.MathUtils.clamp(
     (chalkSurfaceY - camera.position.y) / _chalkClarityRamp, 0, 1) * insideness;
+
+  // ── Submerged blend (12Jul26u) ─────────────────────────────────────────
+  // Short SPATIAL smoothstep below the rendered water top — same pattern as
+  // every other regime blend (chalkBlend ±30, clarity ramps). The 2-scene-unit
+  // (0.4 real m) ramp kills half-in-half-out near-plane flicker at the water
+  // plane while still reading as an instant plunge. 0 outside the corridor.
+  _submergedBlend = submerged
+    ? THREE.MathUtils.smoothstep(WATER_TOP_Y - camera.position.y, 0, 2)
+    : 0;
+
+  // Interior shell: solid opaque bounds (surface underside + walls + endcaps)
+  // rendered ONLY while the camera is inside the volume — outside stays
+  // pixel-identical because the shell simply does not draw.
+  const _shell = thamesMesh?.userData?.interiorShell;
+  if (_shell) _shell.visible = submerged;
 
   // D-002 chalk slowdown: 1.0 (clay/air) → 0.5 (full chalk), lerped by chalkBlend
   // so it never snaps. Drives keyboard flight (movement funnel) AND mouse
@@ -2895,8 +2929,10 @@ function tick() {
       layers.stationsLayer.update({
         camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25,
         // Inside chalk every label hides (Item B); hover tooltips live in the
-        // separate #hoverTip path and stay active.
-        hideForChalk: _chalkClarity > 0.5,
+        // separate #hoverTip path and stay active. Submerged (12Jul26u) hides
+        // them too — HTML overlays are not fogged, so labels would otherwise
+        // shine through the opaque interior shell walls.
+        hideForChalk: _chalkClarity > 0.5 || _submergedBlend > 0.5,
       });
       updateCallCount++;
     }
@@ -2908,12 +2944,12 @@ function tick() {
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
     updateEnvironment(camera, scene, skyDome, renderer,
-      { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity });
+      { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend });
   }
 
   // Update lighting based on camera position
   updateLighting(camera, atmosphereLights,
-    { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity });
+    { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend });
 
   // Inside-chalk clarity: release the chalk sheet (opacity + depthWrite) so
   // the network above is visible looking up. 0-gated above the chalk surface.
@@ -2931,6 +2967,7 @@ function tick() {
       isUnderground,
       surfaceY: surfaceYAtCamera,
       focalLength: lensSystem.getFocalLength(),
+      submergedBlend: _submergedBlend,
     });
   }
 
@@ -2950,6 +2987,12 @@ if (import.meta.env.DEV) {
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     isInThames,
+    // Submerged regime (12Jul26u): shared inside-the-river predicate + signals.
+    isSubmergedAt,
+    WATER_TOP_Y,
+    get submergedBlend() { return _submergedBlend; },
+    get thamesInteriorShell() { return thamesMesh?.userData?.interiorShell ?? null; },
+    get thamesMesh() { return thamesMesh; },
     get overground() { return overgroundGroup; },
     water: getWaterTuningSurface(),
     get waterParams() { return getWaterTuningSurface().params; },

@@ -782,6 +782,13 @@ export function updateAudio(dt, state) {
     u = 0.7;
   }
 
+  // Submerged in the Thames (12Jul26u): isUnderground is false inside the
+  // water column (the camera is above the carved bed), so fold the submerged
+  // blend into u here — reusing the existing underground duck + lowpass sweep
+  // as the underwater muffle. isUnderground itself is deliberately NOT
+  // flipped: it also drives wind gating and spatial-source LOD.
+  u = Math.max(u, (state.submergedBlend || 0) * 0.8);
+
   // ── Ambient bed crossfading ──
   // Surface: full above, fades out underground
   surfaceGain.gain.setTargetAtTime(1.0 - u, t, TAU);

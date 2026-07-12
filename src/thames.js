@@ -10,6 +10,10 @@ import { createWaterMaterial, updateWater } from './water-material.js';
 
 // Water surface level in metres OD — flat water surface
 export const WATER_LEVEL_M = 2;
+// Rendered water top in scene units (2*5 + 2 = 12 → effective 2.4m OD).
+// Single source of truth for "is the camera below the water surface" —
+// shared by the submerged predicate in main.js and the volume top face here.
+export const WATER_TOP_Y = WATER_LEVEL_M * VERTICAL_EXAGGERATION + WATER_LIFT;
 export { updateWater };
 
 // BNG reference — must match terrain.js (Trafalgar Square ≈ TQ 300 804)
@@ -55,7 +59,8 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   } = options;
 
   const VE = VERTICAL_EXAGGERATION;
-  const SURFACE_LIFT = WATER_LIFT; // small lift above carved terrain to prevent z-fighting (render-layers.js)
+  // Top face sits at WATER_TOP_Y = WATER_LEVEL_M*VE + WATER_LIFT (render-layers.js)
+  // — the WATER_LIFT term keeps it above the carved terrain shelf (no z-fighting).
 
   // ── 1. Convert all points (no terrain filtering needed) ───────────────
   const validPoints = [];
@@ -113,7 +118,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     const rightZ = pos.z - normZ * halfW;
 
     // Flat water surface at constant level (terrain is carved to match)
-    const topY = WATER_LEVEL_M * VE + SURFACE_LIFT;
+    const topY = WATER_TOP_Y;
     const bottomY = WATER_LEVEL_M * VE - prof.d * VE;
 
     const base = i * 4 * 3;
@@ -205,7 +210,85 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   mesh.userData = { type: 'thames', name: 'River Thames' };
   mesh.renderOrder = RENDER_ORDER.SURFACE_WATER; // draw after terrain so top face wins depth test at boundaries
 
-  console.log(`Thames volume: ${validPoints.length} data points → ${vertCount} vertices, ${triCount} triangles`);
+  // ── 8. Interior shell (submerged regime, 12Jul26u) ───────────────────
+  // A separate OPAQUE BackSide mesh giving the inside of the water volume
+  // solid bounds: underside of the surface above + both side walls + endcaps.
+  // No bottom face — the carved terrain bed (FrontSide topMat) is the floor
+  // and already reads correctly from inside; a shell bottom would z-fight it
+  // and occlude bathymetry pockets where the DEM carved deeper than the
+  // profile. BackSide means only interior-facing surfaces rasterise, and the
+  // mesh is additionally visibility-gated in main.js by the shared
+  // isSubmergedAt predicate — so the OUTSIDE view is pixel-identical to the
+  // shell-less build (it simply never renders for an exterior camera).
+  //
+  // The shell top sits SHELL_TOP_DROP below the translucent top face so the
+  // two are never coplanar (the DoubleSide water top still composites its
+  // underside ripple over the shell from within).
+  const SHELL_TOP_DROP = 0.05;
+  const shellPositions = positions.slice();
+  for (let i = 0; i <= SAMPLES; i++) {
+    const base = i * 4 * 3;
+    shellPositions[base + 1] -= SHELL_TOP_DROP; // topLeft y
+    shellPositions[base + 4] -= SHELL_TOP_DROP; // topRight y
+  }
+
+  // 6 triangles per segment (top + left wall + right wall) + 4 endcap tris.
+  const shellTriCount = SAMPLES * 6 + 4;
+  const shellIndices = new Uint32Array(shellTriCount * 3);
+  let sIdx = 0;
+  for (let i = 0; i < SAMPLES; i++) {
+    const b = i * 4;
+    const n = (i + 1) * 4;
+    // Top face (same outward winding as the volume; BackSide renders its underside)
+    shellIndices[sIdx++] = b;     shellIndices[sIdx++] = n;     shellIndices[sIdx++] = b + 1;
+    shellIndices[sIdx++] = b + 1; shellIndices[sIdx++] = n;     shellIndices[sIdx++] = n + 1;
+    // Left wall
+    shellIndices[sIdx++] = b;     shellIndices[sIdx++] = b + 2; shellIndices[sIdx++] = n;
+    shellIndices[sIdx++] = b + 2; shellIndices[sIdx++] = n + 2; shellIndices[sIdx++] = n;
+    // Right wall
+    shellIndices[sIdx++] = b + 1; shellIndices[sIdx++] = n + 1; shellIndices[sIdx++] = b + 3;
+    shellIndices[sIdx++] = n + 1; shellIndices[sIdx++] = n + 3; shellIndices[sIdx++] = b + 3;
+  }
+  // Start endcap
+  shellIndices[sIdx++] = 0; shellIndices[sIdx++] = 1; shellIndices[sIdx++] = 2;
+  shellIndices[sIdx++] = 1; shellIndices[sIdx++] = 3; shellIndices[sIdx++] = 2;
+  // End endcap
+  const sLast = SAMPLES * 4;
+  shellIndices[sIdx++] = sLast;     shellIndices[sIdx++] = sLast + 2; shellIndices[sIdx++] = sLast + 1;
+  shellIndices[sIdx++] = sLast + 1; shellIndices[sIdx++] = sLast + 2; shellIndices[sIdx++] = sLast + 3;
+
+  const shellGeometry = new THREE.BufferGeometry();
+  shellGeometry.setAttribute('position', new THREE.BufferAttribute(shellPositions, 3));
+  shellGeometry.setIndex(new THREE.BufferAttribute(shellIndices, 1));
+  shellGeometry.computeVertexNormals();
+
+  // Opaque dark water body. Emissive lift keeps it from reading void-black
+  // under low ambient (same pattern as the terrain underside emissive,
+  // terrain.js). The submerged fog regime (environment.js) does the murk —
+  // walls dissolve into green-brown within the short waterFogFar.
+  const shellMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0c1712,   // dark green-brown water body — sits with the submerged
+    emissive: 0x152016, // fog regime (waterFogColor 0x2a3d2f), not the exterior blue
+    emissiveIntensity: 0.55,
+    roughness: 0.95,
+    metalness: 0.0,
+    side: THREE.BackSide,
+    transparent: false,
+    depthWrite: true,
+  });
+
+  const interiorShell = new THREE.Mesh(shellGeometry, shellMaterial);
+  interiorShell.name = 'thamesInteriorShell';
+  // Draw with the opaque pass BEFORE the transparent water surface so the
+  // translucent top blends over it and solid depth occludes geometry beyond
+  // the walls (tubes, buildings, far-bank terrain).
+  interiorShell.renderOrder = RENDER_ORDER.TERRAIN;
+  interiorShell.visible = false; // toggled per-frame by isSubmergedAt in main.js
+  interiorShell.raycast = () => {}; // never a hover/tooltip target
+  mesh.add(interiorShell);
+  mesh.userData.interiorShell = interiorShell;
+
+  console.log(`Thames volume: ${validPoints.length} data points → ${vertCount} vertices, ${triCount} triangles (+ interior shell ${shellTriCount} tris)`);
 
   return mesh;
 }

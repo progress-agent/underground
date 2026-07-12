@@ -44,6 +44,19 @@ export const ENV_CONFIG = {
   clarityFogNear: 20000,     // fog effectively off for anything the camera can see
   clarityFogFar: 60000,      // > scene diagonal
 
+  // ── Submerged regime (Thames water volume, 12Jul26u) ────────────────────
+  // Applied LAST in updateEnvironment/updateLighting so it overrides every
+  // other regime while the camera is inside the river volume. Short murky
+  // green-brown fog gives the enclosed underwater feel; tunnels/infrastructure
+  // emerge only within waterFogFar. Driven by submergedBlend (0..1), a short
+  // spatial smoothstep below the rendered water top computed in main.js.
+  waterFogColor: 0x2a3d2f,  // murky green-brown
+  waterBgColor: 0x1e2f28,   // darker green-brown void behind geometry
+  waterFogNear: 10,
+  waterFogFar: 250,
+  waterAmbient: 0.35,
+  waterSun: 0.2,
+
   // ── Street-level fill (D7) ──────────────────────────────────────────────
   // Hemisphere light (warm sky / cool-earth ground bounce) that lifts building
   // faces at eye level. Gated to low altitude so the overview is untouched.
@@ -126,6 +139,8 @@ const _cSky = new THREE.Color(ENV_CONFIG.fogColorSky);
 const _cBgGround = new THREE.Color(ENV_CONFIG.groundColor);
 const _cBgSky = new THREE.Color(ENV_CONFIG.skyColor);
 const _cChalk = new THREE.Color(ENV_CONFIG.chalkFogColor);
+const _cWaterFog = new THREE.Color(ENV_CONFIG.waterFogColor);
+const _cWaterBg = new THREE.Color(ENV_CONFIG.waterBgColor);
 
 /**
  * Update environment based on camera height.
@@ -143,8 +158,13 @@ const _cChalk = new THREE.Color(ENV_CONFIG.chalkFogColor);
  *   chalk surface (the from-above white-out is untouched by construction),
  *   1 by chalkClarityRamp units below it. Releases fog distances so everything
  *   the camera can see looking up is unfogged; colour/bg stay chalk white.
+ * @param submergedBlend Thames water-volume membership [0,1] (12Jul26u) — 0
+ *   outside the river volume, 1 just below the rendered water top. Applied
+ *   LAST so the murky underwater regime overrides all others; 0 by
+ *   construction for any camera outside the river, so every existing regime
+ *   is byte-identical when not submerged.
  */
-export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0 } = {}) {
+export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0, submergedBlend = 0 } = {}) {
   const y = camera.position.y;
 
   // Vertical blend (0 = below ground, 1 = above ground/sky). Outside the disc
@@ -196,6 +216,14 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
       fogFar = THREE.MathUtils.lerp(fogFar, ENV_CONFIG.clarityFogFar, chalkClarity);
     }
 
+    // Submerged (12Jul26u): murky green-brown short fog. LAST lerp — inside
+    // the Thames volume this overrides surface/chalk/clarity entirely.
+    if (submergedBlend > 0) {
+      _fogColor.lerp(_cWaterFog, submergedBlend);
+      fogNear = THREE.MathUtils.lerp(fogNear, ENV_CONFIG.waterFogNear, submergedBlend);
+      fogFar = THREE.MathUtils.lerp(fogFar, ENV_CONFIG.waterFogFar, submergedBlend);
+    }
+
     scene.fog.color.copy(_fogColor);
     scene.fog.near = fogNear;
     scene.fog.far = fogFar;
@@ -211,7 +239,7 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   // perfect-clarity ("visible at ANY distance") holds with no extra wiring;
   // a future chalk-look-up mode can force 0 through this same call.
   setInfraHazeStrength(
-    (1 - verticalBlend) * insideness * (1 - chalkBlend) * (1 - chalkClarity)
+    (1 - verticalBlend) * insideness * (1 - chalkBlend) * (1 - chalkClarity) * (1 - submergedBlend)
   );
 
   // Update sky visibility — hidden underground and inside the chalk clouding.
@@ -226,14 +254,15 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     // UN-lifted skyBlend here (not surfaceBlend): clayLift must brighten
     // fog/lights only — the abyss dome has no business rendering underground.
     sky.position.copy(camera.position);
-    sky.material.opacity = skyBlend * (1 - chalkBlend);
-    sky.visible = skyBlend > 0.01 && chalkBlend < 0.99;
+    sky.material.opacity = skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
+    sky.visible = skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99;
   }
 
   // Background colour: clay graphite → sky; then flooded dusty white in chalk so
   // gaps between geometry read as clouding, not void.
   _bgColor.copy(_cBgGround).lerp(_cBgSky, surfaceBlend);
   if (chalkBlend > 0) _bgColor.lerp(_cChalk, chalkBlend);
+  if (submergedBlend > 0) _bgColor.lerp(_cWaterBg, submergedBlend);
 
   // Update renderer background
   if (renderer) {
@@ -281,7 +310,7 @@ export function createAtmosphere(scene) {
 // Update lighting based on camera position.
 // insideness (D5) + chalkBlend (D3.3) + clayLift/chalkClarity (Item B) mirror
 // updateEnvironment's params.
-export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0 } = {}) {
+export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0, clayLift = 1, chalkClarity = 0, submergedBlend = 0 } = {}) {
   if (!lights) return;
 
   const y = camera.position.y;
@@ -305,10 +334,14 @@ export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0,
   // Inside chalk (Item B): lift ambient further so up-view features are
   // actually LIT, not just unfogged. 0 above the chalk surface by construction.
   ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.chalkClarityAmbient, chalkClarity);
+  // Submerged (12Jul26u): LAST lerp — dim, even underwater ambient.
+  ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.waterAmbient, submergedBlend);
   lights.ambient.intensity = ambient;
 
-  // Sun becomes stronger above ground
-  lights.sun.intensity = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, lightBlendLifted);
+  // Sun becomes stronger above ground; dimmed underwater (submerged LAST).
+  let sun = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, lightBlendLifted);
+  sun = THREE.MathUtils.lerp(sun, ENV_CONFIG.waterSun, submergedBlend);
+  lights.sun.intensity = sun;
 
   // Underground light fades as we go up
   lights.underground.intensity = THREE.MathUtils.lerp(0.15, 0, lightBlendLifted);
@@ -317,6 +350,8 @@ export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0,
   // so the overview is untouched. Zeroed underground via groundRamp.
   if (lights.hemi) {
     const eyeFactor = 1 - THREE.MathUtils.smoothstep(y, ENV_CONFIG.hemiFadeLow, ENV_CONFIG.hemiFadeHigh);
-    lights.hemi.intensity = ENV_CONFIG.hemiStreet * eyeFactor * lightBlend;
+    // Warm sky-bounce reads wrong underwater — same rationale as the clayLift
+    // exclusion above, so the hemi is multiplied out by submergedBlend.
+    lights.hemi.intensity = ENV_CONFIG.hemiStreet * eyeFactor * lightBlend * (1 - submergedBlend);
   }
 }
