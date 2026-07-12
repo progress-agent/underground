@@ -80,7 +80,11 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   const profiles = buildThamesProfiles(validPoints);
 
   // ── 4. Sample cross-sections along the spline ────────────────────────
-  const SAMPLES = 600;
+  // 1500 samples over the ~95km course ≈ 64m cross-section spacing — well under
+  // the 250m data spacing. At 600 (159m spacing) the spline cut sharp west-of-Kew
+  // corners by up to 27m, more than the old 21m half-width: the volume missed its
+  // own centreline at 7 bends (12Jul26u forensics, raycast-audit).
+  const SAMPLES = 1500;
   // 4 vertices per cross-section: topLeft, topRight, bottomLeft, bottomRight
   const vertCount = (SAMPLES + 1) * 4;
   const positions = new Float32Array(vertCount * 3);

@@ -68,7 +68,7 @@ export const THAMES_ZONES = [
     name: 'Upper Tideway',
     chainStartM: 0,
     chainEndM: 39191,
-    meanWidth: 45,
+    meanWidth: 80, // 12Jul26u: re-derived from remeasured west-of-Kew widths (OSM water polygons); old 45 reflected the v1 fallback widths
     meanDepth: 2.5,
     maxDepth: 3,
     landmark: 'Teddington Lock',
