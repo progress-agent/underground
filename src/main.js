@@ -174,6 +174,25 @@ const composerRenderTarget = new THREE.WebGLRenderTarget(
   { samples: 4, type: THREE.HalfFloatType }
 );
 const composer = new EffectComposer(renderer, composerRenderTarget);
+// A1 (05Sep26s): the post ping-pong buffer does not need MSAA — only the pass
+// that draws the scene does. EffectComposer builds renderTarget2 as
+// `renderTarget.clone()`, so it silently inherited samples:4 and every bloom /
+// lens / output pass was resolving a second 4x HalfFloat target for nothing.
+// RenderPass has needsSwap:false and draws into readBuffer, so pointing
+// readBuffer at the MSAA target and writeBuffer at a plain one keeps the scene
+// at 4x while the post chain runs single-sampled. Pixel-identical by
+// construction; measured +7% overview / +12% street / +11% underground
+// (M5, dpr 2). Do not "tidy" these two assignments away — without the role
+// flip the scene lands in the non-MSAA target and all edge AA is lost.
+composer.renderTarget2.dispose();
+composer.renderTarget2 = new THREE.WebGLRenderTarget(
+  composerRenderTarget.width,
+  composerRenderTarget.height,
+  { samples: 0, type: THREE.HalfFloatType }
+);
+composer.renderTarget2.texture.name = 'EffectComposer.rt2';
+composer.readBuffer = composer.renderTarget1;
+composer.writeBuffer = composer.renderTarget2;
 // RenderPass and camera added after camera creation (below)
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1.0, 50000);
@@ -1312,6 +1331,20 @@ function brightenIfTooDark(hex, { minLuma = 0.08, floor = 0x2a2a2a } = {}) {
   return { base: hex, emissive: floor };
 }
 
+// D-021 (05Sep26s, Jordan's call: "sharp is fine, makes no visible difference").
+// Tube glass without `transmission`. This completes the 10Jul26f transparency
+// pass, which dropped transmission from shafts.js and tideway.js on taste
+// grounds but never touched the tube lines. What is behind the glass now shows
+// through sharp instead of refracted and blurred — visible only underground and
+// close up. The cost it removes is not cosmetic: a transmissive material makes
+// three.js run a full second scene render into its own MSAA HalfFloat target
+// with a mip chain, 1,228 extra draw calls here. Measured +33% overview /
+// +32% street / +27% underground (M5, dpr 2).
+//
+// Unlike the shafts, opacity is NOT compensated upward (they went 0.27 -> 0.33).
+// Jordan assessed the uncompensated A/B and passed it; if the tubes ever read
+// thin, ~0.50 is the equivalent bump. thickness / ior / attenuation* are gone
+// because they are inert without transmission, not because the look changed.
 function frostedTubeMaterial(hex) {
   const { base, emissive } = brightenIfTooDark(hex);
   return new THREE.MeshPhysicalMaterial({
@@ -1320,11 +1353,7 @@ function frostedTubeMaterial(hex) {
     opacity: 0.42,
     roughness: 0.45,
     metalness: 0.0,
-    transmission: 0.82,
-    thickness: 0.6,
-    ior: 1.28,
-    attenuationColor: new THREE.Color(0x9fb3c8),
-    attenuationDistance: 8.0,
+    transmission: 0,
     clearcoat: 0.22,
     clearcoatRoughness: 0.6,
     emissive: new THREE.Color(emissive),
