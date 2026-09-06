@@ -6,7 +6,9 @@
 //   surface    — ballast ribbon + line-colour stripe on the ground
 //   embankment — ribbon raised ~3m with earth-tone skirt strips
 //   viaduct    — masonry deck raised ~8m on piers
-//   cutting    — ribbon sunk ~3m between rising wall strips
+//   cutting    — ballast at grade, flanked by dark shadow bands (06Sep26u:
+//                was sunk 3m between wall strips, which put it inside the
+//                un-carved terrain mesh and made it invisible)
 //   tunnel     — stripe only, sunk ~20m (e.g. Windrush under the Thames)
 // The same language is intended for NatRail corridors + above-ground tube in
 // later waves (D-019 §2) — keep archetype constants here, not per-line.
@@ -31,13 +33,24 @@ proj4.defs('EPSG:27700', '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=4
 // ── Archetype constants (scene units; Y lifts are real metres × VE) ──────
 const BALLAST_HALF_W = 9;          // 18m ballast bed (visual presence at altitude)
 const STRIPE_HALF_W = 4.5;         // line-colour identity stripe
-const BASE_LIFT = 2;               // z-fight clearance above terrain
+const BASE_LIFT = 5;               // ~1m real: rail head above surrounding ground.
+                                   // Was 2 (0.4m), which left 9.3% of the network
+                                   // "grazing" — flickering in and out of the terrain
+                                   // mesh between rail points (06Sep26u census).
 const STRIPE_LIFT = 0.8;           // stripe above its ballast
+const CUT_SHADOW_W = 6;            // flanking dark band per side (real metres = scene units in XZ)
+const CUT_SHADOW_DROP = 1.2;       // band sits just under the ballast lip, still above terrain
 const CLASS_LIFT_M = {             // real metres relative to terrain
   surface: 0,
   embankment: 3,
   viaduct: 8,
-  cutting: -3,
+  // Cuttings render AT GRADE, recessed by tone rather than geometry (06Sep26u).
+  // The terrain mesh is 512x512 over 70x50km — ~137m x 98m per cell — so a 20m
+  // cutting is an order of magnitude below the grid's resolution and cannot be
+  // carved (the Thames carve works only because the river is 80-250m wide).
+  // Sunk geometry was simply inside an opaque mesh: 14.1% of the identity stripe
+  // network-wide, 79% within 700m of Highbury & Islington, was invisible.
+  cutting: 0,
   tunnel: -20,
 };
 const PIER_SPACING_M = 110;
@@ -47,7 +60,8 @@ const MATS = {
   ballast: new THREE.MeshStandardMaterial({ color: 0x4c4741, roughness: 0.9, metalness: 0.05, fog: true, side: THREE.DoubleSide }),
   earth: new THREE.MeshStandardMaterial({ color: 0x5d5142, roughness: 0.95, metalness: 0.0, fog: true, side: THREE.DoubleSide }),
   masonry: new THREE.MeshStandardMaterial({ color: 0x8d8778, roughness: 0.8, metalness: 0.08, fog: true, side: THREE.DoubleSide }),
-  wall: new THREE.MeshStandardMaterial({ color: 0x57534a, roughness: 0.9, metalness: 0.05, fog: true, side: THREE.DoubleSide }),
+  // Cutting treatment: the shaded flank of a trench, read as tone from altitude.
+  cutShadow: new THREE.MeshStandardMaterial({ color: 0x272320, roughness: 1.0, metalness: 0.0, fog: true, side: THREE.DoubleSide }),
 };
 
 function llToScene(lon, lat) {
@@ -92,6 +106,19 @@ function buildPath(branch, getTerrainMeshSurfaceY) {
     for (let i = 1; i < path.length - 1; i++) {
       path[i].y = (path[i - 1].y + path[i].y * 2 + path[i + 1].y) / 4;
     }
+  }
+  // Terrain floor (06Sep26u). The smoothing above blends across class
+  // boundaries, and a tunnel run at -20m real drags its neighbours down with
+  // it — burying surface and cutting track for a long way either side of every
+  // portal. Measured before this floor: 10.8% of the identity stripe below
+  // terrain, of which only 2.0% was actually tunnel; the rest was a smooth
+  // -0.5m..-18m continuum with no earthworks class to justify it.
+  // Only a tunnel may sit below ground, so the whole descent now happens
+  // inside the tunnel run, which is what a portal is.
+  for (const p of path) {
+    if (p.cls === 'tunnel') continue;
+    const floor = p.terrainY + BASE_LIFT;
+    if (p.y < floor) p.y = floor;
   }
   return path;
 }
@@ -153,12 +180,15 @@ function buildCorridor(path, out) {
       });
       out.earth.push(stripGeometry(skirtRBase, skirtL.right));
     } else if (cls === 'cutting') {
-      // Walls: bed edge up to terrain level either side.
-      const wall = offsetRails(run, BALLAST_HALF_W + 1, (p) => p.y);
-      const wallLTop = run.map((p, j) => ({ x: wall.left[j].x, y: Math.max(p.terrainY + 0.5, p.y), z: wall.left[j].z }));
-      const wallRTop = run.map((p, j) => ({ x: wall.right[j].x, y: Math.max(p.terrainY + 0.5, p.y), z: wall.right[j].z }));
-      out.wall.push(stripGeometry(wallLTop, wall.left));
-      out.wall.push(stripGeometry(wall.right, wallRTop));
+      // At-grade trench treatment: two dark bands flanking the ballast, read as
+      // the shaded walls of a cutting. Tone, not relief — at a 90m camera a 0.6m
+      // step is invisible while a 6m dark band is not, and everything stays
+      // ABOVE the terrain so nothing can occlude it. Replaces the old sunk bed +
+      // vertical wall strips, which were buried inside the terrain mesh.
+      const inner = offsetRails(run, BALLAST_HALF_W, (p) => p.y - CUT_SHADOW_DROP);
+      const outer = offsetRails(run, BALLAST_HALF_W + CUT_SHADOW_W, (p) => p.y - CUT_SHADOW_DROP);
+      out.cutShadow.push(stripGeometry(outer.left, inner.left));
+      out.cutShadow.push(stripGeometry(inner.right, outer.right));
     } else if (cls === 'viaduct') {
       // Piers every PIER_SPACING_M down to terrain.
       let acc = 0;
@@ -273,7 +303,7 @@ export async function createOverground({ getTerrainMeshSurfaceY }) {
       color: colour, roughness: 0.55, metalness: 0.1,
       emissive: colour, emissiveIntensity: 0.35, fog: true, side: THREE.DoubleSide,
     });
-    const out = { stripe: [], ballast: [], masonry: [], earth: [], wall: [] };
+    const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
     const paths = [];
     for (const branch of line.branches || []) {
       const path = buildPath(branch, getTerrainMeshSurfaceY);
@@ -294,7 +324,7 @@ export async function createOverground({ getTerrainMeshSurfaceY }) {
     addMerged(out.ballast, MATS.ballast);
     addMerged(out.masonry, MATS.masonry);
     addMerged(out.earth, MATS.earth);
-    addMerged(out.wall, MATS.wall);
+    addMerged(out.cutShadow, MATS.cutShadow);
 
     // one train on each corridor long enough to justify it
     for (const path of paths) {

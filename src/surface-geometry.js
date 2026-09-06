@@ -6,17 +6,72 @@
 //
 // Parks and roads are handled by surface-texture.js (terrain shader).
 // All Y coordinates come from getTerrainMeshSurfaceY, already VE-scaled.
-// Building heights are VE-scaled here (height * VE).
+//
+// BUILDING HEIGHT IS ITS OWN MULTIPLIER (06Sep26u, D-023). Buildings are the
+// one class of scene object that never crosses the ground plane — each sits
+// entirely above its own terrain point — so they can carry a vertical scale
+// independent of the global VE without any of the datum warping that a
+// ground-referenced VE split would inflict on the chalk floor (mOD) or the
+// water level (mOD). Terrain, tube depths, chalk, water, shafts, bridges and
+// the Overground all keep VE=5.
+//
+// The scale is applied in the SHADER, not the instance matrix: the box is
+// pivoted at its base (translate(0, 0.5, 0)) and the vertex shader multiplies
+// local y by uHeightScale, so each building grows and shrinks about its own
+// footprint. That makes the slider free — no instance-matrix rewrite across
+// 1.35M buildings, no re-parse, no reallocation.
+//
+// Measured 06Sep26u, and the reason this exists: 84.9% of the tile set's
+// heights are exactly 10.0m (a pipeline fallback where OSM carries no height)
+// and 12.3% are 6.4m. Real median aspect (height / sqrt(area)) is 1.04; at
+// VE=5 it renders as 5.21, so every terrace in London was being drawn as a
+// five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
 
 // -- Shared material (single instance across all tiles) -----------------------
+
+// Default 1.0 = heights exactly as authored by the caller's VE argument, i.e.
+// the pre-06Sep26u look. The HUD slider drives it down toward true scale.
+const heightScaleUniform = { value: 1.0 };
 
 const buildingMat = new THREE.MeshStandardMaterial({
   color: 0x8a8580,
   roughness: 0.85,
   metalness: 0.1,
 });
+
+// Scale local y (0..1, base-pivoted) before the instance matrix applies its own
+// y scale. Injected once on the shared material — every tile's InstancedMesh
+// uses this same material instance, so one uniform drives the whole city.
+buildingMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uHeightScale = heightScaleUniform;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform float uHeightScale;')
+    .replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;',
+    );
+};
+// Distinct cache key so this material never shares a compiled program with an
+// un-injected MeshStandardMaterial.
+buildingMat.customProgramCacheKey = () => 'building-height-scale';
+
+/**
+ * Live building-height multiplier. 1.0 = as built (VE-scaled); 0.2 with VE=5
+ * gives true real-world height. Free — one uniform, no geometry touched.
+ */
+export function setBuildingHeightScale(v) {
+  // Capped at 1.0 deliberately. The InstancedMesh bounding sphere is computed
+  // from the instance matrices, which encode the UNSCALED height, so a value
+  // above 1 would push roofs outside the culling volume and pop buildings out
+  // of view at grazing angles. Raising the cap means inflating the bounds too.
+  heightScaleUniform.value = Math.max(0.05, Math.min(1, v));
+}
+
+export function getBuildingHeightScale() {
+  return heightScaleUniform.value;
+}
 
 // NOTE: buildings use a single flat colour, NOT per-instance `setColorAt`.
 // The old height-graded instanceColor tint (COLOR_LOW..COLOR_HIGH) triggered
@@ -46,7 +101,11 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
   const unique = isDuplicateFn ? buildings.filter(b => !isDuplicateFn(b)) : buildings;
   if (unique.length === 0) return null;
 
+  // Base-pivoted: local y runs 0..1 from footprint to roof, so the shader's
+  // uHeightScale grows/shrinks each building about its own base rather than
+  // its centre. Instance position is therefore baseY, NOT baseY + h/2.
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+  boxGeo.translate(0, 0.5, 0);
   const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, unique.length);
 
   const dummy = new THREE.Object3D();
@@ -66,7 +125,7 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
     const side = Math.max(Math.sqrt(b.area), 0.1);
     const h = Math.max(b.height, 0.5) * VE;
 
-    dummy.position.set(b.cx, baseY + h / 2, b.cz);
+    dummy.position.set(b.cx, baseY, b.cz); // base-pivoted geometry
     dummy.scale.set(side, h, side);
     dummy.updateMatrix();
     mesh.setMatrixAt(idx, dummy.matrix);

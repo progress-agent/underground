@@ -25,7 +25,7 @@ import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.j
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
-import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible } from './surface-geometry.js';
+import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale } from './surface-geometry.js';
 import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats } from './surface-loader.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
 import { initThamesZones, getZoneAt, nearestThamesSegment } from './thames-zones.js';
@@ -739,6 +739,36 @@ function deleteUrlParam(key) {
       const mm = Number(flEl.value) || 30;
       if (mm === 30) deleteUrlParam('fl');
       else setUrlParam('fl', mm);
+    });
+  }
+
+  // ── Building height slider (D-023) ──
+  // Reads as effective exaggeration on buildings ONLY: 5.0x is the historical
+  // look (global VE), 1.0x is true real-world height. Buildings never cross the
+  // ground plane, so this is independent of VE with no datum consequences —
+  // terrain, tube depths, chalk (mOD) and water (mOD) are untouched.
+  const bhEl = document.getElementById('buildingHeight');
+  const bhOut = document.getElementById('buildingHeightValue');
+  const initialBh = getUrlNumberParam('bh') ?? prefs.buildingHeight ?? VERTICAL_EXAGGERATION;
+  if (bhEl) {
+    const apply = (mult) => {
+      setBuildingHeightScale(mult / VERTICAL_EXAGGERATION);
+      if (bhOut) bhOut.textContent = `${mult.toFixed(1)}\u00d7`;
+    };
+    bhEl.value = String(initialBh);
+    apply(initialBh);
+
+    bhEl.addEventListener('input', () => {
+      const mult = Number(bhEl.value) || VERTICAL_EXAGGERATION;
+      apply(mult);
+      prefs.buildingHeight = mult;
+      savePrefs(prefs);
+    });
+
+    bhEl.addEventListener('change', () => {
+      const mult = Number(bhEl.value) || VERTICAL_EXAGGERATION;
+      if (mult === VERTICAL_EXAGGERATION) deleteUrlParam('bh');
+      else setUrlParam('bh', mult);
     });
   }
 }
@@ -3019,6 +3049,7 @@ tick();
 if (import.meta.env.DEV) {
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    setBuildingHeightScale, getBuildingHeightScale,
     getChalkSurfaceY, CHALK_TOP_Y,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
