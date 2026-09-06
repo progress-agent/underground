@@ -26,7 +26,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "cache:tfl": "node scripts/cache-tfl.mjs",
-    "test": "playwright test --workers=1"
+    "test": "playwright test --workers=1",
+    "bake": "node scripts/bake-surface.mjs",
+    "bake:verify": "node scripts/verify-bake.mjs"
   },
   "dependencies": {
     "proj4": "^2.20.2",
