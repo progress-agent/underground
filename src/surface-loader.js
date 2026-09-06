@@ -96,18 +96,7 @@ export function updateSurfaceLoader(camX, camZ) {
       // Dispose far-away tiles. Reset to 'idle' (not 'disposed') so the tile
       // re-enters the load queue if the camera comes back within LOAD_RADIUS.
       // 'disposed' is reserved for permanent failures (SPA fallback below).
-      //
-      // Surrender this tile's spatial hashes from the global dedup registry
-      // BEFORE firing the external disposal hook — otherwise those hashes
-      // would persist and reject every building on the tile's next reload,
-      // leaving the tile invisible but counted as 'loaded' (correctness bug).
-      if (ts.buildingHashes && ts.buildingHashes.size > 0) {
-        for (const hash of ts.buildingHashes) placedBuildings.delete(hash);
-        ts.buildingHashes.clear();
-      }
-      ts.state = 'idle';
-      ts.data = null;
-      if (onTileDisposed) onTileDisposed(tile);
+      surrenderTile(tile, ts);
     }
   }
 
@@ -172,6 +161,32 @@ export function makeTileDedup(tileKey) {
 }
 
 /**
+ * Return every loaded tile to 'idle' so the proximity loop refetches it and
+ * fires onTileLoaded again on the next check (within CHECK_INTERVAL).
+ *
+ * Exists for the baked-buildings switch: while the baked path is active the
+ * tile callbacks skip building creation, so tiles loaded during that time hold
+ * no building meshes. Switching back to the live path has to re-run those
+ * callbacks, and re-entering the normal load cycle is safer than reaching into
+ * retained tile data — it goes through exactly the code that runs every other
+ * time a tile arrives.
+ *
+ * @returns {number} tiles reset
+ */
+export function resetLoadedTiles() {
+  if (!tileStates || !manifest) return 0;
+  let n = 0;
+  for (const tile of manifest.tiles) {
+    const ts = tileStates.get(tile.file);
+    if (ts && ts.state === 'loaded') { surrenderTile(tile, ts); n++; }
+  }
+  // Force the next updateSurfaceLoader call to act rather than wait out the
+  // remainder of the current 500ms window.
+  lastCheckTime = 0;
+  return n;
+}
+
+/**
  * Get loading statistics.
  */
 export function getSurfaceLoaderStats() {
@@ -185,6 +200,24 @@ export function getSurfaceLoaderStats() {
 }
 
 // ─── Internal ───────────────────────────────────────────────────────────────
+
+/**
+ * Return one loaded tile to 'idle' and surrender its dedup hashes.
+ *
+ * The hash surrender MUST happen before the external disposal hook fires:
+ * hashes left in the global registry reject every building on the tile's next
+ * reload, leaving it invisible but counted as 'loaded'. That was a real bug;
+ * it is why this is one function and not two copies.
+ */
+function surrenderTile(tile, ts) {
+  if (ts.buildingHashes && ts.buildingHashes.size > 0) {
+    for (const hash of ts.buildingHashes) placedBuildings.delete(hash);
+    ts.buildingHashes.clear();
+  }
+  ts.state = 'idle';
+  ts.data = null;
+  if (onTileDisposed) onTileDisposed(tile);
+}
 
 async function fetchTile(tile, ts) {
   ts.state = 'loading';

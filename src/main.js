@@ -25,8 +25,9 @@ import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.j
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
-import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale } from './surface-geometry.js';
-import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats } from './surface-loader.js';
+import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js';
+import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats, resetLoadedTiles } from './surface-loader.js';
+import { fetchBakedBuildings, createBakedBuildingBuilder } from './baked-buildings.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
 import { initThamesZones, getZoneAt, nearestThamesSegment } from './thames-zones.js';
 import { RENDER_ORDER } from './render-layers.js';
@@ -665,6 +666,26 @@ const urlHorizontalScale = getUrlNumberParam('hx');
 // Optional: pre-focus camera on a line id (e.g. ?focus=victoria)
 const urlFocusLine = getUrlStringParam('focus');
 
+// ── Buildings render path (06Sep26u) ──
+//   'live'  — per-tile JSON: parse, M25 + river filter, terrain lookup, dedup
+//             and InstancedMesh build on every tile arrival, repeated each time
+//             a disposed tile re-enters LOAD_RADIUS. The path since day one.
+//   'baked' — one precompiled UGB1 payload (scripts/bake-surface.mjs), whole
+//             city resident from load, never disposed, no per-arrival work.
+//
+// LIVE IS THE DEFAULT and stays the default until the baked path has been
+// assessed in Jordan's hands. ?buildings=baked overrides for one visit;
+// the HUD toggle persists the choice.
+const urlBuildingsPath = getUrlStringParam('buildings');
+let buildingsPath = (urlBuildingsPath === 'baked' || urlBuildingsPath === 'live')
+  ? urlBuildingsPath
+  : (prefs.buildingsPath === 'baked' ? 'baked' : 'live');
+
+// Assigned by the HUD block below so an async payload failure can correct the
+// toggle's label. Declared HERE, above that block: it is assigned at module
+// evaluation, so a declaration further down the file is a TDZ throw at boot.
+let renderBuildingsToggle = () => {};
+
 const sim = {
   trains: [],
   paused: prefs.paused ?? false,
@@ -770,6 +791,31 @@ function deleteUrlParam(key) {
       if (mult === VERTICAL_EXAGGERATION) deleteUrlParam('bh');
       else setUrlParam('bh', mult);
     });
+  }
+
+  // ── Baked city toggle (06Sep26u) ──
+  // Swaps the buildings render path in place so a live/baked comparison happens
+  // inside one session. Off is the live per-tile path and remains the default.
+  //
+  // Lives in THIS HUD block, not the fps-controls one that holds Fast flight:
+  // both run at module evaluation, and only this one runs after `buildingsPath`
+  // is initialised. Reading it from the earlier block is a TDZ throw at boot.
+  const bakedBtn = document.getElementById('bakedBuildings');
+  if (bakedBtn) {
+    const renderBaked = () => {
+      const on = buildingsPath === 'baked';
+      bakedBtn.textContent = `Baked city: ${on ? 'on' : 'off'}`;
+      bakedBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      bakedBtn.style.background = on ? 'rgba(201,184,150,0.22)' : 'rgba(255,255,255,0.06)';
+      bakedBtn.style.borderColor = on ? 'rgba(201,184,150,0.55)' : 'rgba(255,255,255,0.14)';
+      bakedBtn.style.color = on ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.88)';
+    };
+    renderBuildingsToggle = renderBaked;
+    bakedBtn.addEventListener('click', () => {
+      setBuildingsPath(buildingsPath === 'baked' ? 'live' : 'baked');
+      renderBaked();
+    });
+    renderBaked();
   }
 }
 
@@ -953,10 +999,37 @@ const thamesDataPromise = loadThamesData();
 
         initSurfaceLoader({
           onTileLoaded: (tileData, tileEntry) => {
+            // DEV-only arrival-cost accounting. Vite substitutes `false` for
+            // import.meta.env.DEV in a production build and the branches are
+            // eliminated, so this costs nothing shipped. It exists because the
+            // remaining flight stutter has to be ATTRIBUTED rather than guessed
+            // at: with buildings baked, whatever hitch survives is rasterise
+            // (measured here) plus the tile's own JSON parse (measured in
+            // scripts/measure-baked.mjs), and only one of those is worth a
+            // second compiler.
+            const _t0 = import.meta.env.DEV ? performance.now() : 0;
+
             // Rasterise parks + roads into persistent full-map texture
             if (surfaceTexState) {
               rasteriseTile(surfaceTexState, tileData);
             }
+            const _tRaster = import.meta.env.DEV ? performance.now() : 0;
+            // The baked path owns buildings. The loader still runs under it,
+            // because parks and roads are NOT baked yet and rasterise from
+            // these same tiles — that half of the compiler is still to come.
+            //
+            // So this switch removes ONE of the two per-arrival costs, not
+            // both. rasteriseTile carries no already-done guard: its EFFECT is
+            // idempotent (the texture is persistent and disposal never
+            // un-rasterises), but its COST is paid again every time a tile
+            // re-enters LOAD_RADIUS, exactly like building creation used to be.
+            // How much of the flight stutter survives this switch is therefore
+            // a measured quantity, not a deduced one.
+            if (buildingsPath === 'baked') {
+              if (import.meta.env.DEV) recordArrivalCost(_tRaster - _t0, 0);
+              return;
+            }
+
             // Filter buildings: M25 boundary + Thames river corridor exclusion
             const filteredBuildings = tileData.buildings
               ? tileData.buildings.filter(b => isInsideM25(b.cx, b.cz) && !isInThames(b.cx, b.cz))
@@ -970,6 +1043,7 @@ const thamesDataPromise = loadThamesData();
               mesh.name = `buildings-${tileEntry.file}`;
               surfaceGeometryGroup.add(mesh);
             }
+            if (import.meta.env.DEV) recordArrivalCost(_tRaster - _t0, performance.now() - _tRaster);
           },
           onTileDisposed: (tileEntry) => {
             // Remove tile's building mesh from scene
@@ -996,6 +1070,13 @@ const thamesDataPromise = loadThamesData();
 
           surfaceDataLoaded = true;
           dbg(`Surface loader ready: ${manifest.tiles.length} tiles, ${manifest.cols}×${manifest.rows} grid`);
+
+          // Kick the baked payload only once the terrain and the group exist.
+          // A failure here is NOT fatal and must not be: it falls back to the
+          // live path, which is the whole point of keeping this behind a
+          // switch. A missing payload on a deploy would otherwise be a blank
+          // city rather than a slower one.
+          if (buildingsPath === 'baked') activateBakedBuildings();
         }).catch(err => console.warn('Surface loader failed:', err.message));
       });
     });
@@ -1232,6 +1313,121 @@ let surfaceGeometryGroup = null;  // Parent group for per-tile building Instance
 let surfaceTextureMaterial = null; // Terrain material ref for texture toggle
 let surfaceTexState = null;       // { texture, pixels, size, bbox } from createSurfaceTexture
 let surfaceDataLoaded = false;
+
+// Baked-buildings state. bakedMeshes is retained across a toggle back to
+// 'live' so returning to 'baked' is a re-attach rather than a rebuild — an A/B
+// comparison has to happen inside ONE browser session (camera state and
+// OrbitControls settling both drift between reloads), so the swap must be cheap
+// in both directions.
+let bakedPayload = null;
+let bakedBuilder = null;
+let bakedMeshes = [];
+let bakedLoadMs = 0;
+
+
+// Per-frame slice spent turning payload records into instance matrices. Six
+// milliseconds leaves room inside a 16.7ms budget on a machine already drawing
+// the city; the whole 1.2M-building set completes in a fraction of a second of
+// wall clock and then never runs again.
+const BAKED_BUILD_BUDGET_MS = 6;
+
+// Rolling per-arrival cost log, DEV only (see onTileLoaded). Bounded so a long
+// session cannot grow it without limit.
+const arrivalCosts = [];
+function recordArrivalCost(rasteriseMs, buildingsMs) {
+  arrivalCosts.push({ rasteriseMs, buildingsMs, at: performance.now() });
+  if (arrivalCosts.length > 2000) arrivalCosts.shift();
+}
+
+/**
+ * Load (once) and build the baked payload into the surface group.
+ *
+ * Failure is non-fatal by design: it warns, reverts to the live path and lets
+ * the loader repopulate. A payload missing from a deploy must degrade to a
+ * slower city, never a blank one.
+ */
+async function activateBakedBuildings() {
+  if (!surfaceGeometryGroup) return;
+
+  // Already built — a toggle back is a re-attach, not a rebuild.
+  if (bakedMeshes.length) {
+    for (const m of bakedMeshes) surfaceGeometryGroup.add(m);
+    dbg(`Baked buildings: re-attached ${bakedMeshes.length} tile meshes`);
+    return;
+  }
+
+  try {
+    const t0 = performance.now();
+    if (!bakedPayload) bakedPayload = await fetchBakedBuildings();
+    bakedLoadMs = Math.round(performance.now() - t0);
+
+    // The path may have been switched back while the fetch was in flight.
+    if (buildingsPath !== 'baked') return;
+
+    bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
+      VE: VERTICAL_EXAGGERATION,
+      material: getBuildingMaterial(),
+      onMesh: (mesh) => { bakedMeshes.push(mesh); surfaceGeometryGroup.add(mesh); },
+    });
+    dbg(`Baked buildings: ${(bakedPayload.bytes / 1048576).toFixed(2)}MB, ${bakedPayload.buildings.toLocaleString()} buildings across ${bakedPayload.tiles.length} tiles, fetched+parsed in ${bakedLoadMs}ms`);
+  } catch (err) {
+    console.warn(`Baked buildings unavailable (${err.message}) — falling back to the live tile path`);
+    buildingsPath = 'live';
+    bakedBuilder = null;
+    resetLoadedTiles();
+    // The toggle already painted itself 'on' before the fetch resolved. Without
+    // this it keeps claiming a path that is not running.
+    renderBuildingsToggle();
+  }
+}
+
+/** Detach the baked meshes without discarding them. */
+function deactivateBakedBuildings() {
+  for (const m of bakedMeshes) surfaceGeometryGroup?.remove(m);
+}
+
+/** Remove every live per-tile building mesh from the surface group. */
+function clearLiveBuildingMeshes() {
+  if (!surfaceGeometryGroup) return 0;
+  const live = surfaceGeometryGroup.children.filter(c => c.name?.startsWith('buildings-'));
+  for (const m of live) {
+    surfaceGeometryGroup.remove(m);
+    disposeTileGeometry(m);
+  }
+  return live.length;
+}
+
+/**
+ * Switch the buildings render path at runtime.
+ *
+ * A reload would be simpler, but the comparison this exists to serve has to
+ * happen in one session: OrbitControls.update() runs even with controls
+ * disabled, so two visits to the same camera coordinates settle differently and
+ * matched captures taken across a reload are not matched.
+ *
+ * @param {'live'|'baked'} next
+ */
+function setBuildingsPath(next) {
+  if (next !== 'live' && next !== 'baked') return;
+  if (next === buildingsPath) return;
+  buildingsPath = next;
+  prefs.buildingsPath = next;
+  savePrefs(prefs);
+  if (next === 'live') deleteUrlParam('buildings'); else setUrlParam('buildings', next);
+
+  if (next === 'baked') {
+    const cleared = clearLiveBuildingMeshes();
+    dbg(`Buildings path -> baked (cleared ${cleared} live tile meshes)`);
+    activateBakedBuildings();
+  } else {
+    deactivateBakedBuildings();
+    // Loaded tiles hold no building meshes while baked was active, so they have
+    // to re-fire onTileLoaded. Returning them to 'idle' sends them back through
+    // the ordinary arrival path rather than inventing a second one.
+    const reset = resetLoadedTiles();
+    dbg(`Buildings path -> live (${reset} tiles queued for reload)`);
+  }
+}
 
 // Module-scoped function assigned inside buildNetworkMvp (needs cross-block access)
 let applySoloSelection = () => {};
@@ -2980,6 +3176,16 @@ function tick() {
   // Update surface tile loader (camera-proximity based loading/unloading)
   updateSurfaceLoader(camera.position.x, camera.position.z);
 
+  // Baked buildings: spend a bounded slice per frame turning payload records
+  // into instance matrices, then stop forever. Runs only while a build is in
+  // flight — this is a few frames after load, not an ongoing per-frame cost.
+  if (bakedBuilder && !bakedBuilder.isDone()) {
+    if (bakedBuilder.pump(BAKED_BUILD_BUDGET_MS)) {
+      const st = bakedBuilder.stats();
+      dbg(`Baked buildings resident: ${st.buildings.toLocaleString()} across ${st.meshes} meshes, built in ${st.buildMs}ms of frame time (payload ${bakedLoadMs}ms)`);
+    }
+  }
+
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
 
@@ -3047,9 +3253,21 @@ tick();
 
 // Dev-only debug exposure for Playwright / console testing
 if (import.meta.env.DEV) {
+  // Measurement harnesses (scripts/measure-*.mjs) need Frustum/Matrix4/Sphere in
+  // page scope to answer "how much is actually being drawn" — renderer.info
+  // describes only the composer's final fullscreen pass and cannot.
+  window.__ugTHREE = THREE;
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
     setBuildingHeightScale, getBuildingHeightScale,
+    // Buildings render path (06Sep26u): 'live' | 'baked'
+    setBuildingsPath,
+    get buildingsPath() { return buildingsPath; },
+    get bakedStats() {
+      return bakedBuilder
+        ? { ...bakedBuilder.stats(), payloadBytes: bakedPayload?.bytes ?? 0, loadMs: bakedLoadMs }
+        : null;
+    },
     getChalkSurfaceY, CHALK_TOP_Y,
     trainSystem, composer, bloomPass, lensSystem, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
@@ -3101,6 +3319,8 @@ if (import.meta.env.DEV) {
     get bridgeRegistry() { return bridgesGroup?.userData?.registry ?? new Map(); },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
+    get arrivalCosts() { return arrivalCosts.slice(); },
+    clearArrivalCosts() { arrivalCosts.length = 0; },
     // Sum of populated instance counts across all per-tile building InstancedMeshes.
     // This is what the Phase 0b fix actually guards: tiles can be `state='loaded'`
     // yet render zero buildings if the dedup Set rejects them. Assert against this
@@ -3108,8 +3328,14 @@ if (import.meta.env.DEV) {
     get buildingInstanceCount() {
       if (!surfaceGeometryGroup) return 0;
       let total = 0;
+      // Counts BOTH render paths. The live path names its meshes
+      // 'buildings-<tile file>' and the baked path 'baked-buildings-<index>';
+      // the two prefixes are deliberately non-overlapping, because
+      // clearLiveBuildingMeshes() distinguishes them by exactly this test and
+      // must never sweep away the baked set.
       surfaceGeometryGroup.traverse((obj) => {
-        if (obj.isInstancedMesh && obj.name && obj.name.startsWith('buildings-')) {
+        if (!obj.isInstancedMesh || !obj.name) return;
+        if (obj.name.startsWith('buildings-') || obj.name.startsWith('baked-buildings-')) {
           total += obj.count;
         }
       });

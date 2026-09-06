@@ -73,6 +73,16 @@ export function getBuildingHeightScale() {
   return heightScaleUniform.value;
 }
 
+/**
+ * The single shared building material. Exported so the baked path
+ * (baked-buildings.js) renders through the same material instance and is
+ * therefore driven by the same D-023 height uniform — one slider, both paths,
+ * no second uniform to keep in step.
+ */
+export function getBuildingMaterial() {
+  return buildingMat;
+}
+
 // NOTE: buildings use a single flat colour, NOT per-instance `setColorAt`.
 // The old height-graded instanceColor tint (COLOR_LOW..COLOR_HIGH) triggered
 // the `USE_INSTANCING_COLOR` shader path, which Apple's newer Metal/ANGLE
