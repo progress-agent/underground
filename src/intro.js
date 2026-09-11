@@ -70,13 +70,13 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
 
   function onSkip() { skipRequested = true; }
 
-  // Preserve "any URL param bypasses intro" so deep-links (e.g. ?hx=5) skip
-  // the cinematic, but whitelist ?tuneIntro=1 — otherwise the tuner can't
-  // actually drive the intro it's meant to tune.
+  // Render settings choose how the same visit is drawn, not where it starts.
+  // Preserve explicit skips/deep-links while keeping the cinematic on preview
+  // URLs such as ?buildings=baked (which formerly exposed the fallback pose).
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    sp.delete('tuneIntro');
+    for (const setting of ['tuneIntro', 'buildings', 'ground']) sp.delete(setting);
     return sp.size > 0;
   }
 

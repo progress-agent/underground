@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createRenderQuality } from './render-quality.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
@@ -255,6 +256,7 @@ composer.addPass(new OutputPass());
 
 // ── Lens character simulation (barrel distortion, CA, vignette) ──
 const lensSystem = createLensSystem(camera, composer, controls);
+const renderQuality = createRenderQuality({ renderer, composer });
 
 // ── Train system (shared state) ──
 const trainSystem = createTrainSystem({ scene, renderer, camera });
@@ -343,7 +345,12 @@ let _dragActive = false;
 // Rising-edge tracker for the fps damping handover (see tick()).
 let _fpsWasActive = false;
 
+function isFormInput(target) {
+  return target?.matches?.('input, select, textarea') || target?.isContentEditable;
+}
+
 window.addEventListener('keydown', (e) => {
+  if (isFormInput(e.target)) return;
   fpsControls.keys.add(e.key.toLowerCase());
 });
 
@@ -359,6 +366,7 @@ window.addEventListener('blur', () => {
 
 // Prevent default scrolling for control keys
 window.addEventListener('keydown', (e) => {
+  if (isFormInput(e.target)) return;
   const controlKeys = ['s', 'w', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
   if (controlKeys.includes(e.key.toLowerCase())) {
     e.preventDefault();
@@ -639,6 +647,7 @@ function resetPrefsAndCache() {
   }
 }
 const prefs = loadPrefs();
+renderQuality.set({ scale: prefs.renderScale ?? 1, samples: prefs.edgeSamples ?? 4 });
 // Prefs loaded silently
 
 // Initialize twin tunnel settings now that prefs is loaded
@@ -723,6 +732,32 @@ function deleteUrlParam(key) {
 
 // HUD controls (optional)
 {
+  const scaleInput = document.getElementById('renderScale');
+  const scaleValue = document.getElementById('renderScaleValue');
+  const edgeInput = document.getElementById('edgeQuality');
+  const syncQualityControls = () => {
+    const q = renderQuality.get();
+    if (scaleInput) scaleInput.value = String(Math.round(q.scale * 100));
+    if (scaleValue) scaleValue.textContent = `${Math.round(q.scale * 100)}%`;
+    if (edgeInput) edgeInput.value = String(q.samples);
+  };
+  const applyQualityControls = () => {
+    const q = renderQuality.set({
+      scale: scaleInput ? Number(scaleInput.value) / 100 : renderQuality.get().scale,
+      samples: edgeInput ? Number(edgeInput.value) : renderQuality.get().samples,
+    });
+    prefs.renderScale = q.scale;
+    prefs.edgeSamples = q.samples;
+    savePrefs(prefs);
+    syncQualityControls();
+  };
+  syncQualityControls();
+  scaleInput?.addEventListener('input', () => {
+    if (scaleValue) scaleValue.textContent = `${scaleInput.value}%`;
+  });
+  // Commit once on release, avoiding framebuffer reallocations during dragging.
+  scaleInput?.addEventListener('change', applyQualityControls);
+  edgeInput?.addEventListener('change', applyQualityControls);
   // Handlers check for existence before applying.
 
   const el = document.getElementById('timeScale');
@@ -2249,8 +2284,7 @@ buildNetworkMvp();
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
+  renderQuality.resize();
   lensSystem.updateAspect(camera.aspect);
 });
 
@@ -3304,7 +3338,7 @@ if (import.meta.env.DEV) {
         : null;
     },
     getChalkSurfaceY, CHALK_TOP_Y,
-    trainSystem, composer, bloomPass, lensSystem, isAudioReady,
+    trainSystem, composer, bloomPass, lensSystem, renderQuality, isAudioReady,
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     isInThames,

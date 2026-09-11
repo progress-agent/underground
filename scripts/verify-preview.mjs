@@ -8,6 +8,12 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+  await page.addInitScript(() => {
+    window.__openingCheck = { done: false, doneAt: null };
+    window.addEventListener('ug:intro-done', () => {
+      window.__openingCheck = { done: true, doneAt: performance.now() };
+    });
+  });
   const errors = [], tiles = [], warnings = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'warning') warnings.push(m.text()); });
@@ -15,12 +21,21 @@ try {
   const ground = page.waitForResponse(r => r.url().includes('/baked/ground.bin'));
   const buildings = page.waitForResponse(r => r.url().includes('/baked/buildings.bin'));
   await page.goto(`${url}/?buildings=baked`, { waitUntil: 'domcontentloaded' });
+  // Verify the exact review URL before any key press can skip its opening.
+  await page.waitForFunction(() => !window.__openingCheck.done &&
+    Number(document.getElementById('ug-readout-alt')?.textContent) > 1000,
+    null, { timeout: 15000 });
+  await page.screenshot({ path: `${out}/opening.png` });
   const assets = await Promise.all([ground, buildings]);
   for (const response of assets) {
     if (!response.ok()) throw new Error(`Asset failed: ${response.url()}`);
     await response.finished();
   }
-  await page.waitForTimeout(4000);
+  await page.waitForFunction(() => window.__openingCheck.done, null, { timeout: 30000 });
+  await page.screenshot({ path: `${out}/landing.png` });
+  const opening = await page.evaluate(() => window.__openingCheck);
+  if (opening.doneAt < 8000) throw new Error('Opening was skipped or ended prematurely');
+  await page.waitForTimeout(1000);
   await page.keyboard.down('KeyE');
   await page.waitForTimeout(6000);
   await page.keyboard.up('KeyE');
@@ -28,7 +43,7 @@ try {
   await page.waitForTimeout(800);
   await page.keyboard.up('ArrowDown');
   await page.screenshot({ path: `${out}/flight.png` });
-  const result = { url, errors, warnings, sourceTileRequests: tiles.length,
+  const result = { url, errors, warnings, opening, sourceTileRequests: tiles.length,
     debugAbsent: await page.evaluate(() => !window.__ug),
     bakedSelected: await page.locator('#bakedBuildings').getAttribute('aria-pressed').catch(() => null),
     assets: assets.map(r => ({ url: r.url(), status: r.status(), type: r.headers()['content-type'] })) };
