@@ -176,6 +176,10 @@ const composerRenderTarget = new THREE.WebGLRenderTarget(
   { samples: 4, type: THREE.HalfFloatType }
 );
 const composer = new EffectComposer(renderer, composerRenderTarget);
+// With an explicit target, r161 treats its physical dimensions as CSS size.
+// Normalise before adding passes, or DPR is applied twice to every bloom level
+// until the first window resize (4x unnecessary post-processing pixels at DPR2).
+composer.setSize(window.innerWidth, window.innerHeight);
 // A1 (05Sep26s): the post ping-pong buffer does not need MSAA — only the pass
 // that draws the scene does. EffectComposer builds renderTarget2 as
 // `renderTarget.clone()`, so it silently inherited samples:4 and every bloom /
@@ -2253,6 +2257,7 @@ window.addEventListener('resize', () => {
 // Module-level reference for the tooltip formatter — populated from inside the
 // bare-block scope below so __ug (and tests) can call it directly.
 let _formatInfraTooltipRef = null;
+let _clearHoverForMotion = null;
 
 // ---------- Click-to-focus / shift-click toggle + hover tooltip ----------
 {
@@ -2789,8 +2794,8 @@ let _formatInfraTooltipRef = null;
     // Skip the whole hover cascade (up to three full-scene raycasts) while a
     // rotate drag is active — tooltips are irrelevant mid-drag and the raycasts
     // are the dominant per-move cost. Clear any lingering tip on the way in.
-    if (_dragActive) {
-      setHoverHighlight(null);
+    if (_dragActive || fpsControls.active) {
+      onPointerLeave();
       return;
     }
 
@@ -2820,6 +2825,7 @@ let _formatInfraTooltipRef = null;
     moveTip({}, null);
     setHoverHighlight(null);
   }
+  _clearHoverForMotion = onPointerLeave;
 
   function onPointerDown(ev) {
     // Only left click / primary.
@@ -3033,9 +3039,12 @@ function setShaftsVisible(v) {
 // Non-direction keyboard shortcuts removed — only S/W/X/A/D, Q/E, arrows remain active.
 
 // ---------- Animate ----------
-const clock = new THREE.Clock();
-function tick() {
-  const dt = clock.getDelta();
+let lastFrameTime = null;
+function tick(frameTime) {
+  // Integrate against the display frame, not callback scheduling jitter.
+  // GPU/DOM work can delay JS within a frame without changing its timestamp.
+  const dt = lastFrameTime === null ? 0 : Math.max(0, (frameTime - lastFrameTime) / 1000);
+  lastFrameTime = frameTime;
 
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);
@@ -3045,6 +3054,9 @@ function tick() {
   // turn all missed wall-clock time into one large camera jump. Simulation
   // and audio retain their own elapsed time; bound only interactive motion.
   updateFpsControls(Math.min(dt, 0.05));
+  // A stationary pointer must not leave a tooltip's synchronous GPU readback
+  // running throughout keyboard flight. Hover resumes on the next pointer move.
+  if (fpsControls.active && !_fpsWasActive) _clearHoverForMotion?.();
 
   // Re-enable OrbitControls when not using FPS controls
   if (!intro.isRunning() && !fpsControls.active && !controls.enabled) {
@@ -3078,6 +3090,8 @@ function tick() {
     controls.update();
   }
   _fpsWasActive = fpsControls.active;
+  // DOM label projection runs before renderer.render() flushes this matrix.
+  camera.updateMatrixWorld(true);
 
   // Readout widget — substrate, altitude, compass
   const azimuth = controls.getAzimuthalAngle();
@@ -3262,12 +3276,12 @@ function tick() {
     });
   }
 
-  composer.render();
+  composer.render(dt);
   sampleCushion();
   requestAnimationFrame(tick);
 }
 
-tick();
+requestAnimationFrame(tick);
 
 // Dev-only debug exposure for Playwright / console testing
 if (import.meta.env.DEV) {
