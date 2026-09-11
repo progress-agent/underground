@@ -20,7 +20,9 @@ function stats(values) {
 }
 try {
   // ABBA controls for machine drift; each visit uses a fresh browser context.
-  for (const [index, ground] of ['live', 'baked', 'baked', 'live'].entries()) {
+  const order = (process.env.UG_BENCH_ORDER || 'live,baked,baked,live').split(',');
+  if (order.some(path => !['live', 'baked'].includes(path))) throw new Error('Invalid UG_BENCH_ORDER');
+  for (const [index, ground] of order.entries()) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr });
     const page = await context.newPage();
     const errors = [], tileRequests = [];

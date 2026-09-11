@@ -2823,7 +2823,9 @@ let _formatInfraTooltipRef = null;
 
   function onPointerDown(ev) {
     // Only left click / primary.
-    if (ev.button !== 0) return;
+    // Ordinary clicks have no action here. Avoid an unused full line raycast
+    // on every orbit start; Shift-click keeps the exact existing selection.
+    if (ev.button !== 0 || !ev.shiftKey) return;
 
     const lineId = pickLineUnderPointer(ev);
     if (!lineId) return;
@@ -3039,7 +3041,10 @@ function tick() {
   intro.update(dt);
 
   // Update FPS controls before orbit controls (keyboard takes precedence)
-  updateFpsControls(dt);
+  // A delayed frame (asset upload, shader compilation, tab resume) must not
+  // turn all missed wall-clock time into one large camera jump. Simulation
+  // and audio retain their own elapsed time; bound only interactive motion.
+  updateFpsControls(Math.min(dt, 0.05));
 
   // Re-enable OrbitControls when not using FPS controls
   if (!intro.isRunning() && !fpsControls.active && !controls.enabled) {

@@ -64,3 +64,29 @@ test('switching buildings during the incremental bake does not mix render paths'
   expect(await page.evaluate(() => window.__ug.surfaceGeometryGroup.children.filter(m => m.name.startsWith('baked-buildings-')).length))
     .toBe(await page.evaluate(() => window.__ug.bakedStats.tilesTotal));
 });
+
+test('a blocked frame cannot teleport a held flight key', async ({ page }) => {
+  await page.goto('/?fast=1&buildings=baked');
+  await page.waitForFunction(() => {
+    const ug = window.__ug, s = ug?.bakedStats;
+    return ug?.groundReady && s && s.tilesBuilt === s.tilesTotal;
+  });
+  await page.evaluate(() => {
+    const { camera, controls } = window.__ug;
+    camera.position.set(0, -4000, 0); controls.target.set(1000, -4000, 0); controls.update();
+  });
+  await page.waitForTimeout(300);
+  const moved = await page.evaluate(() => new Promise(resolve => {
+    const ug = window.__ug, start = ug.camera.position.clone();
+    ug.fpsControls.flightToggle = false;
+    ug.fpsControls.keys.clear(); ug.fpsControls.keys.add('w');
+    const until = performance.now() + 250;
+    while (performance.now() < until) { /* reproduce a synchronous loading stall */ }
+    requestAnimationFrame(() => {
+      ug.fpsControls.keys.clear();
+      resolve(ug.camera.position.distanceTo(start));
+    });
+  }));
+  expect(moved).toBeGreaterThan(0);
+  expect(moved).toBeLessThanOrEqual(25.1); // at most 500 scene units/s * 50ms
+});
