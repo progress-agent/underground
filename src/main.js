@@ -31,6 +31,7 @@ import { loadBakedGround } from './baked-ground.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js';
 import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats, resetLoadedTiles } from './surface-loader.js';
 import { fetchBakedBuildings, createBakedBuildingBuilder } from './baked-buildings.js';
+import { fetchLandmarkFootprints, createLandmarkModels } from './landmark-models.js';
 import { initThamesMask, isInThames } from './thames-mask.js';
 import { initThamesZones, getZoneAt, nearestThamesSegment } from './thames-zones.js';
 import { RENDER_ORDER } from './render-layers.js';
@@ -723,6 +724,7 @@ let buildingsPath = (urlBuildingsPath === 'baked' || urlBuildingsPath === 'live'
 // toggle's label. Declared HERE, above that block: it is assigned at module
 // evaluation, so a declaration further down the file is a TDZ throw at boot.
 let renderBuildingsToggle = () => {};
+let landmarkGroup = null;
 
 const sim = {
   trains: [],
@@ -846,6 +848,7 @@ function deleteUrlParam(key) {
   if (bhEl) {
     const apply = (mult) => {
       setBuildingHeightScale(mult / VERTICAL_EXAGGERATION);
+      landmarkGroup?.userData.setHeightScale(getBuildingHeightScale());
       if (bhOut) bhOut.textContent = `${mult.toFixed(1)}\u00d7`;
     };
     bhEl.value = String(initialBh);
@@ -1397,6 +1400,7 @@ let bakedPayload = null;
 let bakedBuilder = null;
 let bakedMeshes = [];
 let bakedLoadMs = 0;
+let landmarkDataPromise = null;
 
 
 // Per-frame slice spent turning payload records into instance matrices. Six
@@ -1426,17 +1430,36 @@ async function activateBakedBuildings() {
   // Already built — a toggle back is a re-attach, not a rebuild.
   if (bakedMeshes.length) {
     for (const m of bakedMeshes) surfaceGeometryGroup.add(m);
+    if (landmarkGroup) surfaceGeometryGroup.add(landmarkGroup);
     dbg(`Baked buildings: re-attached ${bakedMeshes.length} tile meshes`);
     return;
   }
 
   try {
     const t0 = performance.now();
-    if (!bakedPayload) bakedPayload = await fetchBakedBuildings();
+    landmarkDataPromise ||= fetchLandmarkFootprints().catch(err => { landmarkDataPromise = null; throw err; });
+    const [payload, footprints] = await Promise.all([
+      bakedPayload || fetchBakedBuildings(), landmarkDataPromise,
+    ]);
+    bakedPayload = payload;
     bakedLoadMs = Math.round(performance.now() - t0);
 
     // The path may have been switched back while the fetch was in flight.
     if (buildingsPath !== 'baked') return;
+    // A second toggle may have awaited the same fetch. The first activation
+    // owns the incremental builder; never create a second set of tile meshes.
+    if (bakedBuilder) {
+      for (const mesh of bakedMeshes) surfaceGeometryGroup.add(mesh);
+      if (landmarkGroup) surfaceGeometryGroup.add(landmarkGroup);
+      return;
+    }
+
+    if (!landmarkGroup) landmarkGroup = createLandmarkModels(footprints, {
+      getSurfaceY: getTerrainMeshSurfaceY,
+      VE: VERTICAL_EXAGGERATION,
+      heightScale: getBuildingHeightScale(),
+    });
+    surfaceGeometryGroup.add(landmarkGroup);
 
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
@@ -1462,6 +1485,7 @@ async function activateBakedBuildings() {
 /** Detach the baked meshes without discarding them. */
 function deactivateBakedBuildings() {
   for (const m of bakedMeshes) surfaceGeometryGroup?.remove(m);
+  if (landmarkGroup) surfaceGeometryGroup?.remove(landmarkGroup);
 }
 
 /** Remove every live per-tile building mesh from the surface group. */
@@ -3426,6 +3450,7 @@ if (import.meta.env.DEV) {
     get bridgeRegistry() { return bridgesGroup?.userData?.registry ?? new Map(); },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
+    get landmarkGroup() { return landmarkGroup; },
     get arrivalCosts() { return arrivalCosts.slice(); },
     clearArrivalCosts() { arrivalCosts.length = 0; },
     // Sum of populated instance counts across all per-tile building InstancedMeshes.

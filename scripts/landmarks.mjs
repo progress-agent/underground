@@ -1,6 +1,6 @@
 // Named-site registry — the ONE source the bake compiler reads twice.
 //
-// Round one chosen by Jordan 06Sep26u. Landmarks are modelled as real OSM
+// Round one selected by wA with Jordan's authorisation 06Sep26u. Landmarks are modelled as real OSM
 // footprint extrusion + a hand-authored crown (the bridges.js archetype idiom),
 // which creates two obligations on the compiler that pull in opposite
 // directions and are both served from this file:
@@ -32,6 +32,10 @@ export const LANDMARKS = [
   { id: 'bt-tower',       name: 'BT Tower',                     x: -781, z: -1528, suppressRadiusM:  45, crown: 'cylinder-shaft', station: 'Goodge Street' },
   { id: 'the-o2',         name: 'The O2',                       x: 9133, z: 269, suppressRadiusM: 210, crown: 'dome-twelve-masts', station: 'North Greenwich' },
   { id: 'wembley',        name: 'Wembley Stadium',              x: -10633, z: -5126, suppressRadiusM: 230, crown: 'bowl-arch',      station: 'Wembley Park' },
+  // Mean of OSM way 486297861's nodes, projected WGS84 -> EPSG:27700:
+  // 51.53869419152544, -0.016628084745762713. The existing tile includes
+  // the 59,904m² building outline; the bake retains it with its neighbours.
+  { id: 'london-stadium', name: 'London Stadium',               x: 7649, z: -3663, suppressRadiusM: 210, crown: 'oval-canopy',     station: 'Stratford' },
 ];
 
 // Tower Bridge is DELIBERATELY ABSENT. It is already modelled in src/bridges.js
