@@ -44,3 +44,23 @@ for (const failure of ['missing', 'html', 'corrupt']) {
     expect(await page.evaluate(() => window.__ug.surfaceTexState.pixels.some(x => x > 0))).toBe(true);
   });
 }
+
+test('switching buildings during the incremental bake does not mix render paths', async ({ page }) => {
+  await page.goto('/?fast=1&buildings=live');
+  await page.waitForFunction(() => window.__ug?.groundReady);
+  await page.evaluate(() => window.__ug.setBuildingsPath('baked'));
+  await page.waitForFunction(() => {
+    const ug = window.__ug, stats = ug.bakedStats;
+    if (!stats || stats.tilesBuilt === stats.tilesTotal) return false;
+    ug.setBuildingsPath('live');
+    return true;
+  });
+  await page.waitForFunction(() => {
+    const s = window.__ug.bakedStats;
+    return s && s.tilesBuilt === s.tilesTotal;
+  });
+  expect(await page.evaluate(() => window.__ug.surfaceGeometryGroup.children.filter(m => m.name.startsWith('baked-buildings-')).length)).toBe(0);
+  await page.evaluate(() => window.__ug.setBuildingsPath('baked'));
+  expect(await page.evaluate(() => window.__ug.surfaceGeometryGroup.children.filter(m => m.name.startsWith('baked-buildings-')).length))
+    .toBe(await page.evaluate(() => window.__ug.bakedStats.tilesTotal));
+});
