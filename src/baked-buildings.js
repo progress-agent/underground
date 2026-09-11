@@ -13,13 +13,9 @@
 // city is built once and never disposed, so the mechanism that stutters is gone
 // rather than made faster.
 //
-// WHAT IT DOES NOT REPLACE. The bake covers buildings only. Parks and roads are
-// still rasterised into the persistent surface texture from the JSON tiles by
-// surface-loader.js, so the loader keeps running when this path is active — it
-// just stops creating building meshes. rasteriseTile has no already-done guard,
-// so that cost recurs on every reload too; only its EFFECT is idempotent. This
-// module removes one of the two per-arrival costs. The ground-artwork bake is
-// what removes the other.
+// Ground artwork is loaded separately by baked-ground.js. When both layers
+// are baked, main.js stops the source tile loader entirely. A live selection
+// or failed ground payload keeps it available as a fallback.
 //
 // THREE THINGS THE FORMAT GUARANTEES, each a decision rather than a detail:
 //

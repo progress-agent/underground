@@ -25,6 +25,7 @@ import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.j
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
 import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
+import { loadBakedGround } from './baked-ground.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js';
 import { initSurfaceLoader, updateSurfaceLoader, getFullSceneBBox, makeTileDedup, getSurfaceLoaderStats, resetLoadedTiles } from './surface-loader.js';
 import { fetchBakedBuildings, createBakedBuildingBuilder } from './baked-buildings.js';
@@ -677,6 +678,8 @@ const urlFocusLine = getUrlStringParam('focus');
 // assessed in Jordan's hands. ?buildings=baked overrides for one visit;
 // the HUD toggle persists the choice.
 const urlBuildingsPath = getUrlStringParam('buildings');
+// Keep the live ground path for controlled comparison and graceful recovery.
+let groundPath = getUrlStringParam('ground') === 'live' ? 'live' : 'baked';
 let buildingsPath = (urlBuildingsPath === 'baked' || urlBuildingsPath === 'live')
   ? urlBuildingsPath
   : (prefs.buildingsPath === 'baked' ? 'baked' : 'live');
@@ -1010,21 +1013,13 @@ const thamesDataPromise = loadThamesData();
             const _t0 = import.meta.env.DEV ? performance.now() : 0;
 
             // Rasterise parks + roads into persistent full-map texture
-            if (surfaceTexState) {
+            if (surfaceTexState && groundPath === 'live') {
               rasteriseTile(surfaceTexState, tileData);
             }
             const _tRaster = import.meta.env.DEV ? performance.now() : 0;
-            // The baked path owns buildings. The loader still runs under it,
-            // because parks and roads are NOT baked yet and rasterise from
-            // these same tiles — that half of the compiler is still to come.
-            //
-            // So this switch removes ONE of the two per-arrival costs, not
-            // both. rasteriseTile carries no already-done guard: its EFFECT is
-            // idempotent (the texture is persistent and disposal never
-            // un-rasterises), but its COST is paid again every time a tile
-            // re-enters LOAD_RADIUS, exactly like building creation used to be.
-            // How much of the flight stutter survives this switch is therefore
-            // a measured quantity, not a deduced one.
+            // A baked ground texture never changes on tile arrivals. The
+            // loader runs only if at least one layer is live (or has fallen
+            // back). Fully baked flight does not request source tile JSON.
             if (buildingsPath === 'baked') {
               if (import.meta.env.DEV) recordArrivalCost(_tRaster - _t0, 0);
               return;
@@ -1054,11 +1049,21 @@ const thamesDataPromise = loadThamesData();
               disposeTileGeometry(mesh);
             }
           },
-        }).then(manifest => {
+        }).then(async manifest => {
           const fullBBox = getFullSceneBBox();
 
           // Create persistent 4096² texture spanning full M25 area
-          surfaceTexState = createSurfaceTexture(fullBBox, 4096);
+          if (groundPath === 'baked') {
+            try {
+              surfaceTexState = await loadBakedGround(fullBBox);
+              renderer.initTexture(surfaceTexState.texture);
+              dbg('Baked ground ready: full-city parks and roads');
+            } catch (err) {
+              groundPath = 'live';
+              console.warn(`Baked ground unavailable (${err.message}); using live tiles`);
+            }
+          }
+          if (!surfaceTexState) surfaceTexState = createSurfaceTexture(fullBBox, 4096);
 
           // Inject surface shader into terrain material (chains after M25 mask)
           if (result.topMat) {
@@ -1367,7 +1372,11 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
-      onMesh: (mesh) => { bakedMeshes.push(mesh); surfaceGeometryGroup.add(mesh); },
+      onMesh: (mesh) => {
+        bakedMeshes.push(mesh);
+        // A switch during the incremental build must not mix both cities.
+        if (buildingsPath === 'baked') surfaceGeometryGroup.add(mesh);
+      },
     });
     dbg(`Baked buildings: ${(bakedPayload.bytes / 1048576).toFixed(2)}MB, ${bakedPayload.buildings.toLocaleString()} buildings across ${bakedPayload.tiles.length} tiles, fetched+parsed in ${bakedLoadMs}ms`);
   } catch (err) {
@@ -3174,7 +3183,11 @@ function tick() {
   }
 
   // Update surface tile loader (camera-proximity based loading/unloading)
-  updateSurfaceLoader(camera.position.x, camera.position.z);
+  // With both static layers resident there is no reason to fetch/parse source
+  // tiles. Readiness also prevents a load racing the initial ground download.
+  if (surfaceDataLoaded && !(buildingsPath === 'baked' && groundPath === 'baked')) {
+    updateSurfaceLoader(camera.position.x, camera.position.z);
+  }
 
   // Baked buildings: spend a bounded slice per frame turning payload records
   // into instance matrices, then stop forever. Runs only while a build is in
@@ -3263,6 +3276,9 @@ if (import.meta.env.DEV) {
     // Buildings render path (06Sep26u): 'live' | 'baked'
     setBuildingsPath,
     get buildingsPath() { return buildingsPath; },
+    get groundPath() { return groundPath; },
+    get groundReady() { return surfaceDataLoaded; },
+    get surfaceTexState() { return surfaceTexState; },
     get bakedStats() {
       return bakedBuilder
         ? { ...bakedBuilder.stats(), payloadBytes: bakedPayload?.bytes ?? 0, loadMs: bakedLoadMs }

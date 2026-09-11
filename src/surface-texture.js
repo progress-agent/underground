@@ -203,7 +203,7 @@ export function createSurfaceTexture(fullBBox, size = 4096) {
  * @param {{ texture, pixels, size, bbox }} texState  From createSurfaceTexture()
  * @param {object} tileData  Parsed tile JSON (parks, roads arrays)
  */
-export function rasteriseTile(texState, tileData) {
+export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
   const { pixels, size, bbox } = texState;
   const t0 = performance.now();
   let parkCount = 0, roadCount = 0;
@@ -241,7 +241,7 @@ export function rasteriseTile(texState, tileData) {
   texState.texture.needsUpdate = true;
 
   const elapsed = (performance.now() - t0).toFixed(1);
-  console.log(`Surface tile rasterised: ${parkCount} parks, ${roadCount} roads (${elapsed}ms)`);
+  if (!quiet) console.log(`Surface tile rasterised: ${parkCount} parks, ${roadCount} roads (${elapsed}ms)`);
 }
 
 /**
