@@ -15,7 +15,7 @@ export function createRenderQuality({ renderer, composer }) {
 
   function set(next = {}) {
     const nextScale = Number(next.scale ?? scale);
-    scale = Number.isFinite(nextScale) ? Math.min(1, Math.max(0.5, nextScale)) : 1;
+    scale = Number.isFinite(nextScale) ? Math.min(1, Math.max(0.35, nextScale)) : 1;
     const nextSamples = Number(next.samples ?? samples);
     samples = [0, 2, 4].includes(nextSamples) ? nextSamples : 4;
     // Release the previous framebuffer before changing its sample count.

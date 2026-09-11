@@ -7,6 +7,7 @@ for (const dpr of [1, 2]) {
     try {
       await page.goto('/?fast=1&buildings=baked');
       await page.waitForFunction(() => window.__ug?.composer);
+      await page.evaluate(() => window.__ug.setRenderQualityMode?.('manual'));
       const dimensions = () => page.evaluate(() => {
         const { composer, bloomPass } = window.__ug;
         return {

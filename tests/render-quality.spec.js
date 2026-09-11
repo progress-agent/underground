@@ -4,6 +4,9 @@ test('manual quality preserves scene/camera, persists, resizes and restores full
  const context=await browser.newContext({viewport:{width:1000,height:700},deviceScaleFactor:2});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  try{
   await page.goto('/?fast=1&buildings=baked');
+  await page.waitForFunction(()=>window.__ug?.setRenderQualityMode);
+  expect(await page.locator('#renderMode').inputValue()).toBe('auto');
+  await page.evaluate(()=>window.__ug.setRenderQualityMode('manual'));
   await page.waitForFunction(()=>window.__ug?.bakedStats?.tilesTotal>0&&window.__ug.bakedStats.tilesBuilt===window.__ug.bakedStats.tilesTotal);
   const snapshot=()=>page.evaluate(()=>{const u=window.__ug,r=u.composer.renderer;return{quality:u.renderQuality.get(),canvas:[r.domElement.width,r.domElement.height],scene:[u.composer.renderTarget1.width,u.composer.renderTarget1.height],samples:[u.composer.renderTarget1.samples,u.composer.renderTarget2.samples],buildings:u.bakedStats?.buildings ?? 0,position:u.camera.position.toArray()}});
   const before=await snapshot();expect(before.quality).toEqual({scale:1,samples:4,pixelRatio:2});expect(before.buildings).toBeGreaterThan(1000000);

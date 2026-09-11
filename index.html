@@ -337,8 +337,15 @@
         </p>
 
         <p class="small">
+          <label for="renderMode">Rendering:</label>
+          <select id="renderMode">
+            <option value="auto">Automatic</option>
+            <option value="manual">Manual</option>
+          </select>
+        </p>
+        <p class="small">
           <label for="renderScale">Resolution:</label>
-          <input id="renderScale" type="range" min="50" max="100" value="100" step="5"
+          <input id="renderScale" type="range" min="35" max="100" value="100" step="5"
                  style="vertical-align: middle; width: 140px;" />
           <span id="renderScaleValue">100%</span>
         </p>
@@ -350,7 +357,7 @@
             <option value="0">Off</option>
           </select>
         </p>
-        <p class="small" style="opacity:0.7;">Lower settings improve speed. Map coverage stays the same.</p>
+        <p class="small" style="opacity:0.7;">Automatic favours smooth movement. Map coverage stays the same.</p>
 
         <p class="small row">
           <button id="flightSprint" type="button" aria-pressed="false" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Fast flight: off</button>

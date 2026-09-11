@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createRenderQuality } from './render-quality.js';
+import { createAdaptiveQuality } from './adaptive-quality.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
@@ -257,6 +258,11 @@ composer.addPass(new OutputPass());
 // ── Lens character simulation (barrel distortion, CA, vignette) ──
 const lensSystem = createLensSystem(camera, composer, controls);
 const renderQuality = createRenderQuality({ renderer, composer });
+let syncRenderQualityUi = () => {};
+const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
+  renderQuality.set(quality);
+  syncRenderQualityUi();
+} });
 
 // ── Train system (shared state) ──
 const trainSystem = createTrainSystem({ scene, renderer, camera });
@@ -648,6 +654,22 @@ function resetPrefsAndCache() {
 }
 const prefs = loadPrefs();
 renderQuality.set({ scale: prefs.renderScale ?? 1, samples: prefs.edgeSamples ?? 4 });
+let renderQualityMode = prefs.renderMode === 'manual' ? 'manual' : 'auto';
+if (renderQualityMode === 'auto') adaptiveQuality.start(performance.now());
+
+function setRenderQualityMode(next) {
+  renderQualityMode = next === 'manual' ? 'manual' : 'auto';
+  prefs.renderMode = renderQualityMode;
+  if (renderQualityMode === 'auto') {
+    adaptiveQuality.start(performance.now());
+  } else {
+    const quality = renderQuality.get();
+    prefs.renderScale = quality.scale;
+    prefs.edgeSamples = quality.samples;
+  }
+  savePrefs(prefs);
+  syncRenderQualityUi();
+}
 // Prefs loaded silently
 
 // Initialize twin tunnel settings now that prefs is loaded
@@ -735,13 +757,19 @@ function deleteUrlParam(key) {
   const scaleInput = document.getElementById('renderScale');
   const scaleValue = document.getElementById('renderScaleValue');
   const edgeInput = document.getElementById('edgeQuality');
+  const modeInput = document.getElementById('renderMode');
   const syncQualityControls = () => {
     const q = renderQuality.get();
+    const automatic = renderQualityMode === 'auto';
+    if (modeInput) modeInput.value = renderQualityMode;
+    if (scaleInput) scaleInput.disabled = automatic;
+    if (edgeInput) edgeInput.disabled = automatic;
     if (scaleInput) scaleInput.value = String(Math.round(q.scale * 100));
     if (scaleValue) scaleValue.textContent = `${Math.round(q.scale * 100)}%`;
     if (edgeInput) edgeInput.value = String(q.samples);
   };
   const applyQualityControls = () => {
+    if (renderQualityMode !== 'manual') return;
     const q = renderQuality.set({
       scale: scaleInput ? Number(scaleInput.value) / 100 : renderQuality.get().scale,
       samples: edgeInput ? Number(edgeInput.value) : renderQuality.get().samples,
@@ -751,7 +779,9 @@ function deleteUrlParam(key) {
     savePrefs(prefs);
     syncQualityControls();
   };
+  syncRenderQualityUi = syncQualityControls;
   syncQualityControls();
+  modeInput?.addEventListener('change', () => setRenderQualityMode(modeInput.value));
   scaleInput?.addEventListener('input', () => {
     if (scaleValue) scaleValue.textContent = `${scaleInput.value}%`;
   });
@@ -3310,6 +3340,12 @@ function tick(frameTime) {
     });
   }
 
+  if (renderQualityMode === 'auto') {
+    const ready = surfaceDataLoaded && !intro.isRunning() && !document.hidden &&
+      (buildingsPath !== 'baked' || bakedBuilder?.isDone());
+    if (ready) adaptiveQuality.update(dt * 1000, frameTime);
+    else adaptiveQuality.reset(frameTime);
+  }
   composer.render(dt);
   sampleCushion();
   requestAnimationFrame(tick);
@@ -3339,6 +3375,8 @@ if (import.meta.env.DEV) {
     },
     getChalkSurfaceY, CHALK_TOP_Y,
     trainSystem, composer, bloomPass, lensSystem, renderQuality, isAudioReady,
+    adaptiveQuality, setRenderQualityMode,
+    get renderQualityMode() { return renderQualityMode; },
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     nearestThamesSegment, getZoneAt,
     isInThames,
