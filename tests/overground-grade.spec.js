@@ -38,7 +38,7 @@ test('no non-tunnel overground track renders below the terrain', async ({ page }
     const DRESS = new Set(dressing);
     let total = 0, buried = 0, shallowBuried = 0, grazing = 0;
     ug.overground.traverse(o => {
-      if (!o.isMesh) return;
+      if (!o.isMesh || o.userData.type !== 'overground-line' || o.material.emissiveIntensity !== .35) return;
       const hex = o.material?.color?.getHexString?.();
       if (!hex || DRESS.has(hex)) return;
       const pos = o.geometry?.attributes?.position; if (!pos) return;

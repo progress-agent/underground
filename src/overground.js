@@ -1,3 +1,4 @@
+import { createOvergroundFleet } from './overground-trains.js';
 // London Overground surface rail — D-019 earthworks archetype language.
 //
 // Renders public/data/overground.json (Prog 11Jul26s delivery, wA v2 restitch
@@ -93,32 +94,33 @@ function buildPath(branch, getTerrainMeshSurfaceY) {
     for (let i = seg.i0; i < Math.min(seg.i1, pts.length); i++) classes[i] = seg.class;
   }
   const path = [];
-  for (let i = 0; i < pts.length; i++) {
-    const { x, z } = llToScene(pts[i][0], pts[i][1]);
-    const tY = getTerrainMeshSurfaceY({ x, z });
-    if (tY === null || tY === undefined) continue;
-    const cls = CLASS_LIFT_M[classes[i]] === undefined ? 'surface' : classes[i];
-    path.push({ x, z, terrainY: tY, cls, y: tY + BASE_LIFT + CLASS_LIFT_M[cls] * VE });
-  }
-  // Smooth Y so class transitions ramp instead of stepping, and coarse
-  // terrain-cell sampling doesn't jitter the deck.
-  for (let pass = 0; pass < SMOOTH_PASSES; pass++) {
-    for (let i = 1; i < path.length - 1; i++) {
-      path[i].y = (path[i - 1].y + path[i].y * 2 + path[i + 1].y) / 4;
+  // Sample within long source segments too: a chord between two terrain
+  // samples otherwise sails across intervening street-level relief.
+  for(let i=0;i<pts.length-1;i++) {
+    const a=llToScene(...pts[i]),b=llToScene(...pts[i+1]);
+    const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/12));
+    for(let j=0;j<steps+(i===pts.length-2?1:0);j++) {
+      const t=j/steps,x=a.x+(b.x-a.x)*t,z=a.z+(b.z-a.z)*t;
+      const terrainY=getTerrainMeshSurfaceY({x,z});if(!Number.isFinite(terrainY))continue;
+      const cls=CLASS_LIFT_M[classes[i]]===undefined?'surface':classes[i];
+      path.push({x,z,terrainY,cls,y:terrainY+BASE_LIFT+CLASS_LIFT_M[cls]*VE});
     }
   }
-  // Terrain floor (06Sep26u). The smoothing above blends across class
-  // boundaries, and a tunnel run at -20m real drags its neighbours down with
-  // it — burying surface and cutting track for a long way either side of every
-  // portal. Measured before this floor: 10.8% of the identity stripe below
-  // terrain, of which only 2.0% was actually tunnel; the rest was a smooth
-  // -0.5m..-18m continuum with no earthworks class to justify it.
-  // Only a tunnel may sit below ground, so the whole descent now happens
-  // inside the tunnel run, which is what a portal is.
-  for (const p of path) {
-    if (p.cls === 'tunnel') continue;
-    const floor = p.terrainY + BASE_LIFT;
-    if (p.y < floor) p.y = floor;
+  // Distance-based approaches taper a viaduct/embankment down to adjoining
+  // ground-level track. A point-count smoother makes steep steps when source
+  // nodes are unevenly spaced. Limit the additional earthwork grade to4%.
+  const lifts=path.map(p=>Math.max(0,CLASS_LIFT_M[p.cls]));
+  for(const direction of [1,-1]){
+    for(let i=direction===1?1:path.length-2;i>=0&&i<path.length;i+=direction){
+      const j=i-direction,distance=Math.hypot(path[i].x-path[j].x,path[i].z-path[j].z);
+      lifts[i]=Math.min(lifts[i],lifts[j]+distance*.04);
+    }
+  }
+  for(let i=0;i<path.length;i++)if(path[i].cls!=='tunnel')path[i].y=path[i].terrainY+BASE_LIFT+lifts[i]*VE;
+  // Tunnel portal smoothing stays within tunnel samples. Above-ground samples
+  // keep their bounded terrain-relative profiles and cannot be pulled under.
+  for(let pass=0;pass<SMOOTH_PASSES;pass++)for(let i=1;i<path.length-1;i++){
+    if(path[i].cls==='tunnel')path[i].y=(path[i-1].y+2*path[i].y+path[i+1].y)/4;
   }
   return path;
 }
@@ -206,82 +208,6 @@ function buildCorridor(path, out) {
   }
 }
 
-// ── Trains: simple ping-pong capsules with emissive window strips ────────
-const TRAIN_LENGTH = 100;
-const TRAIN_RADIUS = 2.2;
-const TRAIN_SPEED_MPS = 13;
-const TRAIN_MIN_CORRIDOR_M = 5000;
-const TRAIN_VISIBLE_DIST = 9000;
-
-let _ogCapsuleGeo = null;
-let _ogStripGeo = null;
-
-function buildTrain(colour) {
-  if (!_ogCapsuleGeo) {
-    _ogCapsuleGeo = new THREE.CapsuleGeometry(TRAIN_RADIUS, TRAIN_LENGTH, 6, 12);
-    _ogCapsuleGeo.rotateX(Math.PI / 2);
-  }
-  if (!_ogStripGeo) {
-    _ogStripGeo = new THREE.PlaneGeometry(TRAIN_LENGTH * 0.95, 1.6);
-    _ogStripGeo.rotateY(Math.PI / 2);
-  }
-  const train = new THREE.Group();
-  const body = new THREE.Mesh(_ogCapsuleGeo, new THREE.MeshStandardMaterial({
-    color: 0x22252a,
-    roughness: 0.65,
-    metalness: 0.15,
-    emissive: new THREE.Color(colour),
-    emissiveIntensity: 0.05,
-    fog: true,
-  }));
-  train.add(body);
-  const winMat = new THREE.MeshBasicMaterial({ color: 0xffb14e, toneMapped: false, side: THREE.DoubleSide });
-  const wL = new THREE.Mesh(_ogStripGeo, winMat);
-  wL.position.set(-(TRAIN_RADIUS + 0.05), 0.6, 0);
-  train.add(wL);
-  const wR = new THREE.Mesh(_ogStripGeo, winMat);
-  wR.position.set(TRAIN_RADIUS + 0.05, 0.6, 0);
-  train.add(wR);
-  return train;
-}
-
-function makeTrainRunner(path, colour) {
-  // cumulative distances for constant-speed travel
-  const cum = [0];
-  for (let i = 1; i < path.length; i++) {
-    cum.push(cum[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
-  }
-  const total = cum[cum.length - 1];
-  if (total < TRAIN_MIN_CORRIDOR_M) return null;
-  const mesh = buildTrain(colour);
-  return {
-    mesh, path, cum, total,
-    s: Math.random() * total,
-    dir: Math.random() < 0.5 ? 1 : -1,
-  };
-}
-
-function stepTrain(runner, dt) {
-  runner.s += runner.dir * TRAIN_SPEED_MPS * dt;
-  if (runner.s <= 0) { runner.s = 0; runner.dir = 1; }
-  if (runner.s >= runner.total) { runner.s = runner.total; runner.dir = -1; }
-  // locate segment by binary search
-  const { cum, path } = runner;
-  let lo = 0, hi = cum.length - 1;
-  while (lo < hi - 1) {
-    const mid = (lo + hi) >> 1;
-    if (cum[mid] <= runner.s) lo = mid; else hi = mid;
-  }
-  const segLen = cum[hi] - cum[lo] || 1;
-  const t = (runner.s - cum[lo]) / segLen;
-  const a = path[lo], b = path[hi];
-  const x = a.x + (b.x - a.x) * t;
-  const y = a.y + (b.y - a.y) * t + TRAIN_RADIUS;
-  const z = a.z + (b.z - a.z) * t;
-  runner.mesh.position.set(x, y, z);
-  runner.mesh.lookAt(x + (b.x - a.x) * runner.dir, y + (b.y - a.y) * runner.dir, z + (b.z - a.z) * runner.dir);
-}
-
 // Preserve TfL stop coordinates. Nearby rail supplies vertical placement only;
 // incomplete corridor endpoints must never drag a stop hundreds of metres away.
 function stationOnRail(station, paths, getSurfaceY, projectStation) {
@@ -300,7 +226,7 @@ function stationOnRail(station, paths, getSurfaceY, projectStation) {
     sourcePosition:source,railOffsetM:Math.sqrt(distanceSq),network:'overground',lineCount:1};
 }
 
-export async function createOverground({ getTerrainMeshSurfaceY, projectStation }) {
+export async function createOverground({ getTerrainMeshSurfaceY, projectStation, heightScale = 1 }) {
   const res = await fetch('/data/overground.json');
   const contentType = res.headers.get('content-type') || '';
   if (!res.ok || contentType.includes('text/html')) {
@@ -310,7 +236,8 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation 
 
   const group = new THREE.Group();
   group.name = 'overground';
-  const runners = [];
+  const fleets = [],allPaths=[],morphs=[];
+  let multiplier=VE;
   const registry = new Map();
   const stationSets = [];
 
@@ -327,7 +254,7 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation 
     for (const branch of line.branches || []) {
       const path = buildPath(branch, getTerrainMeshSurfaceY);
       if (path.length < 2) continue;
-      paths.push(path);
+      paths.push(path);allPaths.push(path);
       buildCorridor(path, out);
     }
     const addMerged = (geos, mat) => {
@@ -338,6 +265,9 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation 
       mesh.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
       mesh.userData = { type: 'overground-line', lineId: line.id, name: `${line.name} line (Overground)` };
       lineGroup.add(mesh);
+      const p=merged.attributes.position,original=p.array.slice(),bases=new Float32Array(p.count);
+      for(let i=0;i<p.count;i++)bases[i]=getTerrainMeshSurfaceY({x:p.getX(i),z:p.getZ(i)});
+      morphs.push({mesh,original,bases});
     };
     addMerged(out.stripe, stripeMat);
     addMerged(out.ballast, MATS.ballast);
@@ -345,14 +275,8 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation 
     addMerged(out.earth, MATS.earth);
     addMerged(out.cutShadow, MATS.cutShadow);
 
-    // one train on each corridor long enough to justify it
-    for (const path of paths) {
-      const runner = makeTrainRunner(path, colour);
-      if (runner) {
-        lineGroup.add(runner.mesh);
-        runners.push(runner);
-      }
-    }
+    for(const path of paths)for(const p of path)p.liftM=(p.y-p.terrainY)/VE;
+    const fleet=createOvergroundFleet(paths,line.colour,line.id);lineGroup.add(fleet);fleets.push(fleet);
     const stations=(line.stations || []).map(s=>stationOnRail(s,paths,getTerrainMeshSurfaceY,projectStation)).filter(Boolean);
     // The source list is unordered and interchange entries may be empty.
     for(const station of stations) {
@@ -366,26 +290,32 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation 
       colour: line.colour,
       corridors: paths.length,
       points: paths.reduce((s, p) => s + p.length, 0),
-      trains: runners.filter((r) => lineGroup.children.includes(r.mesh)).length,
+      trains: fleet.userData.trains.length,
     });
     group.add(lineGroup);
   }
 
-  let camRef = null;
   group.userData.registry = registry;
   group.userData.stationSets = stationSets;
-  group.userData.update = (dt, camera) => {
-    camRef = camera || camRef;
-    for (const r of runners) {
-      if (camRef) {
-        const dx = r.mesh.position.x - camRef.position.x;
-        const dz = r.mesh.position.z - camRef.position.z;
-        const visible = (dx * dx + dz * dz) < TRAIN_VISIBLE_DIST * TRAIN_VISIBLE_DIST;
-        r.mesh.visible = visible;
-        if (!visible) continue;
-      }
-      stepTrain(r, dt);
+  group.userData.fleets=fleets;
+  group.userData.paths=allPaths;
+  group.userData.setHeightScale=(ratio)=>{
+    multiplier=VE*ratio;
+    for(const path of allPaths)for(const p of path)p.y=p.terrainY+p.liftM*(p.liftM<0?VE:multiplier);
+    for(const {mesh,original,bases} of morphs){
+      const p=mesh.geometry.attributes.position;
+      for(let i=0;i<p.count;i++)p.setY(i,original[i*3+1]<bases[i]?original[i*3+1]:bases[i]+(original[i*3+1]-bases[i])*ratio);
+      p.needsUpdate=true;mesh.geometry.computeVertexNormals();mesh.geometry.computeBoundingSphere();
     }
+    for(const set of stationSets)for(const station of set.stations){
+      station.pos.y=station.groundY+station.liftM*multiplier;station.surfaceY=station.pos.y;
+    }
+    for(const fleet of fleets)fleet.userData.update(0,null,multiplier);
   };
+  for(const set of stationSets)for(const station of set.stations){
+    station.groundY=getTerrainMeshSurfaceY(station.pos);station.liftM=(station.pos.y-station.groundY)/VE;
+  }
+  group.userData.update=(dt,camera)=>{for(const fleet of fleets)fleet.userData.update(dt,camera,multiplier);};
+  group.userData.setHeightScale(heightScale);
   return group;
 }

@@ -193,7 +193,7 @@ function footingY(getTerrainMeshSurfaceY, frame, x, z, deckBottomY) {
 }
 
 function box(widthX, heightY, depthZ, x, y, z) {
-  const g = new THREE.BoxGeometry(widthX, heightY, depthZ);
+  const g = new THREE.BoxGeometry(widthX, heightY, depthZ, Math.max(1, Math.ceil(widthX / 12)), 1, 1);
   g.translate(x, y, z);
   return g;
 }
@@ -469,6 +469,7 @@ function createBridgeMeshes(bridge, getTerrainMeshSurfaceY) {
     if (!geoms.length) continue;
     const merged = mergeGeometries(geoms, false);
     if (!merged) continue;
+    for(const g of geoms)g.dispose();
     merged.computeBoundingBox();
     merged.computeVertexNormals();
     const mesh = new THREE.Mesh(merged, bridgeMaterial(part.family, bridge));
@@ -492,7 +493,7 @@ function createBridgeMeshes(bridge, getTerrainMeshSurfaceY) {
   };
 }
 
-export async function createBridges({ getTerrainMeshSurfaceY } = {}) {
+export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } = {}) {
   const res = await fetch('/data/bridges.json', { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch bridges.json: ${res.status}`);
   const data = await res.json();
@@ -524,6 +525,46 @@ export async function createBridges({ getTerrainMeshSurfaceY } = {}) {
     registry,
     waterSurfaceY: WATER_LEVEL_M * VERTICAL_EXAGGERATION + WATER_LIFT,
   };
+
+  // Geometry is authored at historical VE. Morph from immutable positions,
+  // keeping pier feet on terrain and the water datum fixed. Short approach
+  // ramps retain the bank landings when only structures change exaggeration.
+  const morphs=[];
+  for(const rec of registry.values()) {
+    const frame=axisFrame(rec.data),oldDeck=rec.deckY,water=rec.waterSurfaceY;
+    const endGround={a:getTerrainMeshSurfaceY(rec.deckEndpoints.a),b:getTerrainMeshSurfaceY(rec.deckEndpoints.b)};
+    for(const mesh of rec.group.children) {
+      const attr=mesh.geometry.attributes.position,original=attr.array.slice(),feet=new Float32Array(attr.count);
+      for(let i=0;i<attr.count;i++) {
+        const world=worldFromLocal(frame,attr.getX(i),attr.getZ(i));
+        feet[i]=Math.min(getTerrainMeshSurfaceY(world),oldDeck-3);
+      }
+      morphs.push({rec,mesh,original,feet,oldDeck,water,endGround});
+    }
+  }
+  group.userData.setHeightScale=(ratio)=>{
+    for(const {rec,mesh,original,feet,oldDeck,water,endGround} of morphs) {
+      const attr=mesh.geometry.attributes.position,newDeck=water+(oldDeck-water)*ratio;
+      const span=rec.deckSpan,rampLength=Math.min(85,span.length*.22);
+      for(let i=0;i<attr.count;i++) {
+        const x=original[i*3],y=original[i*3+1];
+        if(ratio===1){attr.setY(i,y);continue;}
+        const blendA=1-THREE.MathUtils.smoothstep(x-span.aX,0,rampLength);
+        const blendB=1-THREE.MathUtils.smoothstep(span.bX-x,0,rampLength);
+        const landingA=Math.max(0,Math.min(oldDeck,endGround.a+2*ratio)-newDeck);
+        const landingB=Math.max(0,Math.min(oldDeck,endGround.b+2*ratio)-newDeck);
+        const deck=newDeck+Math.max(blendA*landingA,blendB*landingB);
+        // Above the deck, scale the architecture. Below it, preserve the feet.
+        const target=y>=oldDeck ? deck+(y-oldDeck)*ratio :
+          feet[i]+(y-feet[i])*(deck-feet[i])/(oldDeck-feet[i]);
+        attr.setY(i,target);
+      }
+      attr.needsUpdate=true;mesh.geometry.computeVertexNormals();
+      mesh.geometry.computeBoundingBox();mesh.geometry.computeBoundingSphere();
+      rec.deckY=newDeck;
+    }
+  };
+  group.userData.setHeightScale(heightScale);
 
   console.log(`Created ${registry.size} Thames bridges`);
   return group;

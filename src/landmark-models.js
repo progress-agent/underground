@@ -1,3 +1,4 @@
+import { millenniumDome, palaceDetails } from './landmark-detail-geometry.js';
 // Landmark silhouettes over the retained OSM outlines. All authored dimensions
 // are real metres. Each building pivots at its own sampled terrain elevation;
 // the existing building-height control scales the complete body and crown.
@@ -9,6 +10,8 @@ import { LANDMARKS } from '../scripts/landmarks.mjs';
 
 export const LANDMARK_FOOTPRINTS_URL = '/data/surface/baked/landmark-footprints.json';
 const materials = Object.fromEntries(Object.entries({
+  fabric:[0xe4e5dd,1,0],seam:[0xadb7b5,1,0],mast:[0xc1a246,.7,.2],cable:[0x8b9698,.7,.1],
+  limestone:[0xc5b18d,.9,0],window:[0x38454a,.8,.1],slate:[0x56616c,.8,.1],
   context: [0x8a8580, .85, .1], stone: [0xc3bba6, .8, .05],
   roof: [0x6b7779, .65, .2], glass: [0x76979f, .3, .45],
   steel: [0xcbd3d2, .45, .35], brick: [0x997667, .85, .05],
@@ -62,7 +65,7 @@ function outline(ring, height) {
 // Geometry is merged by material per building, avoiding a draw for every rib,
 // spoke, capsule and chimney. No per-instance colours (M5 driver constraint).
 function assembler() {
-  const parts = new Map();
+  const parts = new Map(),extras=[];
   let transform = new THREE.Matrix4();
   const frame = (x, z, yaw, build) => {
     const previous = transform;
@@ -76,6 +79,7 @@ function assembler() {
     if (!parts.has(material)) parts.set(material, []);
     parts.get(material).push(geo);
   };
+  const mesh=(geo,mat,x,y,z,name)=>{geo.translate(x,y,z);geo.applyMatrix4(transform);const m=new THREE.Mesh(geo,mat);m.name=name;extras.push(m);};
   const box = (w, h, d, x, y, z, mat = 'stone') => add(new THREE.BoxGeometry(w, h, d), mat, x, y + h / 2, z);
   const cyl = (r, h, x, y, z, mat = 'stone', top = r, segments = 20) => add(new THREE.CylinderGeometry(top, r, h, segments), mat, x, y + h / 2, z);
   const rod = (a, b, radius = .6, mat = 'steel') => {
@@ -85,7 +89,8 @@ function assembler() {
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize()));
     const c = av.add(bv).multiplyScalar(.5); add(g, mat, c.x, c.y, c.z);
   };
-  return { add, box, cyl, rod, frame, finish(group) {
+  return { add, box, cyl, rod, frame, mesh, finish(group) {
+    group.add(...extras);
     for (const [key, geos] of parts) {
       const merged = mergeGeometries(geos, false);
       for (const g of geos) g.dispose();
@@ -221,25 +226,7 @@ function model(site, ring, b, height, floorY = 1) {
       });
       break;
     }
-    case 'westminster': {
-      a.add(outline(ring, 25), 'stone');
-      // Elizabeth Tower at the NE, Victoria Tower at the SW, derived from
-      // the retained palace bounds rather than the registry point.
-      const info = ORIENTATIONS[site.id];
-      a.frame(info.towers[0].centreXZ[0]-b.x,info.towers[0].centreXZ[1]-b.z,-5*Math.PI/180,()=>{
-      const tx = 0, tz = 0;
-      a.box(14,70,14,tx,0,tz); a.box(16,10,16,tx,70,tz);const spire=new THREE.CylinderGeometry(.1,10,16,4);spire.rotateY(Math.PI/4);a.add(spire,'roof',tx,88,tz);
-      for (const [dx,dz,ry] of [[0,-8.1,Math.PI],[0,8.1,0],[-8.1,0,-Math.PI/2],[8.1,0,Math.PI/2]]) {
-        const g=new THREE.CircleGeometry(3.3,24);g.rotateY(ry);a.add(g,'gold',tx+dx,75,tz+dz);
-      }
-      });
-      a.frame(info.towers[1].centreXZ[0]-b.x,info.towers[1].centreXZ[1]-b.z,-5.65*Math.PI/180,()=>{
-      const vx=0,vz=0; a.box(24,88,24,vx,0,vz);a.box(27,6,27,vx,88,vz);
-      for(const dx of [-10,10])for(const dz of [-10,10])a.cyl(2.5,6,vx+dx,94,vz+dz,'stone',1);
-      });
-      for(let z=-d*.4;z<=d*.4;z+=18)for(const x of [-w*.4,w*.4]) {a.box(2,5,2,x,25,z);a.cyl(2,5,x,30,z,'stone',.1,4);}
-      break;
-    }
+    case 'westminster': palaceDetails(a,ring,b,ORIENTATIONS[site.id],outline);break;
     case 'battersea': {
       a.add(outline(ring, 36), 'brick');
       const chimneys=ORIENTATIONS[site.id].chimneys;
@@ -264,17 +251,7 @@ function model(site, ring, b, height, floorY = 1) {
       a.cyl(9,12,0,164,0,'dark');a.cyl(1.1,13,0,176,0,'steel',.35);
       break;
     }
-    case 'the-o2': {
-      const rx=w*.49, rz=d*.49;
-      a.add(outline(ring,8),'stone');dome(a,rx,rz,42,8,'steel');
-      for(const mast of ORIENTATIONS[site.id].masts) {
-        const x=mast.x-b.x,z=mast.z-b.z,t=Math.atan2(z,x);
-        a.cyl(1.8,100,x,0,z,'gold',1.1);
-        for(const off of [-.18,.18])a.rod([x,95,z],[Math.cos(t+off)*rx,9,Math.sin(t+off)*rz],.4);
-        a.rod([x,92,z],[Math.cos(t)*rx*.28,46,Math.sin(t)*rz*.28],.4);
-      }
-      break;
-    }
+    case 'the-o2': millenniumDome(a,b,ORIENTATIONS[site.id]);break;
     case 'wembley': case 'london-stadium': stadium(a,ring,b,site.id==='london-stadium',floorY); break;
     case 'london-eye': {
       // Upright wheel, 120m diameter, with 32 capsules and a cantilever A frame.

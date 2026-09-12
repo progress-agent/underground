@@ -725,6 +725,8 @@ let buildingsPath = (urlBuildingsPath === 'baked' || urlBuildingsPath === 'live'
 // toggle's label. Declared HERE, above that block: it is assigned at module
 // evaluation, so a declaration further down the file is a TDZ throw at boot.
 let renderBuildingsToggle = () => {};
+let bridgesGroup = null;
+let overgroundGroup = null;
 let landmarkGroup = null;
 
 const sim = {
@@ -839,10 +841,9 @@ function deleteUrlParam(key) {
   }
 
   // ── Building height slider (D-023) ──
-  // Reads as effective exaggeration on buildings ONLY: 5.0x is the historical
-  // look (global VE), 1.0x is true real-world height. Buildings never cross the
-  // ground plane, so this is independent of VE with no datum consequences —
-  // terrain, tube depths, chalk (mOD) and water (mOD) are untouched.
+  // Shared above-ground structure exaggeration: 5.0x is the historical
+  // look (global VE),1.0x uses real structure heights. Each structure keeps
+  // its ground or water datum; terrain, Tube depths, chalk and water stay fixed.
   const bhEl = document.getElementById('buildingHeight');
   const bhOut = document.getElementById('buildingHeightValue');
   const initialBh = getUrlNumberParam('bh') ?? prefs.buildingHeight ?? VERTICAL_EXAGGERATION;
@@ -850,6 +851,9 @@ function deleteUrlParam(key) {
     const apply = (mult) => {
       setBuildingHeightScale(mult / VERTICAL_EXAGGERATION);
       landmarkGroup?.userData.setHeightScale(getBuildingHeightScale());
+      bridgesGroup?.userData.setHeightScale(getBuildingHeightScale());
+      overgroundGroup?.userData.setHeightScale(getBuildingHeightScale());
+      refreshOvergroundStationMarkers();
       if (bhOut) bhOut.textContent = `${mult.toFixed(1)}\u00d7`;
     };
     bhEl.value = String(initialBh);
@@ -976,7 +980,7 @@ const thamesDataPromise = loadThamesData();
         });
       }
 
-      createBridges({ getTerrainMeshSurfaceY }).then(group => {
+      createBridges({ getTerrainMeshSurfaceY, heightScale:getBuildingHeightScale() }).then(group => {
         if (group) {
           bridgesGroup = group;
           scene.add(bridgesGroup);
@@ -987,7 +991,7 @@ const thamesDataPromise = loadThamesData();
       });
 
       // Overground surface rail — needs the terrain mesh for at-grade Y (D-019)
-      createOverground({ getTerrainMeshSurfaceY, projectStation: llToXZ }).then(group => {
+      createOverground({ getTerrainMeshSurfaceY, projectStation: llToXZ, heightScale:getBuildingHeightScale() }).then(group => {
         if (group) {
           overgroundGroup = group;
           scene.add(overgroundGroup);
@@ -1580,12 +1584,6 @@ const reservoirDataPromise = loadReservoirData();
 let canalsMesh = null;
 const canalDataPromise = loadCanalData();
 
-// ---------- Thames bridges ----------
-let bridgesGroup = null;
-
-// ---------- Overground surface rail (D-019) ----------
-let overgroundGroup = null;
-
 // ---------- Sewer Tunnels (underground infrastructure) ----------
 let sewersMesh = null;
 loadSewerData().then(data => {
@@ -1935,6 +1933,15 @@ let shaftsVisible = prefs.shaftsVisible ?? prefs.victoriaShaftsVisible ?? true;
 
 // Per-line station layer tracking (supports all 11 Underground lines + DLR)
 let tubeStationsReady = false;
+function refreshOvergroundStationMarkers(){
+  if(!overgroundGroup?.userData.stationsAttached)return;
+  const dummy=new THREE.Object3D();
+  for(const {id,stations} of overgroundGroup.userData.stationSets){
+    const mesh=lineShaftLayers.get(id)?.stationsLayer?.mesh;if(!mesh)continue;
+    stations.forEach((st,i)=>{dummy.position.copy(st.pos);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);});
+    mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();
+  }
+}
 function initialiseOvergroundStations() {
   if (!tubeStationsReady || !overgroundGroup || overgroundGroup.userData.stationsAttached) return;
   const servedBy=new Map();
@@ -2554,7 +2561,7 @@ let _clearHoverForMotion = null;
     'landmark': 0,
     'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
     'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2, 'station-shaft': 2,
-    'tube-line': 3,
+    'tube-line': 3, 'overground-line': 3,
     'canal': 3, 'reservoir': 3,
     'thames': 4, 'chalk': 4,
   };
@@ -2571,7 +2578,7 @@ let _clearHoverForMotion = null;
     // thamesMesh now included — small features (shafts/tunnels) beat it via INFRA_TIER.
     // Tube line meshes (linePickables) are flat-pushed below — they live in lineGroups
     // but iterating linePickables directly avoids walking every line group.
-    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, unifiedShaftLayer?.group];
+    const sources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, overgroundGroup, unifiedShaftLayer?.group];
     for (const src of sources) {
       if (!src || !src.visible) continue;
       // Single mesh with userData.type
@@ -2615,7 +2622,7 @@ let _clearHoverForMotion = null;
     // Use recursive:true so child meshes inside any accidentally-collected
     // Groups are still tested, and force-update world matrices on source
     // groups to guarantee transforms are current after async load.
-    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, unifiedShaftLayer?.group];
+    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, overgroundGroup, unifiedShaftLayer?.group];
     for (const src of infraSources) {
       if (src) src.updateMatrixWorld(true);
     }
@@ -2676,6 +2683,7 @@ let _clearHoverForMotion = null;
   function formatInfraTooltip(mesh, hitPoint = null) {
     const ud = mesh.userData;
     const t = ud.type;
+    if(t === 'overground-line')return `<b>${overgroundGroup.userData.registry.get(ud.lineId).name} line</b><div class="sub">London Overground</div>`;
     if(t === 'landmark') {
       const info=LANDMARK_INFO[ud.landmarkId];
       return `<b>${info.name}</b>${_renderInfraTable([['HEIGHT',info.height],[info.dateLabel || 'COMPLETED',info.date]])}`;
@@ -3342,7 +3350,7 @@ function tick(frameTime) {
   updateTrains(trainSystem, sim, camera, dt);
 
   // Overground trains (simple ping-pong runners, distance-culled)
-  if (overgroundGroup) overgroundGroup.userData.update(dt, camera);
+  if (overgroundGroup) overgroundGroup.userData.update(sim.paused ? 0 : dt*sim.timeScale, camera);
 
   // Update living-water shader uniforms.
   updateWater(dt);
