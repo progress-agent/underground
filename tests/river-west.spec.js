@@ -18,26 +18,29 @@
 // covers its own centreline (corner-cutting regression or width collapse).
 
 import { test, expect } from '@playwright/test';
+import { BNG_REF_E, BNG_REF_N } from '../src/coordinates.js';
 
-// Scene coords (x = e-530000, z = -(n-180400)) at west-of-Kew waypoints:
+// Original source BNG waypoints, converted with the canonical scene origin:
 // Walton, Sunbury, Kingston, Teddington, Richmond, Syon/Old Deer Park, pre-Kew.
 const WEST_TRANSECTS = [
-  ['walton', -26413, 9157],      // idx 25  e503587 n171243
-  ['sunbury', -25090, 11842],    // idx 40  e504910 n168558
-  ['kingston', -17977, 11330],   // idx 90  e512023 n169070
-  ['teddington', -14714, 11873], // idx 105 e515286 n168527
-  ['richmond', -13867, 7884],    // idx 140 e516133 n172516
-  ['syon', -13166, 4559],        // idx 160 e516834 n175841
-  ['pre-kew', -11082, 2574],     // idx 172 e518918 n177826
-];
+  ['walton', 503587, 171243],      // idx 25
+  ['sunbury', 504910, 168558],     // idx 40
+  ['kingston', 512023, 169070],    // idx 90
+  ['teddington', 515286, 168527],  // idx 105
+  ['richmond', 516133, 172516],    // idx 140
+  ['syon', 516834, 175841],        // idx 160
+  ['pre-kew', 518918, 177826],     // idx 172
+].map(([name, e, n]) => [name, e - BNG_REF_E, BNG_REF_N - n]);
+const READY_POINT = { x: 538161 - BNG_REF_E, z: BNG_REF_N - 178060 };
 
 test('west-of-Kew in-channel terrain stays below the rendered water surface', async ({ page }) => {
   await page.goto('/?fast=1');
   await page.waitForFunction(
-    () => window.__ug
+    (point) => window.__ug
       && typeof window.__ug.getTerrainMeshSurfaceY === 'function'
       && typeof window.__ug.isInThames === 'function'
-      && window.__ug.getTerrainMeshSurfaceY({ x: 8161, z: 2340 }) !== null,
+      && window.__ug.getTerrainMeshSurfaceY(point) !== null,
+    READY_POINT,
     { timeout: 90000 },
   );
 
@@ -81,7 +84,7 @@ test('Thames volume covers every centreline waypoint (water continuity)', async 
     return !!water;
   }, { timeout: 60000 });
 
-  const out = await page.evaluate(async () => {
+  const out = await page.evaluate(async ([originE, originN]) => {
     const THREE = await import('/@fs/Users/jc/repos/underground/node_modules/three/build/three.module.js');
     const ug = window.__ug;
     const res = await fetch('/data/thames.json', { cache: 'no-store' });
@@ -92,13 +95,13 @@ test('Thames volume covers every centreline waypoint (water continuity)', async 
     const down = new THREE.Vector3(0, -1, 0);
     const misses = [];
     for (const p of pts) {
-      const x = p.e - 530000, z = -(p.n - 180400);
+      const x = p.e - originE, z = originN - p.n;
       ray.set(new THREE.Vector3(x, 5000, z), down);
       const hits = ray.intersectObject(water, false);
       if (!hits.length) misses.push({ e: p.e, n: p.n, w: p.w });
     }
     return { total: pts.length, misses };
-  });
+  }, [BNG_REF_E, BNG_REF_N]);
 
   expect(out.total).toBeGreaterThan(300);
   expect(out.misses, `waypoints with no water mesh overhead: ${JSON.stringify(out.misses.slice(0, 12))}`).toEqual([]);

@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { createOvergroundFleet } from './overground-trains.js';
 // London Overground surface rail — D-019 earthworks archetype language.
 //
@@ -25,8 +26,8 @@ import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER } from './render-layers.js';
 
 const VE = VERTICAL_EXAGGERATION;
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 
 // Registered in main.js too — defs() is idempotent, keep this module portable.
 proj4.defs('EPSG:27700', '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs');

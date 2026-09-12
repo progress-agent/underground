@@ -330,11 +330,18 @@
           <span id="focalLengthValue">30mm</span>
         </p>
         <p class="small">
-          Structure height:
+          <label for="masterHeight">Master height:</label>
+          <input id="masterHeight" type="range" min="1" max="10" value="5" step="0.1"
+                 style="vertical-align: middle; width: 160px;" />
+          <span id="masterHeightValue">5.0×</span>
+        </p>
+        <p class="small">
+          <label for="buildingHeight">Structure height:</label>
           <input id="buildingHeight" type="range" min="1" max="5" value="5" step="0.1"
                  style="vertical-align: middle; width: 160px;" />
           <span id="buildingHeightValue">5.0×</span>
         </p>
+        <p class="small" id="heightExplanation">Master scales the entire scene. Structures currently appear 5.0× their real height.</p>
 
         <p class="small">
           <label for="renderMode">Rendering:</label>
@@ -377,6 +384,12 @@
           <button id="resetPrefs" type="button" style="font-size:11px; padding:3px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.88); cursor:pointer;">Reset settings</button>
           <span style="opacity:0.7;">Clears saved prefs + TfL cache.</span>
         </p>
+        <details class="small" style="margin-top:12px; opacity:0.75;">
+          <summary>Data credits</summary>
+          <p>Powered by <a href="https://tfl.gov.uk/corporate/terms-and-conditions/transport-data-service" target="_blank" rel="noopener">TfL Open Data</a>. Contains OS data © Crown copyright and database rights 2016 and Geomni UK Map data © and database rights 2019.</p>
+          <p>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>, ODbL. Motorway and airport geometry uses mapped features; heights and route profiles include documented estimates.</p>
+          <p>© <a href="https://environment.data.gov.uk/dataset/13787b9a-26a4-4775-8523-806d13af58fc" target="_blank" rel="noopener">Environment Agency</a> copyright and/or database right 2022. All rights reserved. Bare-earth terrain patches used under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noopener">Open Government Licence</a>.</p>
+        </details>
       </details>
     </div>
 

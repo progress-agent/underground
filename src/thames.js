@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
@@ -17,8 +18,8 @@ export const WATER_TOP_Y = WATER_LEVEL_M * VERTICAL_EXAGGERATION + WATER_LIFT;
 export { updateWater };
 
 // BNG reference — must match terrain.js (Trafalgar Square ≈ TQ 300 804)
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 
 export async function loadThamesData() {
   try {

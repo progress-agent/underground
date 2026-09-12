@@ -38,6 +38,8 @@ import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { installNodeEnv, ROOT } from './bake-node-env.mjs';
 import { LANDMARKS, isSuppressed } from './landmarks.mjs';
+import { createHash } from 'node:crypto';
+import { createAirportSuppression, airportSuppressionSignature, AIRPORT_SUPPRESSION_VERSION } from '../src/airport-suppression.js';
 
 installNodeEnv();
 
@@ -65,10 +67,13 @@ const thamesData = JSON.parse(await readFile(path.join(ROOT, 'public/data/thames
 // carve and before any isInThames call.
 initThamesMask(thamesData.points);
 const m25Data = await loadM25Data();
-initM25Boundary(m25Data.points);
+initM25Boundary(m25Data.supportPoints || m25Data.points);
 const mesh = await terrain.tryCreateTerrainMesh({ thamesData });
 if (!mesh) throw new Error('terrain mesh failed to build — cannot resolve building base heights');
 log(`terrain + masks ready (${Date.now() - t0}ms), VE=${VE}`);
+const airportData=JSON.parse(await readFile(path.join(ROOT,'src/airport-data.json'),'utf8'));
+const isAirportBuilding=createAirportSuppression(airportData);
+const airportFingerprint=await airportSuppressionSignature(airportData);
 
 // ── Tiles ────────────────────────────────────────────────────────────────────
 const TILE_DIR = path.join(ROOT, 'public/data/surface/tiles');
@@ -83,7 +88,7 @@ log(`${tiles.length} tiles`);
 const placed = new Set();                  // dedup: 5m grid + integer height
 const retainedPolys = {};                  // landmark id -> [{height, area, footprint}]
 const tileRecords = [];
-const stats = { read: 0, outsideM25: 0, inThames: 0, suppressed: 0, dup: 0,
+const stats = { read: 0, outsideM25: 0, inThames: 0, suppressed: 0, airportsSuppressed: 0, dup: 0,
                 noTerrain: 0, degenerate: 0, kept: 0, emptyTiles: 0 };
 
 for (const tile of tiles) {
@@ -96,6 +101,9 @@ for (const tile of tiles) {
     stats.read++;
     if (!isInsideM25(b.cx, b.cz)) { stats.outsideM25++; continue; }
     if (isInThames(b.cx, b.cz)) { stats.inThames++; continue; }
+    // This precedes landmark neighbour retention, so airport replacement
+    // footprints cannot be accidentally restored by the landmark companion.
+    if (isAirportBuilding(b)) { stats.airportsSuppressed++; continue; }
 
     const site = isSuppressed(b.cx, b.cz);
     if (site) {
@@ -181,7 +189,11 @@ await writeFile(path.join(OUT_DIR, 'meta.json'), JSON.stringify({
   fields: ['u16 cx_dm (tile-relative)', 'u16 cz_dm (tile-relative)', 'u16 heightM_dm',
            'u16 sideM_dm (sqrt area)', 'i16 baseElevM_dm (terrain elevation, real metres)'],
   tiles: tileRecords.length, buildings: n,
+  payloadSha256: createHash('sha256').update(buf).digest('hex'),
+  airportSuppression: { version: AIRPORT_SUPPRESSION_VERSION, fingerprint: airportFingerprint, buildings: stats.airportsSuppressed },
   builtWithVE: VE,
+  terrain: mesh.meta,
+  terrainBounds: terrain.getTerrainBounds(),
   note: 'builtWithVE is RECORDED, NOT APPLIED — it documents the terrain scale the base elevations were divided by. Changing VE does NOT require a re-bake.',
   landmarks: LANDMARKS.map(l => ({ id: l.id, suppressed: (retainedPolys[l.id] || []).length })),
   stats, generated: new Date().toISOString(),

@@ -62,9 +62,20 @@ export const BAKED_URL = '/data/surface/baked/buildings.bin';
  * @param {string} [url]
  * @returns {Promise<{buffer: ArrayBuffer, view: DataView, tiles: Array, buildings: number, version: number, bytes: number}>}
  */
-export async function fetchBakedBuildings(url = BAKED_URL) {
-  const resp = await fetch(url);
+export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint = null } = {}) {
+  const metadataUrl = new URL('meta.json', new URL(url, globalThis.location?.href || 'http://localhost')).href;
+  const [resp, metadataResponse] = await Promise.all([fetch(url), fetch(metadataUrl)]);
   if (!resp.ok) throw new Error(`baked payload: HTTP ${resp.status}`);
+  if (!metadataResponse.ok || (metadataResponse.headers.get('content-type') || '').includes('text/html')) {
+    throw new Error('baked metadata unavailable');
+  }
+  const metadata = await metadataResponse.json();
+  if (airportFingerprint && !metadata.airportSuppression) {
+    throw new Error('baked airport footprint compatibility missing; rebuild required');
+  }
+  if (metadata.airportSuppression && metadata.airportSuppression.fingerprint !== airportFingerprint) {
+    throw new Error('baked airport replacements unavailable or incompatible');
+  }
 
   // SPA-fallback trap, same one surface-loader.js guards: a dev server or a
   // Pages catch-all answers a missing file with index.html at HTTP 200.
@@ -72,7 +83,15 @@ export async function fetchBakedBuildings(url = BAKED_URL) {
   if (ct.includes('text/html')) throw new Error('baked payload: got HTML (SPA fallback) — payload not deployed');
 
   const buffer = await resp.arrayBuffer();
-  return parseBakedBuildings(buffer);
+  const payload = parseBakedBuildings(buffer);
+  if (metadata.buildings !== payload.buildings || metadata.tiles !== payload.tiles.length) throw new Error('baked metadata and payload disagree');
+  if (metadata.payloadSha256) {
+    const digest=await globalThis.crypto.subtle.digest('SHA-256',buffer);
+    const actual=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
+    if(actual!==metadata.payloadSha256) throw new Error('baked payload checksum differs from metadata');
+  }
+  payload.airportSuppression = metadata.airportSuppression || null;
+  return payload;
 }
 
 /**
@@ -141,7 +160,7 @@ function getSharedBoxGeometry() {
  * Column-major layout, matching THREE.Matrix4.elements:
  *   [0]=sx  [5]=sy  [10]=sz  [12]=x [13]=y [14]=z  [15]=1
  */
-export function buildBakedTile(payload, tileIndex, VE, material) {
+export function buildBakedTile(payload, tileIndex, VE, material, suppressBuilding = null) {
   const t = payload.tiles[tileIndex];
   if (!t || t.count === 0) return null;
 
@@ -152,7 +171,7 @@ export function buildBakedTile(payload, tileIndex, VE, material) {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
-  let off = t.offset;
+  let off = t.offset, placed = 0;
   for (let i = 0; i < t.count; i++, off += REC_BYTES) {
     const x = t.minX + view.getUint16(off, true) * 0.1;
     const z = t.minZ + view.getUint16(off + 2, true) * 0.1;
@@ -160,7 +179,10 @@ export function buildBakedTile(payload, tileIndex, VE, material) {
     const side = view.getUint16(off + 6, true) * 0.1;
     const y = view.getInt16(off + 8, true) * 0.1 * VE;
 
-    const o = i * 16;
+    // Only needed for older, unsuppressed payloads. New compiled payloads
+    // already contain the shared source-footprint exclusion.
+    if (suppressBuilding?.({x,z})) continue;
+    const o = placed++ * 16;
     m[o] = side;
     m[o + 5] = h;
     m[o + 10] = side;
@@ -181,6 +203,8 @@ export function buildBakedTile(payload, tileIndex, VE, material) {
     if (y + h > maxY) maxY = y + h;
   }
 
+  mesh.count = placed;
+  if (!placed) { mesh.dispose(); return null; }
   mesh.instanceMatrix.needsUpdate = true;
 
   // Bounds from the AABB we just accumulated. Conservative (a sphere around the
@@ -217,7 +241,7 @@ export function buildBakedTile(payload, tileIndex, VE, material) {
  * @param {Function} opts.onMesh     (mesh) => void, called per completed tile
  * @returns {{pump: Function, isDone: Function, stats: Function}}
  */
-export function createBakedBuildingBuilder(payload, { VE, material, onMesh }) {
+export function createBakedBuildingBuilder(payload, { VE, material, onMesh, suppressBuilding = null }) {
   let next = 0;
   let placed = 0;
   let meshes = 0;
@@ -233,7 +257,7 @@ export function createBakedBuildingBuilder(payload, { VE, material, onMesh }) {
       if (next >= payload.tiles.length) return true;
       const t0 = performance.now();
       while (next < payload.tiles.length && performance.now() - t0 < budgetMs) {
-        const mesh = buildBakedTile(payload, next, VE, material);
+        const mesh = buildBakedTile(payload, next, VE, material, suppressBuilding);
         if (mesh) {
           placed += mesh.count;
           meshes++;

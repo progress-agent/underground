@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
@@ -5,8 +6,8 @@ import { WATER_LEVEL_M } from './thames.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 import { isInThames } from './thames-mask.js';
 
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 const BANK_SAMPLE_STEP_M = 12;
 const BANK_LANDING_MARGIN_Y = 0.6 * VERTICAL_EXAGGERATION;
 const BANK_OVERSHOOT_M = 25;

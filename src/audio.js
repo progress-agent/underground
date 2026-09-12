@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 /**
  * audio.js — Spatial audio engine for Underground
  *
@@ -894,8 +895,6 @@ export function initSpatialSources({ trainSystem, thamesPoints }) {
 
   if (thamesPoints?.length) {
     // Convert BNG to scene coordinates (matches terrain.js convention)
-    const BNG_REF_E = 530000;
-    const BNG_REF_N = 180400;
     _thamesPolyline = thamesPoints.map(pt => ({
       x: pt.e - BNG_REF_E,
       z: -(pt.n - BNG_REF_N),

@@ -2,11 +2,19 @@ import { LANDMARK_INFO } from './landmark-info.js';
 import * as THREE from 'three';
 import { createRenderQuality } from './render-quality.js';
 import { createAdaptiveQuality } from './adaptive-quality.js';
+import { createVerticalScaleController } from './vertical-scale.js';
+import { createMiniMap } from './mini-map.js';
+import { createAirports, isAirportBuilding, getAirportHoverInfo, AIRPORT_DATA } from './airports.js';
+import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSurfaceY, getAirportDockInfo } from './airport-docks.js';
+import { airportSuppressionSignature } from './airport-suppression.js';
+import { createDlrProfile } from './dlr-profile.js';
+import { createMotorway, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
-import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, TERRAIN_CONFIG, VERTICAL_EXAGGERATION } from './terrain.js';
+import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION } from './terrain.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
@@ -206,6 +214,9 @@ composer.writeBuffer = composer.renderTarget2;
 // RenderPass and camera added after camera creation (below)
 
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1.0, 50000);
+// All city data and camera poses remain canonical VE5. One paired view-matrix
+// transform changes the display of every current and late-loaded scene layer.
+const masterHeight = createVerticalScaleController({ camera, value: 5 });
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -332,8 +343,13 @@ let _chalkClarity = 0;  // last computed inside-chalk clarity [0,1]
 // water top (WATER_TOP_Y = 12 scene units = effective 2.4m OD). Deliberately
 // no bed check: below the carved bed inside the corridor is soil under the
 // river, which the readout has always classed WATER.
+function waterSurfaceAt(x,z) {
+  const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
+  return dockY ?? (isInThames(x,z)?WATER_TOP_Y:null);
+}
 function isSubmergedAt(x, y, z) {
-  return y < WATER_TOP_Y && isInThames(x, z);
+  const surface=waterSurfaceAt(x,z);
+  return surface!==null && y<surface;
 }
 // Last computed submerged blend [0,1] — short spatial smoothstep below the
 // water top (see tick()); drives fog/lighting/audio and __ug exposure.
@@ -655,6 +671,8 @@ function resetPrefsAndCache() {
   }
 }
 const prefs = loadPrefs();
+const initialMasterHeight = getUrlNumberParam('mh') ?? prefs.masterHeight ?? 5;
+masterHeight.setValue(Number.isFinite(initialMasterHeight) ? initialMasterHeight : 5);
 renderQuality.set({ scale: prefs.renderScale ?? 1, samples: prefs.edgeSamples ?? 4 });
 let renderQualityMode = prefs.renderMode === 'manual' ? 'manual' : 'auto';
 if (renderQualityMode === 'auto') adaptiveQuality.start(performance.now());
@@ -728,6 +746,22 @@ let renderBuildingsToggle = () => {};
 let bridgesGroup = null;
 let overgroundGroup = null;
 let landmarkGroup = null;
+let airportsGroup = null;
+let airportInitError = null;
+let airportDockGroup = null;
+let airportDockInitError = null;
+let motorwayGroup = null;
+let motorwayInitError = null;
+function syncMotorwayBridges() {
+  if (!motorwayGroup || !bridgesGroup) return;
+  for (const slug of MOTORWAY_REPLACED_BRIDGES) {
+    const bridge = bridgesGroup.userData.registry.get(slug);
+    if (bridge) bridge.group.visible = false;
+  }
+}
+let airportFingerprintPromise = null;
+let dlrProfile = null;
+const dlrStationPoints = [];
 
 const sim = {
   trains: [],
@@ -853,7 +887,11 @@ function deleteUrlParam(key) {
       landmarkGroup?.userData.setHeightScale(getBuildingHeightScale());
       bridgesGroup?.userData.setHeightScale(getBuildingHeightScale());
       overgroundGroup?.userData.setHeightScale(getBuildingHeightScale());
+      airportsGroup?.userData.setHeightScale(getBuildingHeightScale());
+      motorwayGroup?.userData.setHeightScale(getBuildingHeightScale());
+      if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
       refreshOvergroundStationMarkers();
+      syncHeightExplanation();
       if (bhOut) bhOut.textContent = `${mult.toFixed(1)}\u00d7`;
     };
     bhEl.value = String(initialBh);
@@ -872,6 +910,26 @@ function deleteUrlParam(key) {
       else setUrlParam('bh', mult);
     });
   }
+
+  const mhEl = document.getElementById('masterHeight');
+  const mhOut = document.getElementById('masterHeightValue');
+  const syncMasterHeight = () => {
+    if (mhEl) mhEl.value = String(masterHeight.value);
+    if (mhOut) mhOut.textContent = `${masterHeight.value.toFixed(1)}\u00d7`;
+    syncHeightExplanation();
+  };
+  syncMasterHeight();
+  mhEl?.addEventListener('input', () => {
+    masterHeight.setValue(Number(mhEl.value));
+    prefs.masterHeight = masterHeight.value;
+    savePrefs(prefs);
+    syncMasterHeight();
+    _clearHoverForMotion?.();
+  });
+  mhEl?.addEventListener('change', () => {
+    if (masterHeight.value === 5) deleteUrlParam('mh');
+    else setUrlParam('mh', masterHeight.value);
+  });
 
   // ── Baked city toggle (06Sep26u) ──
   // Swaps the buildings render path in place so a live/baked comparison happens
@@ -954,6 +1012,27 @@ const thamesDataPromise = loadThamesData();
       if (result.undersideMesh) scene.add(result.undersideMesh);
       if (result.contourLines) scene.add(result.contourLines);
 
+      // Replacements must exist before any live or baked airport buildings
+      // are suppressed. Keep this group across buildings-path switches.
+      try {
+        airportsGroup = createAirports({ getSurfaceY: getTerrainMeshSurfaceY,
+          VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
+        scene.add(airportsGroup);
+        airportFingerprintPromise = airportSuppressionSignature(AIRPORT_DATA);
+      } catch (error) {
+        airportInitError = error.message;
+        airportsGroup = null;
+        console.warn(`Airport models unavailable (${error.message}); retaining generic buildings`);
+      }
+
+      try {
+        airportDockGroup=createAirportDockWater({VE:VERTICAL_EXAGGERATION});
+        scene.add(airportDockGroup);
+      } catch(error) {
+        airportDockInitError=error.message;
+        console.warn(`Airport dock water unavailable (${error.message}); retaining terrain`);
+      }
+
       // Initialise Thames river corridor helpers before snapping tubes, because
       // the river-bed clearance clamp depends on the same corridor mask.
       if (thamesData?.points) {
@@ -984,6 +1063,7 @@ const thamesDataPromise = loadThamesData();
         if (group) {
           bridgesGroup = group;
           scene.add(bridgesGroup);
+          syncMotorwayBridges();
           dbg('Bridges added to scene');
         }
       }).catch(err => {
@@ -1019,6 +1099,13 @@ const thamesDataPromise = loadThamesData();
         if (data) {
           canalsMesh = createCanals(data, llToXZ, getTerrainMeshSurfaceY);
           if (canalsMesh) {
+            if(airportDockGroup?.parent && airportDockGroup.visible) {
+              // The old centreline dataset includes two dock ribbons. Clip
+              // only their exact wet-polygon overlap, keeping connections.
+              const materials=new Set();
+              canalsMesh.traverse(mesh=>{if(mesh.isMesh)materials.add(mesh.material);});
+              for(const material of materials)installAirportDockTerrainMask(material);
+            }
             scene.add(canalsMesh);
             addCanalsToLegend();
             dbg('Canals added to scene');
@@ -1028,16 +1115,31 @@ const thamesDataPromise = loadThamesData();
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
       m25DataPromise.then(m25Data => {
-        if (!m25Data?.points?.length) return;
+        if (!m25Data?.points?.length) {
+          // Dock water is independently sourced; its paired wet-polygon mask
+          // must also exist when the optional M25 boundary fetch fails.
+          if(airportDockGroup) {
+            if(result.topMat)installAirportDockTerrainMask(result.topMat);
+            if(result.undersideMat)installAirportDockTerrainMask(result.undersideMat);
+          }
+          return;
+        }
+        const supportPoints = m25Data.supportPoints || m25Data.points;
 
         // Generate mask and apply to both terrain materials
-        const maskTex = generateM25Mask(m25Data.points);
+        const maskTex = generateM25Mask(supportPoints);
         if (result.topMat) applyM25Mask(result.topMat, maskTex);
         if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
+        // Exact wet polygons hide terrain only when their water replacement
+        // exists. Chain after M25, whose installer owns the preceding hook.
+        if(airportDockGroup) {
+          if(result.topMat)installAirportDockTerrainMask(result.topMat);
+          if(result.undersideMat)installAirportDockTerrainMask(result.undersideMat);
+        }
 
         // Chalk floor — build now that the M25 ring is available (rim-flatten),
         // then clip it with the same mask as the terrain (same UV→world map).
-        geologyGroup = createGeologicalStrata(m25Data.points, sim.verticalScale);
+        geologyGroup = createGeologicalStrata(supportPoints, sim.verticalScale);
         if (geologyGroup) {
           scene.add(geologyGroup);
           if (geologyGroup.userData.chalkMat) applyM25Mask(geologyGroup.userData.chalkMat, maskTex);
@@ -1045,24 +1147,34 @@ const thamesDataPromise = loadThamesData();
           dbg('Chalk floor added to scene');
         }
 
-        // M25 road ring
-        m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
-        if (m25Road) scene.add(m25Road);
+        // Both carriageways and Dartford routes use mapped OSM geometry.
+        // Keep the established ring and curated bridges as failure fallback.
+        try {
+          motorwayGroup = createMotorway({ getSurfaceY: getTerrainMeshSurfaceY,
+            VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
+          scene.add(motorwayGroup);
+          syncMotorwayBridges();
+        } catch (error) {
+          motorwayInitError = error.message;
+          console.warn(`Motorway unavailable (${error.message}); retaining previous road and bridges`);
+          m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
+          if (m25Road) scene.add(m25Road);
+        }
 
         // Thames waterfalls at disc edge (needs both Thames and M25 data)
         let thamesCrossings = [];
         if (thamesData?.points?.length) {
-          const waterfalls = createThamesWaterfalls(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
+          const waterfalls = createThamesWaterfalls(thamesData.points, supportPoints, getTerrainMeshSurfaceY);
           if (waterfalls) scene.add(waterfalls);
           // Boundary crossings feed the skirt notch so water spills over cleanly.
-          thamesCrossings = computeThamesCrossings(thamesData.points, m25Data.points, getTerrainMeshSurfaceY);
+          thamesCrossings = computeThamesCrossings(thamesData.points, supportPoints, getTerrainMeshSurfaceY);
         }
 
         // Exterior tapered column (D1): clay disc skirt + fading chalk column.
         // FrontSide-outward, so invisible from inside the disc; the skirt is
         // notched at the Thames crossings so the waterfalls spill over the edge.
         geologyExteriorGroup = createGeologyExterior(
-          m25Data.points, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings
+          supportPoints, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings
         );
         if (geologyExteriorGroup) {
           geologyExteriorGroup.visible = geologyGroup ? geologyGroup.visible : true;
@@ -1110,7 +1222,8 @@ const thamesDataPromise = loadThamesData();
             // Create buildings as InstancedMesh for this tile
             const mesh = createTileBuildings(
               filteredBuildings, getTerrainMeshSurfaceY,
-              VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file)
+              VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file),
+              airportsGroup ? isAirportBuilding : null
             );
             if (mesh) {
               mesh.name = `buildings-${tileEntry.file}`;
@@ -1179,14 +1292,20 @@ function snapAllShaftsToTerrain() {
 
 // Snap all tube centerPts, geometry, stations, and shaft platformY to terrain surface.
 // Called once after terrain loads so that depth is terrain-relative, not sea-level-relative.
-function snapAllTubesToTerrain() {
+function snapAllTubesToTerrain({ onlyLine = null } = {}) {
   if (!terrain) return;
   let snappedTubes = 0;
   let snappedStations = 0;
+  if (!onlyLine || onlyLine === 'dlr') dlrProfile?.refresh({ structureScale: getBuildingHeightScale() });
 
   // 4a. Update centerPt Y values to terrain-relative depth
   for (const [lineId, branches] of lineBranchCenterPts) {
+    if (onlyLine && lineId !== onlyLine) continue;
     for (const branchPts of branches) {
+      if (lineId === 'dlr') {
+        dlrProfile.resnap(branchPts,{ structureScale:getBuildingHeightScale(), refreshTerrain:false });
+        continue;
+      }
       for (const pt of branchPts) {
         const surfaceY = getTerrainMeshSurfaceY({ x: pt.x, z: pt.z });
         if (surfaceY !== null) {
@@ -1218,6 +1337,7 @@ function snapAllTubesToTerrain() {
   }
 
   for (const [lineId, branches] of lineBranchCenterPts) {
+    if (lineId === 'dlr' || (onlyLine && lineId !== onlyLine)) continue;
     for (const branchPts of branches) {
       for (const pt of branchPts) {
         if (isRiverCorridorPoint(pt.x, pt.z)) {
@@ -1230,6 +1350,7 @@ function snapAllTubesToTerrain() {
 
   // 4a-iii. Synthetic river-bed control points: prevent CatmullRom arcing into the river volume
   for (const [lineId, branches] of lineBranchCenterPts) {
+    if (lineId === 'dlr' || (onlyLine && lineId !== onlyLine)) continue;
     for (const branchPts of branches) {
       for (let i = branchPts.length - 2; i >= 0; i--) {
         const a = branchPts[i];
@@ -1265,6 +1386,7 @@ function snapAllTubesToTerrain() {
 
   // 4b. Rebuild tube geometry for each line
   for (const [lineId, branches] of lineBranchCenterPts) {
+    if (onlyLine && lineId !== onlyLine) continue;
     const group = lineGroups.get(lineId);
     if (!group) continue;
     const colour = lineColoursById.get(lineId) ?? 0xffffff;
@@ -1273,6 +1395,8 @@ function snapAllTubesToTerrain() {
     const toRemove = [];
     for (const child of [...group.children]) {
       if (child === group) continue;
+      // DLR height changes keep train phase/dwell state; only their paths move.
+      if (lineId === 'dlr' && child.isGroup && child.userData.lineId === 'dlr') continue;
       toRemove.push(child);
     }
     // Dispose old trains via train system before removing
@@ -1300,7 +1424,7 @@ function snapAllTubesToTerrain() {
     lineRibbonsById.delete(lineId);
 
     // Remove old trains for this line from sim.trains
-    sim.trains = sim.trains.filter(t => {
+    if (lineId !== 'dlr') sim.trains = sim.trains.filter(t => {
       if (t.parent === group) return false;
       return true;
     });
@@ -1317,7 +1441,7 @@ function snapAllTubesToTerrain() {
       const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
       const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
 
-      const segs = Math.max(80, centerPts.length * 10);
+      const segs = lineSegmentCount(lineId, centerPts);
       const radius = 4.5;
 
       const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
@@ -1335,8 +1459,17 @@ function snapAllTubesToTerrain() {
       ribbonCurves.push({ curve: leftCurve, segments: segs }, { curve: rightCurve, segments: segs });
 
       // Recreate trains on new curves (density scales with track length)
-      const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
-      sim.trains.push(...branchTrains);
+      if (lineId === 'dlr' && centerPts._trains) {
+        for (const train of centerPts._trains) {
+          const ud=train.userData;ud.curve=ud.dir>0?leftCurve:rightCurve;
+          ud.curveLengthM=ud.curve.getLength();ud.stationUs=stationUs;
+          train.position.copy(ud.curve.getPointAt(ud.t));
+        }
+      } else {
+        const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
+        if (lineId === 'dlr') centerPts._trains = branchTrains;
+        sim.trains.push(...branchTrains);
+      }
       snappedTubes++;
     }
 
@@ -1350,10 +1483,17 @@ function snapAllTubesToTerrain() {
 
   // 4c. Update station markers (terrain-relative depth + surfaceY for labels)
   for (const [lineId, layers] of lineShaftLayers) {
+    if (onlyLine && lineId !== onlyLine) continue;
     if (!layers.stationsLayer?.stations) continue;
     const stations = layers.stationsLayer.stations;
 
     for (const st of stations) {
+      if (lineId === 'dlr') {
+        const point=dlrProfile.station({id:st.id,nodeIndex:st.dlrProfile.nodeIndex,structureScale:getBuildingHeightScale()});
+        st.pos.copy(point);st.depthM=point._depthM;st.dlrProfile=point._dlrProfile;
+        st.surfaceY=getTerrainMeshSurfaceY(st.pos);
+        continue;
+      }
       if (st.depthM == null) continue;
       const surfaceY = getTerrainMeshSurfaceY({ x: st.pos.x, z: st.pos.z });
       if (surfaceY !== null) {
@@ -1372,6 +1512,7 @@ function snapAllTubesToTerrain() {
         mesh.setMatrixAt(i, dummy.matrix);
       }
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
     }
     snappedStations += stations.length;
   }
@@ -1388,7 +1529,7 @@ function snapAllTubesToTerrain() {
 let m25Road = null;
 const m25DataPromise = loadM25Data();
 m25DataPromise.then(data => {
-  if (data?.points?.length) initM25Boundary(data.points);
+  if (data?.points?.length) initM25Boundary(data.supportPoints || data.points);
 });
 
 // ---------- Surface features (tiled progressive loading) ----------
@@ -1443,9 +1584,10 @@ async function activateBakedBuildings() {
 
   try {
     const t0 = performance.now();
+    const airportFingerprint = airportsGroup ? await airportFingerprintPromise : null;
     landmarkDataPromise ||= fetchLandmarkFootprints().catch(err => { landmarkDataPromise = null; throw err; });
     const [payload, footprints] = await Promise.all([
-      bakedPayload || fetchBakedBuildings(), landmarkDataPromise,
+      bakedPayload || fetchBakedBuildings(undefined, { airportFingerprint }), landmarkDataPromise,
     ]);
     bakedPayload = payload;
     bakedLoadMs = Math.round(performance.now() - t0);
@@ -1470,6 +1612,7 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
+      suppressBuilding: airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null,
       onMesh: (mesh) => {
         bakedMeshes.push(mesh);
         // A switch during the incremental build must not mix both cities.
@@ -1693,18 +1836,25 @@ function frostedTubeMaterial(hex) {
 
 // Geo projection: lon/lat -> x/z in *metres* (local tangent plane-ish), centred on London.
 // This makes scene units ≈ metres, so train speeds and station spacing can feel real.
-const ORIGIN = { lat: 51.5074, lon: -0.1278 };
-
-// OSGB36 / British National Grid — Helmert 7-param datum transform from WGS84
-proj4.defs('EPSG:27700', '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs');
-// Derived from proj4 — consistent with Helmert transform, not independently looked-up.
-const [BNG_REF_E, BNG_REF_N] = proj4('EPSG:4326', 'EPSG:27700', [ORIGIN.lon, ORIGIN.lat]);
+// Shared OSGB36/BNG definition and exact origin live in coordinates.js.
 
 function llToXZ(lat, lon) {
   const [e, n] = proj4('EPSG:4326', 'EPSG:27700', [lon, lat]);
   const x = (e - BNG_REF_E) * sim.horizontalScale;
   const z = -(n - BNG_REF_N) * sim.horizontalScale;
   return { x, z };
+}
+
+let miniMap = null;
+try {
+  miniMap = createMiniMap({ camera, projectStation: llToXZ, onFocus: () => fpsControls.keys.clear() });
+} catch (error) {
+  console.warn(`Tube orientation map unavailable: ${error.message}`);
+}
+try {
+  dlrProfile = createDlrProfile({ project: llToXZ, sampleSurfaceY: getTerrainMeshSurfaceY, verticalExaggeration: VERTICAL_EXAGGERATION });
+} catch (error) {
+  console.warn(`DLR elevation profile unavailable: ${error.message}`);
 }
 
 // Shared station registry: all lines use same X/Z for stations with same NaPTAN ID
@@ -1780,7 +1930,28 @@ function stationUsFromPolyline(centerPts) {
     cum.push(total);
   }
   if (total <= 0) return centerPts.map(() => 0);
-  return cum.map(d => d / total);
+  const indices = centerPts._stationIndices || cum.map((_,i)=>i);
+  return indices.map(i => cum[i] / total);
+}
+
+function lineSegmentCount(lineId,points) {
+  if(lineId!=='dlr')return Math.max(80,points.length*10);
+  let length=0;for(let i=1;i<points.length;i++)length+=points[i].distanceTo(points[i-1]);
+  return Math.max(80,Math.ceil(length/25));
+}
+
+function dlrLocationLabel(profile) {
+  if(!profile)return 'DLR';
+  const names={elevated:'Elevated railway',embankment:'Railway embankment',surface:'Surface railway',tunnel:'Underground railway',cutting:'Railway cutting',portal:'Tunnel portal'};
+  const name=names[profile.classification]||'DLR';
+  if(profile.classification==='portal')return name;
+  const relative=profile.groundRelativeM;
+  return Number.isFinite(relative)?`${name} · ~${Math.abs(relative).toFixed(1)}m ${relative<0?'below':'above'} ground (modelled)`:name;
+}
+
+function syncHeightExplanation() {
+  const element=document.getElementById('heightExplanation');
+  if(element)element.textContent=`Master scales the entire scene. Structures currently appear ${(masterHeight.value*getBuildingHeightScale()).toFixed(1)}× their real height.`;
 }
 
 // Extract inbound branch sequences from TfL route data, deduplicating stops.
@@ -1858,7 +2029,13 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     if (validStopPoints.length < 2) continue;
 
     const interpolateDepth = buildDepthInterpolator(validStopPoints, depthAnchors);
-    const centerPts = [];
+    let centerPts = [];
+
+    if (lineId === 'dlr') {
+      const branch=dlrProfile.buildBranch({points:validStopPoints,structureScale:getBuildingHeightScale()});
+      centerPts=branch.points;centerPts._stationIndices=branch.stationIndices;
+      dlrStationPoints.push(...branch.stationPoints);
+    } else {
 
     for (const sp of validStopPoints) {
       registerStationPosition(sp.id, sp.lat, sp.lon);
@@ -1872,6 +2049,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
       pt._depthM = depthM; // stash for terrain-relative repositioning
       centerPts.push(pt);
     }
+    }
 
     allCenterPts.push(...centerPts);
     allBranchCenterPts.push(centerPts);
@@ -1879,7 +2057,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
     const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
 
-    const segs = Math.max(80, centerPts.length * 10);
+    const segs = lineSegmentCount(lineId, centerPts);
     const radius = 4.5;
 
     const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
@@ -1898,6 +2076,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
 
     // Trains per branch (density scales with track length)
     const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
+    if (lineId === 'dlr') centerPts._trains = branchTrains;
     sim.trains.push(...branchTrains);
     allTrains.push(...branchTrains);
   }
@@ -2182,7 +2361,7 @@ async function buildNetworkMvp() {
           // Build interpolated depth map from all branches (matches tube centerline)
           const branchArrays = branches && branches.length > 0 ? branches : [sps];
           const interpolatedDepths = new Map();
-          for (const branchStops of branchArrays) {
+          for (const branchStops of id==='dlr'?[]:branchArrays) {
             const validBranch = branchStops.filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon));
             if (validBranch.length < 2) continue;
             const interp = buildDepthInterpolator(validBranch, depthAnchors);
@@ -2203,7 +2382,12 @@ async function buildNetworkMvp() {
             }
           }
 
-          const stations = sps
+          const sourceStops=new Map(sps.map(sp=>[sp.id,sp]));
+          const stations = id==='dlr' ? [...new Map(dlrStationPoints.map(p=>[`${p.stationId}:${p._dlrProfile.nodeIndex}`,p])).values()].map(p=>({
+            id:p.stationId,name:sourceStops.get(p.stationId)?.name || dlrProfile.data.stations[p.stationId].name,
+            pos:p.clone(),depthM:p._depthM,dlrProfile:p._dlrProfile,network:'dlr',
+            lineCount:stationLineCount.get(p.stationId)||1,isTerminus:terminusIds.has(p.stationId),
+          })) : sps
             .filter(sp => Number.isFinite(sp.lat) && Number.isFinite(sp.lon))
             .map(sp => {
               const { x, z } = llToXZ(sp.lat, sp.lon);
@@ -2244,6 +2428,7 @@ async function buildNetworkMvp() {
               z: st.pos.z,
               lineId: id,
               depthM: st.depthM,
+              needsShaft: st.dlrProfile?.needsShaft,
               tflLineCount: st.lineCount || 1,
             });
           }
@@ -2361,6 +2546,19 @@ async function buildNetworkMvp() {
 // beneath it. finalize() re-enables controls on every exit path.
 const intro = createIntro({ camera, controls, fpsControls, llToXZ });
 intro.run();
+// Existing Share link now includes an exact canonical camera pose. A valid
+// view is an intentional location deep-link and follows the intro skip path.
+const sharedView = getUrlStringParam('view')?.split(',').map(Number);
+if (sharedView?.length === 6 && sharedView.every(n=>Number.isFinite(n)&&Math.abs(n)<=1e6)) {
+  const position = new THREE.Vector3(...sharedView.slice(0,3));
+  const target = new THREE.Vector3(...sharedView.slice(3));
+  if (position.distanceToSquared(target) > .01) {
+    camera.position.copy(position);
+    controls.target.copy(target);
+    camera.lookAt(target);
+    camera.updateMatrixWorld(true);
+  }
+}
 initIntroTuner({ intro, camera, controls });
 
 buildNetworkMvp();
@@ -2517,7 +2715,8 @@ let _clearHoverForMotion = null;
     }
 
     const depthM = station.depthM;
-    const depthLabel = station.network==='overground' ? `London Overground · ${overgroundGroup.userData.registry.get(station.lineId).name} line` : depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
+    const depthLabel = station.network==='dlr' ? dlrLocationLabel(station.dlrProfile)
+      : station.network==='overground' ? `London Overground · ${overgroundGroup.userData.registry.get(station.lineId).name} line` : depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
 
     tip.innerHTML = `<b>${cleanStationName(station.name)}</b><br/><span class="muted">${depthLabel}</span>`;
     tip.style.display = 'block';
@@ -2558,12 +2757,12 @@ let _clearHoverForMotion = null;
 
   // Priority tiers — lower = higher priority (small features beat large surfaces)
   const INFRA_TIER = {
-    'landmark': 0,
+    'landmark': 0, 'airport': 0,
     'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
     'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2, 'station-shaft': 2,
-    'tube-line': 3, 'overground-line': 3,
+    'tube-line': 3, 'overground-line': 3, 'motorway': 3,
     'canal': 3, 'reservoir': 3,
-    'thames': 4, 'chalk': 4,
+    'thames': 4, 'airport-dock': 4, 'chalk': 4,
   };
 
   // Large-area surface types that would intercept every ray — exclude from pickables.
@@ -2609,6 +2808,9 @@ let _clearHoverForMotion = null;
     if (landmarkGroup?.parent && landmarkGroup.visible && surfaceGeometryGroup.visible) {
       pickables.push(...landmarkGroup.userData.pickables);
     }
+    if (airportsGroup?.visible) pickables.push(...airportsGroup.userData.pickables);
+    if (motorwayGroup?.visible) pickables.push(...motorwayGroup.userData.pickables);
+    if (airportDockGroup?.visible) pickables.push(...airportDockGroup.userData.pickables);
     return pickables;
   }
 
@@ -2622,15 +2824,20 @@ let _clearHoverForMotion = null;
     // Use recursive:true so child meshes inside any accidentally-collected
     // Groups are still tested, and force-update world matrices on source
     // groups to guarantee transforms are current after async load.
-    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, overgroundGroup, unifiedShaftLayer?.group];
+    const infraSources = [tidewayMesh, crossrailMesh, sewersMesh, reservoirsMesh, canalsMesh, geologyGroup, thamesMesh, overgroundGroup, airportsGroup, airportDockGroup, motorwayGroup, unifiedShaftLayer?.group];
     for (const src of infraSources) {
       if (src) src.updateMatrixWorld(true);
     }
     // Tube line meshes live in lineGroups; refresh world matrices so picks land on correct geometry.
     for (const g of lineGroups.values()) g.updateMatrixWorld(true);
 
-    const hits = raycaster.intersectObjects(pickables, true);
-    if (!hits || hits.length === 0) return null;
+    const hits = raycaster.intersectObjects(pickables, true).filter(hit=>{
+      // Raycasting cannot see fragment-shader clipping. Mirror the exact
+      // wet-polygon mask at the actual intersection, not the canal centre.
+      return !(hit.object.userData?.type==='canal' && airportDockGroup?.parent
+        && airportDockGroup.visible && getAirportDockInfo(hit.point));
+    });
+    if (hits.length === 0) return null;
 
     // Sort by priority tier first, then distance
     let best = hits[0];
@@ -2644,7 +2851,7 @@ let _clearHoverForMotion = null;
     }
     // Return mesh + hitPoint so per-class formatters can do spatial lookups
     // (e.g. Thames zone resolution via nearestThamesSegment(hit.point)).
-    return { mesh: best.object, hitPoint: best.point };
+    return { mesh: best.object, hitPoint: best.point, faceIndex: best.faceIndex };
   }
 
   // ---------- Tooltip rendering helpers ----------
@@ -2680,9 +2887,23 @@ let _clearHoverForMotion = null;
   }
 
   _formatInfraTooltipRef = formatInfraTooltip;
-  function formatInfraTooltip(mesh, hitPoint = null) {
+  function formatInfraTooltip(mesh, hitPoint = null, faceIndex = null) {
     const ud = mesh.userData;
     const t = ud.type;
+    if (t === 'tube-line' && ud.lineId === 'dlr') {
+      const point=hitPoint?dlrProfile.sample({x:hitPoint.x,z:hitPoint.z,structureScale:getBuildingHeightScale()}):null;
+      return `<b>DLR</b>${point?`<div class="sub">${dlrLocationLabel(point._dlrProfile)}</div>`:''}`;
+    }
+    if (t === 'motorway') return '<b>M25 / A282</b><div class="sub">Orbital motorway · mapped carriageways and modelled road profile</div>';
+    if(t==='airport-dock') {
+      const name=ud.name.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+      return `<b>${name}</b><div class="sub">Impounded dock water</div>${_renderInfraTable([['REFERENCE LEVEL',`${ud.referenceLevelM.toFixed(2)}m AOD`]])}<div class="sub">Published reference level; not a live measurement</div>`;
+    }
+    if (t === 'airport') {
+      const info = getAirportHoverInfo(mesh, faceIndex);
+      const safeName = info.name.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+      return `<b>${safeName}</b>${_renderInfraTable([['HEIGHT',info.heightM ? `${info.heightM}m` : null]])}`;
+    }
     if(t === 'overground-line')return `<b>${overgroundGroup.userData.registry.get(ud.lineId).name} line</b><div class="sub">London Overground</div>`;
     if(t === 'landmark') {
       const info=LANDMARK_INFO[ud.landmarkId];
@@ -2908,9 +3129,9 @@ let _clearHoverForMotion = null;
     return header + _renderInfraTable(rows);
   }
 
-  function moveInfraTip(ev, mesh, hitPoint = null) {
+  function moveInfraTip(ev, mesh, hitPoint = null, faceIndex = null) {
     if (!tip || !mesh) return;
-    tip.innerHTML = formatInfraTooltip(mesh, hitPoint);
+    tip.innerHTML = formatInfraTooltip(mesh, hitPoint, faceIndex);
     tip.style.display = 'block';
     lastHoverLineId = null; // Reset so transition back to line hover updates text
     const x = (ev.clientX ?? 0) + 12;
@@ -2938,7 +3159,7 @@ let _clearHoverForMotion = null;
     // Tier 2: Infrastructure hover
     const infraHit = pickInfraUnderPointer(ev);
     if (infraHit) {
-      moveInfraTip(ev, infraHit.mesh, infraHit.hitPoint);
+      moveInfraTip(ev, infraHit.mesh, infraHit.hitPoint, infraHit.faceIndex);
       setHoverHighlight(null);
       return;
     }
@@ -3099,6 +3320,8 @@ function setShaftsVisible(v) {
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
       resetPrefsAndCache();
+      masterHeight.setValue(5);
+      for (const key of ['mh', 'bh', 'fl', 't', 'hx']) deleteUrlParam(key);
       location.reload();
     });
   }
@@ -3136,19 +3359,7 @@ function setShaftsVisible(v) {
   if (copyLinkBtn) {
     copyLinkBtn.addEventListener('click', async (e) => {
       e.preventDefault();
-      const url = new URL(location.href);
-      // Ensure the current sim sliders are represented.
-      url.searchParams.set('t', String(sim.timeScale));
-      url.searchParams.set('hx', String(sim.horizontalScale));
-      const fl = lensSystem.getFocalLength();
-      if (fl !== 35) url.searchParams.set('fl', String(fl));
-      else url.searchParams.delete('fl');
-
-      // Preserve focus param if present; otherwise, omit.
-      const focusId = normalizeLineId(getUrlStringParam('focus'));
-      if (!focusId || focusId === 'all') url.searchParams.delete('focus');
-
-      const text = url.toString();
+      const text = getShareUrl();
 
       try {
         await navigator.clipboard.writeText(text);
@@ -3162,6 +3373,20 @@ function setShaftsVisible(v) {
 
   // Initialize pause UI on load.
   updateSimUi();
+}
+
+function getShareUrl(base = location.href) {
+  const url = new URL(base);
+  url.searchParams.set('t', String(sim.timeScale));
+  url.searchParams.set('hx', String(sim.horizontalScale));
+  url.searchParams.set('buildings', buildingsPath);
+  url.searchParams.set('fl', String(lensSystem.getFocalLength()));
+  url.searchParams.set('mh', String(masterHeight.value));
+  url.searchParams.set('bh', String(getBuildingHeightScale()*VERTICAL_EXAGGERATION));
+  const direction=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  const target=camera.position.clone().addScaledVector(direction,1000);
+  url.searchParams.set('view',[...camera.position.toArray(),...target.toArray()].map(n=>n.toFixed(3)).join(','));
+  return url.toString();
 }
 
 // Non-direction keyboard shortcuts removed — only S/W/X/A/D, Q/E, arrows remain active.
@@ -3220,10 +3445,14 @@ function tick(frameTime) {
   _fpsWasActive = fpsControls.active;
   // DOM label projection runs before renderer.render() flushes this matrix.
   camera.updateMatrixWorld(true);
+  miniMap?.update(frameTime);
 
   // Readout widget — substrate, altitude, compass
   const azimuth = controls.getAzimuthalAngle();
-  const surfaceYAtCamera = getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
+  const dockAtCamera=airportDockGroup?getAirportDockInfo(camera.position):null;
+  // Water's visual separation lift is not a physical elevation measurement.
+  const surfaceYAtCamera = dockAtCamera ? dockAtCamera.referenceLevelM*VERTICAL_EXAGGERATION
+    : getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
   const realAltM = surfaceYAtCamera !== null
     ? Math.round((camera.position.y - surfaceYAtCamera) / VERTICAL_EXAGGERATION)
     : Math.round(camera.position.y / VERTICAL_EXAGGERATION);
@@ -3300,14 +3529,14 @@ function tick(frameTime) {
   // (0.4 real m) ramp kills half-in-half-out near-plane flicker at the water
   // plane while still reading as an instant plunge. 0 outside the corridor.
   _submergedBlend = submerged
-    ? THREE.MathUtils.smoothstep(WATER_TOP_Y - camera.position.y, 0, 2)
+    ? THREE.MathUtils.smoothstep(waterSurfaceAt(camera.position.x,camera.position.z) - camera.position.y, 0, 2)
     : 0;
 
   // Interior shell: solid opaque bounds (surface underside + walls + endcaps)
   // rendered ONLY while the camera is inside the volume — outside stays
   // pixel-identical because the shell simply does not draw.
   const _shell = thamesMesh?.userData?.interiorShell;
-  if (_shell) _shell.visible = submerged;
+  if (_shell) _shell.visible = submerged && isInThames(camera.position.x,camera.position.z);
 
   // D-002 chalk slowdown: 1.0 (clay/air) → 0.5 (full chalk), lerped by chalkBlend
   // so it never snaps. Drives keyboard flight (movement funnel) AND mouse
@@ -3350,7 +3579,9 @@ function tick(frameTime) {
   updateTrains(trainSystem, sim, camera, dt);
 
   // Overground trains (simple ping-pong runners, distance-culled)
-  if (overgroundGroup) overgroundGroup.userData.update(sim.paused ? 0 : dt*sim.timeScale, camera);
+  const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
+  if (overgroundGroup) overgroundGroup.userData.update(surfaceSimulationDt, camera);
+  motorwayGroup?.userData.update(surfaceSimulationDt, camera);
 
   // Update living-water shader uniforms.
   updateWater(dt);
@@ -3425,6 +3656,7 @@ if (import.meta.env.DEV) {
   window.__ugTHREE = THREE;
   window.__ug = {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    masterHeight, miniMap, llToXZ, sim, getShareUrl, dlrProfile,
     setBuildingHeightScale, getBuildingHeightScale,
     // Buildings render path (06Sep26u): 'live' | 'baked'
     setBuildingsPath,
@@ -3491,6 +3723,14 @@ if (import.meta.env.DEV) {
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
     get landmarkGroup() { return landmarkGroup; },
+    get airportsGroup() { return airportsGroup; },
+    get airportInitError() { return airportInitError; },
+    get airportDockGroup() { return airportDockGroup; },
+    get airportDockInitError() { return airportDockInitError; },
+    getAirportDockInfo, getAirportDockSurfaceY,
+    get motorwayGroup() { return motorwayGroup; },
+    get motorwayInitError() { return motorwayInitError; },
+    getTerrainBounds,
     get arrivalCosts() { return arrivalCosts.slice(); },
     clearArrivalCosts() { arrivalCosts.length = 0; },
     // Sum of populated instance counts across all per-tile building InstancedMeshes.

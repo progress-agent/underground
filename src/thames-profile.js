@@ -1,8 +1,9 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 // Shared Thames width/depth sampling from thames.json.
 // Keep this independent of terrain.js to avoid circular imports.
 
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 
 function toScenePoint(pt) {
   if (Number.isFinite(pt.x) && Number.isFinite(pt.z)) {

@@ -104,11 +104,14 @@ export function getBuildingMaterial() {
  * @param {Function} [isDuplicateFn]        (building) => boolean — boundary dedup filter
  * @returns {THREE.InstancedMesh|null}
  */
-export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDuplicateFn) {
+export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDuplicateFn, suppressBuilding = null) {
   if (!buildings || buildings.length === 0) return null;
 
   // Filter boundary duplicates before allocating the InstancedMesh buffer
-  const unique = isDuplicateFn ? buildings.filter(b => !isDuplicateFn(b)) : buildings;
+  // Suppress before dedup: an unavailable replacement must be able to fall
+  // back to generic buildings without their identities having been consumed.
+  const candidates = suppressBuilding ? buildings.filter(b => !suppressBuilding(b)) : buildings;
+  const unique = isDuplicateFn ? candidates.filter(b => !isDuplicateFn(b)) : candidates;
   if (unique.length === 0) return null;
 
   // Base-pivoted: local y runs 0..1 from footprint to roof, so the shader's

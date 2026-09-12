@@ -57,6 +57,9 @@ export async function loadStationDepthAnchors() {
 }
 
 export function depthForStation({ naptanId, lineId, anchors }) {
+  // DLR uses sourced rail typology/portals through dlr-profile.js. No generic
+  // underground estimate may silently put an elevated railway below ground.
+  if (lineId === 'dlr') return null;
   if (anchors && naptanId && anchors.has(naptanId)) return anchors.get(naptanId);
   if (lineId && lineId in LINE_DEPTH_M) return LINE_DEPTH_M[lineId];
   return 18; // generic underground

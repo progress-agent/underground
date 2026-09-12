@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 // thames-mask.js — River corridor exclusion for surface buildings
 //
 // Uses Thames waypoint data (BNG centreline with per-point width) to define
@@ -8,8 +9,8 @@
 // per tile load. Each check is 2 dot products + 1 sqrt — <1ms per tile.
 
 // BNG reference — must match terrain.js, thames.js, m25.js
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 
 // Width safety margin: use 90% of actual river width to avoid clipping
 // riverside buildings that sit right on the bank

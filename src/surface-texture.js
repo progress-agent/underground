@@ -21,33 +21,10 @@
 
 import * as THREE from 'three';
 import { isInThames } from './thames-mask.js';
+import { getTerrainBounds } from './terrain.js';
 
 // ─── BNG / scene reference (must match terrain.js, m25.js) ──────────────────
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
-
-// Terrain BNG bounds (from london_full_height.json metadata)
-const TERRAIN_BNG = {
-  minE: 490000, maxE: 560000,  // 70 km E-W
-  minN: 155000, maxN: 205000,  // 50 km N-S
-};
-
 // ─── Coordinate helpers ─────────────────────────────────────────────────────
-
-/**
- * Convert scene X to BNG easting.
- */
-function sceneXToEasting(x) {
-  return x + BNG_REF_E;
-}
-
-/**
- * Convert scene Z to BNG northing.
- * Scene Z is inverted: north = negative Z.
- */
-function sceneZToNorthing(z) {
-  return -z + BNG_REF_N;
-}
 
 /**
  * Convert scene (x, z) to terrain mesh UV (matching vM25Uv).
@@ -58,11 +35,11 @@ function sceneZToNorthing(z) {
  * which uses the opposite v direction (v=0 north, v=1 south).
  */
 function sceneToMeshUV(x, z) {
-  const e = sceneXToEasting(x);
-  const n = sceneZToNorthing(z);
+  const bounds=getTerrainBounds();
+  if(!bounds)throw new Error('Surface texture UV mapping requires loaded terrain');
   return {
-    u: (e - TERRAIN_BNG.minE) / (TERRAIN_BNG.maxE - TERRAIN_BNG.minE),
-    v: (n - TERRAIN_BNG.minN) / (TERRAIN_BNG.maxN - TERRAIN_BNG.minN),
+    u: (x-bounds.minX)/bounds.widthM,
+    v: (bounds.maxZ-z)/bounds.heightM,
   };
 }
 

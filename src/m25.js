@@ -1,17 +1,7 @@
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
-
-// BNG reference — must match terrain.js
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
-
-// Terrain BNG bounds (from london_full_height.json)
-const TERRAIN_BNG = {
-  minE: 490000, maxE: 560000,
-  minN: 155000, maxN: 205000,
-  widthE: 70000,  // 560000 - 490000
-  heightN: 50000, // 205000 - 155000
-};
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
+import { xzToTerrainUV } from './terrain.js';
 
 /**
  * Fetch M25 route data from public/data/m25.json.
@@ -23,7 +13,12 @@ export async function loadM25Data() {
     if (!res.ok) return null;
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('json')) return null;
-    return await res.json();
+    const data = await res.json();
+    if (!Array.isArray(data.points) || data.points.length < 4 || data.points.some(p=>!Number.isFinite(p.e)||!Number.isFinite(p.n))) return null;
+    if (data.supportMarginM > 0 && (!Array.isArray(data.supportPoints) || data.supportPoints.length < 4)) throw new Error('Missing sourced motorway support boundary');
+    data.supportPoints ||= data.points;
+    if (data.supportPoints.some(p=>!Number.isFinite(p.e)||!Number.isFinite(p.n))) throw new Error('Invalid motorway support boundary');
+    return data;
   } catch (err) {
     console.warn('Failed to load M25 data:', err);
     return null;
@@ -40,7 +35,6 @@ function bngToScene(e, n) {
     z: -(n - BNG_REF_N),
   };
 }
-
 /**
  * Convert BNG coordinates to mask UV [0,1].
  * u=0 at west edge (minE), u=1 at east edge (maxE).
@@ -48,10 +42,8 @@ function bngToScene(e, n) {
  * This matches the terrain mesh UV convention (v=0 → north, v=1 → south).
  */
 function bngToMaskUV(e, n) {
-  return {
-    u: (e - TERRAIN_BNG.minE) / TERRAIN_BNG.widthE,
-    v: 1.0 - (n - TERRAIN_BNG.minN) / TERRAIN_BNG.heightN,
-  };
+  const { x, z } = bngToScene(e,n);
+  return xzToTerrainUV({x,z});
 }
 
 /**
@@ -608,10 +600,7 @@ export function initM25Boundary(points) {
 // The grid spans the terrain scene extent (same bounds terrain.js/geology.js
 // use). 256² cells brute-forced against ~270 polygon segments is a one-off
 // ~18M-op build at boot — trivially fast and never touched again.
-const SDF_MIN_X = TERRAIN_BNG.minE - BNG_REF_E;   // -40000
-const SDF_MAX_X = TERRAIN_BNG.maxE - BNG_REF_E;   //  30000
-const SDF_MIN_Z = -(TERRAIN_BNG.maxN - BNG_REF_N); // -24600 (north)
-const SDF_MAX_Z = -(TERRAIN_BNG.minN - BNG_REF_N); //  25400 (south)
+let SDF_MIN_X=0,SDF_MAX_X=0,SDF_MIN_Z=0,SDF_MAX_Z=0;
 const SDF_EDGE_BAND = 1500; // scene units — full inside↔outside blend width
 
 let _m25Sdf = null;   // Float32Array(N*N) signed distance
@@ -620,6 +609,11 @@ let _sdfN = 0;
 function buildM25EdgeField(gridN = 256) {
   const poly = _m25ScenePolygon;
   if (!poly || poly.length < 3) return;
+  // Coverage follows the sourced ring, including its southern extension.
+  SDF_MIN_X=Math.min(...poly.map(p=>p.x))-SDF_EDGE_BAND*2;
+  SDF_MAX_X=Math.max(...poly.map(p=>p.x))+SDF_EDGE_BAND*2;
+  SDF_MIN_Z=Math.min(...poly.map(p=>p.z))-SDF_EDGE_BAND*2;
+  SDF_MAX_Z=Math.max(...poly.map(p=>p.z))+SDF_EDGE_BAND*2;
   _sdfN = gridN;
   _m25Sdf = new Float32Array(gridN * gridN);
   const n = poly.length;

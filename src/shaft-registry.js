@@ -15,8 +15,9 @@ const registry = new Map();
  * The registry deduplicates by naptanId and tracks which lines serve each station,
  * keeping the deepest depth across all lines for shaft height calculation.
  */
-export function registerStationForShafts({ naptanId, name, x, z, lineId, depthM, tflLineCount }) {
+export function registerStationForShafts({ naptanId, name, x, z, lineId, depthM, tflLineCount, needsShaft }) {
   if (!naptanId) return;
+  if (lineId === 'dlr' && !needsShaft) return;
   const key = String(naptanId).trim();
 
   if (registry.has(key)) {
@@ -45,4 +46,3 @@ export function registerStationForShafts({ naptanId, name, x, z, lineId, depthM,
 export function getShaftRegistry() {
   return registry;
 }
-

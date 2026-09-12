@@ -1,3 +1,4 @@
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 // thames-zones.js — Named reach zones for Thames hover tooltips.
 //
 // 10 zones spanning the Thames centreline (Wave 1 plan locked), addressed by
@@ -192,8 +193,8 @@ export function getZoneAt(chainM) {
 //
 // BNG reference must match terrain.js / thames.js / thames-mask.js / m25.js.
 
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+
+
 
 // Lazily populated by initThamesZones() (called from main.js once thames.json
 // has been fetched). Until then, nearestThamesSegment() returns null.

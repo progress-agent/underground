@@ -1,0 +1,2105 @@
+{
+  "version": 1,
+  "width": 620,
+  "height": 430,
+  "provenance": {
+    "source": "Transport for London Unified API RouteSequence",
+    "snapshot": "2026-02-04T18:00:00.000Z",
+    "licence": "https://tfl.gov.uk/corporate/terms-and-conditions/transport-data-service",
+    "attribution": "Powered by TfL Open Data",
+    "additionalAttribution": "Contains OS data © Crown copyright and database rights 2016. Geomni UK Map data © and database rights 2019.",
+    "layout": "Original UnderGround topology-based schematic; intermediate stops omitted. Not TfL map artwork or a journey planner.",
+    "sources": [
+      "https://api.tfl.gov.uk/Line/bakerloo/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/central/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/circle/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/district/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/dlr/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/hammersmith-city/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/jubilee/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/metropolitan/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/northern/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/piccadilly/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/victoria/Route/Sequence/all",
+      "https://api.tfl.gov.uk/Line/waterloo-city/Route/Sequence/all"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "Acton Town",
+      "name": "Acton Town",
+      "lat": 51.503057,
+      "lon": -0.280462,
+      "target": [
+        90,
+        245
+      ],
+      "label": null
+    },
+    {
+      "id": "Aldgate",
+      "name": "Aldgate",
+      "lat": 51.514246,
+      "lon": -0.075689,
+      "target": [
+        445,
+        210
+      ],
+      "label": null
+    },
+    {
+      "id": "Aldgate East",
+      "name": "Aldgate East",
+      "lat": 51.515037,
+      "lon": -0.072384,
+      "target": [
+        455,
+        220
+      ],
+      "label": null
+    },
+    {
+      "id": "Amersham",
+      "name": "Amersham",
+      "lat": 51.674126,
+      "lon": -0.607714,
+      "target": [
+        45,
+        25
+      ],
+      "label": null
+    },
+    {
+      "id": "Baker Street",
+      "name": "Baker Street",
+      "lat": 51.522883,
+      "lon": -0.15713,
+      "target": [
+        230,
+        155
+      ],
+      "label": [
+        0,
+        -14,
+        "middle"
+      ]
+    },
+    {
+      "id": "Bank",
+      "name": "Bank",
+      "lat": 51.51225,
+      "lon": -0.087792,
+      "target": [
+        420,
+        240
+      ],
+      "label": [
+        7,
+        15,
+        "start"
+      ]
+    },
+    {
+      "id": "Barking",
+      "name": "Barking",
+      "lat": 51.539321,
+      "lon": 0.081053,
+      "target": [
+        555,
+        180
+      ],
+      "label": null
+    },
+    {
+      "id": "Battersea Power Station",
+      "name": "Battersea Power Station",
+      "lat": 51.479932,
+      "lon": -0.142142,
+      "target": [
+        270,
+        330
+      ],
+      "label": null
+    },
+    {
+      "id": "Beckton",
+      "name": "Beckton",
+      "lat": 51.514362,
+      "lon": 0.061453,
+      "target": [
+        590,
+        260
+      ],
+      "label": null
+    },
+    {
+      "id": "Blackfriars",
+      "name": "Blackfriars",
+      "lat": 51.511581,
+      "lon": -0.103659,
+      "target": [
+        365,
+        270
+      ],
+      "label": null
+    },
+    {
+      "id": "Bond Street",
+      "name": "Bond Street",
+      "lat": 51.514304,
+      "lon": -0.149723,
+      "target": [
+        240,
+        210
+      ],
+      "label": null
+    },
+    {
+      "id": "Brixton",
+      "name": "Brixton",
+      "lat": 51.462618,
+      "lon": -0.114888,
+      "target": [
+        330,
+        385
+      ],
+      "label": null
+    },
+    {
+      "id": "Camden Town",
+      "name": "Camden Town",
+      "lat": 51.539292,
+      "lon": -0.14274,
+      "target": [
+        300,
+        120
+      ],
+      "label": null
+    },
+    {
+      "id": "Canada Water",
+      "name": "Canada Water",
+      "lat": 51.497931,
+      "lon": -0.049405,
+      "target": [
+        450,
+        300
+      ],
+      "label": null
+    },
+    {
+      "id": "Canary Wharf",
+      "name": "Canary Wharf",
+      "lat": 51.503488,
+      "lon": -0.018246,
+      "target": [
+        490,
+        285
+      ],
+      "label": [
+        -6,
+        17,
+        "end"
+      ]
+    },
+    {
+      "id": "Canning Town",
+      "name": "Canning Town",
+      "lat": 51.513584,
+      "lon": 0.008322,
+      "target": [
+        545,
+        250
+      ],
+      "label": null
+    },
+    {
+      "id": "Chalfont & Latimer",
+      "name": "Chalfont & Latimer",
+      "lat": 51.667985,
+      "lon": -0.560689,
+      "target": [
+        75,
+        35
+      ],
+      "label": null
+    },
+    {
+      "id": "Charing Cross",
+      "name": "Charing Cross",
+      "lat": 51.50741,
+      "lon": -0.127277,
+      "target": [
+        310,
+        260
+      ],
+      "label": null
+    },
+    {
+      "id": "Chesham",
+      "name": "Chesham",
+      "lat": 51.705208,
+      "lon": -0.611247,
+      "target": [
+        80,
+        15
+      ],
+      "label": null
+    },
+    {
+      "id": "Cockfosters",
+      "name": "Cockfosters",
+      "lat": 51.65152,
+      "lon": -0.149171,
+      "target": [
+        400,
+        40
+      ],
+      "label": null
+    },
+    {
+      "id": "Custom House",
+      "name": "Custom House",
+      "lat": 51.509716,
+      "lon": 0.026699,
+      "target": [
+        565,
+        270
+      ],
+      "label": null
+    },
+    {
+      "id": "Ealing Broadway",
+      "name": "Ealing Broadway",
+      "lat": 51.515017,
+      "lon": -0.301457,
+      "target": [
+        65,
+        200
+      ],
+      "label": null
+    },
+    {
+      "id": "Earl's Court",
+      "name": "Earl's Court",
+      "lat": 51.492063,
+      "lon": -0.193378,
+      "target": [
+        170,
+        280
+      ],
+      "label": null
+    },
+    {
+      "id": "East India",
+      "name": "East India",
+      "lat": 51.509359,
+      "lon": -0.002326,
+      "target": [
+        530,
+        250
+      ],
+      "label": null
+    },
+    {
+      "id": "Edgware",
+      "name": "Edgware",
+      "lat": 51.613653,
+      "lon": -0.274928,
+      "target": [
+        255,
+        50
+      ],
+      "label": null
+    },
+    {
+      "id": "Edgware Road (Bakerloo)",
+      "name": "Edgware Road (Bakerloo)",
+      "lat": 51.520299,
+      "lon": -0.17015,
+      "target": [
+        185,
+        140
+      ],
+      "label": null
+    },
+    {
+      "id": "Edgware Road (Circle Line)",
+      "name": "Edgware Road (Circle Line)",
+      "lat": 51.519858,
+      "lon": -0.167832,
+      "target": [
+        195,
+        155
+      ],
+      "label": null
+    },
+    {
+      "id": "Elephant & Castle",
+      "name": "Elephant & Castle",
+      "lat": 51.494536,
+      "lon": -0.100606,
+      "target": [
+        345,
+        320
+      ],
+      "label": null
+    },
+    {
+      "id": "Embankment",
+      "name": "Embankment",
+      "lat": 51.507058,
+      "lon": -0.122666,
+      "target": [
+        320,
+        270
+      ],
+      "label": null
+    },
+    {
+      "id": "Epping",
+      "name": "Epping",
+      "lat": 51.69368,
+      "lon": 0.113767,
+      "target": [
+        565,
+        35
+      ],
+      "label": null
+    },
+    {
+      "id": "Euston",
+      "name": "Euston",
+      "lat": 51.528186,
+      "lon": -0.134239,
+      "target": [
+        300,
+        155
+      ],
+      "label": null
+    },
+    {
+      "id": "Farringdon",
+      "name": "Farringdon",
+      "lat": 51.520252,
+      "lon": -0.104913,
+      "target": [
+        370,
+        165
+      ],
+      "label": null
+    },
+    {
+      "id": "Finchley Central",
+      "name": "Finchley Central",
+      "lat": 51.600921,
+      "lon": -0.192527,
+      "target": [
+        325,
+        75
+      ],
+      "label": null
+    },
+    {
+      "id": "Finchley Road",
+      "name": "Finchley Road",
+      "lat": 51.546825,
+      "lon": -0.179845,
+      "target": [
+        235,
+        125
+      ],
+      "label": null
+    },
+    {
+      "id": "Finsbury Park",
+      "name": "Finsbury Park",
+      "lat": 51.564158,
+      "lon": -0.106825,
+      "target": [
+        380,
+        110
+      ],
+      "label": null
+    },
+    {
+      "id": "Gloucester Road",
+      "name": "Gloucester Road",
+      "lat": 51.494316,
+      "lon": -0.182658,
+      "target": [
+        195,
+        280
+      ],
+      "label": null
+    },
+    {
+      "id": "Green Park",
+      "name": "Green Park",
+      "lat": 51.506947,
+      "lon": -0.142787,
+      "target": [
+        255,
+        250
+      ],
+      "label": null
+    },
+    {
+      "id": "Greenwich",
+      "name": "Greenwich",
+      "lat": 51.478087,
+      "lon": -0.013673,
+      "target": [
+        490,
+        345
+      ],
+      "label": null
+    },
+    {
+      "id": "Hainault",
+      "name": "Hainault",
+      "lat": 51.603659,
+      "lon": 0.093482,
+      "target": [
+        575,
+        95
+      ],
+      "label": null
+    },
+    {
+      "id": "Hammersmith",
+      "name": "Hammersmith",
+      "lat": 51.4923,
+      "lon": -0.22362,
+      "target": [
+        125,
+        255
+      ],
+      "label": null
+    },
+    {
+      "id": "Hammersmith (H&C Line)",
+      "name": "Hammersmith (H&C Line)",
+      "lat": 51.49339,
+      "lon": -0.22503,
+      "target": [
+        200.2526635125651,
+        250.31178153629205
+      ],
+      "label": null
+    },
+    {
+      "id": "Harrow & Wealdstone",
+      "name": "Harrow & Wealdstone",
+      "lat": 51.592268,
+      "lon": -0.335217,
+      "target": [
+        115,
+        70
+      ],
+      "label": null
+    },
+    {
+      "id": "Harrow-on-the-Hill",
+      "name": "Harrow-on-the-Hill",
+      "lat": 51.579195,
+      "lon": -0.337225,
+      "target": [
+        130,
+        95
+      ],
+      "label": null
+    },
+    {
+      "id": "Hatton Cross",
+      "name": "Hatton Cross",
+      "lat": 51.466747,
+      "lon": -0.423191,
+      "target": [
+        112.00964339032058,
+        290.329462712828
+      ],
+      "label": null
+    },
+    {
+      "id": "Heathrow Airport Terminal 4",
+      "name": "Heathrow Airport Terminal 4",
+      "lat": 51.458524,
+      "lon": -0.445771,
+      "target": [
+        60,
+        330
+      ],
+      "label": null
+    },
+    {
+      "id": "Heathrow Airport Terminal 5",
+      "name": "Heathrow Airport Terminal 5",
+      "lat": 51.470052,
+      "lon": -0.49056,
+      "target": [
+        20,
+        305
+      ],
+      "label": null
+    },
+    {
+      "id": "Heathrow Terminals 2 & 3",
+      "name": "Heathrow Terminals 2 & 3",
+      "lat": 51.471235,
+      "lon": -0.452265,
+      "target": [
+        45,
+        305
+      ],
+      "label": [
+        0,
+        20,
+        "middle",
+        "Heathrow"
+      ]
+    },
+    {
+      "id": "High Barnet",
+      "name": "High Barnet",
+      "lat": 51.650541,
+      "lon": -0.194298,
+      "target": [
+        335,
+        30
+      ],
+      "label": null
+    },
+    {
+      "id": "High Street Kensington",
+      "name": "High Street Kensington",
+      "lat": 51.501055,
+      "lon": -0.192792,
+      "target": [
+        170,
+        245
+      ],
+      "label": null
+    },
+    {
+      "id": "Highbury & Islington",
+      "name": "Highbury & Islington",
+      "lat": 51.54635,
+      "lon": -0.103324,
+      "target": [
+        365,
+        130
+      ],
+      "label": null
+    },
+    {
+      "id": "Holborn",
+      "name": "Holborn",
+      "lat": 51.51758,
+      "lon": -0.120475,
+      "target": [
+        340,
+        210
+      ],
+      "label": null
+    },
+    {
+      "id": "Kennington",
+      "name": "Kennington",
+      "lat": 51.488337,
+      "lon": -0.105963,
+      "target": [
+        335,
+        340
+      ],
+      "label": null
+    },
+    {
+      "id": "Kensington (Olympia)",
+      "name": "Kensington (Olympia)",
+      "lat": 51.497624,
+      "lon": -0.210015,
+      "target": [
+        150,
+        255
+      ],
+      "label": null
+    },
+    {
+      "id": "King's Cross & St Pancras International",
+      "name": "King's Cross & St Pancras International",
+      "lat": 51.530663,
+      "lon": -0.123194,
+      "target": [
+        335,
+        150
+      ],
+      "label": [
+        0,
+        -17,
+        "middle",
+        "King’s Cross"
+      ]
+    },
+    {
+      "id": "Leicester Square",
+      "name": "Leicester Square",
+      "lat": 51.511386,
+      "lon": -0.128426,
+      "target": [
+        310,
+        240
+      ],
+      "label": null
+    },
+    {
+      "id": "Lewisham",
+      "name": "Lewisham",
+      "lat": 51.464665,
+      "lon": -0.012874,
+      "target": [
+        490,
+        375
+      ],
+      "label": null
+    },
+    {
+      "id": "Leytonstone",
+      "name": "Leytonstone",
+      "lat": 51.568324,
+      "lon": 0.008194,
+      "target": [
+        525,
+        120
+      ],
+      "label": null
+    },
+    {
+      "id": "Limehouse",
+      "name": "Limehouse",
+      "lat": 51.512393,
+      "lon": -0.039809,
+      "target": [
+        485,
+        245
+      ],
+      "label": null
+    },
+    {
+      "id": "Liverpool Street",
+      "name": "Liverpool Street",
+      "lat": 51.517372,
+      "lon": -0.083182,
+      "target": [
+        415,
+        190
+      ],
+      "label": [
+        7,
+        -13,
+        "start",
+        "Liverpool St"
+      ]
+    },
+    {
+      "id": "London Bridge",
+      "name": "London Bridge",
+      "lat": 51.505721,
+      "lon": -0.088873,
+      "target": [
+        400,
+        290
+      ],
+      "label": null
+    },
+    {
+      "id": "London City Airport",
+      "name": "London City Airport",
+      "lat": 51.503416,
+      "lon": 0.048739,
+      "target": [
+        565,
+        295
+      ],
+      "label": null
+    },
+    {
+      "id": "Mile End",
+      "name": "Mile End",
+      "lat": 51.525122,
+      "lon": -0.03364,
+      "target": [
+        470,
+        190
+      ],
+      "label": null
+    },
+    {
+      "id": "Mill Hill East",
+      "name": "Mill Hill East",
+      "lat": 51.608229,
+      "lon": -0.209986,
+      "target": [
+        305,
+        60
+      ],
+      "label": null
+    },
+    {
+      "id": "Moor Park",
+      "name": "Moor Park",
+      "lat": 51.629845,
+      "lon": -0.432454,
+      "target": [
+        115,
+        50
+      ],
+      "label": null
+    },
+    {
+      "id": "Moorgate",
+      "name": "Moorgate",
+      "lat": 51.518176,
+      "lon": -0.088322,
+      "target": [
+        400,
+        180
+      ],
+      "label": null
+    },
+    {
+      "id": "Morden",
+      "name": "Morden",
+      "lat": 51.402142,
+      "lon": -0.194839,
+      "target": [
+        245,
+        405
+      ],
+      "label": null
+    },
+    {
+      "id": "North Acton",
+      "name": "North Acton",
+      "lat": 51.523524,
+      "lon": -0.259755,
+      "target": [
+        110,
+        195
+      ],
+      "label": null
+    },
+    {
+      "id": "North Greenwich",
+      "name": "North Greenwich",
+      "lat": 51.50047,
+      "lon": 0.004287,
+      "target": [
+        525,
+        280
+      ],
+      "label": null
+    },
+    {
+      "id": "Notting Hill Gate",
+      "name": "Notting Hill Gate",
+      "lat": 51.509128,
+      "lon": -0.196104,
+      "target": [
+        170,
+        215
+      ],
+      "label": null
+    },
+    {
+      "id": "Old Street",
+      "name": "Old Street",
+      "lat": 51.525864,
+      "lon": -0.08777,
+      "target": [
+        405,
+        150
+      ],
+      "label": null
+    },
+    {
+      "id": "Oxford Circus",
+      "name": "Oxford Circus",
+      "lat": 51.515224,
+      "lon": -0.141903,
+      "target": [
+        270,
+        210
+      ],
+      "label": [
+        -4,
+        17,
+        "end"
+      ]
+    },
+    {
+      "id": "Paddington",
+      "name": "Paddington",
+      "lat": 51.516581,
+      "lon": -0.175689,
+      "target": [
+        170,
+        165
+      ],
+      "label": [
+        -9,
+        -12,
+        "end"
+      ]
+    },
+    {
+      "id": "Piccadilly Circus",
+      "name": "Piccadilly Circus",
+      "lat": 51.51005,
+      "lon": -0.133798,
+      "target": [
+        285,
+        245
+      ],
+      "label": null
+    },
+    {
+      "id": "Poplar",
+      "name": "Poplar",
+      "lat": 51.507744,
+      "lon": -0.017384,
+      "target": [
+        510,
+        250
+      ],
+      "label": null
+    },
+    {
+      "id": "Queen's Park",
+      "name": "Queen's Park",
+      "lat": 51.534158,
+      "lon": -0.204574,
+      "target": [
+        145,
+        115
+      ],
+      "label": null
+    },
+    {
+      "id": "Rayners Lane",
+      "name": "Rayners Lane",
+      "lat": 51.575147,
+      "lon": -0.371127,
+      "target": [
+        95,
+        115
+      ],
+      "label": null
+    },
+    {
+      "id": "Richmond",
+      "name": "Richmond",
+      "lat": 51.463237,
+      "lon": -0.301336,
+      "target": [
+        85,
+        325
+      ],
+      "label": null
+    },
+    {
+      "id": "Royal Victoria",
+      "name": "Royal Victoria",
+      "lat": 51.509336,
+      "lon": 0.018497,
+      "target": [
+        555,
+        260
+      ],
+      "label": null
+    },
+    {
+      "id": "Seven Sisters",
+      "name": "Seven Sisters",
+      "lat": 51.58333,
+      "lon": -0.072584,
+      "target": [
+        420,
+        95
+      ],
+      "label": null
+    },
+    {
+      "id": "Shadwell",
+      "name": "Shadwell",
+      "lat": 51.511693,
+      "lon": -0.056643,
+      "target": [
+        470,
+        260
+      ],
+      "label": null
+    },
+    {
+      "id": "Shepherd's Bush",
+      "name": "Shepherd's Bush",
+      "lat": 51.504376,
+      "lon": -0.218813,
+      "target": [
+        130,
+        215
+      ],
+      "label": null
+    },
+    {
+      "id": "South Kensington",
+      "name": "South Kensington",
+      "lat": 51.494094,
+      "lon": -0.174138,
+      "target": [
+        220,
+        280
+      ],
+      "label": null
+    },
+    {
+      "id": "Stanmore",
+      "name": "Stanmore",
+      "lat": 51.619839,
+      "lon": -0.303266,
+      "target": [
+        205,
+        55
+      ],
+      "label": null
+    },
+    {
+      "id": "Stockwell",
+      "name": "Stockwell",
+      "lat": 51.472184,
+      "lon": -0.122644,
+      "target": [
+        295,
+        355
+      ],
+      "label": null
+    },
+    {
+      "id": "Stratford",
+      "name": "Stratford",
+      "lat": 51.541806,
+      "lon": -0.003458,
+      "target": [
+        505,
+        155
+      ],
+      "label": [
+        8,
+        -7,
+        "start"
+      ]
+    },
+    {
+      "id": "Stratford International",
+      "name": "Stratford International",
+      "lat": 51.545265,
+      "lon": -0.009638,
+      "target": [
+        505,
+        135
+      ],
+      "label": null
+    },
+    {
+      "id": "Tottenham Court Road",
+      "name": "Tottenham Court Road",
+      "lat": 51.516426,
+      "lon": -0.13041,
+      "target": [
+        305,
+        210
+      ],
+      "label": null
+    },
+    {
+      "id": "Tottenham Hale",
+      "name": "Tottenham Hale",
+      "lat": 51.588108,
+      "lon": -0.060241,
+      "target": [
+        445,
+        105
+      ],
+      "label": null
+    },
+    {
+      "id": "Tower Gateway",
+      "name": "Tower Gateway",
+      "lat": 51.510617,
+      "lon": -0.074818,
+      "target": [
+        450,
+        260
+      ],
+      "label": null
+    },
+    {
+      "id": "Tower Hill",
+      "name": "Tower Hill",
+      "lat": 51.509971,
+      "lon": -0.076546,
+      "target": [
+        440,
+        245
+      ],
+      "label": null
+    },
+    {
+      "id": "Turnham Green",
+      "name": "Turnham Green",
+      "lat": 51.495148,
+      "lon": -0.254555,
+      "target": [
+        115,
+        265
+      ],
+      "label": null
+    },
+    {
+      "id": "Upminster",
+      "name": "Upminster",
+      "lat": 51.559063,
+      "lon": 0.250882,
+      "target": [
+        585,
+        155
+      ],
+      "label": null
+    },
+    {
+      "id": "Uxbridge",
+      "name": "Uxbridge",
+      "lat": 51.546565,
+      "lon": -0.477949,
+      "target": [
+        35,
+        100
+      ],
+      "label": null
+    },
+    {
+      "id": "Vauxhall",
+      "name": "Vauxhall",
+      "lat": 51.485743,
+      "lon": -0.124204,
+      "target": [
+        290,
+        310
+      ],
+      "label": null
+    },
+    {
+      "id": "Victoria",
+      "name": "Victoria",
+      "lat": 51.496359,
+      "lon": -0.143102,
+      "target": [
+        260,
+        280
+      ],
+      "label": [
+        -8,
+        17,
+        "end"
+      ]
+    },
+    {
+      "id": "Walthamstow Central",
+      "name": "Walthamstow Central",
+      "lat": 51.582965,
+      "lon": -0.019885,
+      "target": [
+        480,
+        80
+      ],
+      "label": null
+    },
+    {
+      "id": "Warren Street",
+      "name": "Warren Street",
+      "lat": 51.524951,
+      "lon": -0.138321,
+      "target": [
+        285,
+        180
+      ],
+      "label": null
+    },
+    {
+      "id": "Waterloo",
+      "name": "Waterloo",
+      "lat": 51.503299,
+      "lon": -0.11478,
+      "target": [
+        340,
+        280
+      ],
+      "label": [
+        -8,
+        17,
+        "end"
+      ]
+    },
+    {
+      "id": "Watford",
+      "name": "Watford",
+      "lat": 51.657446,
+      "lon": -0.417377,
+      "target": [
+        145,
+        35
+      ],
+      "label": null
+    },
+    {
+      "id": "Wembley Park",
+      "name": "Wembley Park",
+      "lat": 51.563198,
+      "lon": -0.279262,
+      "target": [
+        185,
+        100
+      ],
+      "label": null
+    },
+    {
+      "id": "West Ham",
+      "name": "West Ham",
+      "lat": 51.528136,
+      "lon": 0.005055,
+      "target": [
+        525,
+        200
+      ],
+      "label": null
+    },
+    {
+      "id": "West India Quay",
+      "name": "West India Quay",
+      "lat": 51.50703,
+      "lon": -0.020311,
+      "target": [
+        495,
+        270
+      ],
+      "label": null
+    },
+    {
+      "id": "West Ruislip",
+      "name": "West Ruislip",
+      "lat": 51.569688,
+      "lon": -0.437886,
+      "target": [
+        55,
+        135
+      ],
+      "label": null
+    },
+    {
+      "id": "Westferry",
+      "name": "Westferry",
+      "lat": 51.509431,
+      "lon": -0.02675,
+      "target": [
+        490,
+        255
+      ],
+      "label": null
+    },
+    {
+      "id": "Westminster",
+      "name": "Westminster",
+      "lat": 51.50132,
+      "lon": -0.124861,
+      "target": [
+        300,
+        280
+      ],
+      "label": null
+    },
+    {
+      "id": "Whitechapel",
+      "name": "Whitechapel",
+      "lat": 51.519518,
+      "lon": -0.059971,
+      "target": [
+        460,
+        225
+      ],
+      "label": null
+    },
+    {
+      "id": "Wimbledon",
+      "name": "Wimbledon",
+      "lat": 51.421207,
+      "lon": -0.206573,
+      "target": [
+        165,
+        365
+      ],
+      "label": null
+    },
+    {
+      "id": "Woodford",
+      "name": "Woodford",
+      "lat": 51.606899,
+      "lon": 0.03397,
+      "target": [
+        540,
+        75
+      ],
+      "label": null
+    },
+    {
+      "id": "Woolwich Arsenal",
+      "name": "Woolwich Arsenal",
+      "lat": 51.490009,
+      "lon": 0.069127,
+      "target": [
+        585,
+        330
+      ],
+      "label": null
+    }
+  ],
+  "lines": [
+    {
+      "id": "bakerloo",
+      "name": "Bakerloo",
+      "colour": "#B36305",
+      "edges": [
+        [
+          "Harrow & Wealdstone",
+          "Queen's Park"
+        ],
+        [
+          "Paddington",
+          "Queen's Park"
+        ],
+        [
+          "Edgware Road (Bakerloo)",
+          "Paddington"
+        ],
+        [
+          "Baker Street",
+          "Edgware Road (Bakerloo)"
+        ],
+        [
+          "Baker Street",
+          "Oxford Circus"
+        ],
+        [
+          "Oxford Circus",
+          "Piccadilly Circus"
+        ],
+        [
+          "Charing Cross",
+          "Piccadilly Circus"
+        ],
+        [
+          "Charing Cross",
+          "Embankment"
+        ],
+        [
+          "Embankment",
+          "Waterloo"
+        ],
+        [
+          "Elephant & Castle",
+          "Waterloo"
+        ]
+      ]
+    },
+    {
+      "id": "central",
+      "name": "Central",
+      "colour": "#E32017",
+      "edges": [
+        [
+          "Epping",
+          "Woodford"
+        ],
+        [
+          "Leytonstone",
+          "Woodford"
+        ],
+        [
+          "Leytonstone",
+          "Stratford"
+        ],
+        [
+          "Mile End",
+          "Stratford"
+        ],
+        [
+          "Liverpool Street",
+          "Mile End"
+        ],
+        [
+          "Bank",
+          "Liverpool Street"
+        ],
+        [
+          "Bank",
+          "Holborn"
+        ],
+        [
+          "Holborn",
+          "Tottenham Court Road"
+        ],
+        [
+          "Oxford Circus",
+          "Tottenham Court Road"
+        ],
+        [
+          "Bond Street",
+          "Oxford Circus"
+        ],
+        [
+          "Bond Street",
+          "Notting Hill Gate"
+        ],
+        [
+          "Notting Hill Gate",
+          "Shepherd's Bush"
+        ],
+        [
+          "North Acton",
+          "Shepherd's Bush"
+        ],
+        [
+          "North Acton",
+          "West Ruislip"
+        ],
+        [
+          "Hainault",
+          "Leytonstone"
+        ],
+        [
+          "Hainault",
+          "Woodford"
+        ],
+        [
+          "Ealing Broadway",
+          "North Acton"
+        ]
+      ]
+    },
+    {
+      "id": "circle",
+      "name": "Circle",
+      "colour": "#FFD300",
+      "edges": [
+        [
+          "Edgware Road (Circle Line)",
+          "Paddington"
+        ],
+        [
+          "Edgware Road (Circle Line)",
+          "Hammersmith (H&C Line)"
+        ],
+        [
+          "Notting Hill Gate",
+          "Paddington"
+        ],
+        [
+          "High Street Kensington",
+          "Notting Hill Gate"
+        ],
+        [
+          "Gloucester Road",
+          "High Street Kensington"
+        ],
+        [
+          "Gloucester Road",
+          "South Kensington"
+        ],
+        [
+          "South Kensington",
+          "Victoria"
+        ],
+        [
+          "Victoria",
+          "Westminster"
+        ],
+        [
+          "Embankment",
+          "Westminster"
+        ],
+        [
+          "Blackfriars",
+          "Embankment"
+        ],
+        [
+          "Blackfriars",
+          "Tower Hill"
+        ],
+        [
+          "Aldgate",
+          "Tower Hill"
+        ],
+        [
+          "Aldgate",
+          "Liverpool Street"
+        ],
+        [
+          "Liverpool Street",
+          "Moorgate"
+        ],
+        [
+          "Farringdon",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Farringdon",
+          "Moorgate"
+        ],
+        [
+          "Baker Street",
+          "Edgware Road (Circle Line)"
+        ],
+        [
+          "Baker Street",
+          "King's Cross & St Pancras International"
+        ]
+      ]
+    },
+    {
+      "id": "district",
+      "name": "District",
+      "colour": "#00782A",
+      "edges": [
+        [
+          "Barking",
+          "Upminster"
+        ],
+        [
+          "Barking",
+          "West Ham"
+        ],
+        [
+          "Mile End",
+          "West Ham"
+        ],
+        [
+          "Mile End",
+          "Whitechapel"
+        ],
+        [
+          "Aldgate East",
+          "Whitechapel"
+        ],
+        [
+          "Aldgate East",
+          "Tower Hill"
+        ],
+        [
+          "Blackfriars",
+          "Tower Hill"
+        ],
+        [
+          "Blackfriars",
+          "Embankment"
+        ],
+        [
+          "Embankment",
+          "Westminster"
+        ],
+        [
+          "Victoria",
+          "Westminster"
+        ],
+        [
+          "South Kensington",
+          "Victoria"
+        ],
+        [
+          "Gloucester Road",
+          "South Kensington"
+        ],
+        [
+          "Earl's Court",
+          "Gloucester Road"
+        ],
+        [
+          "Earl's Court",
+          "High Street Kensington"
+        ],
+        [
+          "Earl's Court",
+          "Kensington (Olympia)"
+        ],
+        [
+          "Earl's Court",
+          "Hammersmith"
+        ],
+        [
+          "Earl's Court",
+          "Wimbledon"
+        ],
+        [
+          "Hammersmith",
+          "Turnham Green"
+        ],
+        [
+          "Acton Town",
+          "Turnham Green"
+        ],
+        [
+          "Acton Town",
+          "Ealing Broadway"
+        ],
+        [
+          "Richmond",
+          "Turnham Green"
+        ],
+        [
+          "Edgware Road (Circle Line)",
+          "Paddington"
+        ],
+        [
+          "Notting Hill Gate",
+          "Paddington"
+        ],
+        [
+          "High Street Kensington",
+          "Notting Hill Gate"
+        ]
+      ]
+    },
+    {
+      "id": "hammersmith-city",
+      "name": "Hammersmith & City",
+      "colour": "#F3A9BB",
+      "edges": [
+        [
+          "Barking",
+          "West Ham"
+        ],
+        [
+          "Mile End",
+          "West Ham"
+        ],
+        [
+          "Mile End",
+          "Whitechapel"
+        ],
+        [
+          "Aldgate East",
+          "Whitechapel"
+        ],
+        [
+          "Aldgate East",
+          "Liverpool Street"
+        ],
+        [
+          "Liverpool Street",
+          "Moorgate"
+        ],
+        [
+          "Farringdon",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Farringdon",
+          "Moorgate"
+        ],
+        [
+          "Baker Street",
+          "Edgware Road (Circle Line)"
+        ],
+        [
+          "Baker Street",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Edgware Road (Circle Line)",
+          "Hammersmith (H&C Line)"
+        ]
+      ]
+    },
+    {
+      "id": "jubilee",
+      "name": "Jubilee",
+      "colour": "#A0A5A9",
+      "edges": [
+        [
+          "Stratford",
+          "West Ham"
+        ],
+        [
+          "Canning Town",
+          "West Ham"
+        ],
+        [
+          "Canning Town",
+          "North Greenwich"
+        ],
+        [
+          "Canary Wharf",
+          "North Greenwich"
+        ],
+        [
+          "Canada Water",
+          "Canary Wharf"
+        ],
+        [
+          "Canada Water",
+          "London Bridge"
+        ],
+        [
+          "London Bridge",
+          "Waterloo"
+        ],
+        [
+          "Waterloo",
+          "Westminster"
+        ],
+        [
+          "Green Park",
+          "Westminster"
+        ],
+        [
+          "Bond Street",
+          "Green Park"
+        ],
+        [
+          "Baker Street",
+          "Bond Street"
+        ],
+        [
+          "Baker Street",
+          "Finchley Road"
+        ],
+        [
+          "Finchley Road",
+          "Wembley Park"
+        ],
+        [
+          "Stanmore",
+          "Wembley Park"
+        ]
+      ]
+    },
+    {
+      "id": "metropolitan",
+      "name": "Metropolitan",
+      "colour": "#9B0056",
+      "edges": [
+        [
+          "Amersham",
+          "Chalfont & Latimer"
+        ],
+        [
+          "Chalfont & Latimer",
+          "Chesham"
+        ],
+        [
+          "Chalfont & Latimer",
+          "Moor Park"
+        ],
+        [
+          "Moor Park",
+          "Watford"
+        ],
+        [
+          "Harrow-on-the-Hill",
+          "Moor Park"
+        ],
+        [
+          "Harrow-on-the-Hill",
+          "Wembley Park"
+        ],
+        [
+          "Harrow-on-the-Hill",
+          "Rayners Lane"
+        ],
+        [
+          "Finchley Road",
+          "Wembley Park"
+        ],
+        [
+          "Baker Street",
+          "Finchley Road"
+        ],
+        [
+          "Baker Street",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Farringdon",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Farringdon",
+          "Moorgate"
+        ],
+        [
+          "Liverpool Street",
+          "Moorgate"
+        ],
+        [
+          "Aldgate",
+          "Liverpool Street"
+        ],
+        [
+          "Rayners Lane",
+          "Uxbridge"
+        ]
+      ]
+    },
+    {
+      "id": "northern",
+      "name": "Northern",
+      "colour": "#111111",
+      "edges": [
+        [
+          "Finchley Central",
+          "Mill Hill East"
+        ],
+        [
+          "Finchley Central",
+          "High Barnet"
+        ],
+        [
+          "Camden Town",
+          "Euston"
+        ],
+        [
+          "Camden Town",
+          "Finchley Central"
+        ],
+        [
+          "Camden Town",
+          "Edgware"
+        ],
+        [
+          "Euston",
+          "Warren Street"
+        ],
+        [
+          "Euston",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Tottenham Court Road",
+          "Warren Street"
+        ],
+        [
+          "Leicester Square",
+          "Tottenham Court Road"
+        ],
+        [
+          "Charing Cross",
+          "Leicester Square"
+        ],
+        [
+          "Charing Cross",
+          "Embankment"
+        ],
+        [
+          "Embankment",
+          "Waterloo"
+        ],
+        [
+          "Kennington",
+          "Waterloo"
+        ],
+        [
+          "Kennington",
+          "Stockwell"
+        ],
+        [
+          "Morden",
+          "Stockwell"
+        ],
+        [
+          "King's Cross & St Pancras International",
+          "Old Street"
+        ],
+        [
+          "Moorgate",
+          "Old Street"
+        ],
+        [
+          "Bank",
+          "Moorgate"
+        ],
+        [
+          "Bank",
+          "London Bridge"
+        ],
+        [
+          "Elephant & Castle",
+          "Kennington"
+        ],
+        [
+          "Elephant & Castle",
+          "London Bridge"
+        ],
+        [
+          "Battersea Power Station",
+          "Kennington"
+        ]
+      ]
+    },
+    {
+      "id": "piccadilly",
+      "name": "Piccadilly",
+      "colour": "#003688",
+      "edges": [
+        [
+          "Cockfosters",
+          "Finsbury Park"
+        ],
+        [
+          "Finsbury Park",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Holborn",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Holborn",
+          "Leicester Square"
+        ],
+        [
+          "Leicester Square",
+          "Piccadilly Circus"
+        ],
+        [
+          "Green Park",
+          "Piccadilly Circus"
+        ],
+        [
+          "Green Park",
+          "South Kensington"
+        ],
+        [
+          "Gloucester Road",
+          "South Kensington"
+        ],
+        [
+          "Earl's Court",
+          "Gloucester Road"
+        ],
+        [
+          "Earl's Court",
+          "Hammersmith"
+        ],
+        [
+          "Hammersmith",
+          "Turnham Green"
+        ],
+        [
+          "Acton Town",
+          "Turnham Green"
+        ],
+        [
+          "Acton Town",
+          "Rayners Lane"
+        ],
+        [
+          "Acton Town",
+          "Hatton Cross"
+        ],
+        [
+          "Rayners Lane",
+          "Uxbridge"
+        ],
+        [
+          "Hatton Cross",
+          "Heathrow Terminals 2 & 3"
+        ],
+        [
+          "Hatton Cross",
+          "Heathrow Airport Terminal 4"
+        ],
+        [
+          "Heathrow Airport Terminal 5",
+          "Heathrow Terminals 2 & 3"
+        ],
+        [
+          "Heathrow Airport Terminal 4",
+          "Heathrow Terminals 2 & 3"
+        ]
+      ]
+    },
+    {
+      "id": "victoria",
+      "name": "Victoria",
+      "colour": "#0098D4",
+      "edges": [
+        [
+          "Tottenham Hale",
+          "Walthamstow Central"
+        ],
+        [
+          "Seven Sisters",
+          "Tottenham Hale"
+        ],
+        [
+          "Finsbury Park",
+          "Seven Sisters"
+        ],
+        [
+          "Finsbury Park",
+          "Highbury & Islington"
+        ],
+        [
+          "Highbury & Islington",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Euston",
+          "King's Cross & St Pancras International"
+        ],
+        [
+          "Euston",
+          "Warren Street"
+        ],
+        [
+          "Oxford Circus",
+          "Warren Street"
+        ],
+        [
+          "Green Park",
+          "Oxford Circus"
+        ],
+        [
+          "Green Park",
+          "Victoria"
+        ],
+        [
+          "Vauxhall",
+          "Victoria"
+        ],
+        [
+          "Stockwell",
+          "Vauxhall"
+        ],
+        [
+          "Brixton",
+          "Stockwell"
+        ]
+      ]
+    },
+    {
+      "id": "waterloo-city",
+      "name": "Waterloo & City",
+      "colour": "#95CDBA",
+      "edges": [
+        [
+          "Bank",
+          "Waterloo"
+        ]
+      ]
+    },
+    {
+      "id": "dlr",
+      "name": "DLR",
+      "colour": "#00A4A7",
+      "edges": [
+        [
+          "Greenwich",
+          "Lewisham"
+        ],
+        [
+          "Canary Wharf",
+          "West India Quay"
+        ],
+        [
+          "Canary Wharf",
+          "Westferry"
+        ],
+        [
+          "Canary Wharf",
+          "Greenwich"
+        ],
+        [
+          "West India Quay",
+          "Westferry"
+        ],
+        [
+          "Poplar",
+          "West India Quay"
+        ],
+        [
+          "Poplar",
+          "Westferry"
+        ],
+        [
+          "Poplar",
+          "Stratford"
+        ],
+        [
+          "Stratford",
+          "Stratford International"
+        ],
+        [
+          "Stratford",
+          "West Ham"
+        ],
+        [
+          "Limehouse",
+          "Westferry"
+        ],
+        [
+          "Limehouse",
+          "Shadwell"
+        ],
+        [
+          "Shadwell",
+          "Tower Gateway"
+        ],
+        [
+          "Bank",
+          "Shadwell"
+        ],
+        [
+          "Beckton",
+          "Custom House"
+        ],
+        [
+          "Custom House",
+          "Royal Victoria"
+        ],
+        [
+          "Canning Town",
+          "Royal Victoria"
+        ],
+        [
+          "Canning Town",
+          "East India"
+        ],
+        [
+          "Canning Town",
+          "London City Airport"
+        ],
+        [
+          "Canning Town",
+          "West Ham"
+        ],
+        [
+          "East India",
+          "Poplar"
+        ],
+        [
+          "London City Airport",
+          "Woolwich Arsenal"
+        ]
+      ]
+    }
+  ]
+}

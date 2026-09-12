@@ -12,7 +12,8 @@ import {
   generateUndersideNormalMap,
 } from './textures.js';
 import { RENDER_ORDER } from './render-layers.js';
-import { VERTICAL_EXAGGERATION } from './terrain.js';
+import { VERTICAL_EXAGGERATION, getTerrainBounds } from './terrain.js';
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 
 // ── Datum ───────────────────────────────────────────────────────────────
 // Chalk top is ABSOLUTE mOD: nominal clay/chalk boundary at 60m below sea
@@ -21,20 +22,10 @@ import { VERTICAL_EXAGGERATION } from './terrain.js';
 export const CHALK_TOP_Y = -60 * VERTICAL_EXAGGERATION;
 
 // ── Terrain scene extent ────────────────────────────────────────────────
-// Mirrors terrain.js BNG bounds + m25.js TERRAIN_BNG. The chalk plane shares
+// Reads the loaded terrain bounds, including source extensions. The chalk plane shares
 // the terrain's UV→world mapping exactly (same PlaneGeometry construction,
 // same centre), so the M25 mask — indexed in terrain-UV space — lines up 1:1
 // when applyM25Mask() is called on the chalk material.
-const BNG_REF_E = 530000, BNG_REF_N = 180400;
-const TB = { minE: 490000, maxE: 560000, minN: 155000, maxN: 205000 };
-const SW_X = TB.minE - BNG_REF_E;     // -40000 (west)
-const NE_X = TB.maxE - BNG_REF_E;     //  30000 (east)
-const SW_Z = -(TB.minN - BNG_REF_N);  //  25400 (south, +Z)
-const NE_Z = -(TB.maxN - BNG_REF_N);  // -24600 (north, -Z)
-const TERRAIN_W = NE_X - SW_X;        // 70000
-const TERRAIN_H = SW_Z - NE_Z;        // 50000
-const CENTER_X = (SW_X + NE_X) / 2;   // -5000
-const CENTER_Z = (SW_Z + NE_Z) / 2;   //   400
 
 // ── Relief bands (shared by the mesh build and the analytic re-eval) ─────
 // Two-band noise + terraced ledges + micro-grain. Amplitudes chosen so the
@@ -163,6 +154,10 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
   // ── Chalk floor mesh: 512×512 over the terrain extent ──────────────────
+  const bounds=getTerrainBounds();
+  if(!bounds)throw new Error('Geology requires loaded terrain bounds');
+  const TERRAIN_W=bounds.widthM,TERRAIN_H=bounds.heightM;
+  const CENTER_X=(bounds.minX+bounds.maxX)/2,CENTER_Z=(bounds.minZ+bounds.maxZ)/2;
   const segments = 512;
   const geom = new THREE.PlaneGeometry(TERRAIN_W, TERRAIN_H, segments, segments);
   geom.rotateX(-Math.PI / 2);

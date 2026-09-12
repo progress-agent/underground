@@ -28,8 +28,8 @@ import * as THREE from 'three';
 import { fbmNoise } from './noise.js';
 import { RENDER_ORDER } from './render-layers.js';
 
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+// Boundary is sourced in BNG and projected with the runtime Trafalgar origin.
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 
 function bngToScene(e, n) {
   return { x: e - BNG_REF_E, z: -(n - BNG_REF_N) };

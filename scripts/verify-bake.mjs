@@ -7,6 +7,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { installNodeEnv, ROOT } from './bake-node-env.mjs';
 import { isSuppressed } from './landmarks.mjs';
+import { createHash } from 'node:crypto';
+import { createAirportSuppression, airportSuppressionSignature } from '../src/airport-suppression.js';
 installNodeEnv();
 
 const terrain = await import('../src/terrain.js');
@@ -15,12 +17,18 @@ const { loadM25Data, initM25Boundary, isInsideM25 } = await import('../src/m25.j
 const VE = terrain.VERTICAL_EXAGGERATION;
 const thamesData = JSON.parse(await readFile(path.join(ROOT, 'public/data/thames.json'), 'utf8'));
 initThamesMask(thamesData.points);
-initM25Boundary((await loadM25Data()).points);
+const m25Data = await loadM25Data();
+initM25Boundary(m25Data.supportPoints || m25Data.points);
 await terrain.tryCreateTerrainMesh({ thamesData });
 
 const BAKED = path.join(ROOT, 'public/data/surface/baked');
 const meta = JSON.parse(await readFile(path.join(BAKED, 'meta.json'), 'utf8'));
 const buf = await readFile(path.join(BAKED, 'buildings.bin'));
+const airportData = JSON.parse(await readFile(path.join(ROOT, 'src/airport-data.json'), 'utf8'));
+const isAirportBuilding = createAirportSuppression(airportData);
+const airportFingerprint = await airportSuppressionSignature(airportData);
+if (meta.airportSuppression?.fingerprint !== airportFingerprint) throw new Error('Airport suppression metadata does not match active replacement footprints');
+if (meta.payloadSha256 !== createHash('sha256').update(buf).digest('hex')) throw new Error('Baked payload hash does not match metadata');
 
 // header
 const magic = buf.readUInt32LE(0), version = buf.readUInt16LE(4);
@@ -63,9 +71,19 @@ let rng = 1234567; const rand = () => (rng = (rng * 1103515245 + 12345) & 0x7fff
 const sample = files.filter(() => rand() < 0.05);
 
 let checked = 0, missing = 0, worstBase = 0, worstH = 0, worstSide = 0, suppressedFound = 0;
-for (const t of sample) {
+let airportReplacements = 0, airportLeaks = 0;
+const sampleFiles = new Set(sample.map(t=>t.file));
+for (const t of files) {
   const data = JSON.parse(await readFile(path.join(TILE_DIR, t.file), 'utf8'));
   for (const b of data.buildings || []) {
+    // Check every source airport replacement, not just the random terrain
+    // sample. These omissions are intentional, never dedup losers.
+    if (isAirportBuilding(b)) {
+      airportReplacements++;
+      if (decoded.has(`${Math.round(b.cx)},${Math.round(b.cz)}`)) airportLeaks++;
+      continue;
+    }
+    if (!sampleFiles.has(t.file)) continue;
     if (!isInsideM25(b.cx, b.cz) || isInThames(b.cx, b.cz)) continue;
     if (isSuppressed(b.cx, b.cz)) {
       if (decoded.has(`${Math.round(b.cx)},${Math.round(b.cz)}`)) suppressedFound++;
@@ -87,6 +105,7 @@ console.log(`  max |height   delta| ${worstH.toFixed(4)} m   (bound 0.05 = half 
 console.log(`  max |side     delta| ${worstSide.toFixed(4)} m   (bound 0.05 = half a decimetre)`);
 console.log(`  not in payload (dedup losers): ${missing.toLocaleString()}`);
 console.log(`  SUPPRESSED buildings wrongly present: ${suppressedFound}`);
+console.log(`  intentional airport replacements: ${airportReplacements}; wrongly retained: ${airportLeaks}`);
 
 // Rounding to decimetres has a maximum error of EXACTLY half a decimetre, so
 // 0.0500 is the pass boundary, not a failure. An epsilon, not a fudge.
@@ -96,6 +115,8 @@ if (worstBase > BOUND) fail.push(`baseElev exceeds quantisation (${worstBase})`)
 if (worstH > BOUND) fail.push(`height exceeds quantisation (${worstH})`);
 if (worstSide > BOUND) fail.push(`side exceeds quantisation (${worstSide})`);
 if (suppressedFound > 0) fail.push('suppression leaked');
+if (airportLeaks > 0) fail.push('airport replacements leaked');
+if (!airportReplacements || !meta.airportSuppression.buildings) fail.push('airport replacement check has no source records');
 if (badBase > 0) fail.push('non-finite base elevations');
 console.log(fail.length ? `\nFAIL: ${fail.join('; ')}` : '\nPASS — payload reproduces the live ingest within quantisation');
 process.exit(fail.length ? 1 : 0);

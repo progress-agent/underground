@@ -15,6 +15,14 @@
 // below the rendered surface everywhere.
 
 import { test, expect } from '@playwright/test';
+import { BNG_REF_E, BNG_REF_N } from '../src/coordinates.js';
+
+// Preserve the original BNG locations and bank offsets. These fixtures were
+// recorded relative to E530000/N180400 before the scene origin was corrected.
+const canonicalFixture = ({ x, z, ...rest }) => ({
+  ...rest, x: x + 530000 - BNG_REF_E, z: z + BNG_REF_N - 180400,
+});
+const READY_POINT = canonicalFixture({ x: 8161, z: 2340 });
 
 const WATER_PLANE_SCENE_Y = 10;    // riverLevelM (2m OD) * VE 5 (data plane)
 const WATER_TOP_SCENE_Y = 12;      // rendered top: riverLevelM*VE + WATER_LIFT
@@ -29,20 +37,21 @@ const BANK_POINTS = [
   { name: 'GreenwichPierE-R+30', x: 8528.2, z: 2024.8 },
   { name: 'O2north-L+10', x: 9243.6, z: 93.6 },
   { name: 'O2north-R+10', x: 9414.4, z: -253.6 },
-];
+].map(canonicalFixture);
 // Mid-channel points (between the L/R bank pairs): must stay AT or BELOW the
 // water plane — the carve (shelf at 1.85m OD or bathymetric bed) still fires.
 const CHANNEL_POINTS = [
   { name: 'CuttySark-mid', x: 8161.0, z: 2340.0 },
   { name: 'GreenwichPierE-mid', x: 8623.0, z: 2158.0 },
-];
+].map(canonicalFixture);
 
 test('Thames banks sit at or above the water plane; channel stays carved', async ({ page }) => {
   await page.goto('/?fast=1');
   await page.waitForFunction(
-    () => window.__ug
+    (point) => window.__ug
       && typeof window.__ug.getTerrainMeshSurfaceY === 'function'
-      && window.__ug.getTerrainMeshSurfaceY({ x: 8161, z: 2340 }) !== null,
+      && window.__ug.getTerrainMeshSurfaceY(point) !== null,
+    READY_POINT,
     { timeout: 90000 },
   );
 
@@ -82,15 +91,19 @@ const TRANSECTS = [
   ['vauxhall', 70, 2320, 'NS'],
   ['city', 2500, -20, 'NS'],
   ['tower', 3655, 260, 'NS'],
-];
+].map(([name, x, z, axis]) => {
+  const point = canonicalFixture({ x, z });
+  return [name, point.x, point.z, axis];
+});
 
 test('Thames in-channel terrain stays below the rendered water surface', async ({ page }) => {
   await page.goto('/?fast=1');
   await page.waitForFunction(
-    () => window.__ug
+    (point) => window.__ug
       && typeof window.__ug.getTerrainMeshSurfaceY === 'function'
       && typeof window.__ug.isInThames === 'function'
-      && window.__ug.getTerrainMeshSurfaceY({ x: 8161, z: 2340 }) !== null,
+      && window.__ug.getTerrainMeshSurfaceY(point) !== null,
+    READY_POINT,
     { timeout: 90000 },
   );
 

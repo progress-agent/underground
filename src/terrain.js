@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import UPNG from 'upng-js';
+import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import {
   generateTerrainGrainTexture,
   generateTerrainRoughnessTexture,
@@ -9,10 +10,7 @@ import {
 } from './textures.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 
-// BNG reference point for the scene ORIGIN (51.5074°N, 0.1278°W)
-// Trafalgar Square ≈ TQ 300 804 ≈ E 530000, N 180400 in British National Grid
-const BNG_REF_E = 530000;
-const BNG_REF_N = 180400;
+export const TERRAIN_ORIGIN_BNG = [BNG_REF_E, BNG_REF_N];
 
 // Unified vertical exaggeration for terrain AND underground depth.
 // VE=5 splits the difference: terrain hills pronounced, underground depth visible,
@@ -47,6 +45,111 @@ export const TERRAIN_CONFIG = {
 
 // Module-level terrain state — set by tryCreateTerrainMesh, read by helper functions
 let terrainState = null;
+
+export const TERRAIN_CORRECTION_URL = '/data/terrain/stratford-dtm.json';
+export const SOUTHERN_TERRAIN_URL = '/data/terrain/southern-dtm.json';
+export const AIRPORT_TERRAIN_URL = '/data/terrain/airport-dtm.json';
+const AIRPORT_CORRECTION_BOUNDS={
+  'heathrow':[504000,173000,511000,178000],
+  'london-city':[541000,179000,544000,181000],
+  'biggin-hill':[540000,159000,543000,163000],
+  'northolt':[508000,184000,511000,186000],
+  'elstree':[515000,195000,517000,198000],
+  'denham':[502000,188000,504000,190000],
+  'stapleford':[548000,196000,551000,199000],
+ 'kenley':[531000,156000,535000,160000],
+ 'damyns-hall':[554000,181000,558000,185000],
+};
+export function validateAirportTerrainCorrections(data){
+  if(data?.version!==1||!Array.isArray(data.patches)||data.patches.length!==Object.keys(AIRPORT_CORRECTION_BOUNDS).length)throw Error('Invalid or missing physical airport DTM corrections');
+  const ids=new Set();
+  for(const p of data.patches){
+    const bounds=AIRPORT_CORRECTION_BOUNDS[p.id];
+    if(!bounds||ids.has(p.id)||p.version!==1||p.crs!=='EPSG:27700'||p.units!=='metres'||p.datum!=='Ordnance Datum Newlyn'
+      ||JSON.stringify(p.bounds_m)!==JSON.stringify(bounds)||p.pixel_size_m!==25||p.boundaryBlendM!==250
+      ||p.width!==(bounds[2]-bounds[0])/25||p.height!==(bounds[3]-bounds[1])/25||!Array.isArray(p.elevations)
+      ||p.elevations.length!==p.width*p.height||p.elevations.some(y=>!Number.isFinite(y)||y < -1000||y > 1400)
+      ||!/^[a-f0-9]{64}$/.test(p.sourceSha256))throw Error(`Invalid physical airport DTM correction: ${p.id}`);
+    ids.add(p.id);
+  }
+  return data;
+}
+export function applyAirportTerrainCorrections(hm,meta,data){
+  validateAirportTerrainCorrections(data);
+  return data.patches.map(p=>({id:p.id,source:p.source,sourceSha256:p.sourceSha256,bounds_m:p.bounds_m,
+    boundaryBlendM:p.boundaryBlendM,correctedSamples:applyPhysicalTerrainCorrection(hm,meta,p)}));
+}
+
+export function validateSouthernTerrain(data) {
+  if(data?.version!==1||data.crs!=='EPSG:27700'||data.units!=='metres'||data.datum!=='Ordnance Datum Newlyn'
+    ||data.width!==1400||data.height!==100||data.pixel_size_m!==50
+    ||JSON.stringify(data.bounds_m)!=='[490000,151000,560000,156000]'
+    ||!Array.isArray(data.elevations)||data.elevations.length!==140000
+    ||data.elevations.some(y=>!Number.isFinite(y)||y < -1000||y > 1400))throw new Error('Invalid or missing physical southern DTM extension');
+  return data;
+}
+export function getTerrainBounds() {
+  if(!terrainState)return null;
+  const {swSceneX,swSceneZ,neSceneX,neSceneZ,terrainW,terrainH,segments,segmentsY}=terrainState;
+  return {minX:swSceneX,maxX:neSceneX,minZ:neSceneZ,maxZ:swSceneZ,widthM:terrainW,heightM:terrainH,width:terrainW,height:terrainH,
+    bounds_m:[swSceneX+BNG_REF_E,BNG_REF_N-swSceneZ,neSceneX+BNG_REF_E,BNG_REF_N-neSceneZ],
+    columns:segments+1,rows:segmentsY+1,originBNG:[...TERRAIN_ORIGIN_BNG]};
+}
+
+
+export function validateTerrainCorrection(data) {
+  if (data?.version !== 1 || data.crs !== 'EPSG:27700' || data.units !== 'metres' || data.datum !== 'Ordnance Datum Newlyn'
+    || data.width !== 80 || data.height !== 80 || data.pixel_size_m !== 25
+    || JSON.stringify(data.bounds_m) !== '[537000,183000,539000,185000]'
+    || !Array.isArray(data.elevations) || data.elevations.length !== data.width * data.height
+    || data.elevations.some(y => !Number.isFinite(y) || y < -1000 || y > 1400)
+    || !Number.isFinite(data.boundaryBlendM) || data.boundaryBlendM <= 0) {
+    throw new Error('Invalid or missing physical Stratford DTM correction');
+  }
+  return data;
+}
+
+// Authoritative Float32 DTM is an area raster. Sample at pixel centres, unlike
+// the legacy full-city PNG's endpoint grid. Never extrapolate outside coverage.
+export function sampleTerrainCorrection(data, easting, northing) {
+  const [west, south, east, north] = data.bounds_m;
+  if (easting < west || easting > east || northing < south || northing > north) return null;
+  const x = THREE.MathUtils.clamp((easting - west) / data.pixel_size_m - .5, 0, data.width - 1);
+  const z = THREE.MathUtils.clamp((north - northing) / data.pixel_size_m - .5, 0, data.height - 1);
+  const x0 = Math.floor(x), z0 = Math.floor(z), x1 = Math.min(x0 + 1, data.width - 1), z1 = Math.min(z0 + 1, data.height - 1);
+  const u = x - x0, v = z - z0, row = data.width, a = data.elevations;
+  const elevation = a[z0 * row + x0] * (1 - u) * (1 - v) + a[z0 * row + x1] * u * (1 - v)
+    + a[z1 * row + x0] * (1 - u) * v + a[z1 * row + x1] * u * v;
+  const edgeDistance = Math.min(easting - west, east - easting, northing - south, north - northing);
+  const weight = THREE.MathUtils.smoothstep(edgeDistance, 0, data.boundaryBlendM);
+  return { elevation, weight };
+}
+
+export function applyTerrainCorrection(hm, meta, correction) {
+  validateTerrainCorrection(correction);
+  return applyPhysicalTerrainCorrection(hm,meta,correction);
+}
+
+function applyPhysicalTerrainCorrection(hm, meta, correction) {
+  const [west, south, east, north] = meta.bounds_m;
+  const minimum = meta.elev_min_m ?? hm.minRaw;
+  const range = (meta.elev_max_m ?? hm.minRaw + hm.rawRange) - minimum;
+  if (!Number.isFinite(range) || range <= 0) throw new Error('Terrain has no physical elevation scale');
+  let changed = 0;
+  for (let row = 0; row < hm.height; row++) {
+    const n = north - row / (hm.height - 1) * (north - south);
+    if (n < correction.bounds_m[1] || n > correction.bounds_m[3]) continue;
+    for (let col = 0; col < hm.width; col++) {
+      const e = west + col / (hm.width - 1) * (east - west);
+      const sample = sampleTerrainCorrection(correction, e, n);
+      if (!sample || sample.weight === 0) continue;
+      const index = row * hm.width + col, original = hm.floats[index] * range + minimum;
+      hm.floats[index] = (THREE.MathUtils.lerp(original, sample.elevation, sample.weight) - minimum) / range;
+      changed++;
+    }
+  }
+  return changed;
+}
 
 /**
  * Decode a 16-bit PNG heightmap properly, bypassing the browser's <img> element
@@ -365,7 +468,12 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
         if (!res.ok) continue;
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('json')) continue;  // Skip HTML fallback responses
-        meta = await res.json();
+        const candidate = await res.json();
+        // The legacy Victoria PNG has only0–255 intensity values and no
+        // metre conversion. Never silently promote those values to elevations.
+        if (!Number.isFinite(candidate.elev_min_m) || !Number.isFinite(candidate.elev_max_m)
+          || candidate.elev_max_m <= candidate.elev_min_m) continue;
+        meta = candidate;
         break;
       } catch { /* not valid JSON, try next */ }
     }
@@ -373,6 +481,35 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
 
     // Decode 16-bit PNG properly — browser <img> destroys 16-bit precision
     const hm = await load16bitHeightmap(`/data/terrain/${meta.heightmap}`);
+    // DSM includes roofs. Replace only independently validated Stratford
+    // coverage with EA bare-earth elevations, before geometry, normals, colours
+    // and all height samplers are built. Missing correction must be visible.
+    const correctionResponse = await fetch(TERRAIN_CORRECTION_URL);
+    if (!correctionResponse.ok || !(correctionResponse.headers.get('content-type') || '').includes('json')) {
+      throw new Error('Required Stratford DTM correction is unavailable');
+    }
+    const correction = validateTerrainCorrection(await correctionResponse.json());
+    const correctedSamples = applyTerrainCorrection(hm, meta, correction);
+    meta.terrainCorrection = { source: correction.source, sourceSha256: correction.sourceSha256,
+      bounds_m: correction.bounds_m, correctedSamples };
+
+    // Airport terminal/hangar roofs are also present in the legacy DSM. Use
+    // complete, validated EA bare-earth patches, blending only inside coverage.
+    const airportResponse=await fetch(AIRPORT_TERRAIN_URL);
+    if(!airportResponse.ok||!(airportResponse.headers.get('content-type')||'').includes('json'))throw Error('Required airport DTM corrections unavailable');
+    const airportCorrections=validateAirportTerrainCorrections(await airportResponse.json());
+    meta.airportTerrainCorrections=applyAirportTerrainCorrections(hm,meta,airportCorrections);
+
+    const southernResponse=await fetch(SOUTHERN_TERRAIN_URL);
+    if(!southernResponse.ok||!(southernResponse.headers.get('content-type')||'').includes('json'))throw new Error('Required southern DTM extension unavailable');
+    const southern=validateSouthernTerrain(await southernResponse.json());
+    // Append forty old grid rows, keeping every old BNG grid node in place.
+    const sourceBounds=[...meta.bounds_m],segments=TERRAIN_CONFIG.segments,segmentsY=segments+40;
+    const rowSpacing=(sourceBounds[3]-sourceBounds[1])/segments;
+    meta.sourceBounds_m=sourceBounds;
+    meta.bounds_m=[sourceBounds[0],sourceBounds[3]-rowSpacing*segmentsY,sourceBounds[2],sourceBounds[3]];
+    meta.renderGrid={columns:segments+1,rows:segmentsY+1,rowSpacingM:rowSpacing,columnSpacingM:(sourceBounds[2]-sourceBounds[0])/segments};
+    meta.southernExtension={source:southern.source,sourceSha256:southern.sourceSha256,bounds_m:southern.bounds_m,overlapBlendNorthM:156000,overlapBlendSouthM:155000};
 
     // ── Geographic alignment ──────────────────────────────────────────
     // Convert BNG bounds from metadata to scene XZ coordinates.
@@ -397,10 +534,9 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     console.log(`Terrain: BNG [${bngXmin},${bngYmin}]–[${bngXmax},${bngYmax}] → scene center (${centerX.toFixed(0)}, ${centerZ.toFixed(0)}), ${terrainW.toFixed(0)}×${terrainH.toFixed(0)}m`);
 
     // ── Geometry ──────────────────────────────────────────────────────
-    const segments = TERRAIN_CONFIG.segments;
     const VE = TERRAIN_CONFIG.verticalExaggeration;
 
-    const geom = new THREE.PlaneGeometry(terrainW, terrainH, segments, segments);
+    const geom = new THREE.PlaneGeometry(terrainW, terrainH, segments, segmentsY);
     geom.rotateX(-Math.PI / 2);
     // After rotation: X spans [-terrainW/2, +terrainW/2], Z spans [-terrainH/2, +terrainH/2]
     // PlaneGeometry UV mapping after rotateX(-PI/2):
@@ -429,12 +565,21 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const elevations = new Float32Array(pos.count);
     let elevSum = 0;
     for (let i = 0; i < pos.count; i++) {
-      const u = uv.getX(i);
-      const v = uv.getY(i);
-      const px = Math.min(hm.width - 1, Math.round(u * (hm.width - 1)));
-      const py = Math.min(hm.height - 1, Math.round((1 - v) * (hm.height - 1)));
-      const h01 = hm.floats[py * hm.width + px];
-      const elevM = h01 * elevRange + elevMin;
+      const col=i%(segments+1),row=Math.floor(i/(segments+1));
+      const e=sourceBounds[0]+col/segments*(sourceBounds[2]-sourceBounds[0]);
+      const n=sourceBounds[3]-row*rowSpacing;
+      let elevM;
+      if(row<=segments){
+        const px=Math.round(col/segments*(hm.width-1)),py=Math.round(row/segments*(hm.height-1));
+        elevM=hm.floats[py*hm.width+px]*elevRange+elevMin;
+      }
+      if(n<=156000){
+        const sample=sampleTerrainCorrection(southern,e,n);
+        if(!sample)throw new Error('Southern terrain vertex exceeds verified coverage');
+        const weight=THREE.MathUtils.smoothstep(156000-n,0,1000);
+        elevM=row>segments?sample.elevation:THREE.MathUtils.lerp(elevM,sample.elevation,weight);
+      }
+      if(!Number.isFinite(elevM))throw new Error('Missing physical terrain elevation');
       elevations[i] = elevM;
       elevSum += elevM;
     }
@@ -451,7 +596,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
         d: Number.isFinite(pt.d) ? pt.d : 3,
       }));
       carveRiverChannel(
-        elevations, segments + 1, segments + 1,
+        elevations, segments + 1, segmentsY + 1,
         swSceneX, neSceneX, swSceneZ, neSceneZ,
         riverSegments
       );
@@ -474,7 +619,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       VE,
       elevMin: meta.elev_min_m ?? hm.minRaw,
       elevRange: (meta.elev_max_m ?? (hm.minRaw + hm.rawRange)) - (meta.elev_min_m ?? hm.minRaw),
-      segments,   // grid resolution (for mesh vertex sampling)
+      segments, segmentsY,   // independent grid dimensions, old spacing retained
     };
 
     // ── Vertex colours by elevation ───────────────────────────────────
@@ -523,7 +668,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     // ── Generate procedural textures ──────────────────────────────────
     const grainTex = generateTerrainGrainTexture();
     const roughnessTex = generateTerrainRoughnessTexture();
-    const terrainNormalTex = generateTerrainNormalMap(hm.floats, hm.width, hm.height);
+    const terrainNormalTex = generateTerrainNormalMap(Float32Array.from(elevations,y=>(y-elevMin)/elevRange), segments+1, segmentsY+1);
     const undersideGrainTex = generateUndersideGrainTexture();
     const undersideNormalTex = generateUndersideNormalMap(undersideGrainTex);
 
@@ -616,13 +761,10 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     // Used by shaft snapping and altimeter.
     let heightSampler = null;
     try {
-      const { floats, width: tw, height: th } = hm;
       heightSampler = (u, v) => {
-        const uu = Math.max(0, Math.min(1, u));
-        const vv = Math.max(0, Math.min(1, v));
-        const x = Math.round(uu * (tw - 1));
-        const y = Math.round(vv * (th - 1));  // v=0→top (north), v=1→bottom (south)
-        return floats[y * tw + x];
+        if(!Number.isFinite(u)||!Number.isFinite(v)||u<0||u>1||v<0||v>1)return null;
+        const y=getTerrainMeshSurfaceY({x:swSceneX+u*terrainW,z:neSceneZ+v*terrainH});
+        return Number.isFinite(y)?(y/VE-elevMin)/elevRange:null;
       };
     } catch {
       // ignore
@@ -674,8 +816,7 @@ export function xzToTerrainUV({ x, z } = {}) {
   // v: 0 at north edge (neSceneZ, negative), 1 at south edge (swSceneZ, positive)
   const v = (z - neSceneZ) / terrainH;
   return {
-    u: Math.max(0, Math.min(1, u)),
-    v: Math.max(0, Math.min(1, v)),
+    u, v,
   };
 }
 
@@ -684,6 +825,9 @@ export function xzToTerrainUV({ x, z } = {}) {
  * Composes xzToTerrainUV + heightSampler + terrainHeightToWorldY.
  */
 export function getTerrainSurfaceY({ x, z, heightSampler }) {
+  // Consumers need the displayed triangle surface, including river carving and
+  // the DTM correction, rather than a different higher-resolution raster skin.
+  if (terrainState?.mesh) return getTerrainMeshSurfaceY({ x, z });
   if (!heightSampler || !terrainState) return null;
   const { u, v } = xzToTerrainUV({ x, z });
   const h01 = heightSampler(u, v);
@@ -692,7 +836,7 @@ export function getTerrainSurfaceY({ x, z, heightSampler }) {
 
 /**
  * Sample the actual terrain mesh vertex Y at a world (x, z) position.
- * Uses bilinear interpolation across the four nearest PlaneGeometry vertices,
+ * Uses barycentric interpolation on the actual PlaneGeometry triangle,
  * so the returned Y matches exactly what the GPU renders — no heightmap/mesh
  * resolution mismatch.
  *
@@ -701,7 +845,7 @@ export function getTerrainSurfaceY({ x, z, heightSampler }) {
  */
 export function getTerrainMeshSurfaceY({ x, z } = {}) {
   if (!terrainState?.mesh) return null;
-  const { mesh, segments, centerX, centerZ, terrainW, terrainH } = terrainState;
+  const { mesh, segments, segmentsY, centerX, centerZ, terrainW, terrainH } = terrainState;
   const pos = mesh.geometry.attributes.position;
 
   // World → mesh-local coordinates
@@ -710,17 +854,17 @@ export function getTerrainMeshSurfaceY({ x, z } = {}) {
 
   // Map to continuous grid coordinates [0, segments]
   const gridCol = (localX + terrainW / 2) / terrainW * segments;
-  const gridRow = (localZ + terrainH / 2) / terrainH * segments;
+  const gridRow = (localZ + terrainH / 2) / terrainH * segmentsY;
 
   // Bounds check (allow a tiny epsilon for floating-point edge cases)
   if (gridCol < -0.001 || gridCol > segments + 0.001 ||
-      gridRow < -0.001 || gridRow > segments + 0.001) {
+      gridRow < -0.001 || gridRow > segmentsY + 0.001) {
     return null;
   }
 
   // Integer cell indices (clamp to valid range)
   const col0 = Math.min(Math.max(0, Math.floor(gridCol)), segments - 1);
-  const row0 = Math.min(Math.max(0, Math.floor(gridRow)), segments - 1);
+  const row0 = Math.min(Math.max(0, Math.floor(gridRow)), segmentsY - 1);
   const col1 = col0 + 1;
   const row1 = row0 + 1;
 
@@ -735,14 +879,15 @@ export function getTerrainMeshSurfaceY({ x, z } = {}) {
   const i01 = row1 * stride + col0;
   const i11 = row1 * stride + col1;
 
-  // Bilinear interpolation of vertex Y values
+  // PlaneGeometry uses triangles (00,01,10) and (01,11,10), sharing the
+  // u+v=1 diagonal. Bilinear interpolation describes a different curved surface
+  // and can leave building bases/rails floating over steep DSM cells.
   const y00 = pos.getY(i00);
   const y10 = pos.getY(i10);
   const y01 = pos.getY(i01);
   const y11 = pos.getY(i11);
 
-  return y00 * (1 - u) * (1 - v)
-       + y10 * u * (1 - v)
-       + y01 * (1 - u) * v
-       + y11 * u * v;
+  return u + v <= 1
+    ? y00 + (y10 - y00) * u + (y01 - y00) * v
+    : y11 + (y01 - y11) * (1 - u) + (y10 - y11) * (1 - v);
 }
