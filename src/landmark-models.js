@@ -3,6 +3,8 @@
 // the existing building-height control scales the complete body and crown.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import orientationAudit from './landmark-orientations.json';
+const ORIENTATIONS = Object.fromEntries(orientationAudit.landmarks.map(s => [s.id, s]));
 import { LANDMARKS } from '../scripts/landmarks.mjs';
 
 export const LANDMARK_FOOTPRINTS_URL = '/data/surface/baked/landmark-footprints.json';
@@ -61,8 +63,14 @@ function outline(ring, height) {
 // spoke, capsule and chimney. No per-instance colours (M5 driver constraint).
 function assembler() {
   const parts = new Map();
+  let transform = new THREE.Matrix4();
+  const frame = (x, z, yaw, build) => {
+    const previous = transform;
+    transform = previous.clone().multiply(new THREE.Matrix4().makeTranslation(x, 0, z)).multiply(new THREE.Matrix4().makeRotationY(yaw));
+    build(); transform = previous;
+  };
   const add = (geo, material = 'stone', x = 0, y = 0, z = 0) => {
-    geo.translate(x, y, z);
+    geo.translate(x, y, z); geo.applyMatrix4(transform);
     if (geo.index) { const flat = geo.toNonIndexed(); geo.dispose(); geo = flat; }
     geo.deleteAttribute('uv'); geo.clearGroups();
     if (!parts.has(material)) parts.set(material, []);
@@ -77,7 +85,7 @@ function assembler() {
     g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.normalize()));
     const c = av.add(bv).multiplyScalar(.5); add(g, mat, c.x, c.y, c.z);
   };
-  return { add, box, cyl, rod, finish(group) {
+  return { add, box, cyl, rod, frame, finish(group) {
     for (const [key, geos] of parts) {
       const merged = mergeGeometries(geos, false);
       for (const g of geos) g.dispose();
@@ -116,10 +124,14 @@ function taperedOutline(ring, bottomY, topY, topScale) {
 }
 
 function stadium(a, ring, b, london, floorY) {
+  const orientation = ORIENTATIONS[london ? 'london-stadium' : 'wembley'];
+  const yaw = -orientation.pitchAxisBearingDeg * Math.PI / 180;
+  const px = orientation.pitchCentreXZ[0] - b.x, pz = orientation.pitchCentreXZ[1] - b.z;
+  const iw = london ? b.w : b.d, id = london ? b.d : b.w;
   // Real outer outline, an open roof and stepped seating. The inner pitch is
   // deliberately open geometry, never a dark rectangle painted onto a lid.
   const outer = new THREE.Shape(ring.map(([x, z]) => new THREE.Vector2(x, -z)));
-  const hole = new THREE.Path(); hole.absellipse(0, 0, b.w * .26, b.d * .31, 0, Math.PI * 2, true);
+  const hole = new THREE.Path(); hole.absellipse(px, -pz, iw * .26, id * .31, 0, Math.PI * 2, true, yaw);
   outer.holes.push(hole);
   const roofY = london ? 47 : 48;
   const roof = new THREE.ExtrudeGeometry(outer, { depth: 3, bevelEnabled: false, steps: 1 });
@@ -129,20 +141,25 @@ function stadium(a, ring, b, london, floorY) {
   wall.holes.push(new THREE.Path([...ring].reverse().map(([x,z]) => new THREE.Vector2(x * .95, -z * .95))));
   const walls = new THREE.ExtrudeGeometry(wall, { depth: roofY, bevelEnabled: false, steps: 1 });
   walls.rotateX(-Math.PI / 2); a.add(walls, 'dark');
+  a.frame(px, pz, yaw, () => {
   for (let tier = 0; tier < 5; tier++) {
-    const rx = b.w * (.23 + tier * .043), rz = b.d * (.28 + tier * .038);
+    const rx = iw * (.23 + tier * .043), rz = id * (.28 + tier * .038);
     const g = new THREE.RingGeometry(1, 1.12, 64); g.rotateX(-Math.PI / 2); g.scale(rx, 1, rz);
     a.add(g, 'seats', 0, floorY + 3 + tier * (roofY - floorY - 6) / 5, 0);
   }
   const floor = new THREE.CylinderGeometry(1, 1, 1, 64);
-  floor.scale(b.w * .27, .5, b.d * .32);
+  floor.scale(iw * .27, .5, id * .32);
   a.add(floor, 'seats', 0, floorY, 0);
   a.box(68, .3, 105, 0, floorY + .3, 0, 'pitch');
   for (const x of [-34, 34]) a.rod([x, floorY + .7, -52.5], [x, floorY + .7, 52.5], .16);
   for (const z of [-52.5, 0, 52.5]) a.rod([-34, floorY + .7, z], [34, floorY + .7, z], .16);
+  });
   for (let i = 0; i < 32; i++) {
     const t = i / 32 * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-    a.rod([c * b.w * .48, roofY + 4, s * b.d * .47], [c * b.w * .27, roofY + 3, s * b.d * .32], .55);
+    const ix=c*iw*.26,iz=s*id*.31;
+    const x=px+Math.cos(yaw)*ix+Math.sin(yaw)*iz,z=pz-Math.sin(yaw)*ix+Math.cos(yaw)*iz;
+    const outerScale=1/Math.hypot(x/(b.w*.48),z/(b.d*.47));
+    a.rod([x*outerScale,roofY+4,z*outerScale],[x,roofY+3,z],.55);
   }
   if (london) {
     for (let i = 0; i < 14; i++) {
@@ -193,39 +210,52 @@ function model(site, ring, b, height, floorY = 1) {
     }
     case 'st-pauls': {
       a.add(outline(ring, 30), 'stone');
-      a.cyl(17, 21, 12, 30, 0); a.cyl(19, 4, 12, 51, 0);
-      dome(a,19,19,30,55,'roof',12); a.cyl(4,12,12,85,0); a.cyl(3,8,12,97,0,'roof',.5);
-      a.rod([12,105,0],[12,111,0],.5,'gold'); a.rod([9,109,0],[15,109,0],.5,'gold');
-      for (const z of [-d*.28,d*.28]) {a.box(12,43,12,-w*.36,0,z);a.cyl(7,12,-w*.36,43,z,'stone',3);a.cyl(3,5,-w*.36,55,z,'roof',.1);}
+      const info = ORIENTATIONS[site.id], [dx,dz] = info.dome.centreXZ;
+      a.frame(dx-b.x,dz-b.z,0,()=>{
+        a.cyl(17,21,0,30,0);a.cyl(19,4,0,51,0);dome(a,19,19,30,55);
+        a.cyl(4,12,0,85,0);a.cyl(3,8,0,97,0,'roof',.5);
+        a.rod([0,105,0],[0,111,0],.5,'gold');a.rod([-3,109,0],[3,109,0],.5,'gold');
+      });
+      for(const tower of info.westTowerCentres) a.frame(tower.centreXZ[0]-b.x,tower.centreXZ[1]-b.z,(90-info.longAxisBearingDeg)*Math.PI/180,()=>{
+        a.box(12,43,12,0,0,0);a.cyl(7,12,0,43,0,'stone',3);a.cyl(3,5,0,55,0,'roof',.1);
+      });
       break;
     }
     case 'westminster': {
       a.add(outline(ring, 25), 'stone');
       // Elizabeth Tower at the NE, Victoria Tower at the SW, derived from
       // the retained palace bounds rather than the registry point.
-      const tx = -4, tz = -d / 2 + 2;
-      a.box(14,70,14,tx,0,tz); a.box(16,10,16,tx,70,tz);a.cyl(10,16,tx,80,tz,'roof',.1,4);
+      const info = ORIENTATIONS[site.id];
+      a.frame(info.towers[0].centreXZ[0]-b.x,info.towers[0].centreXZ[1]-b.z,-5*Math.PI/180,()=>{
+      const tx = 0, tz = 0;
+      a.box(14,70,14,tx,0,tz); a.box(16,10,16,tx,70,tz);const spire=new THREE.CylinderGeometry(.1,10,16,4);spire.rotateY(Math.PI/4);a.add(spire,'roof',tx,88,tz);
       for (const [dx,dz,ry] of [[0,-8.1,Math.PI],[0,8.1,0],[-8.1,0,-Math.PI/2],[8.1,0,Math.PI/2]]) {
         const g=new THREE.CircleGeometry(3.3,24);g.rotateY(ry);a.add(g,'gold',tx+dx,75,tz+dz);
       }
-      const vx=-w*.43,vz=d*.43; a.box(24,88,24,vx,0,vz);a.box(27,6,27,vx,88,vz);
+      });
+      a.frame(info.towers[1].centreXZ[0]-b.x,info.towers[1].centreXZ[1]-b.z,-5.65*Math.PI/180,()=>{
+      const vx=0,vz=0; a.box(24,88,24,vx,0,vz);a.box(27,6,27,vx,88,vz);
       for(const dx of [-10,10])for(const dz of [-10,10])a.cyl(2.5,6,vx+dx,94,vz+dz,'stone',1);
+      });
       for(let z=-d*.4;z<=d*.4;z+=18)for(const x of [-w*.4,w*.4]) {a.box(2,5,2,x,25,z);a.cyl(2,5,x,30,z,'stone',.1,4);}
       break;
     }
     case 'battersea': {
-      a.add(outline(ring, 36), 'brick'); a.box(w*.4,14,d*.8,0,36,0,'brick');
-      for(const x of [-w*.38,w*.38])for(const z of [-d*.38,d*.38]) {
-        a.box(17,13,17,x,36,z,'brick');a.cyl(5.5,54,x,49,z,'stone',4);a.cyl(4.7,2,x,103,z,'stone');
-      }
-      for(let z=-d*.32;z<=d*.32;z+=12)for(const x of [-w*.49,w*.49])a.box(1,23,3,x,9,z,'dark');
+      a.add(outline(ring, 36), 'brick');
+      const chimneys=ORIENTATIONS[site.id].chimneys;
+      const cx=chimneys.reduce((sum,c)=>sum+c.centreXZ[0],0)/4-b.x;
+      const cz=chimneys.reduce((sum,c)=>sum+c.centreXZ[1],0)/4-b.z;
+      a.frame(cx,cz,-11.3*Math.PI/180,()=>a.box(42,14,156,0,36,0,'brick'));
+      for(const chimney of chimneys) a.frame(chimney.centreXZ[0]-b.x,chimney.centreXZ[1]-b.z,-11.3*Math.PI/180,()=>{
+        a.box(17,13,17,0,36,0,'brick');a.cyl(5.5,54,0,49,0,'stone',4);a.cyl(4.7,2,0,103,0,'stone');
+      });
       break;
     }
     case 'canary-wharf': {
       const roofHeight = height > 220 ? height-25 : height;
       a.add(outline(ring, roofHeight), 'glass');
-      if(height>220) { const g=new THREE.ConeGeometry(Math.min(w,d)*.69,25,4);g.rotateY(Math.PI/4);a.add(g,'steel',0,roofHeight+12.5,0); }
-      for(let y=12;y<roofHeight;y+=12) {a.box(w+.3,.65,d+.3,0,y,0,'steel');}
+      if(height>220) { const g=new THREE.ConeGeometry(Math.sqrt(Math.abs(THREE.ShapeUtils.area(ring.map(p=>new THREE.Vector2(...p)))))*.707,25,4);g.rotateY(Math.PI/4-8.3*Math.PI/180);a.add(g,'steel',0,roofHeight+12.5,0); }
+      for(let y=12;y<roofHeight;y+=12) {a.add(outline(ring.map(([x,z])=>[x*1.006,z*1.006]),.65),'steel',0,y,0);}
       break;
     }
     case 'bt-tower': {
@@ -237,8 +267,8 @@ function model(site, ring, b, height, floorY = 1) {
     case 'the-o2': {
       const rx=w*.49, rz=d*.49;
       a.add(outline(ring,8),'stone');dome(a,rx,rz,42,8,'steel');
-      for(let i=0;i<12;i++) {
-        const t=i/12*Math.PI*2, x=Math.cos(t)*rx*.7,z=Math.sin(t)*rz*.7;
+      for(const mast of ORIENTATIONS[site.id].masts) {
+        const x=mast.x-b.x,z=mast.z-b.z,t=Math.atan2(z,x);
         a.cyl(1.8,100,x,0,z,'gold',1.1);
         for(const off of [-.18,.18])a.rod([x,95,z],[Math.cos(t+off)*rx,9,Math.sin(t+off)*rz],.4);
         a.rod([x,92,z],[Math.cos(t)*rx*.28,46,Math.sin(t)*rz*.28],.4);
@@ -248,10 +278,10 @@ function model(site, ring, b, height, floorY = 1) {
     case 'wembley': case 'london-stadium': stadium(a,ring,b,site.id==='london-stadium',floorY); break;
     case 'london-eye': {
       // Upright wheel, 120m diameter, with 32 capsules and a cantilever A frame.
-      const wheel = new THREE.TorusGeometry(60,1,6,96); wheel.rotateY(-.25);a.add(wheel,'steel',0,75,0);
+      const wheel = new THREE.TorusGeometry(60,1,6,96); a.add(wheel,'steel',0,75,0);
       for(let i=0;i<32;i++) {
-        const t=i/32*Math.PI*2,x=Math.cos(t)*60,y=75+Math.sin(t)*60,z=x*Math.sin(.25);
-        const px=x*Math.cos(.25);a.rod([0,75,0],[px,y,z],.2);
+        const t=i/32*Math.PI*2,x=Math.cos(t)*60,y=75+Math.sin(t)*60,z=0;
+        const px=x;a.rod([0,75,0],[px,y,z],.2);
         const capsule=new THREE.SphereGeometry(1,10,6);capsule.scale(3,1.8,2);a.add(capsule,'glass',px,y,z);
       }
       a.rod([-24,0,22],[0,75,0],2);a.rod([24,0,22],[0,75,0],2);a.rod([0,75,-4],[0,75,8],3);
@@ -277,6 +307,7 @@ export function createLandmarkModels(data, { getSurfaceY, VE = 5, heightScale = 
       site.id==='canary-wharf' ? buildings.reduce((a,b)=>a.height>b.height?a:b) :
       buildings.reduce((a,b)=>a.area>b.area?a:b);
     for(const building of buildings) {
+      if(site.id==='london-eye' && building===primary)continue; // retained A-frame proxy, now authored
       // Stadium interior parts, O2 fixtures and clock-tower proxies belong to
       // the authored primary. Keep neighbouring buildings outside its outline.
       const ring=cleanRing(building.footprint), b=bounds(ring);
@@ -290,24 +321,39 @@ export function createLandmarkModels(data, { getSurfaceY, VE = 5, heightScale = 
       // The two source clock/Victoria tower proxies straddle the palace edge,
       // so a centre-in-palace test misses them. Their crowns are authored above.
       if(site.id==='westminster' && building!==primary && building.height>=80 && building.area<600)continue;
-      const special=building===primary || (site.id==='canary-wharf'&&building.height>150);
+      const special=site.id!=='london-eye' && (building===primary || (site.id==='canary-wharf'&&building.height>150));
       const base=getSurfaceY({x:b.x,z:b.z});if(!Number.isFinite(base))throw new Error(`no terrain under ${site.id}`);
       const anchor=new THREE.Group();anchor.position.set(b.x,base,b.z);anchor.name=special?'landmark-model':'landmark-neighbour';
-      anchor.userData={site:site.id,sourceArea:building.area,sourceHeight:building.height,primary:building===primary};
+      anchor.userData={site:site.id,sourceArea:building.area,sourceHeight:building.height,primary:special&&building===primary};
       const local=ring.map(([x,z])=>[x-b.x,z-b.z]);
       // Terrain retains VE even at the slider's true-height setting. Clear its
       // highest point beneath the open floor at that minimum setting as well.
       let floorY=1;
       if(special && ['wembley','london-stadium'].includes(site.id)) {
-        for(let x=-b.w*.27;x<=b.w*.27;x+=8)for(let z=-b.d*.32;z<=b.d*.32;z+=8) {
+        for(let x=-b.w*.5;x<=b.w*.5;x+=8)for(let z=-b.d*.5;z<=b.d*.5;z+=8) {
           floorY=Math.max(floorY,getSurfaceY({x:b.x+x,z:b.z+z})-base+1);
         }
       }
       const a=special?model(site,local,b,building.height,floorY):assembler();
       if(!special)a.add(outline(local,Math.max(.5,building.height)),'context');
-      a.finish(anchor);siteGroup.add(anchor);anchors.push(anchor);
+      a.finish(anchor);
+      if(special) {
+        const landmarkId=site.id==='canary-wharf' && building!==primary ? (b.z<100?'8-canada-square':'25-canada-square') : site.id;
+        anchor.traverse(o=>{if(o.isMesh)o.userData={type:'landmark',landmarkId};});
+      }
+      siteGroup.add(anchor);anchors.push(anchor);
+    }
+    if(site.id==='london-eye') {
+      const info=ORIENTATIONS[site.id], [x,z]=info.centreXZ;
+      const anchor=new THREE.Group();anchor.name='landmark-model';anchor.userData={site:site.id,primary:true};
+      anchor.position.set(x,getSurfaceY({x,z}),z);anchor.rotation.y=info.proposedWheelYawRad;
+      model(site,[],{},135).finish(anchor);
+      anchor.traverse(o=>{if(o.isMesh)o.userData={type:'landmark',landmarkId:site.id};});
+      siteGroup.add(anchor);anchors.push(anchor);
     }
   }
+  group.userData.pickables=[];
+  group.traverse(o=>{if(o.isMesh&&o.userData.type==='landmark')group.userData.pickables.push(o);});
   group.userData.sites=LANDMARKS.length;
   group.userData.setHeightScale=(value)=>{for(const a of anchors)a.scale.y=VE*value;};
   group.userData.setHeightScale(heightScale);

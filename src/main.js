@@ -1,3 +1,4 @@
+import { LANDMARK_INFO } from './landmark-info.js';
 import * as THREE from 'three';
 import { createRenderQuality } from './render-quality.js';
 import { createAdaptiveQuality } from './adaptive-quality.js';
@@ -986,10 +987,11 @@ const thamesDataPromise = loadThamesData();
       });
 
       // Overground surface rail — needs the terrain mesh for at-grade Y (D-019)
-      createOverground({ getTerrainMeshSurfaceY }).then(group => {
+      createOverground({ getTerrainMeshSurfaceY, projectStation: llToXZ }).then(group => {
         if (group) {
           overgroundGroup = group;
           scene.add(overgroundGroup);
+          initialiseOvergroundStations();
           dbg('Overground rail added to scene');
         }
       }).catch(err => {
@@ -1932,6 +1934,25 @@ let labelsVisible = prefs.labelsVisible ?? prefs.victoriaLabelsVisible ?? true;
 let shaftsVisible = prefs.shaftsVisible ?? prefs.victoriaShaftsVisible ?? true;
 
 // Per-line station layer tracking (supports all 11 Underground lines + DLR)
+let tubeStationsReady = false;
+function initialiseOvergroundStations() {
+  if (!tubeStationsReady || !overgroundGroup || overgroundGroup.userData.stationsAttached) return;
+  const servedBy=new Map();
+  for(const {stationsLayer} of lineShaftLayers.values())for(const station of stationsLayer.stations) {
+    const name=cleanStationName(station.name);servedBy.set(name,Math.max(servedBy.get(name)||0,station.lineCount||1));
+  }
+  for(const {stations} of overgroundGroup.userData.stationSets)for(const station of stations) {
+    const name=cleanStationName(station.name);servedBy.set(name,(servedBy.get(name)||0)+1);
+  }
+  for (const {id,colour,stations} of overgroundGroup.userData.stationSets) {
+    for(const station of stations)station.lineCount=servedBy.get(cleanStationName(station.name))||1;
+    const stationsLayer=createStationMarkers({scene,stations,colour,size:6,labels:true,surfaceOnly:true});
+    stationsLayer.mesh.visible=stationsVisible;
+    stationsLayer.setLabelsVisible(labelsVisible);
+    lineShaftLayers.set(id,{stationsLayer});
+  }
+  overgroundGroup.userData.stationsAttached=true;
+}
 const lineShaftLayers = new Map(); // lineId -> { stationsLayer }
 let unifiedShaftLayer = null; // single frosted-glass shaft layer for all stations
 const lineStationsVisible = new Map(); // lineId -> boolean
@@ -2262,6 +2283,9 @@ async function buildNetworkMvp() {
       snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
     }
 
+    tubeStationsReady = true;
+    initialiseOvergroundStations();
+
     // Loading complete: set bar to 100% and hide it
     updateLoadingProgress(totalLines, totalLines);
     // Ensure minimum display time so loading feedback is visible even with fast cache
@@ -2422,7 +2446,7 @@ let _clearHoverForMotion = null;
     // Check station markers from all line shaft layers
     _allStationMeshes.length = 0;
     for (const [, layers] of lineShaftLayers) {
-      if (layers.stationsLayer?.mesh) {
+      if (layers.stationsLayer?.mesh?.visible) {
         _allStationMeshes.push(layers.stationsLayer.mesh);
       }
     }
@@ -2486,7 +2510,7 @@ let _clearHoverForMotion = null;
     }
 
     const depthM = station.depthM;
-    const depthLabel = depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
+    const depthLabel = station.network==='overground' ? `London Overground · ${overgroundGroup.userData.registry.get(station.lineId).name} line` : depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
 
     tip.innerHTML = `<b>${cleanStationName(station.name)}</b><br/><span class="muted">${depthLabel}</span>`;
     tip.style.display = 'block';
@@ -2527,6 +2551,7 @@ let _clearHoverForMotion = null;
 
   // Priority tiers — lower = higher priority (small features beat large surfaces)
   const INFRA_TIER = {
+    'landmark': 0,
     'tideway-shaft': 1, 'lee-shaft': 1, 'crossrail': 1, 'chalk-marker': 1,
     'tideway-tunnel': 2, 'lee-tunnel': 2, 'sewer': 2, 'station-shaft': 2,
     'tube-line': 3,
@@ -2573,6 +2598,9 @@ let _clearHoverForMotion = null;
       if (!m || m.userData?.type !== 'tube-line') continue;
       if (m.parent && m.parent.visible === false) continue;
       pickables.push(m);
+    }
+    if (landmarkGroup?.parent && landmarkGroup.visible && surfaceGeometryGroup.visible) {
+      pickables.push(...landmarkGroup.userData.pickables);
     }
     return pickables;
   }
@@ -2648,6 +2676,10 @@ let _clearHoverForMotion = null;
   function formatInfraTooltip(mesh, hitPoint = null) {
     const ud = mesh.userData;
     const t = ud.type;
+    if(t === 'landmark') {
+      const info=LANDMARK_INFO[ud.landmarkId];
+      return `<b>${info.name}</b>${_renderInfraTable([['HEIGHT',info.height],[info.dateLabel || 'COMPLETED',info.date]])}`;
+    }
 
     // Special-cases that retain string-only semantics (per Jordan-locked):
     if (t === 'chalk') {

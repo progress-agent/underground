@@ -1,0 +1,269 @@
+{
+  "convention": {
+    "bearing": "Degrees clockwise from BNG grid north; axis bearings modulo 180",
+    "scene": "x east, z south; runtime origin E=530028.7469586737,N=180380.09351556934",
+    "yaw": "THREE positive Y yaw decreases bearing; unrotated XY wheel has plan bearing 90, so wheelYaw=90-bearing; unrotated pitch long axis Z has bearing 0 modulo180, so pitchYaw=-bearing modulo180",
+    "projection": "Same proj4 EPSG:27700 definition and projected Trafalgar origin as src/main.js; do not use stale fixed-origin registry comment",
+    "accuracy": "Reported decimals expose reproducible calculation, not survey accuracy. OSM geometry is mapped evidence."
+  },
+  "landmarks": [
+    {
+      "id": "london-eye",
+      "source": "https://www.openstreetmap.org/way/204068874",
+      "planeBearingDeg": 5.8410018062450355,
+      "currentPlaneBearingDeg": 104.32394487827058,
+      "proposedWheelYawRad": 1.4688516136609848,
+      "centreXZ": [
+        575.3261075355113,
+        436.8554948291858
+      ],
+      "proposal": "Build unrotated wheel, spokes, capsules, axle and supports in one local frame; apply Y yaw once. Place hub above mapped wheel centre, not bbox centre of retained support footprint. Local +Z support side then points east, towards land."
+    },
+    {
+      "id": "wembley",
+      "source": "https://www.openstreetmap.org/way/116539074",
+      "pitchAxisBearingDeg": 88.44149938211729,
+      "pitchCentreXZ": [
+        -10658.865489600925,
+        -5142.005254819873
+      ],
+      "proposal": "Rotate pitch, markings, floor/opening and seating long axis from N/S to measured E/W. Preserve global outer outline. Arch already spans E/W on north side: do not rotate it by the pitch quarter-turn.",
+      "archSource": "https://www.openstreetmap.org/way/27784957",
+      "archCaveat": "OSM arch tags explicitly say source=geotagged photos of the feet + artistic guesswork; do not treat the curved arch outline as precise surveyed geometry.",
+      "officialArchSource": "https://help.wembleystadium.com/support/solutions/articles/7000028145-stats-and-facts",
+      "archFacts": "North stand, 315m span, 133m high, as stated by stadium operator."
+    },
+    {
+      "id": "london-stadium",
+      "source": "https://www.openstreetmap.org/way/576808926",
+      "pitchAxisBearingDeg": 179.67011581197022,
+      "pitchCentreXZ": [
+        7628.116450298461,
+        -3680.728623752162
+      ],
+      "proposal": "Existing N/S alignment is close; apply +0.329884 degrees Y yaw to pitch/markings and align centres. Preserve retained footprint. No quarter-turn."
+    },
+    {
+      "id": "battersea",
+      "source": "https://www.openstreetmap.org/way/4965216",
+      "chimneys": [
+        {
+          "osmWay": 223254725,
+          "centreXZ": [
+            -1100.904292915773,
+            2796.9159769001126
+          ]
+        },
+        {
+          "osmWay": 223255111,
+          "centreXZ": [
+            -1051.9836591492058,
+            2805.825476041209
+          ]
+        },
+        {
+          "osmWay": 223255300,
+          "centreXZ": [
+            -1130.7629021753673,
+            2949.81011516921
+          ]
+        },
+        {
+          "osmWay": 223255478,
+          "centreXZ": [
+            -1083.331478556327,
+            2959.684785262012
+          ]
+        }
+      ],
+      "longAxisBearingsDeg": [
+        11.050183830829882,
+        11.516015203441164
+      ],
+      "proposal": "Place chimneys at mapped centres and orient crown boilerhouse/roof along their ~11.3 degree NNE axis. Current spacing about136m across footprint should be about49m across chimney rows; rotation alone will not correct it. Retain body footprint orientation."
+    },
+    {
+      "id": "st-pauls",
+      "source": "https://www.openstreetmap.org/way/369161987",
+      "longAxisBearingDeg": 82.10118538073337,
+      "westTowerCentres": [
+        {
+          "osmWay": 664624466,
+          "centreXZ": [
+            1953.8460900372593,
+            -732.4091845796211
+          ]
+        },
+        {
+          "osmWay": 664630388,
+          "centreXZ": [
+            1948.2381059504114,
+            -772.8298904846306
+          ]
+        }
+      ],
+      "dome": {
+        "osmWay": 664613340,
+        "centreXZ": [
+          2027.9474243618315,
+          -762.951804531971
+        ]
+      },
+      "proposal": "Map west tower centres directly and orient crown frame +7.898815 degrees Y from current cardinal layout. Dome is axisymmetric but its centre should follow mapped dome. Retain body footprint."
+    },
+    {
+      "id": "westminster",
+      "towers": [
+        {
+          "name": "Elizabeth",
+          "osmWay": 123557148,
+          "centreXZ": [
+            243.0182579482207,
+            739.2044072270801
+          ],
+          "wallAxesDeg": [
+            5,
+            95
+          ]
+        },
+        {
+          "name": "Victoria",
+          "osmWay": 367642689,
+          "centreXZ": [
+            195.21856592595577,
+            1004.7547394123103
+          ],
+          "wallAxesDeg": [
+            5.65,
+            95.65
+          ]
+        }
+      ],
+      "proposal": "Use separate mapped tower centres and wall bearings, approximately -5 and -5.65 degrees Y yaw. Elizabeth is currently ~8.8m too far south. Rotate clock faces with their tower. Four-sided spire also needs pi/4 primitive phase to align square edges with tower stage. Preserve palace outline, which is not one rigid rectangle."
+    },
+    {
+      "id": "canary-wharf",
+      "source": "https://www.openstreetmap.org/way/5986754",
+      "oneCanadaWallAxesDeg": [
+        8.3,
+        98.3
+      ],
+      "centreXZ": [
+        7521.378753335623,
+        76.06746921566082
+      ],
+      "proposal": "One Canada pyramid currently cardinal; add about -8.3 degrees Y yaw to square roof frame. Floor bands on ALL three towers should derive from their own retained outlines or own oriented frames, not world-axis bbox plates. Do not rotate actual source bodies or apply One Canada angle blindly to neighbours."
+    },
+    {
+      "id": "shard",
+      "source": "https://www.openstreetmap.org/way/31110737",
+      "proposal": "No plan-yaw correction: body, taper and sampled crown ribs all use actual retained polygon vertices, preserving irregular plan orientation. A scalar guessed yaw would rotate correct geometry."
+    },
+    {
+      "id": "gherkin",
+      "source": "https://www.openstreetmap.org/way/4959489",
+      "proposal": "No body-yaw correction: lathe is axisymmetric and retained base outline has map orientation. Helical lattice has arbitrary rotational phase but no evidence-grounded directional correction established."
+    },
+    {
+      "id": "bt-tower",
+      "source": "https://www.openstreetmap.org/way/5022282",
+      "proposal": "No plan-yaw correction to current axisymmetric cylinders/rings. Base neighbours retain their own source footprints. Any later directional antennas need separate evidence."
+    },
+    {
+      "id": "the-o2",
+      "mastCentreXZ": [
+        9104.594284648183,
+        255.88568421372716
+      ],
+      "mastBearingPhaseModulo30Deg": -7.950898656588731,
+      "masts": [
+        {
+          "osmNode": 2377736208,
+          "x": 9119.586259469856,
+          "z": 361.6072056555422,
+          "bearing": 171.92891256520386,
+          "radius": 106.7792086739072
+        },
+        {
+          "osmNode": 2377736211,
+          "x": 9064.664022344165,
+          "z": 355.0866400160594,
+          "bearing": 201.92571846851584,
+          "radius": 106.93575398230469
+        },
+        {
+          "osmNode": 2377736215,
+          "x": 9170.214166881284,
+          "z": 340.14537276048213,
+          "bearing": 142.08920307822325,
+          "radius": 106.79730360960505
+        },
+        {
+          "osmNode": 2377736223,
+          "x": 9020.325802879874,
+          "z": 322.1241082045599,
+          "bearing": 231.83122538395634,
+          "radius": 107.18538068377241
+        },
+        {
+          "osmNode": 2377736231,
+          "x": 9203.651643446181,
+          "z": 296.1067972180317,
+          "bearing": 112.09905193133415,
+          "radius": 106.91163764221525
+        },
+        {
+          "osmNode": 2377736236,
+          "x": 8998.250669505214,
+          "z": 270.72459047299344,
+          "bearing": 262.05638957402033,
+          "radius": 107.37391499171078
+        },
+        {
+          "osmNode": 2377736239,
+          "x": 9210.562655058573,
+          "z": 241.09860146878054,
+          "bearing": 82.05610469537629,
+          "radius": 106.99510897017448
+        },
+        {
+          "osmNode": 2377736245,
+          "x": 9004.991854931577,
+          "z": 215.77705593919381,
+          "bearing": 291.9340173567515,
+          "radius": 107.37479251442639
+        },
+        {
+          "osmNode": 2377736248,
+          "x": 9189.055368876318,
+          "z": 190.20731857739156,
+          "bearing": 52.13076044163614,
+          "radius": 106.99216074859045
+        },
+        {
+          "osmNode": 2377736251,
+          "x": 9038.961038134992,
+          "z": 171.10184328700416,
+          "bearing": 322.25566909882355,
+          "radius": 107.21950722769226
+        },
+        {
+          "osmNode": 2377736257,
+          "x": 9144.93479879736,
+          "z": 156.80591969413217,
+          "bearing": 22.153789068136575,
+          "radius": 106.97736591951737
+        },
+        {
+          "osmNode": 2377736262,
+          "x": 9089.933135452797,
+          "z": 149.842757270555,
+          "bearing": 352.1283744589574,
+          "radius": 107.05163076947647
+        }
+      ],
+      "proposal": "Dome is axisymmetric. Twelve yellow masts have mapped phase -7.9509 degrees modulo30 and radius about107m. Current phase0/radius119.36m is wrong. Prefer exact node positions and connect cables radially from centre; alternatively apply +7.9509 degrees Y yaw to mast/cable frame and adjust radius.",
+      "architectSource": "https://rshp.com/assets/uploads/2611_MillenniumDome_JS_en_1.pdf"
+    }
+  ]
+}

@@ -282,7 +282,25 @@ function stepTrain(runner, dt) {
   runner.mesh.lookAt(x + (b.x - a.x) * runner.dir, y + (b.y - a.y) * runner.dir, z + (b.z - a.z) * runner.dir);
 }
 
-export async function createOverground({ getTerrainMeshSurfaceY }) {
+// Preserve TfL stop coordinates. Nearby rail supplies vertical placement only;
+// incomplete corridor endpoints must never drag a stop hundreds of metres away.
+function stationOnRail(station, paths, getSurfaceY, projectStation) {
+  const source = projectStation(station.lat, station.lon);
+  let best = null, distanceSq = Infinity;
+  for (const path of paths) for (let i=1;i<path.length;i++) {
+    const a=path[i-1],b=path[i],dx=b.x-a.x,dz=b.z-a.z;
+    const t=THREE.MathUtils.clamp(((source.x-a.x)*dx+(source.z-a.z)*dz)/(dx*dx+dz*dz || 1),0,1);
+    const x=a.x+t*dx,z=a.z+t*dz,d=(source.x-x)**2+(source.z-z)**2;
+    if(d<distanceSq){distanceSq=d;best=new THREE.Vector3(x,a.y+t*(b.y-a.y)+STRIPE_LIFT+3,z);}
+  }
+  if(!best)return null;
+  const groundY=getSurfaceY(source),nearRail=distanceSq<=100*100;
+  const pos=new THREE.Vector3(source.x,nearRail?Math.max(best.y,groundY+3):groundY+BASE_LIFT+3,source.z);
+  return {id:station.naptan,name:station.name,pos,surfaceY:pos.y,
+    sourcePosition:source,railOffsetM:Math.sqrt(distanceSq),network:'overground',lineCount:1};
+}
+
+export async function createOverground({ getTerrainMeshSurfaceY, projectStation }) {
   const res = await fetch('/data/overground.json');
   const contentType = res.headers.get('content-type') || '';
   if (!res.ok || contentType.includes('text/html')) {
@@ -294,6 +312,7 @@ export async function createOverground({ getTerrainMeshSurfaceY }) {
   group.name = 'overground';
   const runners = [];
   const registry = new Map();
+  const stationSets = [];
 
   for (const line of data.lines || []) {
     const lineGroup = new THREE.Group();
@@ -334,6 +353,14 @@ export async function createOverground({ getTerrainMeshSurfaceY }) {
         runners.push(runner);
       }
     }
+    const stations=(line.stations || []).map(s=>stationOnRail(s,paths,getTerrainMeshSurfaceY,projectStation)).filter(Boolean);
+    // The source list is unordered and interchange entries may be empty.
+    for(const station of stations) {
+      station.lineId=line.id;
+      station.isTerminus=false; // corridor fragments do not prove service termini
+      station.lineCount=Math.max(1,new Set((line.stations.find(s=>s.naptan===station.id)?.interchange || []).filter(Boolean)).size);
+    }
+    stationSets.push({id:line.id,colour:line.colour,stations});
     registry.set(line.id, {
       name: line.name,
       colour: line.colour,
@@ -346,6 +373,7 @@ export async function createOverground({ getTerrainMeshSurfaceY }) {
 
   let camRef = null;
   group.userData.registry = registry;
+  group.userData.stationSets = stationSets;
   group.userData.update = (dt, camera) => {
     camRef = camera || camRef;
     for (const r of runners) {

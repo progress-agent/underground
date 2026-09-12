@@ -145,7 +145,9 @@ export function getLabelPolicy() {
 }
 
 export function cleanStationName(name) {
-  return name.replace(/\s+(Underground|DLR) Station$/i, '');
+  if(name==='Bethnal Green Rail Station')return 'Bethnal Green (Overground)'; // distinct from the Central line station
+  const cleaned = name.replace(/\s+(Underground|DLR|Rail) Station$/i, '');
+  return ({'London Euston':'Euston', 'London Liverpool Street':'Liverpool Street', 'Richmond (London)':'Richmond', 'New Cross ELL':'New Cross', 'Queens Park (London)':"Queen's Park", 'Shepherds Bush':"Shepherd's Bush"})[cleaned] || cleaned;
 }
 
 // Size multiplier based on how many tube lines serve a station:
@@ -182,6 +184,7 @@ export function createStationMarkers({
   colour = 0x0098d4,
   size = 1.0,
   labels = true,
+  surfaceOnly = false,
 }) {
   // ---- 3D markers (fast): InstancedMesh spheres ----
   const geo = new THREE.SphereGeometry(size, 10, 10);
@@ -300,7 +303,8 @@ export function createStationMarkers({
 
     // Toggle layer visibility based on camera position (dirty-checked)
     setLayerDisplay(surfaceLayer, cameraAboveGround);
-    setLayerDisplay(undergroundLayer, !cameraAboveGround);
+    setLayerDisplay(undergroundLayer, !cameraAboveGround && !surfaceOnly);
+    if (surfaceOnly && !cameraAboveGround) return;
 
     if (cameraAboveGround) {
       updateSurface(camera, w, h);
