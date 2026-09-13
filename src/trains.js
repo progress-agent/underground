@@ -249,9 +249,10 @@ export function updateTrains(system, sim, camera, dt) {
     const du = (ud.cruiseMps * simDt) / Math.max(1e-6, ud.curveLengthM);
     let u = ud.t + ud.dir * du;
 
-    // Wrap
-    if (u >= 1) u -= 1;
-    if (u < 0) u += 1;
+    // A delayed frame can cover several complete circuits, especially on
+    // short DLR branches at accelerated simulation speed. Keep the curve
+    // parameter valid in either direction without dropping elapsed time.
+    u = ((u % 1) + 1) % 1;
 
     // Station arrival detection
     const stations = ud.stationUs;
@@ -259,9 +260,11 @@ export function updateTrains(system, sim, camera, dt) {
       const idx = ud.nextStationIndex;
       const targetU = stations[idx];
       const prevU = ud.t;
-      const crossed = ud.dir === 1
+      // A complete circuit crosses the next station regardless of where the
+      // wrapped endpoint falls. Retain the existing arrival/dwell policy.
+      const crossed = du >= 1 || (ud.dir === 1
         ? (prevU <= targetU && u >= targetU) || (prevU > u && (u >= targetU || prevU <= targetU))
-        : (prevU >= targetU && u <= targetU) || (prevU < u && (u <= targetU || prevU >= targetU));
+        : (prevU >= targetU && u <= targetU) || (prevU < u && (u <= targetU || prevU >= targetU)));
 
       if (crossed) {
         u = targetU;
