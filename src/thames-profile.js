@@ -1,4 +1,5 @@
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
+import * as THREE from 'three';
 // Shared Thames width/depth sampling from thames.json.
 // Keep this independent of terrain.js to avoid circular imports.
 
@@ -47,6 +48,26 @@ export function buildThamesProfiles(points) {
     w: p.w,
     d: p.d,
   }));
+}
+
+// Shared render cross-sections, used by water AND locally refined terrain.
+// The profile depths remain the supplied illustrative bathymetry; no new
+// survey precision or source depth is manufactured here.
+export function buildThamesCrossSections(points, { samples = 1500, VE = 5, waterLevelM = 2, topY = 12 } = {}) {
+  const source = sceneThamesPoints(points);
+  if(source.length<2)return null;
+  const spline = new THREE.CatmullRomCurve3(source.map(p=>new THREE.Vector3(p.x,0,p.z)));
+  spline.curveType='catmullrom'; spline.tension=0.5;
+  const profiles=buildThamesProfiles(source),positions=new Float32Array((samples+1)*12);
+  let totalChain=0;
+  for(let i=1;i<source.length;i++)totalChain+=Math.hypot(source[i].x-source[i-1].x,source[i].z-source[i-1].z);
+  for(let i=0;i<=samples;i++){
+    const u=i/samples,p=spline.getPointAt(u),t=spline.getTangentAt(u),profile=lerpThamesProfile(profiles,u);
+    const norm=Math.hypot(t.x,t.z)||1,nx=-t.z/norm,nz=t.x/norm,h=profile.w/2,bed=(waterLevelM-profile.d)*VE;
+    positions.set([p.x+nx*h,topY,p.z+nz*h,p.x-nx*h,topY,p.z-nz*h,
+      p.x+nx*h,bed,p.z+nz*h,p.x-nx*h,bed,p.z-nz*h],i*12);
+  }
+  return {positions,totalChain,samples,source,profiles};
 }
 
 export function lerpThamesProfile(profiles, u) {

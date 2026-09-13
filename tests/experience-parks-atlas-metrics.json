@@ -1,0 +1,212 @@
+{
+  "font": "900 84px Arial, sans-serif",
+  "alignment": "center",
+  "baseline": "alphabetic",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.7632.6 Safari/537.36",
+  "gpuDisabled": true,
+  "characters": {
+    "A": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 30.3310546875,
+      "actualBoundingBoxRight": 30.0029296875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "B": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.1787109375,
+      "actualBoundingBoxRight": 26.1884765625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "C": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 26.3525390625,
+      "actualBoundingBoxRight": 26.0244140625,
+      "actualBoundingBoxAscent": 61.154296875,
+      "actualBoundingBoxDescent": 1.025390625
+    },
+    "D": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.2607421875,
+      "actualBoundingBoxRight": 26.1474609375,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "E": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 21.90234375,
+      "actualBoundingBoxRight": 23.830078125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "F": {
+      "width": 51.310546875,
+      "actualBoundingBoxLeft": 19.4619140625,
+      "actualBoundingBoxRight": 21.7587890625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "G": {
+      "width": 65.337890625,
+      "actualBoundingBoxLeft": 28.6494140625,
+      "actualBoundingBoxRight": 27.5830078125,
+      "actualBoundingBoxAscent": 61.154296875,
+      "actualBoundingBoxDescent": 1.025390625
+    },
+    "H": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.1787109375,
+      "actualBoundingBoxRight": 23.8916015625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "I": {
+      "width": 23.337890625,
+      "actualBoundingBoxLeft": 5.9267578125,
+      "actualBoundingBoxRight": 6.2138671875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "J": {
+      "width": 46.716796875,
+      "actualBoundingBoxLeft": 21.9228515625,
+      "actualBoundingBoxRight": 16.5498046875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 1.025390625
+    },
+    "K": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.0556640625,
+      "actualBoundingBoxRight": 30.1669921875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "L": {
+      "width": 51.310546875,
+      "actualBoundingBoxLeft": 19.2158203125,
+      "actualBoundingBoxRight": 23.1123046875,
+      "actualBoundingBoxAscent": 59.63671875,
+      "actualBoundingBoxDescent": 0
+    },
+    "M": {
+      "width": 69.97265625,
+      "actualBoundingBoxLeft": 29.0390625,
+      "actualBoundingBoxRight": 29.0390625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "N": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.0966796875,
+      "actualBoundingBoxRight": 23.6044921875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "O": {
+      "width": 65.337890625,
+      "actualBoundingBoxLeft": 29.0185546875,
+      "actualBoundingBoxRight": 29.3056640625,
+      "actualBoundingBoxAscent": 61.154296875,
+      "actualBoundingBoxDescent": 1.025390625
+    },
+    "P": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 21.90234375,
+      "actualBoundingBoxRight": 24.158203125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "Q": {
+      "width": 65.337890625,
+      "actualBoundingBoxLeft": 29.0185546875,
+      "actualBoundingBoxRight": 31.5615234375,
+      "actualBoundingBoxAscent": 61.154296875,
+      "actualBoundingBoxDescent": 6.029296875
+    },
+    "R": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.1787109375,
+      "actualBoundingBoxRight": 29.8798828125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "S": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 24.978515625,
+      "actualBoundingBoxRight": 23.912109375,
+      "actualBoundingBoxAscent": 61.154296875,
+      "actualBoundingBoxDescent": 1.06640625
+    },
+    "T": {
+      "width": 51.310546875,
+      "actualBoundingBoxLeft": 23.8505859375,
+      "actualBoundingBoxRight": 23.9326171875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "U": {
+      "width": 60.662109375,
+      "actualBoundingBoxLeft": 24.3017578125,
+      "actualBoundingBoxRight": 23.6455078125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 1.025390625
+    },
+    "V": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 28.0546875,
+      "actualBoundingBoxRight": 27.931640625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "W": {
+      "width": 79.283203125,
+      "actualBoundingBoxLeft": 39.3544921875,
+      "actualBoundingBoxRight": 39.5595703125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "X": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 28.013671875,
+      "actualBoundingBoxRight": 27.890625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "Y": {
+      "width": 56.02734375,
+      "actualBoundingBoxLeft": 28.13671875,
+      "actualBoundingBoxRight": 28.095703125,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "Z": {
+      "width": 51.310546875,
+      "actualBoundingBoxLeft": 24.7529296875,
+      "actualBoundingBoxRight": 24.0966796875,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": 0
+    },
+    "'": {
+      "width": 19.974609375,
+      "actualBoundingBoxLeft": 6.2138671875,
+      "actualBoundingBoxRight": 6.3369140625,
+      "actualBoundingBoxAscent": 60.12890625,
+      "actualBoundingBoxDescent": -38.759765625
+    },
+    ".": {
+      "width": 23.337890625,
+      "actualBoundingBoxLeft": 5.6396484375,
+      "actualBoundingBoxRight": 5.8857421875,
+      "actualBoundingBoxAscent": 11.525390625,
+      "actualBoundingBoxDescent": 0
+    },
+    "-": {
+      "width": 27.97265625,
+      "actualBoundingBoxLeft": 9.26953125,
+      "actualBoundingBoxRight": 13.37109375,
+      "actualBoundingBoxAscent": 27.5625,
+      "actualBoundingBoxDescent": -16.037109375
+    }
+  }
+}

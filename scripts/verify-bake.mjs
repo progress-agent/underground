@@ -91,7 +91,7 @@ for (const t of files) {
     }
     const got = decoded.get(`${Math.round(b.cx)},${Math.round(b.cz)}`);
     if (!got) { missing++; continue; }   // legitimately a dedup loser
-    const sceneY = terrain.getTerrainMeshSurfaceY({ x: b.cx, z: b.cz });
+    const sceneY = terrain.getStructuralSurfaceY({ x: b.cx, z: b.cz });
     if (sceneY === null) continue;
     checked++;
     worstBase = Math.max(worstBase, Math.abs(got.baseM - sceneY / VE));

@@ -2101,5 +2101,1387 @@
         ]
       ]
     }
+  ],
+  "orientationRoutes": [
+    {
+      "line": "central",
+      "stops": [
+        "West Ruislip",
+        "North Acton",
+        "Notting Hill Gate",
+        "Oxford Circus",
+        "Bank",
+        "Stratford",
+        "Epping"
+      ],
+      "geographic": [
+        {
+          "name": "West Ruislip",
+          "lat": 51.569688,
+          "lon": -0.437886
+        },
+        {
+          "name": "Ruislip Gardens",
+          "lat": 51.560736,
+          "lon": -0.41071
+        },
+        {
+          "name": "South Ruislip",
+          "lat": 51.556853,
+          "lon": -0.398915
+        },
+        {
+          "name": "Northolt",
+          "lat": 51.548236,
+          "lon": -0.368699
+        },
+        {
+          "name": "Greenford",
+          "lat": 51.542424,
+          "lon": -0.34605
+        },
+        {
+          "name": "Perivale",
+          "lat": 51.536717,
+          "lon": -0.323446
+        },
+        {
+          "name": "Hanger Lane",
+          "lat": 51.530177,
+          "lon": -0.292704
+        },
+        {
+          "name": "North Acton",
+          "lat": 51.523524,
+          "lon": -0.259755
+        },
+        {
+          "name": "East Acton",
+          "lat": 51.516612,
+          "lon": -0.247248
+        },
+        {
+          "name": "White City",
+          "lat": 51.511959,
+          "lon": -0.224297
+        },
+        {
+          "name": "Shepherd's Bush",
+          "lat": 51.504376,
+          "lon": -0.218813
+        },
+        {
+          "name": "Holland Park",
+          "lat": 51.507143,
+          "lon": -0.205679
+        },
+        {
+          "name": "Notting Hill Gate",
+          "lat": 51.509128,
+          "lon": -0.196104
+        },
+        {
+          "name": "Queensway",
+          "lat": 51.510312,
+          "lon": -0.187152
+        },
+        {
+          "name": "Lancaster Gate",
+          "lat": 51.511723,
+          "lon": -0.175494
+        },
+        {
+          "name": "Marble Arch",
+          "lat": 51.513424,
+          "lon": -0.158953
+        },
+        {
+          "name": "Bond Street",
+          "lat": 51.514304,
+          "lon": -0.149723
+        },
+        {
+          "name": "Oxford Circus",
+          "lat": 51.515224,
+          "lon": -0.141903
+        },
+        {
+          "name": "Tottenham Court Road",
+          "lat": 51.516426,
+          "lon": -0.13041
+        },
+        {
+          "name": "Holborn",
+          "lat": 51.51758,
+          "lon": -0.120475
+        },
+        {
+          "name": "Chancery Lane",
+          "lat": 51.518247,
+          "lon": -0.111583
+        },
+        {
+          "name": "St. Paul's",
+          "lat": 51.514936,
+          "lon": -0.097567
+        },
+        {
+          "name": "Bank",
+          "lat": 51.51225,
+          "lon": -0.087792
+        },
+        {
+          "name": "Liverpool Street",
+          "lat": 51.517372,
+          "lon": -0.083182
+        },
+        {
+          "name": "Bethnal Green",
+          "lat": 51.527222,
+          "lon": -0.055506
+        },
+        {
+          "name": "Mile End",
+          "lat": 51.525122,
+          "lon": -0.03364
+        },
+        {
+          "name": "Stratford",
+          "lat": 51.541806,
+          "lon": -0.003458
+        },
+        {
+          "name": "Leyton",
+          "lat": 51.556589,
+          "lon": -0.005523
+        },
+        {
+          "name": "Leytonstone",
+          "lat": 51.568324,
+          "lon": 0.008194
+        },
+        {
+          "name": "Snaresbrook",
+          "lat": 51.580678,
+          "lon": 0.02144
+        },
+        {
+          "name": "South Woodford",
+          "lat": 51.591907,
+          "lon": 0.027338
+        },
+        {
+          "name": "Woodford",
+          "lat": 51.606899,
+          "lon": 0.03397
+        },
+        {
+          "name": "Buckhurst Hill",
+          "lat": 51.626605,
+          "lon": 0.046757
+        },
+        {
+          "name": "Loughton",
+          "lat": 51.641443,
+          "lon": 0.055476
+        },
+        {
+          "name": "Debden",
+          "lat": 51.645386,
+          "lon": 0.083782
+        },
+        {
+          "name": "Theydon Bois",
+          "lat": 51.671759,
+          "lon": 0.103085
+        },
+        {
+          "name": "Epping",
+          "lat": 51.69368,
+          "lon": 0.113767
+        }
+      ]
+    },
+    {
+      "line": "central",
+      "stops": [
+        "Ealing Broadway",
+        "North Acton"
+      ],
+      "geographic": [
+        {
+          "name": "Ealing Broadway",
+          "lat": 51.515017,
+          "lon": -0.301457
+        },
+        {
+          "name": "West Acton",
+          "lat": 51.518001,
+          "lon": -0.28098
+        },
+        {
+          "name": "North Acton",
+          "lat": 51.523524,
+          "lon": -0.259755
+        }
+      ]
+    },
+    {
+      "line": "northern",
+      "stops": [
+        "Edgware",
+        "Camden Town",
+        "Euston",
+        "Tottenham Court Road",
+        "Charing Cross",
+        "Kennington",
+        "Morden"
+      ],
+      "geographic": [
+        {
+          "name": "Edgware",
+          "lat": 51.613653,
+          "lon": -0.274928
+        },
+        {
+          "name": "Burnt Oak",
+          "lat": 51.602774,
+          "lon": -0.264048
+        },
+        {
+          "name": "Colindale",
+          "lat": 51.595424,
+          "lon": -0.249919
+        },
+        {
+          "name": "Hendon Central",
+          "lat": 51.583301,
+          "lon": -0.226424
+        },
+        {
+          "name": "Brent Cross",
+          "lat": 51.57665,
+          "lon": -0.213622
+        },
+        {
+          "name": "Golders Green",
+          "lat": 51.572259,
+          "lon": -0.194039
+        },
+        {
+          "name": "Hampstead",
+          "lat": 51.556239,
+          "lon": -0.177464
+        },
+        {
+          "name": "Belsize Park",
+          "lat": 51.550241,
+          "lon": -0.164766
+        },
+        {
+          "name": "Chalk Farm",
+          "lat": 51.544118,
+          "lon": -0.153388
+        },
+        {
+          "name": "Camden Town",
+          "lat": 51.539292,
+          "lon": -0.14274
+        },
+        {
+          "name": "Euston",
+          "lat": 51.528186,
+          "lon": -0.134239
+        },
+        {
+          "name": "Warren Street",
+          "lat": 51.524951,
+          "lon": -0.138321
+        },
+        {
+          "name": "Goodge Street",
+          "lat": 51.520599,
+          "lon": -0.134361
+        },
+        {
+          "name": "Tottenham Court Road",
+          "lat": 51.516426,
+          "lon": -0.13041
+        },
+        {
+          "name": "Leicester Square",
+          "lat": 51.511386,
+          "lon": -0.128426
+        },
+        {
+          "name": "Charing Cross",
+          "lat": 51.50741,
+          "lon": -0.127277
+        },
+        {
+          "name": "Embankment",
+          "lat": 51.507058,
+          "lon": -0.122666
+        },
+        {
+          "name": "Waterloo",
+          "lat": 51.503299,
+          "lon": -0.11478
+        },
+        {
+          "name": "Kennington",
+          "lat": 51.488337,
+          "lon": -0.105963
+        },
+        {
+          "name": "Oval",
+          "lat": 51.48185,
+          "lon": -0.112439
+        },
+        {
+          "name": "Stockwell",
+          "lat": 51.472184,
+          "lon": -0.122644
+        },
+        {
+          "name": "Clapham North",
+          "lat": 51.465135,
+          "lon": -0.130016
+        },
+        {
+          "name": "Clapham Common",
+          "lat": 51.461742,
+          "lon": -0.138317
+        },
+        {
+          "name": "Clapham South",
+          "lat": 51.452654,
+          "lon": -0.147582
+        },
+        {
+          "name": "Balham",
+          "lat": 51.443288,
+          "lon": -0.152997
+        },
+        {
+          "name": "Tooting Bec",
+          "lat": 51.435678,
+          "lon": -0.159736
+        },
+        {
+          "name": "Tooting Broadway",
+          "lat": 51.42763,
+          "lon": -0.168374
+        },
+        {
+          "name": "Colliers Wood",
+          "lat": 51.41816,
+          "lon": -0.178086
+        },
+        {
+          "name": "South Wimbledon",
+          "lat": 51.415309,
+          "lon": -0.192005
+        },
+        {
+          "name": "Morden",
+          "lat": 51.402142,
+          "lon": -0.194839
+        }
+      ]
+    },
+    {
+      "line": "northern",
+      "stops": [
+        "High Barnet",
+        "Camden Town",
+        "King's Cross & St Pancras International",
+        "Bank",
+        "Kennington"
+      ],
+      "geographic": [
+        {
+          "name": "High Barnet",
+          "lat": 51.650541,
+          "lon": -0.194298
+        },
+        {
+          "name": "Totteridge & Whetstone",
+          "lat": 51.630597,
+          "lon": -0.17921
+        },
+        {
+          "name": "Woodside Park",
+          "lat": 51.618014,
+          "lon": -0.18542
+        },
+        {
+          "name": "West Finchley",
+          "lat": 51.609426,
+          "lon": -0.188362
+        },
+        {
+          "name": "Finchley Central",
+          "lat": 51.600921,
+          "lon": -0.192527
+        },
+        {
+          "name": "East Finchley",
+          "lat": 51.587131,
+          "lon": -0.165012
+        },
+        {
+          "name": "Highgate",
+          "lat": 51.577532,
+          "lon": -0.145857
+        },
+        {
+          "name": "Archway",
+          "lat": 51.565478,
+          "lon": -0.134819
+        },
+        {
+          "name": "Tufnell Park",
+          "lat": 51.556822,
+          "lon": -0.138433
+        },
+        {
+          "name": "Kentish Town",
+          "lat": 51.550312,
+          "lon": -0.140733
+        },
+        {
+          "name": "Camden Town",
+          "lat": 51.539292,
+          "lon": -0.14274
+        },
+        {
+          "name": "Euston",
+          "lat": 51.528186,
+          "lon": -0.134239
+        },
+        {
+          "name": "King's Cross & St Pancras International",
+          "lat": 51.530663,
+          "lon": -0.123194
+        },
+        {
+          "name": "Angel",
+          "lat": 51.532624,
+          "lon": -0.105898
+        },
+        {
+          "name": "Old Street",
+          "lat": 51.525864,
+          "lon": -0.08777
+        },
+        {
+          "name": "Moorgate",
+          "lat": 51.518176,
+          "lon": -0.088322
+        },
+        {
+          "name": "Bank",
+          "lat": 51.51225,
+          "lon": -0.087792
+        },
+        {
+          "name": "London Bridge",
+          "lat": 51.505721,
+          "lon": -0.088873
+        },
+        {
+          "name": "Borough",
+          "lat": 51.501199,
+          "lon": -0.09337
+        },
+        {
+          "name": "Elephant & Castle",
+          "lat": 51.494536,
+          "lon": -0.100606
+        },
+        {
+          "name": "Kennington",
+          "lat": 51.488337,
+          "lon": -0.105963
+        }
+      ]
+    },
+    {
+      "line": "piccadilly",
+      "stops": [
+        "Heathrow Terminals 2 & 3",
+        "Acton Town",
+        "South Kensington",
+        "Green Park",
+        "Holborn",
+        "King's Cross & St Pancras International",
+        "Cockfosters"
+      ],
+      "geographic": [
+        {
+          "name": "Heathrow Terminals 2 & 3",
+          "lat": 51.471235,
+          "lon": -0.452265
+        },
+        {
+          "name": "Hatton Cross",
+          "lat": 51.466747,
+          "lon": -0.423191
+        },
+        {
+          "name": "Hounslow West",
+          "lat": 51.473469,
+          "lon": -0.386544
+        },
+        {
+          "name": "Hounslow Central",
+          "lat": 51.471295,
+          "lon": -0.366578
+        },
+        {
+          "name": "Hounslow East",
+          "lat": 51.473213,
+          "lon": -0.356474
+        },
+        {
+          "name": "Osterley",
+          "lat": 51.481274,
+          "lon": -0.352224
+        },
+        {
+          "name": "Boston Manor",
+          "lat": 51.495635,
+          "lon": -0.324939
+        },
+        {
+          "name": "Northfields",
+          "lat": 51.499319,
+          "lon": -0.314719
+        },
+        {
+          "name": "South Ealing",
+          "lat": 51.501003,
+          "lon": -0.307424
+        },
+        {
+          "name": "Acton Town",
+          "lat": 51.503057,
+          "lon": -0.280462
+        },
+        {
+          "name": "Turnham Green",
+          "lat": 51.495148,
+          "lon": -0.254555
+        },
+        {
+          "name": "Hammersmith",
+          "lat": 51.4923,
+          "lon": -0.22362
+        },
+        {
+          "name": "Barons Court",
+          "lat": 51.490311,
+          "lon": -0.213427
+        },
+        {
+          "name": "Earl's Court",
+          "lat": 51.492063,
+          "lon": -0.193378
+        },
+        {
+          "name": "Gloucester Road",
+          "lat": 51.494316,
+          "lon": -0.182658
+        },
+        {
+          "name": "South Kensington",
+          "lat": 51.494094,
+          "lon": -0.174138
+        },
+        {
+          "name": "Knightsbridge",
+          "lat": 51.501669,
+          "lon": -0.160508
+        },
+        {
+          "name": "Hyde Park Corner",
+          "lat": 51.503035,
+          "lon": -0.152441
+        },
+        {
+          "name": "Green Park",
+          "lat": 51.506947,
+          "lon": -0.142787
+        },
+        {
+          "name": "Piccadilly Circus",
+          "lat": 51.51005,
+          "lon": -0.133798
+        },
+        {
+          "name": "Leicester Square",
+          "lat": 51.511386,
+          "lon": -0.128426
+        },
+        {
+          "name": "Covent Garden",
+          "lat": 51.513093,
+          "lon": -0.124436
+        },
+        {
+          "name": "Holborn",
+          "lat": 51.51758,
+          "lon": -0.120475
+        },
+        {
+          "name": "Russell Square",
+          "lat": 51.523073,
+          "lon": -0.124285
+        },
+        {
+          "name": "King's Cross & St Pancras International",
+          "lat": 51.530663,
+          "lon": -0.123194
+        },
+        {
+          "name": "Caledonian Road",
+          "lat": 51.548519,
+          "lon": -0.118493
+        },
+        {
+          "name": "Holloway Road",
+          "lat": 51.552697,
+          "lon": -0.113244
+        },
+        {
+          "name": "Arsenal",
+          "lat": 51.558655,
+          "lon": -0.107457
+        },
+        {
+          "name": "Finsbury Park",
+          "lat": 51.564158,
+          "lon": -0.106825
+        },
+        {
+          "name": "Manor House",
+          "lat": 51.570738,
+          "lon": -0.096118
+        },
+        {
+          "name": "Turnpike Lane",
+          "lat": 51.590272,
+          "lon": -0.102953
+        },
+        {
+          "name": "Wood Green",
+          "lat": 51.597479,
+          "lon": -0.109886
+        },
+        {
+          "name": "Bounds Green",
+          "lat": 51.607034,
+          "lon": -0.124235
+        },
+        {
+          "name": "Arnos Grove",
+          "lat": 51.616446,
+          "lon": -0.133062
+        },
+        {
+          "name": "Southgate",
+          "lat": 51.632315,
+          "lon": -0.127816
+        },
+        {
+          "name": "Oakwood",
+          "lat": 51.647726,
+          "lon": -0.132182
+        },
+        {
+          "name": "Cockfosters",
+          "lat": 51.65152,
+          "lon": -0.149171
+        }
+      ]
+    },
+    {
+      "line": "victoria",
+      "stops": [
+        "Brixton",
+        "Victoria",
+        "Oxford Circus",
+        "King's Cross & St Pancras International",
+        "Walthamstow Central"
+      ],
+      "geographic": [
+        {
+          "name": "Brixton",
+          "lat": 51.462618,
+          "lon": -0.114888
+        },
+        {
+          "name": "Stockwell",
+          "lat": 51.472184,
+          "lon": -0.122644
+        },
+        {
+          "name": "Vauxhall",
+          "lat": 51.485743,
+          "lon": -0.124204
+        },
+        {
+          "name": "Pimlico",
+          "lat": 51.489097,
+          "lon": -0.133761
+        },
+        {
+          "name": "Victoria",
+          "lat": 51.496359,
+          "lon": -0.143102
+        },
+        {
+          "name": "Green Park",
+          "lat": 51.506947,
+          "lon": -0.142787
+        },
+        {
+          "name": "Oxford Circus",
+          "lat": 51.515224,
+          "lon": -0.141903
+        },
+        {
+          "name": "Warren Street",
+          "lat": 51.524951,
+          "lon": -0.138321
+        },
+        {
+          "name": "Euston",
+          "lat": 51.528186,
+          "lon": -0.134239
+        },
+        {
+          "name": "King's Cross & St Pancras International",
+          "lat": 51.530663,
+          "lon": -0.123194
+        },
+        {
+          "name": "Highbury & Islington",
+          "lat": 51.54635,
+          "lon": -0.103324
+        },
+        {
+          "name": "Finsbury Park",
+          "lat": 51.564158,
+          "lon": -0.106825
+        },
+        {
+          "name": "Seven Sisters",
+          "lat": 51.58333,
+          "lon": -0.072584
+        },
+        {
+          "name": "Tottenham Hale",
+          "lat": 51.588108,
+          "lon": -0.060241
+        },
+        {
+          "name": "Blackhorse Road",
+          "lat": 51.586919,
+          "lon": -0.04115
+        },
+        {
+          "name": "Walthamstow Central",
+          "lat": 51.582965,
+          "lon": -0.019885
+        }
+      ]
+    },
+    {
+      "line": "jubilee",
+      "stops": [
+        "Stanmore",
+        "Baker Street",
+        "Green Park",
+        "Waterloo",
+        "London Bridge",
+        "Canary Wharf",
+        "Stratford"
+      ],
+      "geographic": [
+        {
+          "name": "Stanmore",
+          "lat": 51.619839,
+          "lon": -0.303266
+        },
+        {
+          "name": "Canons Park",
+          "lat": 51.607701,
+          "lon": -0.294693
+        },
+        {
+          "name": "Queensbury",
+          "lat": 51.594188,
+          "lon": -0.286219
+        },
+        {
+          "name": "Kingsbury",
+          "lat": 51.584845,
+          "lon": -0.27879
+        },
+        {
+          "name": "Wembley Park",
+          "lat": 51.563198,
+          "lon": -0.279262
+        },
+        {
+          "name": "Neasden",
+          "lat": 51.553986,
+          "lon": -0.249837
+        },
+        {
+          "name": "Dollis Hill",
+          "lat": 51.551955,
+          "lon": -0.239068
+        },
+        {
+          "name": "Willesden Green",
+          "lat": 51.549146,
+          "lon": -0.221537
+        },
+        {
+          "name": "Kilburn",
+          "lat": 51.547183,
+          "lon": -0.204248
+        },
+        {
+          "name": "West Hampstead",
+          "lat": 51.546638,
+          "lon": -0.191059
+        },
+        {
+          "name": "Finchley Road",
+          "lat": 51.546825,
+          "lon": -0.179845
+        },
+        {
+          "name": "Swiss Cottage",
+          "lat": 51.543681,
+          "lon": -0.174894
+        },
+        {
+          "name": "St. John's Wood",
+          "lat": 51.534521,
+          "lon": -0.173948
+        },
+        {
+          "name": "Baker Street",
+          "lat": 51.522883,
+          "lon": -0.15713
+        },
+        {
+          "name": "Bond Street",
+          "lat": 51.514304,
+          "lon": -0.149723
+        },
+        {
+          "name": "Green Park",
+          "lat": 51.506947,
+          "lon": -0.142787
+        },
+        {
+          "name": "Westminster",
+          "lat": 51.50132,
+          "lon": -0.124861
+        },
+        {
+          "name": "Waterloo",
+          "lat": 51.503299,
+          "lon": -0.11478
+        },
+        {
+          "name": "Southwark",
+          "lat": 51.50427,
+          "lon": -0.105331
+        },
+        {
+          "name": "London Bridge",
+          "lat": 51.505721,
+          "lon": -0.088873
+        },
+        {
+          "name": "Bermondsey",
+          "lat": 51.49775,
+          "lon": -0.063993
+        },
+        {
+          "name": "Canada Water",
+          "lat": 51.497931,
+          "lon": -0.049405
+        },
+        {
+          "name": "Canary Wharf",
+          "lat": 51.503488,
+          "lon": -0.018246
+        },
+        {
+          "name": "North Greenwich",
+          "lat": 51.50047,
+          "lon": 0.004287
+        },
+        {
+          "name": "Canning Town",
+          "lat": 51.513584,
+          "lon": 0.008322
+        },
+        {
+          "name": "West Ham",
+          "lat": 51.528136,
+          "lon": 0.005055
+        },
+        {
+          "name": "Stratford",
+          "lat": 51.541806,
+          "lon": -0.003458
+        }
+      ]
+    },
+    {
+      "line": "circle",
+      "stops": [
+        "Paddington",
+        "Baker Street",
+        "King's Cross & St Pancras International",
+        "Liverpool Street",
+        "Tower Hill",
+        "Westminster",
+        "Victoria",
+        "South Kensington",
+        "High Street Kensington",
+        "Paddington"
+      ],
+      "geographic": [
+        {
+          "name": "Paddington",
+          "lat": 51.516581,
+          "lon": -0.175689
+        },
+        {
+          "name": "Edgware Road (Circle Line)",
+          "lat": 51.519858,
+          "lon": -0.167832
+        },
+        {
+          "name": "Baker Street",
+          "lat": 51.522883,
+          "lon": -0.15713
+        },
+        {
+          "name": "Great Portland Street",
+          "lat": 51.52384,
+          "lon": -0.144262
+        },
+        {
+          "name": "Euston Square",
+          "lat": 51.525604,
+          "lon": -0.135829
+        },
+        {
+          "name": "King's Cross & St Pancras International",
+          "lat": 51.530663,
+          "lon": -0.123194
+        },
+        {
+          "name": "Farringdon",
+          "lat": 51.520252,
+          "lon": -0.104913
+        },
+        {
+          "name": "Barbican",
+          "lat": 51.520275,
+          "lon": -0.097993
+        },
+        {
+          "name": "Moorgate",
+          "lat": 51.518176,
+          "lon": -0.088322
+        },
+        {
+          "name": "Liverpool Street",
+          "lat": 51.517372,
+          "lon": -0.083182
+        },
+        {
+          "name": "Aldgate",
+          "lat": 51.514246,
+          "lon": -0.075689
+        },
+        {
+          "name": "Tower Hill",
+          "lat": 51.509971,
+          "lon": -0.076546
+        },
+        {
+          "name": "Monument",
+          "lat": 51.5107,
+          "lon": -0.085969
+        },
+        {
+          "name": "Cannon Street",
+          "lat": 51.51151,
+          "lon": -0.090432
+        },
+        {
+          "name": "Mansion House",
+          "lat": 51.512117,
+          "lon": -0.094009
+        },
+        {
+          "name": "Blackfriars",
+          "lat": 51.511581,
+          "lon": -0.103659
+        },
+        {
+          "name": "Temple",
+          "lat": 51.511006,
+          "lon": -0.11426
+        },
+        {
+          "name": "Embankment",
+          "lat": 51.507058,
+          "lon": -0.122666
+        },
+        {
+          "name": "Westminster",
+          "lat": 51.50132,
+          "lon": -0.124861
+        },
+        {
+          "name": "St. James's Park",
+          "lat": 51.499544,
+          "lon": -0.133608
+        },
+        {
+          "name": "Victoria",
+          "lat": 51.496359,
+          "lon": -0.143102
+        },
+        {
+          "name": "Sloane Square",
+          "lat": 51.49227,
+          "lon": -0.156377
+        },
+        {
+          "name": "South Kensington",
+          "lat": 51.494094,
+          "lon": -0.174138
+        },
+        {
+          "name": "Gloucester Road",
+          "lat": 51.494316,
+          "lon": -0.182658
+        },
+        {
+          "name": "High Street Kensington",
+          "lat": 51.501055,
+          "lon": -0.192792
+        },
+        {
+          "name": "Notting Hill Gate",
+          "lat": 51.509128,
+          "lon": -0.196104
+        },
+        {
+          "name": "Bayswater",
+          "lat": 51.512284,
+          "lon": -0.187938
+        },
+        {
+          "name": "Paddington",
+          "lat": 51.516581,
+          "lon": -0.175689
+        }
+      ]
+    },
+    {
+      "line": "district",
+      "stops": [
+        "Richmond",
+        "Turnham Green",
+        "Earl's Court",
+        "South Kensington",
+        "Westminster",
+        "Tower Hill",
+        "West Ham",
+        "Upminster"
+      ],
+      "geographic": [
+        {
+          "name": "Richmond",
+          "lat": 51.463237,
+          "lon": -0.301336
+        },
+        {
+          "name": "Kew Gardens",
+          "lat": 51.477058,
+          "lon": -0.285241
+        },
+        {
+          "name": "Gunnersbury",
+          "lat": 51.491803,
+          "lon": -0.275267
+        },
+        {
+          "name": "Turnham Green",
+          "lat": 51.495148,
+          "lon": -0.254555
+        },
+        {
+          "name": "Stamford Brook",
+          "lat": 51.494917,
+          "lon": -0.245704
+        },
+        {
+          "name": "Ravenscourt Park",
+          "lat": 51.494122,
+          "lon": -0.235881
+        },
+        {
+          "name": "Hammersmith",
+          "lat": 51.4923,
+          "lon": -0.22362
+        },
+        {
+          "name": "Barons Court",
+          "lat": 51.490311,
+          "lon": -0.213427
+        },
+        {
+          "name": "West Kensington",
+          "lat": 51.490459,
+          "lon": -0.206636
+        },
+        {
+          "name": "Earl's Court",
+          "lat": 51.492063,
+          "lon": -0.193378
+        },
+        {
+          "name": "Gloucester Road",
+          "lat": 51.494316,
+          "lon": -0.182658
+        },
+        {
+          "name": "South Kensington",
+          "lat": 51.494094,
+          "lon": -0.174138
+        },
+        {
+          "name": "Sloane Square",
+          "lat": 51.49227,
+          "lon": -0.156377
+        },
+        {
+          "name": "Victoria",
+          "lat": 51.496359,
+          "lon": -0.143102
+        },
+        {
+          "name": "St. James's Park",
+          "lat": 51.499544,
+          "lon": -0.133608
+        },
+        {
+          "name": "Westminster",
+          "lat": 51.50132,
+          "lon": -0.124861
+        },
+        {
+          "name": "Embankment",
+          "lat": 51.507058,
+          "lon": -0.122666
+        },
+        {
+          "name": "Temple",
+          "lat": 51.511006,
+          "lon": -0.11426
+        },
+        {
+          "name": "Blackfriars",
+          "lat": 51.511581,
+          "lon": -0.103659
+        },
+        {
+          "name": "Mansion House",
+          "lat": 51.512117,
+          "lon": -0.094009
+        },
+        {
+          "name": "Cannon Street",
+          "lat": 51.51151,
+          "lon": -0.090432
+        },
+        {
+          "name": "Monument",
+          "lat": 51.5107,
+          "lon": -0.085969
+        },
+        {
+          "name": "Tower Hill",
+          "lat": 51.509971,
+          "lon": -0.076546
+        },
+        {
+          "name": "Aldgate East",
+          "lat": 51.515037,
+          "lon": -0.072384
+        },
+        {
+          "name": "Whitechapel",
+          "lat": 51.519518,
+          "lon": -0.059971
+        },
+        {
+          "name": "Stepney Green",
+          "lat": 51.521858,
+          "lon": -0.046596
+        },
+        {
+          "name": "Mile End",
+          "lat": 51.525122,
+          "lon": -0.03364
+        },
+        {
+          "name": "Bow Road",
+          "lat": 51.52694,
+          "lon": -0.025128
+        },
+        {
+          "name": "Bromley-by-Bow",
+          "lat": 51.524839,
+          "lon": -0.011538
+        },
+        {
+          "name": "West Ham",
+          "lat": 51.528136,
+          "lon": 0.005055
+        },
+        {
+          "name": "Plaistow",
+          "lat": 51.531341,
+          "lon": 0.017451
+        },
+        {
+          "name": "Upton Park",
+          "lat": 51.53534,
+          "lon": 0.035263
+        },
+        {
+          "name": "East Ham",
+          "lat": 51.538948,
+          "lon": 0.051186
+        },
+        {
+          "name": "Barking",
+          "lat": 51.539321,
+          "lon": 0.081053
+        },
+        {
+          "name": "Upney",
+          "lat": 51.538372,
+          "lon": 0.10153
+        },
+        {
+          "name": "Becontree",
+          "lat": 51.540331,
+          "lon": 0.127016
+        },
+        {
+          "name": "Dagenham Heathway",
+          "lat": 51.541639,
+          "lon": 0.147527
+        },
+        {
+          "name": "Dagenham East",
+          "lat": 51.544096,
+          "lon": 0.166017
+        },
+        {
+          "name": "Elm Park",
+          "lat": 51.549775,
+          "lon": 0.19864
+        },
+        {
+          "name": "Hornchurch",
+          "lat": 51.554093,
+          "lon": 0.219116
+        },
+        {
+          "name": "Upminster Bridge",
+          "lat": 51.55856,
+          "lon": 0.235809
+        },
+        {
+          "name": "Upminster",
+          "lat": 51.559063,
+          "lon": 0.250882
+        }
+      ]
+    },
+    {
+      "line": "district",
+      "stops": [
+        "Wimbledon",
+        "Earl's Court"
+      ],
+      "geographic": [
+        {
+          "name": "Wimbledon",
+          "lat": 51.421207,
+          "lon": -0.206573
+        },
+        {
+          "name": "Wimbledon Park",
+          "lat": 51.434573,
+          "lon": -0.199719
+        },
+        {
+          "name": "Southfields",
+          "lat": 51.445073,
+          "lon": -0.206602
+        },
+        {
+          "name": "East Putney",
+          "lat": 51.459205,
+          "lon": -0.211
+        },
+        {
+          "name": "Putney Bridge",
+          "lat": 51.468262,
+          "lon": -0.208731
+        },
+        {
+          "name": "Parsons Green",
+          "lat": 51.475277,
+          "lon": -0.20117
+        },
+        {
+          "name": "Fulham Broadway",
+          "lat": 51.480081,
+          "lon": -0.195422
+        },
+        {
+          "name": "West Brompton",
+          "lat": 51.487268,
+          "lon": -0.195599
+        },
+        {
+          "name": "Earl's Court",
+          "lat": 51.492063,
+          "lon": -0.193378
+        }
+      ]
+    }
   ]
 }

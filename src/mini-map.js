@@ -92,7 +92,7 @@ export function createSchematicMapping({projectStation,data=diagram}) {
     const p=projectStation(node.lat,node.lon);
     return [node.id,{...node,...map(p.x,p.z)}];
   }));
-  return {map,jacobian,nodes,diagnostics:{regularisation,minDeterminant,domain,maxAuthoredAdjustment:Math.max(...[...nodes.values()].map(p=>Math.hypot(p.x-p.target[0],p.y-p.target[1])))}};
+  return {map,jacobian,nodes,projectStation,diagnostics:{regularisation,minDeterminant,domain,maxAuthoredAdjustment:Math.max(...[...nodes.values()].map(p=>Math.hypot(p.x-p.target[0],p.y-p.target[1])))}};
 }
 
 /** Horizontal camera frustum rays transformed by the mapping's LOCAL Jacobian.
@@ -134,25 +134,93 @@ export function schematicEdgePath(a,b,offset=0) {
   return points.map((p,i)=>`${i?'L':'M'}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join(' ');
 }
 
+// A few connected route strokes carry the familiar network silhouette. The
+// complete source graph remains the mapping's control set and provenance.
+export const ORIENTATION_ROUTES = diagram.orientationRoutes;
+
+export const ROUTE_ERROR_UNITS = 2.5; // ~1.3 CSS pixels, bounded against source motion below.
+
+export function orientationRouteSamples(mapping,stops) {
+  const route=ORIENTATION_ROUTES.find(route=>route.stops.length===stops.length&&route.stops.every((name,i)=>name===stops[i]));
+  if(!route?.geographic?.length)throw new Error('Orientation route needs its full source walk');
+  const points=[];
+  for(let i=1;i<route.geographic.length;i++) {
+    const a=route.geographic[i-1],b=route.geographic[i];
+    const pa=mapping.projectStation(a.lat,a.lon),pb=mapping.projectStation(b.lat,b.lon);
+    const steps=Math.max(1,Math.ceil(Math.hypot(pb.x-pa.x,pb.z-pa.z)/25));
+    for(let k=i===1?0:1;k<=steps;k++) {
+      const t=k/steps,p=mapping.map(pa.x+(pb.x-pa.x)*t,pa.z+(pb.z-pa.z)*t);
+      points.push([p.x,p.y]);
+    }
+  }
+  return points;
+}
+
+function distanceToSegment(p,a,b) {
+  const dx=b[0]-a[0],dy=b[1]-a[1],length2=dx*dx+dy*dy;
+  const t=length2?clamp(((p[0]-a[0])*dx+(p[1]-a[1])*dy)/length2,0,1):0;
+  return Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy);
+}
+function octilinearCandidates(a,b) {
+  const dx=b[0]-a[0],dy=b[1]-a[1],d=Math.min(Math.abs(dx),Math.abs(dy));
+  const sx=Math.sign(dx),sy=Math.sign(dy);
+  return [
+    [a,[a[0]+sx*d,a[1]+sy*d],b],
+    [a,[b[0]-sx*d,b[1]-sy*d],b],
+    [a,[a[0]+sx*d/2,a[1]+sy*d/2],[b[0]-sx*d/2,b[1]-sy*d/2],b],
+  ];
+}
+function matchesSamples(path,points,start,end,tolerance) {
+  for(let k=start+1;k<end;k++) {
+    let error=Infinity;
+    for(let j=1;j<path.length;j++)error=Math.min(error,distanceToSegment(points[k],path[j-1],path[j]));
+    if(error>tolerance)return false;
+  }
+  return true;
+}
+export function orientationRoutePath(mapping,stops) {
+  // Fit long octilinear runs to the complete transformed source walk. Unlike
+  // independently doglegging every edge, the fit crosses station boundaries,
+  // but it may never cut across a real bend hidden between sparse anchors.
+  const points=orientationRouteSamples(mapping,stops),out=[points[0]];
+  let i=0;
+  while(i<points.length-1) {
+    let bestEnd=i+1,bestPath=octilinearCandidates(points[i],points[i+1])[0],failed=0;
+    for(let j=i+1;j<points.length&&j<=i+600;j++) {
+      const candidates=octilinearCandidates(points[i],points[j]);
+      const candidate=candidates.find(path=>matchesSamples(path,points,i,j,ROUTE_ERROR_UNITS));
+      if(candidate){bestEnd=j;bestPath=candidate;failed=0;}
+      else if(++failed>=12)break;
+    }
+    out.push(...bestPath.slice(1));i=bestEnd;
+  }
+  // Remove repeated/collinear vertices after fitting adjacent runs.
+  const simple=[];
+  for(const p of out) {
+    if(simple.length&&Math.hypot(p[0]-simple.at(-1)[0],p[1]-simple.at(-1)[1])<1e-7)continue;
+    while(simple.length>1) {
+      const a=simple.at(-2),b=simple.at(-1),dx=b[0]-a[0],dy=b[1]-a[1],ex=p[0]-b[0],ey=p[1]-b[1];
+      if(Math.abs(dx*ey-dy*ex)>1e-7||dx*ex+dy*ey<0)break;
+      simple.pop();
+    }
+    simple.push(p);
+  }
+  return simple.map((p,i)=>`${i?'L':'M'}${p.map(n=>n.toFixed(2)).join(',')}`).join(' ');
+}
+export const MINI_CONE_RADIUS = 78; // ~40 CSS pixels at the unchanged 320px width.
+
 const CSS=`
-#ug-mini-map {position:fixed;right:12px;top:48px;width:320px;max-width:calc(100vw - 24px);z-index:21;color:#eeeae2;background:#10141b;border:1px solid #42454a;border-radius:5px;font-family:'Railway Sans',system-ui,sans-serif;user-select:none;box-sizing:border-box;}
-#ug-mini-map .mini-head {display:flex;align-items:center;justify-content:space-between;min-height:35px;padding:0 7px 0 12px;gap:10px;}
-#ug-mini-map .mini-title {font-size:13px;letter-spacing:.03em;}
-#ug-mini-map button {font:inherit;color:inherit;background:none;border:0;border-radius:3px;cursor:pointer;min-width:34px;min-height:34px;display:flex;align-items:center;justify-content:center;padding:5px;}
-#ug-mini-map button:focus-visible,#ug-mini-map summary:focus-visible,#ug-mini-map a:focus-visible {outline:2px solid #c9b896;outline-offset:2px;}
-#ug-mini-map button:hover {background:#282d35;}
-#ug-mini-map .mini-drawing {display:block;width:100%;height:auto;background:#eeeae2;border-top:1px solid #42454a;border-bottom:1px solid #42454a;}
-#ug-mini-map .mini-foot {display:flex;align-items:center;justify-content:space-between;padding:6px 10px;font-size:10px;color:#bfc2c7;gap:6px;}
-#ug-mini-map .mini-status {white-space:nowrap;}
-#ug-mini-map details {font-size:10px;text-align:right;}
-#ug-mini-map summary {cursor:pointer;list-style:none;text-decoration:underline;text-underline-offset:2px;}
-#ug-mini-map summary::-webkit-details-marker {display:none;}
-#ug-mini-map .mini-credits {position:absolute;right:0;top:100%;width:260px;box-sizing:border-box;background:#10141b;border:1px solid #42454a;padding:10px;text-align:left;font-size:11px;line-height:1.4;z-index:1;}
-#ug-mini-map a {color:#eeeae2;}
-#ug-mini-map[data-collapsed="true"] {width:142px;}
+#ug-mini-map {position:fixed;right:12px;top:48px;width:320px;max-width:calc(100vw - 24px);z-index:21;color:#eeeae2;font-family:'Railway Sans',system-ui,sans-serif;user-select:none;box-sizing:border-box;pointer-events:none;}
+#ug-mini-map .mini-drawing {display:block;width:100%;height:auto;overflow:visible;}
+#ug-mini-map button {position:absolute;right:0;top:0;font:inherit;color:inherit;background:none;border:0;border-radius:3px;cursor:pointer;width:34px;height:34px;display:flex;align-items:center;justify-content:center;padding:5px;pointer-events:auto;opacity:.3;text-shadow:0 0 3px #111;}
+#ug-mini-map button:hover,#ug-mini-map button:focus-visible {opacity:1;}
+#ug-mini-map button:focus-visible {outline:2px solid #c9b896;outline-offset:2px;}
+#ug-mini-map[data-collapsed="true"] {width:34px;height:34px;}
 #ug-mini-map[data-collapsed="true"] .mini-body {display:none;}
 #ug-mini-map[data-collapsed="true"] .mini-toggle-icon {transform:rotate(180deg);}
-@media(max-width:700px) {#ug-mini-map {top:58px;width:260px;}#ug-mini-map button {min-width:44px;min-height:44px;}#ug-mini-map[data-collapsed="true"] {width:145px;}}
+.mini-credits {font-size:10px;line-height:1.5;color:inherit;margin:8px 0;}
+.mini-credits a {color:inherit;}
+@media(max-width:700px) {#ug-mini-map {top:58px;width:260px;}#ug-mini-map button {width:44px;height:44px;}#ug-mini-map[data-collapsed="true"] {width:44px;height:44px;}}
 @media(max-height:570px) and (min-width:701px) {#ug-mini-map {width:240px;top:45px;}}
 `;
 
@@ -173,60 +241,46 @@ export function miniMapPoseKey(camera) {
   return [p.x,p.z,m[0],m[2],m[4],m[6],m[8],m[10],q[0],q[5],q[8],q[9]].map(n=>n.toFixed(5)).join(',');
 }
 
-export function createMiniMap({camera,projectStation,parent=document.body,data=diagram,onFocus=()=>{}}) {
+export function createMiniMap({camera,projectStation,parent=document.body,data=diagram,onFocus=()=>{},creditsParent=document.querySelector('#hudDetails')}) {
   const mapping=createSchematicMapping({projectStation,data});
   const root=document.createElement('section');root.id='ug-mini-map';
   root.setAttribute('aria-label','Tube orientation map');
   const style=document.createElement('style');style.textContent=CSS;root.append(style);
-  const head=document.createElement('div');head.className='mini-head';
-  const title=document.createElement('span');title.className='mini-title';title.textContent='Tube map';head.append(title);
   const toggle=document.createElement('button');toggle.type='button';toggle.setAttribute('aria-controls','ug-mini-map-body');
-  toggle.innerHTML='<svg class="mini-toggle-icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
-  head.append(toggle);root.append(head);
+  toggle.innerHTML='<svg class="mini-toggle-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+  root.append(toggle);
   const body=document.createElement('div');body.id='ug-mini-map-body';body.className='mini-body';root.append(body);
-  const svg=svgElement('svg',{class:'mini-drawing',viewBox:`0 0 ${data.width} ${data.height}`,role:'img','aria-label':'Schematic Tube map, approximate position and camera field of view. Intermediate stations omitted.'});
+  const svg=svgElement('svg',{class:'mini-drawing',viewBox:`0 0 ${data.width} ${data.height}`,role:'img','aria-label':'North-up Tube orientation schematic, approximate position and camera field of view. Selected routes only.'});
   body.append(svg);
-  svg.append(svgElement('title',{},'London Underground and DLR orientation schematic'));
-  const rails=svgElement('g',{'stroke-linecap':'round','stroke-linejoin':'round',fill:'none'});svg.append(rails);
-  const sharedEdges=new Map();
-  for(const line of data.lines) for(const edge of line.edges) {
-    const key=[...edge].sort().join('|');if(!sharedEdges.has(key)) sharedEdges.set(key,[]);sharedEdges.get(key).push(line.id);
-  }
-  for(const line of data.lines) {
-    const group=svgElement('g',{'data-line':line.id});group.append(svgElement('title',{},line.name));
-    for(const [a,b] of line.edges) {
-      const members=sharedEdges.get([a,b].sort().join('|'));
-      const offset=(members.indexOf(line.id)-(members.length-1)/2)*3.7;
-      group.append(svgElement('path',{d:schematicEdgePath(mapping.nodes.get(a),mapping.nodes.get(b),offset),stroke:line.colour,'stroke-width':line.id==='dlr'?3.3:3.6}));
-    }
+  svg.append(svgElement('title',{},'Tube orientation, selected routes'));
+  const defs=svgElement('defs');
+  const gradient=svgElement('radialGradient',{id:'ug-mini-cone-fade',gradientUnits:'userSpaceOnUse',cx:0,cy:0,r:MINI_CONE_RADIUS});
+  gradient.append(svgElement('stop',{offset:0,'stop-color':'#fff7d8','stop-opacity':.8}),svgElement('stop',{offset:.65,'stop-color':'#fff7d8','stop-opacity':.32}),svgElement('stop',{offset:1,'stop-color':'#fff7d8','stop-opacity':.04}));
+  defs.append(gradient);svg.append(defs);
+  const rails=svgElement('g',{'data-mini-routes':'','stroke-linecap':'round','stroke-linejoin':'round',fill:'none',opacity:.48});svg.append(rails);
+  for(const route of ORIENTATION_ROUTES) {
+    const line=data.lines.find(line=>line.id===route.line);
+    if(!line)throw new Error(`Missing orientation line: ${route.line}`);
+    const d=orientationRoutePath(mapping,route.stops);
+    const group=svgElement('g',{'data-line':line.id});
+    // A narrow translucent cushion keeps dark and pale lines legible without a
+    // map-wide backing plate, blur/filter pass or scene pixel readback.
+    group.append(svgElement('path',{d,stroke:line.id==='northern'?'#e9e2ce':'#10141b','stroke-width':5.2,'stroke-opacity':.32}));
+    group.append(svgElement('path',{d,stroke:line.colour,'stroke-width':2.8}));
     rails.append(group);
   }
-  const stations=svgElement('g');svg.append(stations);
-  const labels=svgElement('g',{'font-family':"'Railway Sans',system-ui,sans-serif",'font-size':18,fill:'#17232e',stroke:'#eeeae2','stroke-width':4,'paint-order':'stroke','stroke-linejoin':'round'});svg.append(labels);
-  for(const node of mapping.nodes.values()) {
-    const lineCount=data.lines.filter(line=>line.edges.some(edge=>edge.includes(node.id))).length;
-    if(node.label||lineCount>1) {
-      const station=svgElement('circle',{cx:node.x,cy:node.y,r:lineCount>1?4.2:2.5,fill:'#fffdf6',stroke:'#17232e','stroke-width':1.7});
-      station.append(svgElement('title',{},node.name));stations.append(station);
-    }
-    if(node.label) {
-      const [dx,dy,anchor,label=node.name]=node.label;
-      labels.append(svgElement('text',{x:node.x+dx,y:node.y+dy,'text-anchor':anchor},label));
-    }
-  }
   const marker=svgElement('g',{'data-mini-position':'','pointer-events':'none'});
-  const cone=svgElement('path',{'data-mini-cone':'',fill:'#196fbc','fill-opacity':.25,stroke:'#075ca8','stroke-width':1.4});
-  const halo=svgElement('circle',{r:7,fill:'#fffdf6',stroke:'#13344d','stroke-width':1.5});
-  const dot=svgElement('circle',{r:3.5,fill:'#096bad'});
+  const cone=svgElement('path',{'data-mini-cone':'',fill:'url(#ug-mini-cone-fade)',stroke:'#fff7d8','stroke-opacity':.7,'stroke-width':1.6});
+  const halo=svgElement('circle',{r:7,fill:'#fff7d8',stroke:'#10141b','stroke-width':2});
+  const dot=svgElement('circle',{r:2.5,fill:'#fffdf6'});
   marker.append(cone,halo,dot);svg.append(marker);
-  const foot=document.createElement('div');foot.className='mini-foot';
-  const status=document.createElement('span');status.className='mini-status';status.textContent='Approx. position';foot.append(status);
-  const credits=document.createElement('details');
-  const summary=document.createElement('summary');summary.textContent='TfL data';credits.append(summary);
-  const creditBody=document.createElement('div');creditBody.className='mini-credits';
+  const credits=document.createElement('details');credits.className='mini-credits';
+  const summary=document.createElement('summary');summary.textContent='Tube map data';credits.append(summary);
+  const creditBody=document.createElement('div');
   const creditLink=document.createElement('a');creditLink.href=data.provenance.licence;creditLink.target='_blank';creditLink.rel='noopener noreferrer';creditLink.textContent=data.provenance.attribution;creditBody.append(creditLink);
   creditBody.append(document.createTextNode(`. ${data.provenance.additionalAttribution} ${data.provenance.layout} Source snapshot ${data.provenance.snapshot.slice(0,10)}.`));
-  credits.append(creditBody);foot.append(credits);body.append(foot);parent.append(root);
+  credits.append(creditBody);
+  (creditsParent||parent).append(credits);parent.append(root);
   let collapsed=false,lastTime=-Infinity,lastPose='',disposed=false;
   const setCollapsed=value=> {
     collapsed=Boolean(value);root.dataset.collapsed=String(collapsed);
@@ -260,12 +314,12 @@ export function createMiniMap({camera,projectStation,parent=document.body,data=d
     const outside=point.outside||x!==point.x||y!==point.y;
     marker.setAttribute('transform',`translate(${x.toFixed(2)},${y.toFixed(2)})`);
     marker.dataset.outside=String(outside);
-    const points=schematicViewCone(camera,mapping);
+    const points=schematicViewCone(camera,mapping,MINI_CONE_RADIUS);
     cone.setAttribute('d',points?`M0,0 L${points.map(p=>p.map(n=>n.toFixed(2)).join(',')).join(' L')} Z`:'');
     halo.setAttribute('stroke-dasharray',outside?'3 2':'none');
-    status.textContent=outside?'Outside Tube coverage':points?'Approx. position':'Looking vertically';
+    marker.setAttribute('aria-label',outside?'Outside Tube coverage':points?'Approximate position and viewing direction':'Approximate position, looking vertically');
   }
   return {root,mapping,update,setCollapsed,get collapsed(){return collapsed;},dispose(){
-    disposed=true;window.removeEventListener('resize',onResize);hud?.removeEventListener('toggle',avoidHud);root.remove();
+    disposed=true;window.removeEventListener('resize',onResize);hud?.removeEventListener('toggle',avoidHud);credits.remove();root.remove();
   }};
 }

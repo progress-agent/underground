@@ -33,7 +33,7 @@ export function createOvergroundFleet(paths,colour,lineId){
  });
  const materials=[
   new THREE.MeshStandardMaterial({color:0xe2e3de,roughness:.65,metalness:.15}),
-  new THREE.MeshStandardMaterial({color:new THREE.Color(colour),roughness:.6,metalness:.2}),
+  new THREE.MeshStandardMaterial({color:new THREE.Color(colour).lerp(new THREE.Color(0x85827a),.22).multiplyScalar(.9),roughness:.6,metalness:.2}),
   new THREE.MeshBasicMaterial({color:0x24384b,toneMapped:false}),
  ];
  const meshes=[bodyGeometry,roofGeometry,windowGeometry].map((geometry,i)=>{

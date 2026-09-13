@@ -245,10 +245,14 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation,
   for (const line of data.lines || []) {
     const lineGroup = new THREE.Group();
     lineGroup.name = `overground-${line.id}`;
+    // Keep the six identities while placing the corridors into the muted city
+    // palette. A small residual glow preserves underground route legibility.
     const colour = new THREE.Color(line.colour || '#EE7C0E');
+    const neutral = new THREE.Color(0x85827a);
+    colour.lerp(neutral, 0.32).multiplyScalar(0.82);
     const stripeMat = new THREE.MeshStandardMaterial({
       color: colour, roughness: 0.55, metalness: 0.1,
-      emissive: colour, emissiveIntensity: 0.35, fog: true, side: THREE.DoubleSide,
+      emissive: colour, emissiveIntensity: 0.07, fog: true, side: THREE.DoubleSide,
     });
     const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
     const paths = [];

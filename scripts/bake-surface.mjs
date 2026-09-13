@@ -122,7 +122,7 @@ for (const tile of tiles) {
     // The renderer guards this too; dropping it here means it never ships.
     if (!Number.isFinite(b.height) || !Number.isFinite(b.area) || b.area <= 0) { stats.degenerate++; continue; }
 
-    const sceneY = terrain.getTerrainMeshSurfaceY({ x: b.cx, z: b.cz });
+    const sceneY = terrain.getStructuralSurfaceY({ x: b.cx, z: b.cz });
     if (sceneY === null || sceneY === undefined || Number.isNaN(sceneY)) { stats.noTerrain++; continue; }
 
     recs.push({

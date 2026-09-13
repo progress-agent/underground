@@ -53,8 +53,9 @@ test('steady keyboard flight follows frame timestamps despite variable callback 
   await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__pacingProbe.active = true; });
   await page.waitForFunction(() => window.__pacingProbe.steps.length >= 24);
   const steps = await page.evaluate(() => { window.__pacingProbe.active = false; window.__ug.fpsControls.keys.clear(); return window.__pacingProbe.steps.slice(2); });
-  // Deep chalk: 500 units/s * 0.5 substrate factor / 60 display frames/s.
-  for (const step of steps) expect(step).toBeCloseTo(250/60, 4);
+  // Deep chalk cruises at ordinary underground speed after the transient
+  // membrane. Jordan retired the lasting 0.5 multiplier on 13Sep26u.
+  for (const step of steps) expect(step).toBeCloseTo(500/60, 4);
 });
 
 test('keyboard flight clears a lingering tooltip and avoids its GPU readback', async ({ page }) => {

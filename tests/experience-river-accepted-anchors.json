@@ -1,0 +1,66 @@
+{
+  "provenance": "Frozen accepted 8e60ea2 serving payload; centres identified independently by Phase 2 reviewer before structural sampler correction",
+  "payloadSha256": "5b7e4c90ac2aec2bd41c4ff5688e915f8b2505e1cdc7c981445f61c8651bce9b",
+  "anchors": [
+    {
+      "x": 20808,
+      "z": 879,
+      "baseDecimetres": 22,
+      "tile": "tile_26_11.json"
+    },
+    {
+      "x": 20812,
+      "z": 903,
+      "baseDecimetres": 22,
+      "tile": "tile_26_11.json"
+    },
+    {
+      "x": 20829,
+      "z": 1025,
+      "baseDecimetres": 22,
+      "tile": "tile_26_11.json"
+    },
+    {
+      "x": 18733,
+      "z": -1498,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 18753,
+      "z": -1492,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 18741,
+      "z": -1490,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 18627,
+      "z": -1536,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 18710,
+      "z": -1469,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 18986,
+      "z": -1294,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    },
+    {
+      "x": 19002,
+      "z": -1291,
+      "baseDecimetres": 22,
+      "tile": "tile_25_13.json"
+    }
+  ]
+}

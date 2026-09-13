@@ -9,8 +9,45 @@ import {
   generateUndersideNormalMap,
 } from './textures.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
+import { buildThamesCrossSections } from './thames-profile.js';
+import { refineTerrainRiverBed } from './terrain-river-bed.js';
 
 export const TERRAIN_ORIGIN_BNG = [BNG_REF_E, BNG_REF_N];
+
+// Apply only greenery below ground. The shared atlas also contains roads, but
+// exposing asphalt underneath would obscure the parks' geographical outlines.
+// Call AFTER M25/dock installers, which own earlier shader hooks.
+export function applyParkUndersideTexture(material, texture, bounds) {
+  const previous = material.onBeforeCompile;
+  const enabled = { value: 1 };
+  material.onBeforeCompile = function (shader, renderer) {
+    previous?.call(this, shader, renderer);
+    shader.uniforms.parkUndersideTexture = { value: texture };
+    shader.uniforms.parkUndersideBounds = { value: new THREE.Vector4(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV) };
+    shader.uniforms.parkUndersideEnabled = enabled;
+    shader.vertexShader = shader.vertexShader.replace('void main() {', 'varying vec2 vParkUndersideUv;\nvoid main() {')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n vParkUndersideUv = uv;');
+    shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
+      uniform sampler2D parkUndersideTexture;
+      uniform vec4 parkUndersideBounds;
+      uniform float parkUndersideEnabled;
+      varying vec2 vParkUndersideUv;
+      void main() {`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      vec2 parkUv = (vParkUndersideUv - parkUndersideBounds.xy) / (parkUndersideBounds.zw - parkUndersideBounds.xy);
+      float undersideGreen = 0.0;
+      if (all(greaterThanEqual(parkUv, vec2(0.0))) && all(lessThanEqual(parkUv, vec2(1.0)))) {
+        undersideGreen = texture2D(parkUndersideTexture, parkUv).a * parkUndersideEnabled;
+      }
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.35, 0.15), undersideGreen * 0.78);`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(0.045, 0.095, 0.032), undersideGreen * 0.85);`);
+  };
+  material.needsUpdate = true;
+  const controller = { setEnabled: value => { enabled.value = value ? 1 : 0; } };
+  material.userData.parkUnderside = controller;
+  return controller;
+}
 
 // Unified vertical exaggeration for terrain AND underground depth.
 // VE=5 splits the difference: terrain hills pronounced, underground depth visible,
@@ -94,6 +131,24 @@ export function getTerrainBounds() {
   return {minX:swSceneX,maxX:neSceneX,minZ:neSceneZ,maxZ:swSceneZ,widthM:terrainW,heightM:terrainH,width:terrainW,height:terrainH,
     bounds_m:[swSceneX+BNG_REF_E,BNG_REF_N-swSceneZ,neSceneX+BNG_REF_E,BNG_REF_N-neSceneZ],
     columns:segments+1,rows:segmentsY+1,originBNG:[...TERRAIN_ORIGIN_BNG]};
+}
+
+/** Read-only final rendered triangles for terrain-conforming decorations.
+ * The final index, rather than the original grid, includes clipped wet-edge
+ * pieces. Query once per footprint; this does not alter geometry or samplers. */
+export function getTerrainSurfaceTriangles({minX,maxX,minZ,maxZ}={}) {
+  if(![minX,maxX,minZ,maxZ].every(Number.isFinite)||minX>maxX||minZ>maxZ)throw Error('Invalid terrain triangle query bounds');
+  const mesh=terrainState?.mesh;if(!mesh)return [];
+  const positions=mesh.geometry.attributes.position.array,index=mesh.geometry.index.array;
+  const ox=mesh.position.x,oy=mesh.position.y,oz=mesh.position.z;
+  const lx=minX-ox,hx=maxX-ox,lz=minZ-oz,hz=maxZ-oz,result=[];
+  for(let i=0;i<index.length;i+=3) {
+    const a=index[i]*3,b=index[i+1]*3,c=index[i+2]*3;
+    const ax=positions[a],az=positions[a+2],bx=positions[b],bz=positions[b+2],cx=positions[c],cz=positions[c+2];
+    if(Math.max(ax,bx,cx)<lx||Math.min(ax,bx,cx)>hx||Math.max(az,bz,cz)<lz||Math.min(az,bz,cz)>hz)continue;
+    result.push({triangleIndex:i/3,vertices:[[ax+ox,positions[a+1]+oy,az+oz],[bx+ox,positions[b+1]+oy,bz+oz],[cx+ox,positions[c+1]+oy,cz+oz]]});
+  }
+  return result;
 }
 
 
@@ -552,7 +607,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     //   v=0 (south) → py=h-1 (bottom of image = south) ✓
     //   v=1 (north) → py=0 (top of image = north) ✓
 
-    const pos = geom.attributes.position;
+    let pos = geom.attributes.position;
     const uv = geom.attributes.uv;
 
     // ── First pass: compute physical elevation at each vertex ─────────
@@ -693,6 +748,17 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     // Deepened (~24% darker) so the overhead mass reads as damp soil/rock and
     // sits clearly ABOVE the bright chalk floor in the clay-zone sandwich —
     // dark earth ceiling, glowing white floor. (Geology-vision D4.2.)
+    // The coarse shoreline shelf spans entire central channels where their
+    // half-width is smaller than a grid-cell diagonal. Preserve land/shelf
+    // outside the exact wet footprint, but replace wet triangles with the
+    // existing source bathymetry and retain any deeper terrain pockets.
+    if(thamesData?.points?.length){
+      const sections=buildThamesCrossSections(thamesData.points,{VE,
+        topY:2*VE+WATER_LIFT});
+      terrainState.riverBed=refineTerrainRiverBed(geom,sections.positions,{centerX,centerZ});
+      terrainState.thamesSections=sections;
+      pos=geom.attributes.position;
+    }
     const undersideGeom = geom.clone();
     const undersideLowCol = new THREE.Color(0x5c4834);
     const undersideMidCol = new THREE.Color(0x6b5842);
@@ -845,6 +911,16 @@ export function getTerrainSurfaceY({ x, z, heightSampler }) {
  */
 export function getTerrainMeshSurfaceY({ x, z } = {}) {
   if (!terrainState?.mesh) return null;
+  const riverY=terrainState.riverBed?.sample(x,z);
+  if(riverY!==undefined&&riverY!==null)return riverY;
+  return getStructuralSurfaceY({x,z});
+}
+
+/** Stable pre-refinement grid for existing city anchors. The appended wet-bed
+ * vertices never replace these original grid positions. Navigation and visible
+ * terrain queries must use getTerrainMeshSurfaceY instead. */
+export function getStructuralSurfaceY({x,z}={}) {
+  if(!terrainState?.mesh)return null;
   const { mesh, segments, segmentsY, centerX, centerZ, terrainW, terrainH } = terrainState;
   const pos = mesh.geometry.attributes.position;
 
@@ -891,3 +967,5 @@ export function getTerrainMeshSurfaceY({ x, z } = {}) {
     ? y00 + (y10 - y00) * u + (y01 - y00) * v
     : y11 + (y01 - y11) * (1 - u) + (y10 - y11) * (1 - v);
 }
+
+export function getTerrainRiverBed(){return terrainState?.riverBed ?? null;}

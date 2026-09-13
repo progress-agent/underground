@@ -230,6 +230,7 @@ void main() {`
   vec3 waterViewY = normalize( ( viewMatrix * vec4( 0.0, 1.0, 0.0, 0.0 ) ).xyz );
   vec3 waterViewZ = normalize( ( viewMatrix * vec4( 0.0, 0.0, 1.0, 0.0 ) ).xyz );
   vec3 waterRippleNormal = normalize( waterViewX * waterRipple.x + waterViewZ * waterRipple.y + waterViewY );
+  waterRippleNormal *= gl_FrontFacing ? 1.0 : -1.0;
   normal = normalize( mix( normal, waterRippleNormal, uNormalBlend * vWaterUpness ) );`
     ).replace(
       '#include <opaque_fragment>',
@@ -237,7 +238,7 @@ void main() {`
   float depthTint = smoothstep( uDepthTintNearM, uDepthTintFarM, vWaterDepth ) * uDepthTintStrength;
   gl_FragColor.rgb *= 1.0 - depthTint;
   vec3 waterViewDir = normalize( cameraPosition - vWaterWorldPosition );
-  float waterFresnel = pow( 1.0 - clamp( dot( normalize( vWaterWorldNormal ), waterViewDir ), 0.0, 1.0 ), uFresnelPower );
+  float waterFresnel = pow( 1.0 - clamp( abs(dot( normalize( vWaterWorldNormal ), waterViewDir )), 0.0, 1.0 ), uFresnelPower );
   waterFresnel *= uFresnelStrength * ( 0.30 + 0.70 * vWaterUpness );
   gl_FragColor.rgb = mix( gl_FragColor.rgb, uFresnelTint, waterFresnel );
   float shoreline = smoothstep( 0.82, 1.0, abs( vWaterEdge ) ) * vWaterUpness;

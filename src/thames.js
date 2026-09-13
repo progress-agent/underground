@@ -1,9 +1,11 @@
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import * as THREE from 'three';
-import { VERTICAL_EXAGGERATION } from './terrain.js';
+import { VERTICAL_EXAGGERATION, getTerrainRiverBed } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
-import { buildThamesProfiles, lerpThamesProfile } from './thames-profile.js';
+import { buildThamesCrossSections } from './thames-profile.js';
 import { createWaterMaterial, updateWater } from './water-material.js';
+import { createThamesNavigation } from './thames-navigation.js';
+import { createRiverBankMaterial, initialiseRiverBedMask, configureRiverMaterialReach } from './river-materials.js';
 
 // River Thames data and 3D volume rendering
 // Coordinates are in EPSG:27700 (British National Grid)
@@ -75,88 +77,38 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     return null;
   }
 
-  // ── 2. Build centreline spline ───────────────────────────────────────
-  const splineControlPoints = validPoints.map(p => new THREE.Vector3(p.x, 0, p.z));
-  const spline = new THREE.CatmullRomCurve3(splineControlPoints);
-  spline.curveType = 'catmullrom';
-  spline.tension = 0.5;
-
-  // ── 3. Build width / depth / surfaceY profiles ───────────────────────
-  // Assign each data point a u value based on cumulative polyline distance.
-  const profiles = buildThamesProfiles(validPoints);
-
-  // ── 4. Sample cross-sections along the spline ────────────────────────
-  // 1500 samples over the ~95km course ≈ 64m cross-section spacing — well under
-  // the 250m data spacing. At 600 (159m spacing) the spline cut sharp west-of-Kew
-  // corners by up to 27m, more than the old 21m half-width: the volume missed its
-  // own centreline at 7 bends (12Jul26u forensics, raycast-audit).
+  // Shared exact cross-sections also define the locally refined terrain bed.
   const SAMPLES = 1500;
-  // 4 vertices per cross-section: topLeft, topRight, bottomLeft, bottomRight
-  const vertCount = (SAMPLES + 1) * 4;
-  const positions = new Float32Array(vertCount * 3);
-  const waterDepths = new Float32Array(vertCount);
-  const waterEdges = new Float32Array(vertCount);
-
-  for (let i = 0; i <= SAMPLES; i++) {
-    const u = i / SAMPLES;
-    const pos = spline.getPointAt(u);
-    const tangent = spline.getTangentAt(u);
-
-    // Perpendicular normal in XZ plane
-    const nx = -tangent.z;
-    const nz = tangent.x;
-    const nLen = Math.sqrt(nx * nx + nz * nz) || 1;
-    const normX = nx / nLen;
-    const normZ = nz / nLen;
-
-    // Interpolate width, depth from profiles
-    const prof = lerpThamesProfile(profiles, u);
-    const halfW = prof.w / 2;
-
-    const leftX  = pos.x + normX * halfW;
-    const leftZ  = pos.z + normZ * halfW;
-    const rightX = pos.x - normX * halfW;
-    const rightZ = pos.z - normZ * halfW;
-
-    // Flat water surface at constant level (terrain is carved to match)
-    const topY = WATER_TOP_Y;
-    const bottomY = WATER_LEVEL_M * VE - prof.d * VE;
-
-    const base = i * 4 * 3;
-    // topLeft
-    positions[base]     = leftX;
-    positions[base + 1] = topY;
-    positions[base + 2] = leftZ;
-    // topRight
-    positions[base + 3] = rightX;
-    positions[base + 4] = topY;
-    positions[base + 5] = rightZ;
-    // bottomLeft
-    positions[base + 6] = leftX;
-    positions[base + 7] = bottomY;
-    positions[base + 8] = leftZ;
-    // bottomRight
-    positions[base + 9]  = rightX;
-    positions[base + 10] = bottomY;
-    positions[base + 11] = rightZ;
-
-    const depth = prof.d;
-    const vBase = i * 4;
-    waterDepths[vBase] = depth;
-    waterDepths[vBase + 1] = depth;
-    waterDepths[vBase + 2] = depth;
-    waterDepths[vBase + 3] = depth;
-    // Across-water coordinate: -1/1 at banks, interpolating through 0 mid-river.
-    waterEdges[vBase] = -1.0;
-    waterEdges[vBase + 1] = 1.0;
-    waterEdges[vBase + 2] = -1.0;
-    waterEdges[vBase + 3] = 1.0;
+  const {positions,totalChain} = buildThamesCrossSections(validPoints,
+    {samples:SAMPLES,VE,waterLevelM:WATER_LEVEL_M,topY:WATER_TOP_Y});
+  const vertCount=(SAMPLES+1)*4;
+  const waterDepths=new Float32Array(vertCount),waterEdges=new Float32Array(vertCount);
+  for(let i=0;i<=SAMPLES;i++){
+    const base=i*12,depth=(WATER_LEVEL_M*VE-positions[base+7])/VE;
+    for(let side=0;side<2;side++){
+      const b=base+6+side*3;
+      // Connect banks to the same final floor, including retained deeper pockets.
+      const actual=getTerrainMeshSurfaceY?.({x:positions[b],z:positions[b+2]});
+      if(actual!==null&&actual!==undefined)positions[b+1]=Math.min(positions[b+1],actual);
+    }
+    waterDepths.fill(depth,i*4,i*4+4);
+    waterEdges.set([-1,1,-1,1],i*4);
+  }
+  const bed=getTerrainRiverBed();
+  if(bed)for(let i=0;i<SAMPLES;i++)for(const side of[0,1]){
+    const a=i*12+6+side*3,b=a+12;
+    const minimum=bed.segmentMinimum({x:positions[a],z:positions[a+2]},
+      {x:positions[b],z:positions[b+2]});
+    // Foundations extend to the deepest actual triangle along this bank
+    // segment. Any excess is behind the opaque floor, preventing local gaps.
+    if(Number.isFinite(minimum)){positions[a+1]=Math.min(positions[a+1],minimum);positions[b+1]=Math.min(positions[b+1],minimum);}
   }
 
   // ── 5. Build index buffer ────────────────────────────────────────────
-  // 8 triangles per segment (top, bottom, left wall, right wall)
+  // Top and banks only. Refined terrain is the bed; a second flat water
+  // bottom would cover retained deeper pockets.
   // + 4 endcap triangles (2 per cap)
-  const triCount = SAMPLES * 8 + 4;
+  const triCount = SAMPLES * 6 + 4;
   const indices = new Uint32Array(triCount * 3);
   let idx = 0;
 
@@ -169,10 +121,6 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     // Top face
     indices[idx++] = b;     indices[idx++] = n;     indices[idx++] = b + 1;
     indices[idx++] = b + 1; indices[idx++] = n;     indices[idx++] = n + 1;
-
-    // Bottom face (reversed winding for downward normals)
-    indices[idx++] = b + 2; indices[idx++] = b + 3; indices[idx++] = n + 2;
-    indices[idx++] = b + 3; indices[idx++] = n + 3; indices[idx++] = n + 2;
 
     // Left wall (TL → BL side)
     indices[idx++] = b;     indices[idx++] = b + 2; indices[idx++] = n;
@@ -210,10 +158,25 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   mesh.name = 'thamesRiver';
   mesh.userData = { type: 'thames', name: 'River Thames' };
   mesh.renderOrder = RENDER_ORDER.SURFACE_WATER; // draw after terrain so top face wins depth test at boundaries
+  mesh.userData.navigation = createThamesNavigation(positions, getTerrainMeshSurfaceY, WATER_TOP_Y);
+  mesh.userData.materialReach=configureRiverMaterialReach(thamesData.points);
+  initialiseRiverBedMask(positions, totalChain);
+
+  // The distortion mask draws only the water surface, not the volume's sides
+  // or underside. It shares exact triangles with the visible mesh.
+  const surfaceIndices = new Uint32Array(SAMPLES * 6);
+  for (let i = 0; i < SAMPLES; i++) {
+    const b = i * 4, n = b + 4;
+    surfaceIndices.set([b, n, b + 1, b + 1, n, n + 1], i * 6);
+  }
+  const surfaceGeometry = new THREE.BufferGeometry();
+  surfaceGeometry.setAttribute('position', geometry.getAttribute('position'));
+  surfaceGeometry.setIndex(new THREE.BufferAttribute(surfaceIndices, 1));
+  mesh.userData.surfaceGeometry = surfaceGeometry;
 
   // ── 8. Interior shell (submerged regime, 12Jul26u) ───────────────────
-  // A separate OPAQUE BackSide mesh giving the inside of the water volume
-  // solid bounds: underside of the surface above + both side walls + endcaps.
+  // A separate opaque BackSide mesh supplies both banks and endcaps.
+  // The upward surface stays translucent for the refracted city view.
   // No bottom face — the carved terrain bed (FrontSide topMat) is the floor
   // and already reads correctly from inside; a shell bottom would z-fight it
   // and occlude bathymetry pockets where the DEM carved deeper than the
@@ -233,16 +196,14 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
     shellPositions[base + 4] -= SHELL_TOP_DROP; // topRight y
   }
 
-  // 6 triangles per segment (top + left wall + right wall) + 4 endcap tris.
-  const shellTriCount = SAMPLES * 6 + 4;
+  // Masonry/mud banks remain opaque, but the ceiling is now the translucent
+  // living-water surface itself. Keep the actual carved terrain as the floor.
+  const shellTriCount = SAMPLES * 4 + 4;
   const shellIndices = new Uint32Array(shellTriCount * 3);
   let sIdx = 0;
   for (let i = 0; i < SAMPLES; i++) {
     const b = i * 4;
     const n = (i + 1) * 4;
-    // Top face (same outward winding as the volume; BackSide renders its underside)
-    shellIndices[sIdx++] = b;     shellIndices[sIdx++] = n;     shellIndices[sIdx++] = b + 1;
-    shellIndices[sIdx++] = b + 1; shellIndices[sIdx++] = n;     shellIndices[sIdx++] = n + 1;
     // Left wall
     shellIndices[sIdx++] = b;     shellIndices[sIdx++] = b + 2; shellIndices[sIdx++] = n;
     shellIndices[sIdx++] = b + 2; shellIndices[sIdx++] = n + 2; shellIndices[sIdx++] = n;
@@ -261,22 +222,16 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   const shellGeometry = new THREE.BufferGeometry();
   shellGeometry.setAttribute('position', new THREE.BufferAttribute(shellPositions, 3));
   shellGeometry.setIndex(new THREE.BufferAttribute(shellIndices, 1));
+  const chainages = new Float32Array(vertCount);
+  for (let i = 0; i < vertCount; i++) chainages[i] = Math.floor(i / 4) / SAMPLES * totalChain;
+  shellGeometry.setAttribute('riverChain', new THREE.BufferAttribute(chainages, 1));
   shellGeometry.computeVertexNormals();
 
   // Opaque dark water body. Emissive lift keeps it from reading void-black
   // under low ambient (same pattern as the terrain underside emissive,
   // terrain.js). The submerged fog regime (environment.js) does the murk —
   // walls dissolve into green-brown within the short waterFogFar.
-  const shellMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0c1712,   // dark green-brown water body — sits with the submerged
-    emissive: 0x152016, // fog regime (waterFogColor 0x2a3d2f), not the exterior blue
-    emissiveIntensity: 0.55,
-    roughness: 0.95,
-    metalness: 0.0,
-    side: THREE.BackSide,
-    transparent: false,
-    depthWrite: true,
-  });
+  const shellMaterial = createRiverBankMaterial();
 
   const interiorShell = new THREE.Mesh(shellGeometry, shellMaterial);
   interiorShell.name = 'thamesInteriorShell';

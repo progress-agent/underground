@@ -22,6 +22,17 @@
 import * as THREE from 'three';
 import { isInThames } from './thames-mask.js';
 import { getTerrainBounds } from './terrain.js';
+import parkBoundaryRepairs from './park-boundary-repairs.json' with { type: 'json' };
+
+const boundaryRepairs=parkBoundaryRepairs.parks.map(park=>{
+  const points=park.rings.flat();
+  return {...park,bounds:{minX:Math.min(...points.map(p=>p[0])),maxX:Math.max(...points.map(p=>p[0])),minZ:Math.min(...points.map(p=>p[1])),maxZ:Math.max(...points.map(p=>p[1]))}};
+});
+export function getParkBoundaryRepair(park) {
+  // Victoria Park is also the name of three unrelated parks in the tile set.
+  // Name plus overlapping source bounds selects only the East London feature.
+  return boundaryRepairs.find(repair=>repair.name===park.name && park.polygon?.some(([x,z])=>x>=repair.bounds.minX-50&&x<=repair.bounds.maxX+50&&z>=repair.bounds.minZ-50&&z<=repair.bounds.maxZ+50));
+}
 
 // ─── BNG / scene reference (must match terrain.js, m25.js) ──────────────────
 // ─── Coordinate helpers ─────────────────────────────────────────────────────
@@ -189,9 +200,12 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
   if (tileData.parks) {
     for (const park of tileData.parks) {
       if (!park.polygon || park.polygon.length < 3) continue;
-      rasterisePolygon(park.polygon, bbox, size, pixels, (idx) => {
-        pixels[idx + 3] = 255; // A = green
-      });
+      const repair=getParkBoundaryRepair(park);
+      for(const ring of repair?.rings || [park.polygon]) {
+        rasterisePolygon(ring, bbox, size, pixels, (idx) => {
+          pixels[idx + 3] = 255; // A = green
+        },repair?.holes);
+      }
       parkCount++;
     }
   }
@@ -230,7 +244,7 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
  *
  * Polygon vertices are in scene coordinates [x, z].
  */
-function rasterisePolygon(polygon, bbox, size, pixels, paintFn) {
+function rasterisePolygon(polygon, bbox, size, pixels, paintFn, holes=[]) {
   // Convert polygon vertices to pixel coords
   const pxPoly = [];
   let minPx = size, maxPx = 0, minPy = size, maxPy = 0;
@@ -258,6 +272,7 @@ function rasterisePolygon(polygon, bbox, size, pixels, paintFn) {
     for (let px = minPx; px <= maxPx; px++) {
       if (pointInPolygon(px, py, pxPoly)) {
         const sc = pxToScene(px, py, bbox, size);
+        if(holes.some(hole=>pointInPolygon(sc.sceneX,sc.sceneZ,hole)))continue;
         if (isInThames(sc.sceneX, sc.sceneZ)) continue;
         const idx = (py * size + px) * 4;
         paintFn(idx);

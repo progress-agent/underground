@@ -50,12 +50,12 @@ export const ENV_CONFIG = {
   // green-brown fog gives the enclosed underwater feel; tunnels/infrastructure
   // emerge only within waterFogFar. Driven by submergedBlend (0..1), a short
   // spatial smoothstep below the rendered water top computed in main.js.
-  waterFogColor: 0x2a3d2f,  // murky green-brown
-  waterBgColor: 0x1e2f28,   // darker green-brown void behind geometry
-  waterFogNear: 10,
-  waterFogFar: 250,
-  waterAmbient: 0.35,
-  waterSun: 0.2,
+  waterFogColor: 0x44665d,  // clearer green water, retaining a Thames identity
+  waterBgColor: 0x314e46,
+  waterFogNear: 35,
+  waterFogFar: 1100,
+  waterAmbient: 0.65,
+  waterSun: 0.65,
 
   // ── Street-level fill (D7) ──────────────────────────────────────────────
   // Hemisphere light (warm sky / cool-earth ground bounce) that lifts building
@@ -124,7 +124,26 @@ export function createSkyDome(scene) {
     depthWrite: false,   // pure background — never occlude scene geometry
     fog: false,
   });
+  // The ordinary dome is an abyss cap: its upper half is transparent because
+  // the exterior clear colour supplies sky. Underwater the clear colour must
+  // stay green, so reveal the same steel-blue sky in the upper hemisphere of
+  // this existing draw. Opaque banks/bed still win depth; the lower hemisphere
+  // stays transparent underwater. No extra city render or sky mesh is needed.
+  const submergedSky = { value: 0 };
+  material.onBeforeCompile = shader => {
+    shader.uniforms.uSubmergedSky = submergedSky;
+    shader.uniforms.uSubmergedSkyColor = { value: new THREE.Color(ENV_CONFIG.skyColor) };
+    shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
+uniform float uSubmergedSky;
+uniform vec3 uSubmergedSkyColor;
+void main() {`).replace('#include <map_fragment>', `#include <map_fragment>
+float aboveWaterHorizon=smoothstep(0.5,0.51,vMapUv.y);
+diffuseColor.rgb=mix(diffuseColor.rgb,uSubmergedSkyColor,aboveWaterHorizon*uSubmergedSky);
+diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
+`);
+  };
   const sky = new THREE.Mesh(geometry, material);
+  sky.userData.submergedSky = submergedSky;
   sky.renderOrder = -1000; // draw first in the transparent queue (background)
   sky.name = 'skyDome';
   scene.add(sky);
@@ -254,8 +273,10 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     // UN-lifted skyBlend here (not surfaceBlend): clayLift must brighten
     // fog/lights only — the abyss dome has no business rendering underground.
     sky.position.copy(camera.position);
-    sky.material.opacity = skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
-    sky.visible = skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99;
+    const ordinarySkyOpacity=skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
+    sky.material.opacity = Math.max(ordinarySkyOpacity,submergedBlend);
+    sky.visible = (skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99) || submergedBlend > 0.001;
+    if(sky.userData.submergedSky)sky.userData.submergedSky.value=submergedBlend;
   }
 
   // Background colour: clay graphite → sky; then flooded dusty white in chalk so

@@ -14,7 +14,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
-import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION } from './terrain.js';
+import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, applyParkUndersideTexture, getTerrainRiverBed } from './terrain.js';
+import { createParkLabels } from './park-labels.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
@@ -57,6 +58,9 @@ import { initControlsGuide } from './controls-guide.js';
 import { initCushionLuma, sampleCushion, resetCushion, _cushionState } from './cushion-luma.js';
 import { initReadout } from './readout.js';
 import { getWaterTuningSurface } from './water-material.js';
+import { createMaterialResistance } from './material-resistance.js';
+import { applyRiverBedMaterial, setRiverMaterialSubmerged } from './river-materials.js';
+import { createUnderwaterSurface } from './underwater-surface.js';
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -187,6 +191,10 @@ const composerRenderTarget = new THREE.WebGLRenderTarget(
   window.innerHeight * composerPixelRatio,
   { samples: 4, type: THREE.HalfFloatType }
 );
+// The existing lens pass samples scene depth to keep surface refraction off
+// opaque riverbanks/bed. This target is only read while post writes to rt2.
+composerRenderTarget.depthTexture = new THREE.DepthTexture(
+  composerRenderTarget.width, composerRenderTarget.height, THREE.UnsignedIntType);
 const composer = new EffectComposer(renderer, composerRenderTarget);
 // With an explicit target, r161 treats its physical dimensions as CSS size.
 // Normalise before adding passes, or DPR is applied twice to every bloom level
@@ -216,7 +224,7 @@ composer.writeBuffer = composer.renderTarget2;
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1.0, 50000);
 // All city data and camera poses remain canonical VE5. One paired view-matrix
 // transform changes the display of every current and late-loaded scene layer.
-const masterHeight = createVerticalScaleController({ camera, value: 5 });
+const masterHeight = createVerticalScaleController({ camera, value: 1.1 });
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -270,6 +278,8 @@ composer.addPass(new OutputPass());
 
 // ── Lens character simulation (barrel distortion, CA, vignette) ──
 const lensSystem = createLensSystem(camera, composer, controls);
+const underwaterSurface = createUnderwaterSurface({ camera, lensPass: lensSystem.pass,
+  sceneTarget: composer.renderTarget1 });
 const renderQuality = createRenderQuality({ renderer, composer });
 let syncRenderQualityUi = () => {};
 const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
@@ -337,20 +347,31 @@ let _clayLift = 1;      // last computed clay clarity gradient [0,1]
 let _chalkClarity = 0;  // last computed inside-chalk clarity [0,1]
 
 // ── Submerged (Thames water volume, 12Jul26u) ──────────────────────────────
-// THE single inside-the-river predicate — shared by the substrate readout,
-// the atmosphere regime, the interior-shell visibility toggle, and (build 3)
-// the speed regime. True anywhere in the Thames corridor below the rendered
-// water top (WATER_TOP_Y = 12 scene units = effective 2.4m OD). Deliberately
-// no bed check: below the carved bed inside the corridor is soil under the
-// river, which the readout has always classed WATER.
+// Shared water classification for readout, atmosphere and keyboard speed.
+// Thames membership follows rendered cross-sections AND actual carved terrain;
+// the narrower building suppression corridor is not a navigation boundary.
 function waterSurfaceAt(x,z) {
   const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
-  return dockY ?? (isInThames(x,z)?WATER_TOP_Y:null);
+  return dockY ?? (thamesMesh?.userData.navigation?.containsXZ(x,z)?WATER_TOP_Y:null);
 }
 function isSubmergedAt(x, y, z) {
-  const surface=waterSurfaceAt(x,z);
-  return surface!==null && y<surface;
+  // Docks retain their published impounded surface reference. They have no
+  // bathymetry dataset; do not fabricate a floor while fixing the Thames.
+  const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
+  if(dockY!==null)return y<dockY;
+  return thamesMesh?.userData.navigation?.contains({x,y,z}) ?? false;
 }
+function classifySubstrateAt(point) {
+  if(isSubmergedAt(point.x,point.y,point.z))return 'WATER';
+  const surface=getTerrainMeshSurfaceY(point);
+  if(point.y >= (surface ?? 0))return 'AIR';
+  return point.y < getChalkSurfaceY(point.x,point.z) ? 'CHALK' : 'CLAY';
+}
+const materialResistance=createMaterialResistance({classify:classifySubstrateAt,
+  riverNormal:(point,movement)=>{
+    const dock=airportDockGroup?getAirportDockSurfaceY(point,VERTICAL_EXAGGERATION):null;
+    return dock!==null?null:thamesMesh?.userData.navigation?.outwardNormal(point,movement);
+  }});
 // Last computed submerged blend [0,1] — short spatial smoothstep below the
 // water top (see tick()); drives fog/lighting/audio and __ug exposure.
 let _submergedBlend = 0;
@@ -380,12 +401,16 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('keyup', (e) => {
   fpsControls.keys.delete(e.key.toLowerCase());
+  // A release/repress can occur entirely between display frames. Clear
+  // pressure synchronously so the next press cannot inherit an old hold.
+  if(!['w','s','a','d','q','e'].some(key=>fpsControls.keys.has(key)))materialResistance.cancel();
 });
 
 // Clear stuck keys when window loses focus (prevents runaway movement on
 // cmd-tab away mid-hold — a keyup may never fire in that case).
 window.addEventListener('blur', () => {
   fpsControls.keys.clear();
+  materialResistance.cancel();
 });
 
 // Prevent default scrolling for control keys
@@ -406,7 +431,7 @@ function updateFpsControls(dt) {
 
   fpsControls.active = hasFpsKey;
 
-  if (!hasFpsKey) return;
+  if (!hasFpsKey) { materialResistance.cancel(); return; }
 
   // Disable OrbitControls while using FPS controls to prevent fighting
   controls.enabled = false;
@@ -466,9 +491,10 @@ function updateFpsControls(dt) {
     // real-metre speed under VE=5, but what the eye tracks is scene units,
     // and unequal on-screen rates made Q/E feel sluggish next to WASD.
     displacement.y *= 1.0;
-    camera.position.add(displacement);
-    controls.target.add(displacement);
-  }
+    const allowed=materialResistance.apply(camera.position,displacement,dt);
+    camera.position.add(allowed);
+    controls.target.add(allowed);
+  } else materialResistance.cancel();
 
   // Arrow keys rotate the camera (yaw and pitch)
   const yawSpeed = fpsControls.rotateSpeed;
@@ -671,8 +697,8 @@ function resetPrefsAndCache() {
   }
 }
 const prefs = loadPrefs();
-const initialMasterHeight = getUrlNumberParam('mh') ?? prefs.masterHeight ?? 5;
-masterHeight.setValue(Number.isFinite(initialMasterHeight) ? initialMasterHeight : 5);
+const initialMasterHeight = getUrlNumberParam('mh') ?? prefs.masterHeight ?? 1.1;
+masterHeight.setValue(Number.isFinite(initialMasterHeight) ? initialMasterHeight : 1.1);
 renderQuality.set({ scale: prefs.renderScale ?? 1, samples: prefs.edgeSamples ?? 4 });
 let renderQualityMode = prefs.renderMode === 'manual' ? 'manual' : 'auto';
 if (renderQualityMode === 'auto') adaptiveQuality.start(performance.now());
@@ -880,7 +906,7 @@ function deleteUrlParam(key) {
   // its ground or water datum; terrain, Tube depths, chalk and water stay fixed.
   const bhEl = document.getElementById('buildingHeight');
   const bhOut = document.getElementById('buildingHeightValue');
-  const initialBh = getUrlNumberParam('bh') ?? prefs.buildingHeight ?? VERTICAL_EXAGGERATION;
+  const initialBh = getUrlNumberParam('bh') ?? prefs.buildingHeight ?? 2;
   if (bhEl) {
     const apply = (mult) => {
       setBuildingHeightScale(mult / VERTICAL_EXAGGERATION);
@@ -898,15 +924,15 @@ function deleteUrlParam(key) {
     apply(initialBh);
 
     bhEl.addEventListener('input', () => {
-      const mult = Number(bhEl.value) || VERTICAL_EXAGGERATION;
+      const mult = Number(bhEl.value) || 2;
       apply(mult);
       prefs.buildingHeight = mult;
       savePrefs(prefs);
     });
 
     bhEl.addEventListener('change', () => {
-      const mult = Number(bhEl.value) || VERTICAL_EXAGGERATION;
-      if (mult === VERTICAL_EXAGGERATION) deleteUrlParam('bh');
+      const mult = Number(bhEl.value) || 2;
+      if (mult === 2) deleteUrlParam('bh');
       else setUrlParam('bh', mult);
     });
   }
@@ -927,7 +953,7 @@ function deleteUrlParam(key) {
     _clearHoverForMotion?.();
   });
   mhEl?.addEventListener('change', () => {
-    if (masterHeight.value === 5) deleteUrlParam('mh');
+    if (masterHeight.value === 1.1) deleteUrlParam('mh');
     else setUrlParam('mh', masterHeight.value);
   });
 
@@ -975,6 +1001,8 @@ scene.add(rim);
 
 // ---------- Thames (flat-level 3D volume) ----------
 let thamesMesh = null;
+let parkLabelsGroup = null;
+let parkUndersideController = null;
 let thamesProfileSampler = null;
 const thamesDataPromise = loadThamesData();
 
@@ -1011,11 +1039,15 @@ const thamesDataPromise = loadThamesData();
       scene.add(result.mesh);
       if (result.undersideMesh) scene.add(result.undersideMesh);
       if (result.contourLines) scene.add(result.contourLines);
+      createParkLabels({getSurfaceY:getTerrainMeshSurfaceY}).then(group=>{
+        parkLabelsGroup=group;
+        scene.add(group);
+      }).catch(error=>console.error('Park inscriptions unavailable:',error.message));
 
       // Replacements must exist before any live or baked airport buildings
       // are suppressed. Keep this group across buildings-path switches.
       try {
-        airportsGroup = createAirports({ getSurfaceY: getTerrainMeshSurfaceY,
+        airportsGroup = createAirports({ getSurfaceY: getStructuralSurfaceY,
           VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
         scene.add(airportsGroup);
         airportFingerprintPromise = airportSuppressionSignature(AIRPORT_DATA);
@@ -1043,13 +1075,14 @@ const thamesDataPromise = loadThamesData();
       // Reposition tubes + stations to terrain-relative depth, then snap shafts.
       snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
-      snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
+      snapTidewayShaftsToTerrain(getStructuralSurfaceY);
 
       // Build Thames 3D volume (flat water level, no terrain sampling needed)
       if (thamesData) {
         thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY);
         if (thamesMesh) {
           scene.add(thamesMesh);
+          underwaterSurface.setGeometry(thamesMesh.userData.surfaceGeometry);
         }
 
         // Register spatial audio sources (trains added dynamically, Thames static)
@@ -1071,7 +1104,7 @@ const thamesDataPromise = loadThamesData();
       });
 
       // Overground surface rail — needs the terrain mesh for at-grade Y (D-019)
-      createOverground({ getTerrainMeshSurfaceY, projectStation: llToXZ, heightScale:getBuildingHeightScale() }).then(group => {
+      createOverground({ getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ, heightScale:getBuildingHeightScale() }).then(group => {
         if (group) {
           overgroundGroup = group;
           scene.add(overgroundGroup);
@@ -1122,6 +1155,7 @@ const thamesDataPromise = loadThamesData();
             if(result.topMat)installAirportDockTerrainMask(result.topMat);
             if(result.undersideMat)installAirportDockTerrainMask(result.undersideMat);
           }
+          applyRiverBedMaterial(result.topMat);
           return;
         }
         const supportPoints = m25Data.supportPoints || m25Data.points;
@@ -1136,6 +1170,7 @@ const thamesDataPromise = loadThamesData();
           if(result.topMat)installAirportDockTerrainMask(result.topMat);
           if(result.undersideMat)installAirportDockTerrainMask(result.undersideMat);
         }
+        applyRiverBedMaterial(result.topMat);
 
         // Chalk floor — build now that the M25 ring is available (rim-flatten),
         // then clip it with the same mask as the terrain (same UV→world map).
@@ -1150,14 +1185,14 @@ const thamesDataPromise = loadThamesData();
         // Both carriageways and Dartford routes use mapped OSM geometry.
         // Keep the established ring and curated bridges as failure fallback.
         try {
-          motorwayGroup = createMotorway({ getSurfaceY: getTerrainMeshSurfaceY,
+          motorwayGroup = createMotorway({ getSurfaceY: getStructuralSurfaceY,
             VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
           scene.add(motorwayGroup);
           syncMotorwayBridges();
         } catch (error) {
           motorwayInitError = error.message;
           console.warn(`Motorway unavailable (${error.message}); retaining previous road and bridges`);
-          m25Road = createM25Road(m25Data.points, getTerrainMeshSurfaceY);
+          m25Road = createM25Road(m25Data.points, getStructuralSurfaceY);
           if (m25Road) scene.add(m25Road);
         }
 
@@ -1221,7 +1256,7 @@ const thamesDataPromise = loadThamesData();
               : [];
             // Create buildings as InstancedMesh for this tile
             const mesh = createTileBuildings(
-              filteredBuildings, getTerrainMeshSurfaceY,
+              filteredBuildings, getStructuralSurfaceY,
               VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file),
               airportsGroup ? isAirportBuilding : null
             );
@@ -1263,6 +1298,10 @@ const thamesDataPromise = loadThamesData();
             setSurfaceTextureEnabled(result.topMat, true); // hybrid surface on by default
             surfaceTextureMaterial = result.topMat;
           }
+          if(result.undersideMat) {
+            parkUndersideController=applyParkUndersideTexture(result.undersideMat,
+              surfaceTexState.texture,sceneBBoxToUVBounds(fullBBox));
+          }
 
           surfaceDataLoaded = true;
           dbg(`Surface loader ready: ${manifest.tiles.length} tiles, ${manifest.cols}×${manifest.rows} grid`);
@@ -1286,7 +1325,7 @@ const thamesDataPromise = loadThamesData();
 // per-line shaft loading code).
 function snapAllShaftsToTerrain() {
   if (unifiedShaftLayer) {
-    unifiedShaftLayer.updateGroundYPositions(getTerrainMeshSurfaceY);
+    unifiedShaftLayer.updateGroundYPositions(getStructuralSurfaceY);
   }
 }
 
@@ -1307,7 +1346,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
         continue;
       }
       for (const pt of branchPts) {
-        const surfaceY = getTerrainMeshSurfaceY({ x: pt.x, z: pt.z });
+        const surfaceY = getStructuralSurfaceY({ x: pt.x, z: pt.z });
         if (surfaceY !== null) {
           pt.y = surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
         }
@@ -1491,11 +1530,11 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       if (lineId === 'dlr') {
         const point=dlrProfile.station({id:st.id,nodeIndex:st.dlrProfile.nodeIndex,structureScale:getBuildingHeightScale()});
         st.pos.copy(point);st.depthM=point._depthM;st.dlrProfile=point._dlrProfile;
-        st.surfaceY=getTerrainMeshSurfaceY(st.pos);
+        st.surfaceY=getStructuralSurfaceY(st.pos);
         continue;
       }
       if (st.depthM == null) continue;
-      const surfaceY = getTerrainMeshSurfaceY({ x: st.pos.x, z: st.pos.z });
+      const surfaceY = getStructuralSurfaceY({ x: st.pos.x, z: st.pos.z });
       if (surfaceY !== null) {
         st.pos.y = surfaceY - st.depthM * sim.verticalScale;
         st.surfaceY = surfaceY;
@@ -1603,7 +1642,7 @@ async function activateBakedBuildings() {
     }
 
     if (!landmarkGroup) landmarkGroup = createLandmarkModels(footprints, {
-      getSurfaceY: getTerrainMeshSurfaceY,
+      getSurfaceY: getStructuralSurfaceY,
       VE: VERTICAL_EXAGGERATION,
       heightScale: getBuildingHeightScale(),
     });
@@ -1691,7 +1730,7 @@ loadTidewayData().then(tidewayData => {
     if (tidewayMesh) {
       scene.add(tidewayMesh);
       addTidewayToLegend();
-      if (terrain) snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
+      if (terrain) snapTidewayShaftsToTerrain(getStructuralSurfaceY);
       dbg('Tideway + Lee Tunnel system added to scene');
     }
   }
@@ -1852,7 +1891,7 @@ try {
   console.warn(`Tube orientation map unavailable: ${error.message}`);
 }
 try {
-  dlrProfile = createDlrProfile({ project: llToXZ, sampleSurfaceY: getTerrainMeshSurfaceY, verticalExaggeration: VERTICAL_EXAGGERATION });
+  dlrProfile = createDlrProfile({ project: llToXZ, sampleSurfaceY: getStructuralSurfaceY, verticalExaggeration: VERTICAL_EXAGGERATION });
 } catch (error) {
   console.warn(`DLR elevation profile unavailable: ${error.message}`);
 }
@@ -2294,6 +2333,7 @@ async function buildNetworkMvp() {
       if (surfaceTextureMaterial) {
         setSurfaceTextureEnabled(surfaceTextureMaterial, val === 'all' || val === 'surface-texture' || val === 'surface-hybrid');
       }
+      parkUndersideController?.setEnabled(val==='all'||val==='surface-texture'||val==='surface-hybrid');
       if (surfaceGeometryGroup) {
         setSurfaceGeometryVisible(surfaceGeometryGroup, val === 'all' || val === 'surface-geometry' || val === 'surface-hybrid');
       }
@@ -2458,7 +2498,7 @@ async function buildNetworkMvp() {
     unifiedShaftLayer = createUnifiedShafts({
       scene,
       registry: getShaftRegistry(),
-      getTerrainMeshSurfaceY: terrain ? getTerrainMeshSurfaceY : null,
+      getTerrainMeshSurfaceY: terrain ? getStructuralSurfaceY : null,
       verticalScale: sim.verticalScale,
     });
     if (unifiedShaftLayer?.group) {
@@ -2472,7 +2512,7 @@ async function buildNetworkMvp() {
     if (terrain) {
       snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
-      snapTidewayShaftsToTerrain(getTerrainMeshSurfaceY);
+      snapTidewayShaftsToTerrain(getStructuralSurfaceY);
     }
 
     tubeStationsReady = true;
@@ -3320,7 +3360,7 @@ function setShaftsVisible(v) {
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
       resetPrefsAndCache();
-      masterHeight.setValue(5);
+      masterHeight.setValue(1.1);
       for (const key of ['mh', 'bh', 'fl', 't', 'hx']) deleteUrlParam(key);
       location.reload();
     });
@@ -3536,14 +3576,15 @@ function tick(frameTime) {
   // rendered ONLY while the camera is inside the volume — outside stays
   // pixel-identical because the shell simply does not draw.
   const _shell = thamesMesh?.userData?.interiorShell;
-  if (_shell) _shell.visible = submerged && isInThames(camera.position.x,camera.position.z);
+  const insideThames=thamesMesh?.userData.navigation?.contains(camera.position) ?? false;
+  if (_shell) _shell.visible = insideThames;
+  setRiverMaterialSubmerged(insideThames);
 
-  // D-002 chalk slowdown: 1.0 (clay/air) → 0.5 (full chalk), lerped by chalkBlend
-  // so it never snaps. Drives keyboard flight (movement funnel) AND mouse
-  // zoom/pan (scaled from captured base values — multiply, never compound).
-  substrateSpeedFactor = 1.0 - 0.5 * chalkBlend;
-  controls.zoomSpeed = _baseZoomSpeed * substrateSpeedFactor;
-  controls.panSpeed = _basePanSpeed * substrateSpeedFactor;
+  // Material resistance is now transient and held-key-only. Chalk cruising,
+  // mouse/touch pan and dolly keep their ordinary speeds.
+  substrateSpeedFactor = 1.0;
+  controls.zoomSpeed = _baseZoomSpeed;
+  controls.panSpeed = _basePanSpeed;
 
   // Controls-guide reveal: fire once when camera drops within 500 scene units
   // (~100m altimeter at VE=5) of the terrain surface. forceReveal() is
@@ -3596,7 +3637,8 @@ function tick(frameTime) {
         // separate #hoverTip path and stay active. Submerged (12Jul26u) hides
         // them too — HTML overlays are not fogged, so labels would otherwise
         // shine through the opaque interior shell walls.
-        hideForChalk: _chalkClarity > 0.5 || _submergedBlend > 0.5,
+        hideForChalk: _chalkClarity > 0.5,
+        hideForWater: submerged,
       });
       updateCallCount++;
     }
@@ -3604,6 +3646,7 @@ function tick(frameTime) {
   if (updateCallCount === 0 && lineShaftLayers.size > 0) {
     // Station updates skipped
   }
+  parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
@@ -3641,6 +3684,7 @@ function tick(frameTime) {
     if (ready) adaptiveQuality.update(dt * 1000, frameTime);
     else adaptiveQuality.reset(frameTime);
   }
+  underwaterSurface.update(renderer,dt,insideThames?_submergedBlend:0);
   composer.render(dt);
   sampleCushion();
   requestAnimationFrame(tick);
@@ -3655,7 +3699,10 @@ if (import.meta.env.DEV) {
   // describes only the composer's final fullscreen pass and cannot.
   window.__ugTHREE = THREE;
   window.__ug = {
-    camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, VERTICAL_EXAGGERATION,
+    getTerrainRiverBed,
+    materialResistance, classifySubstrateAt, underwaterSurface,
+    get parkLabelsGroup() { return parkLabelsGroup; },
+    camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, getStructuralSurfaceY, VERTICAL_EXAGGERATION,
     masterHeight, miniMap, llToXZ, sim, getShareUrl, dlrProfile,
     setBuildingHeightScale, getBuildingHeightScale,
     // Buildings render path (06Sep26u): 'live' | 'baked'

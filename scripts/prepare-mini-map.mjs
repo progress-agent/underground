@@ -58,6 +58,19 @@ const labels = {
   'Canary Wharf':[-6,17,'end'], 'Heathrow Terminals 2 & 3':[0,20,'middle','Heathrow'],
 };
 const clean = name => name.replace(/ (Underground|DLR) Station$/, '');
+const orientationRoutes = [
+  {line:'central',stops:['West Ruislip','North Acton','Notting Hill Gate','Oxford Circus','Bank','Stratford','Epping']},
+  {line:'central',stops:['Ealing Broadway','North Acton']},
+  {line:'northern',stops:['Edgware','Camden Town','Euston','Tottenham Court Road','Charing Cross','Kennington','Morden']},
+  {line:'northern',stops:['High Barnet','Camden Town',"King's Cross & St Pancras International",'Bank','Kennington']},
+  {line:'piccadilly',stops:['Heathrow Terminals 2 & 3','Acton Town','South Kensington','Green Park','Holborn',"King's Cross & St Pancras International",'Cockfosters']},
+  {line:'victoria',stops:['Brixton','Victoria','Oxford Circus',"King's Cross & St Pancras International",'Walthamstow Central']},
+  {line:'jubilee',stops:['Stanmore','Baker Street','Green Park','Waterloo','London Bridge','Canary Wharf','Stratford']},
+  {line:'circle',stops:['Paddington','Baker Street',"King's Cross & St Pancras International",'Liverpool Street','Tower Hill','Westminster','Victoria','South Kensington','High Street Kensington','Paddington']},
+  {line:'district',stops:['Richmond','Turnham Green',"Earl's Court",'South Kensington','Westminster','Tower Hill','West Ham','Upminster']},
+  {line:'district',stops:['Wimbledon',"Earl's Court"]},
+];
+const sourceGraphs=new Map();
 const stations = new Map();
 const lines = [];
 for (const [id, colour] of Object.entries(colours)) {
@@ -80,6 +93,7 @@ for (const [id, colour] of Object.entries(colours)) {
       join(a,b);join(b,a);
     }
   }
+  sourceGraphs.set(id,new Map([...graph].map(([name,neighbours])=>[name,new Set(neighbours)])));
   // Contract only degree-two, unselected intermediate stations. Every resulting
   // edge is backed by a connected source walk, including branch boundaries.
   for (const [name, neighbours] of [...graph]) {
@@ -101,10 +115,28 @@ const nodes = [...retained].sort().map(name=> {
   return {...s, target:authored[name], label:labels[name] ?? null};
 });
 for(const name of Object.keys(authored)) if(!stations.has(name)) throw new Error(`Authored station absent from source: ${name}`);
+// Preserve full source station walks for each quiet display route. Geographic
+// sampling and rendering share these coordinates, including omitted minor stops.
+for(const route of orientationRoutes) {
+  const graph=sourceGraphs.get(route.line),walk=[];
+  for(let i=1;i<route.stops.length;i++) {
+    const start=route.stops[i-1],end=route.stops[i];
+    const queue=[start],parents=new Map([[start,null]]);
+    for(let q=0;q<queue.length&&!parents.has(end);q++) {
+      for(const name of graph.get(queue[q])??[]) if(!parents.has(name)) {
+        parents.set(name,queue[q]);queue.push(name);
+      }
+    }
+    if(!parents.has(end))throw new Error(`Disconnected orientation route: ${start} / ${end}`);
+    const leg=[];for(let n=end;n!==null;n=parents.get(n))leg.unshift(n);
+    walk.push(...(walk.length?leg.slice(1):leg));
+  }
+  route.geographic=walk.map(name=>{const s=stations.get(name);return {name,lat:s.lat,lon:s.lon};});
+}
 const data={
   version:1, width:620, height:430,
   provenance:{ source:'Transport for London Unified API RouteSequence',snapshot:index.generatedAt,licence:'https://tfl.gov.uk/corporate/terms-and-conditions/transport-data-service',attribution:'Powered by TfL Open Data',additionalAttribution:'Contains OS data © Crown copyright and database rights 2016. Geomni UK Map data © and database rights 2019.',layout:'Original UnderGround topology-based schematic; intermediate stops omitted. Not TfL map artwork or a journey planner.',sources:Object.values(index.lines).map(e=>e.url)},
-  nodes,lines,
+  nodes,lines,orientationRoutes,
 };
 const output=path.join(root,'src/mini-map-data.json');
 const serialised=JSON.stringify(data,null,2)+'\n';

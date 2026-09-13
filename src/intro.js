@@ -76,7 +76,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh']) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh']) sp.delete(setting);
     return sp.size > 0;
   }
 
