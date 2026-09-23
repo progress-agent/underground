@@ -45,7 +45,10 @@ test.describe('Conveyance modes', () => {
       await page.keyboard.press(key);
       expect(await activeId(page)).toBe(id);
       expect(await pressed(page)).toEqual([id]);
-      if (id !== 'deity') await expect(page.locator('#ug-mode-hint')).toContainText(/coming/i);
+      // Stubs say "coming"; a mode its own lane has built (Pedestrian, A2) shows its key hint.
+      const stub = await page.evaluate((m) => window.__ug.modes.registry.get(m).stub, id);
+      if (id !== 'deity' && stub) await expect(page.locator('#ug-mode-hint')).toContainText(/coming/i);
+      if (id !== 'deity' && !stub) await expect(page.locator('#ug-mode-hint')).not.toContainText(/coming/i);
     }
 
     await page.click('#ug-mode-bar button[data-mode="drone"]');
@@ -88,7 +91,10 @@ test.describe('Conveyance modes', () => {
       return { moved: ug.camera.position.distanceTo(p0), speed: ug.fpsControls.lastSpeed };
     });
     const deity = await hold();
-    await page.keyboard.press('2');
+    // Whichever modes are still stubs (Pedestrian stopped being one in lane A2).
+    const stubKey = await page.evaluate(() => window.__ug.modes.registry.list().find(m => m.stub)?.key ?? null);
+    test.skip(stubKey === null, 'every mode has been built; no stub left to check');
+    await page.keyboard.press(stubKey);
     const stub = await hold();
     expect(deity.moved).toBeGreaterThan(10);
     expect(stub.moved).toBeGreaterThan(10);

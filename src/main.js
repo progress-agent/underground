@@ -3734,6 +3734,14 @@ modeSystem = installModes({
   getMasterBus,
 });
 // ── /sprint:A1 ──
+// ── sprint:A2 ──
+// Pedestrian mode reads the tube network lazily (stations, platforms and the
+// snapped tunnel centrelines); getters so it always sees the current snap.
+modeSystem.ctx.tubeNetwork = {
+  get branches() { return lineBranchCenterPts; },
+  get stationLayers() { return lineShaftLayers; },
+};
+// ── /sprint:A2 ──
 
 requestAnimationFrame(tick);
 

@@ -2,6 +2,7 @@
 // Deity speed regime and the D-037 water rule.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { createModeRegistry } from '../src/modes/registry.js';
 import { createPhysicsPanel, PHYSICS_STORAGE_KEY } from '../src/modes/physics-panel.js';
 import { deityRegimeSpeed } from '../src/modes/deity-speed.js';
@@ -26,7 +27,8 @@ test('registry: four modes on keys 1-4, stubs fall back to Deity', () => {
   const physics = createPhysicsPanel({ storage: memoryStorage(), document: null });
   const fps = { keys: new Set() };
   const looks = [];
-  const reg = createModeRegistry({ onLookMode: (m) => looks.push(m) });
+  // Real modes (Pedestrian since lane A2) need the shared ctx fields they register with.
+  const reg = createModeRegistry({ ctx: { THREE, VE: 5, physics, keys: fps.keys }, onLookMode: (m) => looks.push(m) });
   reg.register(createDeityMode({ fpsControls: fps, physics }));
   for (const f of [createPedestrianMode, createDroneMode, createBalloonMode]) reg.register(f(reg.ctx));
   assert.deepEqual(reg.list().map(m => m.id), ['deity', 'pedestrian', 'drone', 'balloon']);
@@ -34,16 +36,19 @@ test('registry: four modes on keys 1-4, stubs fall back to Deity', () => {
   assert.equal(reg.byKey('5'), null);
   assert.ok(reg.activate('deity'));
   assert.equal(reg.update(0.016), false, 'Deity keeps the original keyboard path');
-  for (const id of ['pedestrian', 'drone', 'balloon']) {
+  assert.equal(reg.get('pedestrian').stub, false, 'Pedestrian is a real mode (lane A2)');
+  assert.equal(reg.get('pedestrian').look, 'lock');
+  assert.equal(reg.get('pedestrian').solid, true);
+  for (const id of ['drone', 'balloon']) {
     assert.ok(reg.activate(id));
     assert.equal(reg.activeId, id);
-    assert.equal(reg.active.stub, true);
+    if (!reg.active.stub) continue; // replaced by its own lane
     assert.match(reg.active.hint, /coming/i);
+    assert.equal(looks.at(-1), 'none');
     assert.equal(reg.update(0.016), false, `${id} stub falls back to Deity`);
   }
   assert.equal(reg.activate('nope'), false);
   assert.equal(reg.activeId, 'balloon');
-  assert.ok(looks.every(m => m === 'none'));
 });
 
 test('registry: activate/deactivate hooks, owned update, onChange, ctx.time', () => {
