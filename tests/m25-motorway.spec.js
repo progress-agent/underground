@@ -102,10 +102,9 @@ test('projected vehicle LOD partitions every stable identity once and preserves 
   const ids=[],colour=[];let far=0,near=0,maxPositionError=0;
   for(const mesh of g.children.filter(m=>m.isInstancedMesh)){
    expect(mesh.instanceColor).toBeFalsy();expect(mesh.visible).toBe(mesh.count>0);
-   if(['roof','tyre'].some(part=>mesh.name.endsWith('-'+part)))continue;
    for(let i=0;i<mesh.count;i++){
     const id=mesh.userData.vehicleIds[i],p=g.userData.vehicleAt(id),a=mesh.instanceMatrix.array,o=i*16;
-    ids.push(id);colour.push([id,mesh.name.endsWith('blue')||mesh.name.endsWith('farBlue')]);
+    ids.push(id);colour.push([id,mesh.userData.colour]);
     if(mesh.userData.lod==='far')far++;else near++;
     maxPositionError=Math.max(maxPositionError,Math.abs(a[o+12]-p.x),Math.abs(a[o+14]-p.z),Math.abs(a[o+13]-(p.y+.88*5)));
    }
@@ -123,7 +122,11 @@ test('projected vehicle LOD partitions every stable identity once and preserves 
  expect(g.userData.trafficLod.near).toBeGreaterThan(0);expect(checkPartition()).toEqual(colour);
  let phaseError=0;for(let id=0;id<total;id++)phaseError=Math.max(phaseError,Math.abs(g.userData.vehicleAt(id).distance-phases[id]));expect(phaseError).toBe(0);
  g.userData.update(4,camera);expect(g.userData.getElapsed()).toBe(4);
- for(const id of [0,100,total-1]){const p=g.userData.vehicleAt(id),r=g.userData.routes.find(r=>r.id===p.routeId);expect(p.distance).toBeCloseTo((phases[id]+10)%r.length,7);}
+ // Sprint 23Sep26w: each vehicle now carries a bounded speed variation, so
+ // 4s no longer advances exactly 10m. The position must equal the pure
+ // function of (identity, elapsed) and stay within the variation bound of
+ // the common 2.5 m/s advance.
+ for(const id of [0,100,total-1]){const p=g.userData.vehicleAt(id),r=g.userData.routes.find(r=>r.id===p.routeId);expect(p.distance).toBeCloseTo(g.userData.vehicleChainageAt(id,4),7);const advance=((p.distance-phases[id])%r.length+r.length)%r.length;expect(Math.abs(advance-10)).toBeLessThan(2*3+.05);}
  g.userData.dispose();
 });
 
@@ -133,7 +136,7 @@ test('vehicle detail responds to lens and Master view with native-pixel hysteres
  const {motorwayVehiclePixelSize}=await import('../src/m25-motorway.js');
  const camera=new PerspectiveCamera(55,1.6,1,100000),g=createMotorway({getSurfaceY:()=>30,viewportHeightPx:1800}),p=g.userData.vehicleAt(0);
  const radius=Math.hypot(1.05,1.125*5,2.2),factor=camera.projectionMatrix.elements[5]*1800;
- const detail=()=>g.children.find(m=>m.isInstancedMesh&&!m.name.endsWith('-roof')&&!m.name.endsWith('-tyre')&&Array.from(m.userData.vehicleIds.subarray(0,m.count)).includes(0)).userData.lod;
+ const detail=()=>g.children.find(m=>m.isInstancedMesh&&Array.from(m.userData.vehicleIds.subarray(0,m.count)).includes(0)).userData.lod;
  const setPixels=pixels=>{camera.position.set(p.x,p.y,p.z+radius+factor*radius/pixels);camera.lookAt(p.x,p.y,p.z);camera.updateMatrixWorld(true);for(let i=0;i<3;i++)g.userData.update(0,camera);};
  setPixels(3);expect(detail()).toBe('near');setPixels(2);expect(detail()).toBe('far');setPixels(3);expect(detail()).toBe('far');setPixels(4);expect(detail()).toBe('near');
  const pixels=()=>motorwayVehiclePixelSize(camera,p,{viewportHeightPx:1800});
