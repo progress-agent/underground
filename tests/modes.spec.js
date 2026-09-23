@@ -45,7 +45,10 @@ test.describe('Conveyance modes', () => {
       await page.keyboard.press(key);
       expect(await activeId(page)).toBe(id);
       expect(await pressed(page)).toEqual([id]);
-      if (id !== 'deity') await expect(page.locator('#ug-mode-hint')).toContainText(/coming/i);
+      // Stubs say "coming"; lanes A2/A3 replace stubs with real modes whose own
+      // hints are pinned in their specs (modes-drone-balloon.spec.js).
+      const stub = await page.evaluate((m) => !!window.__ug.modes.registry.get(m).stub, id);
+      if (id !== 'deity' && stub) await expect(page.locator('#ug-mode-hint')).toContainText(/coming/i);
     }
 
     await page.click('#ug-mode-bar button[data-mode="drone"]');

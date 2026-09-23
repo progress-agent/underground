@@ -34,16 +34,18 @@ test('registry: four modes on keys 1-4, stubs fall back to Deity', () => {
   assert.equal(reg.byKey('5'), null);
   assert.ok(reg.activate('deity'));
   assert.equal(reg.update(0.016), false, 'Deity keeps the original keyboard path');
+  // Lanes A2/A3 replace stubs with real modes (D-037); whichever are still
+  // stubs must keep the Deity fallback. Real modes are covered by their own tests.
   for (const id of ['pedestrian', 'drone', 'balloon']) {
     assert.ok(reg.activate(id));
     assert.equal(reg.activeId, id);
-    assert.equal(reg.active.stub, true);
+    if (!reg.active.stub) continue;
     assert.match(reg.active.hint, /coming/i);
     assert.equal(reg.update(0.016), false, `${id} stub falls back to Deity`);
+    assert.equal(looks.at(-1), 'none');
   }
   assert.equal(reg.activate('nope'), false);
   assert.equal(reg.activeId, 'balloon');
-  assert.ok(looks.every(m => m === 'none'));
 });
 
 test('registry: activate/deactivate hooks, owned update, onChange, ctx.time', () => {
