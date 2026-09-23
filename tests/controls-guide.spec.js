@@ -24,16 +24,112 @@
 // The original 30s/37s design contract is verified implicitly via the
 // compression ratio — show=3000ms, shift hold=5000ms, fade=800ms are all
 // shared with the production timeline.
+//
+// Timeline race (diagnosed 06Sep26u, verified and fixed 24Sep26h, sprint
+// 23Sep26w lane E). The timeline tests used to sample class state from the
+// test side against a wall clock they did not own. Measured on d1a2f7b:
+//   - the tick loop's altitude predicate (D-004, 8833893) reveals the widget
+//     ~300ms after load, BEFORE the test's forceReveal() (~600ms), in 12/12
+//     instrumented runs; the test's call is a no-op and t=0 is not its own;
+//   - the first full render then blocks the main thread for ~3.2s while
+//     three.js links shader programs (CPU profile: WebGLProgram.getUniforms
+//     -> onFirstUse 2.6s inside tick -> composer.render). The 3s fade timer
+//     falls due inside that freeze and runs as soon as it ends, racing the
+//     test's queued checks: ':39' saw all 8 captions already faded.
+// Under full-suite GPU contention the freeze grows, and fixed 5s/7s waits
+// counted in Node wall-clock can expire, or both shift timers can fire
+// back-to-back after the freeze so 'is-visible' is never observed (':91').
+//
+// Fix: an init script records every class transition with the PAGE clock
+// (performance.now) from before any page script runs. Tests assert the
+// recorded sequence against the real reveal instant. Timers never fire
+// early, so lower bounds relative to the reveal are deterministic; freezes
+// can only delay events, which the generous waits absorb.
 
 import { test, expect } from '@playwright/test';
 
 const FAST = '/?fast=1';
+const SHOW_MS = 3000;          // SHOW_MS_FAST
+const SHIFT_DELAY_MS = 200;
+const SHIFT_HOLD_MS = 5000;
+const EARLY_EPSILON_MS = 20;   // timer-clamping / clock-granularity allowance
+const TIMELINE_WAIT_MS = 30000; // absorbs startup freezes under suite load
 
-// Wait for the dev surface to mount, then trigger the reveal explicitly.
+// Install before any page script: record widget class transitions on the
+// page clock, plus a snapshot of the captions at the instant of reveal.
+async function recordTimeline(page) {
+  await page.addInitScript(() => {
+    const t = window.__cgTimeline = {};
+    const now = () => performance.now();
+    // Anchor the reveal SYNCHRONOUSLY at classList.add('ready'), which
+    // forceReveal() calls just before scheduling its timers, so every
+    // measured interval is a true lower bound. (A MutationObserver record
+    // lands at the end of the revealing tick, up to a frame late, which
+    // would shrink the intervals by that much.)
+    const owners = new WeakMap();
+    const classList = Object.getOwnPropertyDescriptor(Element.prototype, 'classList');
+    Object.defineProperty(Element.prototype, 'classList', {
+      ...classList,
+      get() { const list = classList.get.call(this); owners.set(list, this); return list; },
+    });
+    let capturing = false;
+    const setTimeoutNative = window.setTimeout;
+    window.setTimeout = function (fn, delay, ...rest) {
+      if (capturing) t.scheduled.push(delay);
+      return setTimeoutNative.call(this, fn, delay, ...rest);
+    };
+    const add = DOMTokenList.prototype.add;
+    DOMTokenList.prototype.add = function (...tokens) {
+      const result = add.apply(this, tokens);
+      const root = owners.get(this);
+      if (t.readyAt === undefined && root?.id === 'ug-controls-guide' && tokens.includes('ready')) {
+        t.readyAt = now();
+        // forceReveal() schedules its fade timers synchronously after this
+        // add; capture their requested delays until the task yields. A
+        // startup freeze can delay when a timer FIRES (masking an early fade
+        // in the observed intervals), but never what was scheduled.
+        t.scheduled = [];
+        capturing = true;
+        queueMicrotask(() => { capturing = false; });
+        const targets = [...root.querySelectorAll('.fade-target')];
+        const box = (sel) => { const r = root.querySelector(sel)?.getBoundingClientRect(); return !!r && r.width > 0 && r.height > 0; };
+        t.atReveal = {
+          targets: targets.length,
+          faded: targets.filter((el) => el.classList.contains('is-faded')).length,
+          titleBox: box('.title'),
+          roleBox: box('.cluster-role'),
+        };
+      }
+      return result;
+    };
+    // Later transitions only need "not early", so an end-of-task record is
+    // safe: lateness can only lengthen the measured intervals.
+    new MutationObserver(() => {
+      const root = document.getElementById('ug-controls-guide');
+      if (!root || t.readyAt === undefined) return;
+      const targets = root.querySelectorAll('.fade-target');
+      const faded = [...targets].filter((el) => el.classList.contains('is-faded')).length;
+      if (t.firstFadedAt === undefined && faded > 0) t.firstFadedAt = now();
+      if (t.allFadedAt === undefined && targets.length && faded === targets.length) t.allFadedAt = now();
+      const shift = root.querySelector('.shift-message')?.classList.contains('is-visible');
+      if (t.shiftOnAt === undefined && shift) t.shiftOnAt = now();
+      if (t.shiftOnAt !== undefined && t.shiftOffAt === undefined && !shift) t.shiftOffAt = now();
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+  });
+}
+
+// Wait for the dev surface to mount, then trigger the reveal explicitly (a
+// no-op when the altitude predicate has already revealed; see header).
 async function gotoAndReveal(page) {
+  await recordTimeline(page);
   await page.goto(FAST);
   await page.waitForFunction(() => !!(window.__ug && window.__ug.controlsGuide), null, { timeout: 8000 });
   await page.evaluate(() => window.__ug.controlsGuide.forceReveal());
+}
+
+async function timelineWhen(page, key) {
+  await page.waitForFunction((k) => window.__cgTimeline?.[k] !== undefined, key, { timeout: TIMELINE_WAIT_MS });
+  return page.evaluate(() => window.__cgTimeline);
 }
 
 test('widget visible after forceReveal with all caption labels opaque', async ({ page }) => {
@@ -43,70 +139,77 @@ test('widget visible after forceReveal with all caption labels opaque', async ({
   const root = page.locator('#ug-controls-guide');
   await expect(root).toHaveClass(/ready/, { timeout: 2000 });
 
-  // Captions opaque (not yet faded).
-  const fadeTargets = page.locator('#ug-controls-guide .fade-target');
-  const count = await fadeTargets.count();
-  expect(count).toBeGreaterThan(0);
+  // Captions opaque (not yet faded) at the instant of reveal, captured by the
+  // page itself rather than sampled after an uncontrolled delay.
+  const t = await timelineWhen(page, 'readyAt');
+  expect(t.atReveal.targets).toBeGreaterThan(0);
+  expect(t.atReveal.faded).toBe(0);
+  expect(t.atReveal.titleBox).toBe(true);
+  expect(t.atReveal.roleBox).toBe(true);
+  // Timeline as scheduled at reveal: captions fade, shift in, shift out.
+  expect(t.scheduled).toEqual([SHOW_MS, SHOW_MS + SHIFT_DELAY_MS, SHOW_MS + SHIFT_DELAY_MS + SHIFT_HOLD_MS]);
 
   // Sanity sample — title visible, action labels visible.
   await expect(page.locator('#ug-controls-guide .title')).toBeVisible();
   await expect(page.locator('#ug-controls-guide .cluster-role')).toBeVisible();
 
-  // None should have .is-faded yet.
-  const fadedCount = await page.locator('#ug-controls-guide .fade-target.is-faded').count();
-  expect(fadedCount).toBe(0);
+  // And they stay unfaded for the whole show window: no caption fades early.
+  const faded = await timelineWhen(page, 'firstFadedAt');
+  expect(faded.firstFadedAt - faded.readyAt).toBeGreaterThanOrEqual(SHOW_MS - EARLY_EPSILON_MS);
 });
 
 test('caption labels faded ~3s after reveal (compressed)', async ({ page }) => {
   await gotoAndReveal(page);
   await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
-  // Wait for fade trigger (showMs=3000ms with ?fast=1) — assertion uses ample
-  // upper bound to absorb scheduler jitter.
-  await page.waitForFunction(() => {
-    const els = document.querySelectorAll('#ug-controls-guide .fade-target');
-    return els.length > 0 && Array.from(els).every((el) => el.classList.contains('is-faded'));
-  }, null, { timeout: 5000 });
+  // Every caption fades, and not before the show window has elapsed.
+  const t = await timelineWhen(page, 'allFadedAt');
+  expect(t.firstFadedAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS - EARLY_EPSILON_MS);
 
-  // Confirm computed opacity has gone to 0 after the 800ms transition.
-  await expect(page.locator('#ug-controls-guide .title')).toHaveCSS('opacity', '0', { timeout: 1500 });
+  // Confirm computed opacity has gone to 0 after the 800ms transition. The
+  // 800ms contract is the declared transition; the final state is terminal,
+  // so waiting for it through a startup freeze cannot mask a regression.
+  await expect(page.locator('#ug-controls-guide .title')).toHaveCSS('transition-duration', '0.8s');
+  await expect(page.locator('#ug-controls-guide .title')).toHaveCSS('opacity', '0', { timeout: TIMELINE_WAIT_MS });
 });
 
 test('shift-message visible ~3.2s after reveal', async ({ page }) => {
   await gotoAndReveal(page);
   await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
-  // Wait for .is-visible to appear on .shift-message (showMs + SHIFT_DELAY_MS
-  // = 3200ms with ?fast=1).
-  await page.waitForFunction(
-    () => document.querySelector('#ug-controls-guide .shift-message')?.classList.contains('is-visible'),
-    null,
-    { timeout: 5000 }
-  );
+  // .is-visible arrives on .shift-message no sooner than showMs +
+  // SHIFT_DELAY_MS = 3200ms after reveal, and after the captions fade.
+  const t = await timelineWhen(page, 'shiftOnAt');
+  expect(t.shiftOnAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS - EARLY_EPSILON_MS);
+  expect(t.shiftOnAt).toBeGreaterThanOrEqual(t.firstFadedAt);
 
-  // Computed opacity reaches 1 after 800ms transition.
-  await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '1', { timeout: 1500 });
+  // Computed opacity reaches 1 after 800ms transition (still inside the 5s hold).
+  if (t.shiftOffAt === undefined) {
+    await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '1', { timeout: 1500 });
+  }
 });
 
 test('shift-message gone ~9s after reveal (after 5s hold + 800ms fade)', async ({ page }) => {
   await gotoAndReveal(page);
   await expect(page.locator('#ug-controls-guide')).toHaveClass(/ready/, { timeout: 2000 });
 
-  // After SHIFT_HOLD_MS=5000ms, the .is-visible class is removed. Total wall
-  // clock from reveal: showMs(3000) + SHIFT_DELAY(200) + SHIFT_HOLD(5000) ~ 8.2s.
-  await page.waitForFunction(
-    () => document.querySelector('#ug-controls-guide .shift-message')?.classList.contains('is-visible'),
-    null,
-    { timeout: 5000 }
-  );
-  await page.waitForFunction(
-    () => !document.querySelector('#ug-controls-guide .shift-message')?.classList.contains('is-visible'),
-    null,
-    { timeout: 7000 }
-  );
+  // After SHIFT_HOLD_MS=5000ms, the .is-visible class is removed. Total from
+  // reveal: showMs(3000) + SHIFT_DELAY(200) + SHIFT_HOLD(5000) ~ 8.2s. The
+  // recorder sees both transitions even if a freeze runs the timers
+  // back-to-back.
+  const t = await timelineWhen(page, 'shiftOffAt');
+  expect(t.scheduled).toEqual([SHOW_MS, SHOW_MS + SHIFT_DELAY_MS, SHOW_MS + SHIFT_DELAY_MS + SHIFT_HOLD_MS]);
+  expect(t.shiftOnAt).toBeDefined();
+  expect(t.shiftOnAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS - EARLY_EPSILON_MS);
+  expect(t.shiftOffAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS + SHIFT_HOLD_MS - EARLY_EPSILON_MS);
+  // >= not >: after a long freeze both timers run back-to-back and the page
+  // clock (100us resolution) can stamp them identically. Order is still
+  // guaranteed, since shiftOffAt is only recorded once shiftOnAt exists.
+  expect(t.shiftOffAt).toBeGreaterThanOrEqual(t.shiftOnAt);
 
-  // Opacity reaches 0 after 800ms fade.
-  await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '0', { timeout: 1500 });
+  // Opacity reaches 0 after 800ms fade (declared duration; terminal state).
+  await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('transition-duration', '0.8s');
+  await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '0', { timeout: TIMELINE_WAIT_MS });
 });
 
 test('click on Q key dispatches synthetic KeyboardEvent with code KeyQ', async ({ page }) => {
