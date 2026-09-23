@@ -71,6 +71,39 @@ export const ENV_CONFIG = {
   lightFullY: 90,
 };
 
+// ── Time-of-day sun in the air substrate (sprint 23Sep26w, Lane D) ─────────
+// The sun that shipped before the slider: a fixed directional light at this
+// position (direction only matters). sun.js anchors the slider's default here.
+export const LEGACY_SUN_POSITION = [2000, 600, 1500];
+const _legacyDir = new THREE.Vector3(...LEGACY_SUN_POSITION).normalize();
+const _legacyDistance = new THREE.Vector3(...LEGACY_SUN_POSITION).length();
+const _cWhite = new THREE.Color(0xffffff);
+const _cHemiSky = new THREE.Color(ENV_CONFIG.hemiSky);
+// weight: 0..1 air-substrate weight (exactly 0 underground or submerged, so
+// every regime below is byte-identical to the legacy lighting there).
+// state: sun.js sunState(t). distance: shadow-fitted light distance.
+const _air = { weight: 0, state: null, distance: undefined };
+
+/** Set by sun.js each frame, before updateEnvironment/updateLighting. */
+export function setAirSun({ weight = 0, state = null, distance } = {}) {
+  _air.weight = state && Number.isFinite(weight) ? THREE.MathUtils.clamp(weight, 0, 1) : 0;
+  _air.state = state;
+  _air.distance = distance;
+}
+
+/** The sun direction (towards the sun) that updateLighting will apply. */
+export function resolveSunDirection(out = new THREE.Vector3()) {
+  const w = _air.weight;
+  if (w <= 0) return out.copy(_legacyDir);
+  if (w >= 1) return out.copy(_air.state.direction);
+  return out.copy(_legacyDir).lerp(_air.state.direction, w).normalize();
+}
+
+/** Read-only view of the current air sun blend (tests, tuning). */
+export function getAirSun() {
+  return { weight: _air.weight, t: _air.state?.t ?? null, distance: _air.distance };
+}
+
 // Create sky dome — a camera-following "abyss cap" (D1.4).
 //
 // IMPORTANT geometry note: the camera far plane is 50000, so an 80000-radius
@@ -160,6 +193,9 @@ const _cBgSky = new THREE.Color(ENV_CONFIG.skyColor);
 const _cChalk = new THREE.Color(ENV_CONFIG.chalkFogColor);
 const _cWaterFog = new THREE.Color(ENV_CONFIG.waterFogColor);
 const _cWaterBg = new THREE.Color(ENV_CONFIG.waterBgColor);
+const _cSkyAir = new THREE.Color();
+const _cBgSkyAir = new THREE.Color();
+const _sunDir = new THREE.Vector3();
 
 /**
  * Update environment based on camera height.
@@ -198,8 +234,17 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   const surfaceBlend = THREE.MathUtils.lerp(1.0, verticalBlendLifted, insideness);
   const skyBlend = THREE.MathUtils.lerp(1.0, verticalBlend, insideness);
 
+  // Time of day (Lane D) tints only the sky-side endpoints, and only by the
+  // air weight, which is exactly 0 for any camera below the surface.
+  _cSkyAir.copy(_cSky);
+  _cBgSkyAir.copy(_cBgSky);
+  if (_air.weight > 0) {
+    _cSkyAir.lerp(_air.state.fogSky, _air.weight);
+    _cBgSkyAir.lerp(_air.state.skyColor, _air.weight);
+  }
+
   // Base fog colour: airy-clay graphite underground → warm-grey toward sky.
-  _fogColor.copy(_cGround).lerp(_cSky, surfaceBlend);
+  _fogColor.copy(_cGround).lerp(_cSkyAir, surfaceBlend);
 
   if (scene.fog) {
     // Fog near: push far out above ground, keep tight underground.
@@ -281,7 +326,7 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
 
   // Background colour: clay graphite → sky; then flooded dusty white in chalk so
   // gaps between geometry read as clouding, not void.
-  _bgColor.copy(_cBgGround).lerp(_cBgSky, surfaceBlend);
+  _bgColor.copy(_cBgGround).lerp(_cBgSkyAir, surfaceBlend);
   if (chalkBlend > 0) _bgColor.lerp(_cChalk, chalkBlend);
   if (submergedBlend > 0) _bgColor.lerp(_cWaterBg, submergedBlend);
 
@@ -309,7 +354,9 @@ export function createAtmosphere(scene) {
   const sun = new THREE.DirectionalLight(0xfff4e6, ENV_CONFIG.sunIntensity);
   sun.name = 'sunLight';
   sun.position.set(2000, 600, 1500);
-  sun.castShadow = false; // Keep it simple, no shadows
+  // Shadows are configured by sun.js (near-camera, toggleable); without it the
+  // light casts nothing, as before.
+  sun.castShadow = false;
   scene.add(sun);
 
   // Underground fill light - warm brown from below (complements rock face)
@@ -357,12 +404,27 @@ export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0,
   ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.chalkClarityAmbient, chalkClarity);
   // Submerged (12Jul26u): LAST lerp — dim, even underwater ambient.
   ambient = THREE.MathUtils.lerp(ambient, ENV_CONFIG.waterAmbient, submergedBlend);
-  lights.ambient.intensity = ambient;
+  // Time of day (Lane D): scale and tint by the air weight (0 underground).
+  const airW = _air.weight;
+  lights.ambient.intensity = airW > 0 ? ambient * THREE.MathUtils.lerp(1, _air.state.ambientFactor, airW) : ambient;
+  lights.ambient.color.copy(_cWhite);
+  if (airW > 0) lights.ambient.color.lerp(_air.state.ambientColor, airW);
 
   // Sun becomes stronger above ground; dimmed underwater (submerged LAST).
   let sun = THREE.MathUtils.lerp(0.2, ENV_CONFIG.sunIntensity, lightBlendLifted);
   sun = THREE.MathUtils.lerp(sun, ENV_CONFIG.waterSun, submergedBlend);
-  lights.sun.intensity = sun;
+  lights.sun.intensity = airW > 0 ? sun * THREE.MathUtils.lerp(1, _air.state.sunFactor, airW) : sun;
+  lights.sun.color.set(0xfff4e6);
+  if (airW > 0) lights.sun.color.lerp(_air.state.sunColor, airW);
+  // Direction: legacy underground; the slider's sun in the air. The light sits
+  // up-sun of its target (sun.js moves the target to the shadow square).
+  resolveSunDirection(_sunDir);
+  if (airW <= 0 && _air.distance === undefined && lights.sun.target.position.lengthSq() === 0) {
+    lights.sun.position.set(...LEGACY_SUN_POSITION);
+  } else {
+    lights.sun.position.copy(lights.sun.target.position)
+      .addScaledVector(_sunDir, _air.distance ?? _legacyDistance);
+  }
 
   // Underground light fades as we go up
   lights.underground.intensity = THREE.MathUtils.lerp(0.15, 0, lightBlendLifted);
@@ -374,5 +436,8 @@ export function updateLighting(camera, lights, { insideness = 1, chalkBlend = 0,
     // Warm sky-bounce reads wrong underwater — same rationale as the clayLift
     // exclusion above, so the hemi is multiplied out by submergedBlend.
     lights.hemi.intensity = ENV_CONFIG.hemiStreet * eyeFactor * lightBlend * (1 - submergedBlend);
+    if (airW > 0) lights.hemi.intensity *= THREE.MathUtils.lerp(1, _air.state.hemiFactor, airW);
+    lights.hemi.color.copy(_cHemiSky);
+    if (airW > 0) lights.hemi.color.lerp(_air.state.hemiSky, airW);
   }
 }

@@ -1,13 +1,17 @@
 // Conservative display-time controller. Drop quality after sustained overload;
 // probe upward slowly, and back off failed probes to avoid quality oscillation.
+// Near-camera sun shadows (sprint 23Sep26w, Lane D) are the first thing to go:
+// level 1 is full resolution and full edge smoothing without shadows, and no
+// lower level brings them back. Resolution and MSAA only start to fall after.
 export const QUALITY_LEVELS = [
-  { scale: 1, samples: 4 },
-  { scale: 0.85, samples: 4 },
-  { scale: 0.75, samples: 2 },
-  { scale: 0.6, samples: 2 },
-  { scale: 0.5, samples: 0 },
-  { scale: 0.4, samples: 0 },
-  { scale: 0.35, samples: 0 },
+  { scale: 1, samples: 4, shadows: true },
+  { scale: 1, samples: 4, shadows: false },
+  { scale: 0.85, samples: 4, shadows: false },
+  { scale: 0.75, samples: 2, shadows: false },
+  { scale: 0.6, samples: 2, shadows: false },
+  { scale: 0.5, samples: 0, shadows: false },
+  { scale: 0.4, samples: 0, shadows: false },
+  { scale: 0.35, samples: 0, shadows: false },
 ];
 
 export function createAdaptiveQuality({ apply }) {
