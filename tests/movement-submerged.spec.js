@@ -1,10 +1,14 @@
 // movement-submerged.spec.js — submerged speed regime + vertical parity (12Jul26u).
 //
 // Coverage:
-//   1. Inside the Thames water volume, movement runs at the CONSTANT underground
-//      base rate. Before the fix, the D-002 altitude clamp fired against the
-//      carved bed (camera "above ground" at tiny altitude) and pinned speed to
-//      the 0.3× crawl.
+//   1. Inside the Thames water volume, movement runs at the speed just above
+//      the surface at the same point (D-037, 23Sep26w, superseding D-020 §3's
+//      constant underground base). Jordan: underwater motion "should be the
+//      same as anywhere else". Measured before the change at this point:
+//      500 m/s submerged vs 150 m/s just above (3.33x). The old assertion here
+//      (130 < d < 400 for a 400ms hold, i.e. constant base) pinned the very
+//      behaviour Jordan reported as the bug, so it is replaced, not loosened.
+//      tests/water-speed-parity.spec.js measures the parity directly.
 //   2. Vertical (Q/E) displacement equals horizontal (WASD) for equal holds —
 //      on-screen scene-unit parity (Jordan-locked; the old 2.5× real-metre
 //      compensation is gone). Asserted both submerged and underground.
@@ -68,7 +72,7 @@ test.describe('Submerged movement regime + vertical parity', () => {
     await waitReady(page);
   });
 
-  test('submerged: W-hold moves at constant base, not the 0.3x altitude crawl', async ({ page }) => {
+  test('submerged: W-hold moves at the just-above-surface speed, not the constant base', async ({ page }) => {
     await teleport(page, MID.x, SUB_Y, MID.z);
     await page.waitForFunction(
       () => window.__ug.isSubmergedAt(
@@ -83,13 +87,19 @@ test.describe('Submerged movement regime + vertical parity', () => {
     await holdKeys(page, ['w'], 400);
     const p1 = await snapshotCamera(page);
     const d = dist(p0, p1);
+    const submergedSpeed = await page.evaluate(() => window.__ug.fpsControls.lastSpeed);
 
-    // Nominal: 500 u/s x 0.4 s = 200u at constant base. The pre-fix altitude
-    // clamp (0.3x against the carved bed) would give ~60u. Bounds separate the
-    // two regimes with wide dt-jitter margin.
-    console.log(`[movement-submerged] W-hold distance=${d.toFixed(1)}`);
-    expect(d).toBeGreaterThan(130);
-    expect(d).toBeLessThan(400);
+    // Just above the water at the same point.
+    await teleport(page, MID.x, 12.5, MID.z);
+    await holdKeys(page, ['w'], 120);
+    const aboveSpeed = await page.evaluate(() => window.__ug.fpsControls.lastSpeed);
+
+    // Nominal: 150 u/s x 0.4 s = 60u (0.3x crawl over the 14m-deep reach).
+    // The superseded constant base would give ~200u. Bounds separate the two.
+    console.log(`[movement-submerged] W-hold distance=${d.toFixed(1)} speed=${submergedSpeed} above=${aboveSpeed}`);
+    expect(submergedSpeed).toBeCloseTo(aboveSpeed, 6);
+    expect(d).toBeGreaterThan(35);
+    expect(d).toBeLessThan(110);
   });
 
   test('submerged: vertical (Q) displacement matches horizontal (W) for equal holds', async ({ page }) => {
