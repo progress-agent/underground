@@ -46,6 +46,23 @@ const collect = (halfExtent) => {
   return out;
 };
 
+/** Payload buildings beyond the map edge (sprint 23Sep26w, D-037 Lane B).
+ * The bake clips to m25.json's support ring (40m beyond the outer carriageway
+ * centreline); the map now ends at the outer barrier, and the ~110 buildings
+ * in that strip are suppressed at build time rather than left standing over
+ * the void. Counted here independently of the build, from the raw payload. */
+const countOffMapPayload = async (page) => page.evaluate(async () => {
+  const { parseBakedBuildings, BAKED_URL } = await import('/src/baked-buildings.js');
+  const { isOffMapEdge } = await import('/src/m25-edge.js');
+  const payload = parseBakedBuildings(await (await fetch(BAKED_URL)).arrayBuffer());
+  let off = 0;
+  for (const t of payload.tiles) for (let i = 0, o = t.offset; i < t.count; i++, o += 10) {
+    const x = t.minX + payload.view.getUint16(o, true) * 0.1, z = t.minZ + payload.view.getUint16(o + 2, true) * 0.1;
+    if (isOffMapEdge({ x, z })) off++;
+  }
+  return off;
+});
+
 async function bootLive(page) {
   await page.goto('/?buildings=live');
   await page.waitForFunction(
@@ -70,7 +87,10 @@ test('baked path places buildings where the live path places them', async ({ pag
 
   const stats = await page.evaluate(() => window.__ug.bakedStats);
   console.log('baked payload:', JSON.stringify(stats));
-  expect(stats.buildings, 'not every baked building became an instance').toBe(stats.buildingsTotal);
+  const offMap = await countOffMapPayload(page);
+  expect(offMap, 'map-edge suppression should remove only a sliver').toBeGreaterThan(0);
+  expect(offMap).toBeLessThan(500);
+  expect(stats.buildings, 'not every on-map baked building became an instance').toBe(stats.buildingsTotal - offMap);
 
   const baked = await page.evaluate(collect, WINDOW_M);
   expect(baked.length).toBeGreaterThan(1000);
@@ -169,7 +189,7 @@ test('baked path survives a round trip back to live and forward again', async ({
   await page.waitForFunction(() => window.__ug.bakedStats?.tilesBuilt >= window.__ug.bakedStats?.tilesTotal,
     { timeout: 60000 });
   const bakedCount = await page.evaluate(() => window.__ug.buildingInstanceCount);
-  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal));
+  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal) - await countOffMapPayload(page));
 
   // Back to live. Tiles loaded while baked was active hold no building meshes,
   // so resetLoadedTiles() has to send them round the arrival path again. This
