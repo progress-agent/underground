@@ -6,12 +6,12 @@
 //   2. Submerged regime activates INSIDE: substrate reads WATER (fixing the
 //      previously inverted predicate that read AIR in the water column),
 //      fog collapses to the short murky band, interior shell renders.
-//   3. Regime does NOT activate outside: shell hidden, fog released,
-//      substrate AIR above the surface.
-//   4. Outside appearance regression (material-state assertions): the
-//      translucent DoubleSide water material is untouched and the opaque
-//      interior shell is invisible for an exterior camera — the structural
-//      guarantee that the outside view is pixel-identical.
+//   3. Regime does NOT activate outside: fog released, substrate AIR above
+//      the surface. The opaque bank shell still draws above ground, since
+//      without it the banks are a translucent window onto the underground
+//      (23Sep26w); it hides only for an underground camera outside the river.
+//   4. Material-state regression: the translucent DoubleSide water material
+//      is untouched and the shell stays BackSide, opaque and non-raycastable.
 //
 // Mid-channel probe points come from river-banks.spec.js (known in-channel
 // coordinates at the Cutty Sark / Greenwich Pier reaches).
@@ -86,7 +86,7 @@ test('inside the volume: substrate WATER, murky short fog, interior shell visibl
   expect(state.fogNear).toBeLessThanOrEqual(50);
 });
 
-test('outside the volume: regime off, shell hidden, substrate AIR', async ({ page }) => {
+test('outside the volume: regime off, bank shell drawn, substrate AIR', async ({ page }) => {
   await gotoAndWait(page);
   // 500 scene units above the same mid-channel point — clearly exterior.
   await teleport(page, MID.x, 500, MID.z);
@@ -105,11 +105,31 @@ test('outside the volume: regime off, shell hidden, substrate AIR', async ({ pag
     };
   });
   expect(state.submergedBlend).toBe(0);
-  expect(state.shellVisible).toBe(false);
+  expect(state.shellVisible).toBe(true); // opaque banks, not a window underground
   expect(state.fogFar).toBeGreaterThan(1000); // surface regime fog released
 });
 
-test('outside appearance regression: water material untouched, shell structurally non-rendering', async ({ page }) => {
+test('underground beside the river: shell hidden, river body stays translucent', async ({ page }) => {
+  await gotoAndWait(page);
+  // Step off the channel until the point is dry land, then drop 30m below it.
+  const probe = await page.evaluate((mid) => {
+    const ug = window.__ug;
+    for (let d = 200; d <= 2000; d += 100) {
+      const x = mid.x, z = mid.z + d, surface = ug.getTerrainMeshSurfaceY({ x, z });
+      if (surface !== null && !ug.isSubmergedAt(x, surface - 150, z)) return { x, y: surface - 150, z };
+    }
+    return null;
+  }, MID);
+  expect(probe).not.toBeNull();
+  await teleport(page, probe.x, probe.y, probe.z);
+  await page.waitForFunction(
+    () => ['CLAY', 'CHALK'].includes(document.getElementById('ug-readout')?.dataset.substrate),
+    null, { timeout: 3000 },
+  );
+  expect(await page.evaluate(() => window.__ug.thamesInteriorShell.visible)).toBe(false);
+});
+
+test('material regression: water material untouched, shell BackSide, opaque, non-raycastable', async ({ page }) => {
   await gotoAndWait(page);
   await teleport(page, MID.x, 500, MID.z);
   await page.waitForFunction(() => window.__ug.submergedBlend === 0, null, { timeout: 3000 });
@@ -124,8 +144,7 @@ test('outside appearance regression: water material untouched, shell structurall
       waterOpacity: water.opacity,
       waterDoubleSide: water.side === 2,   // THREE.DoubleSide
       waterDepthWrite: water.depthWrite,
-      // Shell: invisible outside + BackSide + opaque — the pixel-identity guarantee.
-      shellVisible: shell.visible,
+      // Shell: BackSide + opaque, so it culls the near bank from the land.
       shellBackSide: shell.material.side === 1, // THREE.BackSide
       shellOpaque: shell.material.transparent === false,
       shellDepthWrite: shell.material.depthWrite,
@@ -137,7 +156,6 @@ test('outside appearance regression: water material untouched, shell structurall
   expect(state.waterOpacity).toBeCloseTo(0.58, 2);
   expect(state.waterDoubleSide).toBe(true);
   expect(state.waterDepthWrite).toBe(false);
-  expect(state.shellVisible).toBe(false);
   expect(state.shellBackSide).toBe(true);
   expect(state.shellOpaque).toBe(true);
   expect(state.shellDepthWrite).toBe(true);

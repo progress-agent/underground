@@ -3572,12 +3572,17 @@ function tick(frameTime) {
     ? THREE.MathUtils.smoothstep(waterSurfaceAt(camera.position.x,camera.position.z) - camera.position.y, 0, 2)
     : 0;
 
-  // Interior shell: solid opaque bounds (surface underside + walls + endcaps)
-  // rendered ONLY while the camera is inside the volume — outside stays
-  // pixel-identical because the shell simply does not draw.
+  // Interior shell: opaque bank walls + endcaps. Drawn inside the volume AND
+  // for any camera above ground. The terrain is a skin cut open at the exact
+  // wet footprint, so without the shell the only thing between the bank and
+  // the soil beyond it is the translucent water side wall: looking through the
+  // surface at a bank showed the chalk floor and tube lines behind it (23Sep26w).
+  // BackSide keeps the near bank culled from the land, so only walls seen
+  // across or along the channel draw. Hidden for an underground camera outside
+  // the channel, which keeps its translucent view of the river body.
   const _shell = thamesMesh?.userData?.interiorShell;
   const insideThames=thamesMesh?.userData.navigation?.contains(camera.position) ?? false;
-  if (_shell) _shell.visible = insideThames;
+  if (_shell) _shell.visible = insideThames || !belowSurface;
   setRiverMaterialSubmerged(insideThames);
 
   // Material resistance is now transient and held-key-only. Chalk cruising,

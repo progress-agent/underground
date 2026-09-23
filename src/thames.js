@@ -181,9 +181,9 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   // and already reads correctly from inside; a shell bottom would z-fight it
   // and occlude bathymetry pockets where the DEM carved deeper than the
   // profile. BackSide means only interior-facing surfaces rasterise, and the
-  // mesh is additionally visibility-gated in main.js by the shared
-  // isSubmergedAt predicate — so the OUTSIDE view is pixel-identical to the
-  // shell-less build (it simply never renders for an exterior camera).
+  // mesh is visibility-gated in main.js: drawn inside the volume and for any
+  // above-ground camera (the banks are otherwise a translucent window onto
+  // the underground, 23Sep26w), hidden for an underground camera outside it.
   //
   // The shell top sits SHELL_TOP_DROP below the translucent top face so the
   // two are never coplanar (the DoubleSide water top still composites its
@@ -239,7 +239,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   // translucent top blends over it and solid depth occludes geometry beyond
   // the walls (tubes, buildings, far-bank terrain).
   interiorShell.renderOrder = RENDER_ORDER.TERRAIN;
-  interiorShell.visible = false; // toggled per-frame by isSubmergedAt in main.js
+  interiorShell.visible = false; // toggled per-frame by the camera regime in main.js
   interiorShell.raycast = () => {}; // never a hover/tooltip target
   mesh.add(interiorShell);
   mesh.userData.interiorShell = interiorShell;
