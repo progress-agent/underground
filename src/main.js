@@ -61,6 +61,9 @@ import { getWaterTuningSurface } from './water-material.js';
 import { createMaterialResistance } from './material-resistance.js';
 import { applyRiverBedMaterial, setRiverMaterialSubmerged } from './river-materials.js';
 import { createUnderwaterSurface } from './underwater-surface.js';
+// ── sprint:C ──
+import { createSeaLife } from './sea-life.js';
+// ── /sprint:C ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -1004,6 +1007,9 @@ let thamesMesh = null;
 let parkLabelsGroup = null;
 let parkUndersideController = null;
 let thamesProfileSampler = null;
+// ── sprint:C ──
+let seaLife = null; // silent sea life in the Thames, drawn only while submerged
+// ── /sprint:C ──
 const thamesDataPromise = loadThamesData();
 
 // ---------- Ground (terrain if available, else debug grid) ----------
@@ -1091,6 +1097,19 @@ const thamesDataPromise = loadThamesData();
           thamesPoints: thamesData.points,
         });
       }
+
+      // ── sprint:C ──
+      // Sea life on the same cross-sections as the water volume. The octopus
+      // clings to a drawn bridge pier, so the bridge axes come along too.
+      if (thamesMesh && thamesData?.points) {
+        fetch('/data/bridges.json').then(r => (r.ok ? r.json() : {})).catch(() => ({}))
+          .then(data => {
+            seaLife = createSeaLife({ thamesPoints: thamesData.points, navigation: thamesMesh.userData.navigation,
+              bridges: data?.bridges ?? [], VE: VERTICAL_EXAGGERATION, topY: WATER_TOP_Y, waterLevelM: WATER_LEVEL_M });
+            scene.add(seaLife.group);
+          }).catch(error => console.warn('Sea life unavailable:', error.message));
+      }
+      // ── /sprint:C ──
 
       createBridges({ getTerrainMeshSurfaceY, heightScale:getBuildingHeightScale() }).then(group => {
         if (group) {
@@ -3628,6 +3647,9 @@ function tick(frameTime) {
   const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
   if (overgroundGroup) overgroundGroup.userData.update(surfaceSimulationDt, camera);
   motorwayGroup?.userData.update(surfaceSimulationDt, camera);
+  // ── sprint:C ──
+  seaLife?.update(surfaceSimulationDt, camera, { submerged });
+  // ── /sprint:C ──
 
   // Update living-water shader uniforms.
   updateWater(dt);
@@ -3806,4 +3828,7 @@ if (import.meta.env.DEV) {
       return total;
     },
   };
+  // ── sprint:C ──
+  Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
+  // ── /sprint:C ──
 }

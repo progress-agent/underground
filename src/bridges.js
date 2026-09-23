@@ -242,6 +242,28 @@ function supportPositions(spanM, length, preferredSpacing = 55) {
   return Array.from({ length: pierCount }, (_, i) => start + step * i);
 }
 
+// ── sprint:C ──
+// In-river pier anchors for sea life (sprint 23Sep26w, Lane C). Pure and
+// terrain-free: mirrors the support layout of buildArchBridge/buildBeamBridge
+// so a creature can cling to a pier that is actually drawn. World XZ of each
+// pier centre, the bridge axis (u) and river-wise (n) unit vectors, and the
+// pier half extents along each. Other archetypes return no anchors.
+export function bridgePierAnchors(bridge) {
+  const arch = bridge.archetype === 'arch';
+  const beam = bridge.archetype === 'beam-girder' || bridge.archetype === 'cantilever';
+  if (!arch && !beam) return [];
+  const frame = axisFrame(bridge);
+  const isRail = bridge.kind.includes('rail');
+  const width = Math.max(bridge.deckWidthM, isRail ? 11 : (arch ? 8 : 9));
+  const supports = supportPositions(bridge.spanM, frame.length, arch ? 42 : 60);
+  const xs = arch ? supports : supports.slice(1, -1);
+  const halfU = (arch ? 3.4 : 4.2) / 2;
+  const halfN = (arch ? width + 1.8 : Math.min(width + 3, 18)) / 2;
+  return xs.map(localX => ({ localX, ...worldFromLocal(frame, localX, 0),
+    ux: frame.ux, uz: frame.uz, nx: frame.nx, nz: frame.nz, halfU, halfN }));
+}
+// ── /sprint:C ──
+
 function buildArchBridge(ctx) {
   const { bridge, frame, deckSpan, deckOffsets, deckY, deckBottomY, deckThicknessY, getTerrainMeshSurfaceY } = ctx;
   const geoms = [];
