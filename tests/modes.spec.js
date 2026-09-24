@@ -45,8 +45,8 @@ test.describe('Conveyance modes', () => {
       await page.keyboard.press(key);
       expect(await activeId(page)).toBe(id);
       expect(await pressed(page)).toEqual([id]);
-      // Stubs say "coming"; a mode its own lane has built (Pedestrian, A2) shows its key hint.
-      const stub = await page.evaluate((m) => window.__ug.modes.registry.get(m).stub, id);
+      // Stubs say "coming"; a mode its own lane has built (A2, A3) shows its own key hint.
+      const stub = await page.evaluate((m) => !!window.__ug.modes.registry.get(m).stub, id);
       if (id !== 'deity' && stub) await expect(page.locator('#ug-mode-hint')).toContainText(/coming/i);
       if (id !== 'deity' && !stub) await expect(page.locator('#ug-mode-hint')).not.toContainText(/coming/i);
     }

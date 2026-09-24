@@ -39,6 +39,12 @@ test('registry: four modes on keys 1-4, stubs fall back to Deity', () => {
   assert.equal(reg.get('pedestrian').stub, false, 'Pedestrian is a real mode (lane A2)');
   assert.equal(reg.get('pedestrian').look, 'lock');
   assert.equal(reg.get('pedestrian').solid, true);
+  // Integration (D-037): lane A3 made Drone and Balloon real modes too.
+  assert.equal(!!reg.get('drone').stub, false, 'Drone is a real mode (lane A3)');
+  assert.equal(reg.get('drone').look, 'lock');
+  assert.equal(!!reg.get('balloon').stub, false, 'Balloon is a real mode (lane A3)');
+  assert.equal(reg.get('balloon').look, 'drag');
+  // Whichever modes are still stubs must keep the Deity fallback.
   for (const id of ['drone', 'balloon']) {
     assert.ok(reg.activate(id));
     assert.equal(reg.activeId, id);
@@ -46,6 +52,7 @@ test('registry: four modes on keys 1-4, stubs fall back to Deity', () => {
     assert.match(reg.active.hint, /coming/i);
     assert.equal(looks.at(-1), 'none');
     assert.equal(reg.update(0.016), false, `${id} stub falls back to Deity`);
+    assert.equal(looks.at(-1), 'none');
   }
   assert.equal(reg.activate('nope'), false);
   assert.equal(reg.activeId, 'balloon');
