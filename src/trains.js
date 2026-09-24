@@ -411,8 +411,18 @@ function pose(train) {
   const ud = train.userData;
   ud.curve.getPointAt(ud.t, train.position);
   orient(train);
-  ud._poseT = ud.t; ud._poseDir = ud.dir;
+  ud._poseT = ud.t; ud._poseDir = ud.dir; ud._posT = ud.t;
   trainPoseStats.posed++;
+}
+// A hidden line's trains still move: spatial audio (audio.js reassignPool and
+// updatePoolPositions) reads train.position for every train, visible or not.
+// Keep the cheap position write and skip only the orientation (lookAt) work.
+// The pose is marked stale so it is fully re-posed once the line is shown.
+function placeHidden(train) {
+  const ud = train.userData;
+  if (ud._posT !== ud.t) { ud.curve.getPointAt(ud.t, train.position); ud._posT = ud.t; }
+  ud._poseT = NaN;
+  trainPoseStats.hidden++;
 }
 // ── /s24:R ──
 
@@ -428,7 +438,7 @@ export function updateTrains(system, sim, camera, dt) {
       ud._pausedLeft = Math.max(0, ud._pausedLeft - simDt);
       // ── s24:R ──
       if (reuse) {
-        if (!lineShown(train)) { trainPoseStats.hidden++; continue; }
+        if (!lineShown(train)) { placeHidden(train); continue; }
         if (ud._poseT === ud.t && ud._poseDir === ud.dir) { trainPoseStats.reused++; continue; }
         pose(train);
         continue;
@@ -471,7 +481,7 @@ export function updateTrains(system, sim, camera, dt) {
     ud.t = u;
     // ── s24:R ──
     if (reuse) {
-      if (!lineShown(train)) { ud._poseT = NaN; trainPoseStats.hidden++; continue; }
+      if (!lineShown(train)) { placeHidden(train); continue; }
       pose(train);
       continue;
     }

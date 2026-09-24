@@ -131,3 +131,25 @@ test('the rebuild sweep disposes the batch through disposeTrains, and a new buil
   updateTrains(system, sim, null, 0.1);
   assert.equal(fresh.children[0].count, again.length);
 });
+
+// Integration fix (sprint 24Sep26h): the verifier found that with trainPose on,
+// a train on a solo-filtered (hidden) line froze its position while ud.t kept
+// advancing, so spatial audio (audio.js reads train.position for every train)
+// placed sound sources at stale spots. Position must track the curve always;
+// only the orientation work may be skipped while hidden.
+test('a hidden line still moves its trains (spatial audio reads their position)', () => {
+  setTrainEconomies({ batch: true, reusePose: true });
+  const { group, system, trains } = line('central', 0xdc241f);
+  updateTrains(system, sim, null, 0.1);
+  group.visible = false;
+  for (let i = 0; i < 6; i++) updateTrains(system, sim, null, 2);
+  const p = new THREE.Vector3();
+  trains.forEach((t, i) => {
+    t.userData.curve.getPointAt(t.userData.t, p);
+    assert.ok(t.position.distanceTo(p) < 1e-6, `train ${i} position is current while hidden`);
+  });
+  // A still-hidden dwelling train keeps its current position without re-posing.
+  group.visible = true;
+  updateTrains(system, sim, null, 0);
+  trains.forEach((t, i) => { t.userData.curve.getPointAt(t.userData.t, p); assert.ok(t.position.distanceTo(p) < 1e-6, `train ${i} after show`); });
+});
