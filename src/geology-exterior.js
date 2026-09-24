@@ -7,8 +7,9 @@
 //   1. Clay disc skirt   — a vertical wall on the map edge ring, from
 //      the local terrain surface down to the chalk top (CHALK_TOP_Y). London-
 //      clay brown, matte, faint horizontal strata banding. FrontSide (outward)
-//      so it is invisible from inside the disc. Notched where the two Thames
-//      waterfall ribbons spill over the edge.
+//      so it is invisible from inside the disc. Across the two Thames
+//      waterfall crossings its top is held at the waterfall lip (no notch
+//      since sprint 23Sep26w), so the cliff stays closed under the water.
 //
 //   2. Chalk column     — a tall, slender tapering ring wall from CHALK_TOP_Y
 //      down to ~-19000, starting flush with the map edge (the outer face of
@@ -85,9 +86,9 @@ function firstSegmentFacesOutward(ringXZ /*, centroid */) {
 }
 
 /**
- * Build the clay disc skirt: a vertical wall following the M25 boundary from
- * the local terrain surface down to CHALK_TOP_Y, notched at the Thames
- * crossings so the waterfalls spill over the edge cleanly.
+ * Build the clay disc skirt: a vertical wall following the map edge ring from
+ * the local terrain surface down to CHALK_TOP_Y, its top held at the waterfall
+ * lip across each Thames crossing so the water spills over a closed cliff.
  *
  * @param {Array<{e,n}>} m25Points        M25 BNG ring
  * @param {function}     getSurfaceY      (x,z) → world Y
@@ -394,7 +395,7 @@ export function createGeologyExterior(m25Points, chalkTopY, getSurfaceY, crossin
   if (column) group.add(column);
 
   console.log(
-    `Geology exterior: skirt ${skirt ? 'on' : 'off'} (${crossings.length} notches), ` +
+    `Geology exterior: skirt ${skirt ? 'on' : 'off'} (${crossings.length} waterfall lips), ` +
     `chalk column ${column ? 'on' : 'off'} → -19000`
   );
   return group;
