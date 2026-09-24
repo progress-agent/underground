@@ -17,6 +17,9 @@ import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthIn
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, applyParkUndersideTexture, getTerrainRiverBed } from './terrain.js';
 import { createParkLabels } from './park-labels.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
+// ── sprint:D ──
+import { createSunSystem } from './sun.js';
+// ── /sprint:D ──
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -1000,6 +1003,13 @@ atmosphereLights = createAtmosphere(scene);
 
 // Create sky dome for above-ground visibility
 skyDome = createSkyDome(scene);
+
+// ── sprint:D ──
+// Time-of-day sun (Dawn to Dusk) and near-camera shadows, persisted in prefs.
+// Controls are inserted into the settings HUD above the Rendering row.
+const sunSystem = createSunSystem({ renderer, scene, lights: atmosphereLights, prefs, savePrefs });
+sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? null);
+// ── /sprint:D ──
 
 // Keep rim light for tube highlighting
 const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
@@ -3675,6 +3685,13 @@ function tick(frameTime) {
     // Station updates skipped
   }
   parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
+
+  // ── sprint:D ──
+  // Air-substrate sun blend and shadow fit; must precede the environment and
+  // lighting updates below. Automatic quality level 1+ drops shadows first.
+  sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
+    adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
+  // ── /sprint:D ──
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
