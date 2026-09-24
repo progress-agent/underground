@@ -19,8 +19,12 @@ async function boot(page) {
   await page.goto('/?skip=1&buildings=baked');
   await page.waitForFunction(() => !!(window.__ug && window.__ug.modes && window.__ug.intro
     && !window.__ug.intro.isRunning()), null, { timeout: 90000 });
-  await page.waitForFunction(() => window.__ug.buildingInstanceCount > 100000
-    && window.__ug.lineBranchCenterPts.size > 5, null, { timeout: 90000 });
+  // Every baked tile, not just a count: tiles build in batches, and a count
+  // threshold can pass while the neighbourhood around the camera is still empty.
+  await page.waitForFunction(() => {
+    const b = window.__ug.bakedStats;
+    return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal && window.__ug.lineBranchCenterPts.size > 5;
+  }, null, { timeout: 90000 });
 }
 
 const setSlider = (page, id, v) => page.evaluate(([id, v]) => {
@@ -149,6 +153,57 @@ test.describe('Pedestrian mode', () => {
     expect(slide.maxX).toBeLessThanOrEqual(setup.facade - 0.34);
   });
 
+  test('jetpack: holding Space lifts off a real street and lands on a real roof', async ({ page }) => {
+    await boot(page);
+    await enter(page);
+    const setup = await page.evaluate(() => {
+      const ug = window.__ug, c = ug.modes.collision, m = ug.modes.registry.get('pedestrian');
+      c.sync();
+      const p = ug.camera.position;
+      // A roof 8m to 30m up, wide enough to land on, open ground 3m west of it.
+      const near = c.buildingsNear(p.x, p.z, 2000).filter(b => b.maxX - b.minX > 28 && b.maxZ - b.minZ > 16
+        && b.roofY - b.baseY > 8 * 5 && b.roofY - b.baseY < 30 * 5);
+      for (const b of near) {
+        const cz = (b.minZ + b.maxZ) / 2, sx = b.minX - 3;
+        if (c.waterAt(sx, cz)) continue;
+        const ground = c.groundHeightAt(sx, cz);
+        if (ground === null || c.standHeightAt(sx, cz, Infinity, 0) !== ground) continue;
+        if ([4, 10, 16, 22].some(k => c.roofHeightAt(b.minX + k, cz) !== b.roofY)) continue; // no taller neighbour on the landing spot
+        m.place(sx, cz, { yaw: -Math.PI / 2 });
+        return { found: true, roofY: b.roofY, minX: b.minX, maxX: b.maxX };
+      }
+      return { found: false };
+    });
+    expect(setup.found).toBe(true);
+    await page.mouse.click(5, 300); // a user gesture starts audio, so the jetpack roar has a bus
+    await page.waitForFunction(() => window.__ug.isAudioReady(), null, { timeout: 5000 });
+    await page.keyboard.down(' ');
+    await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
+    // Thrust until clear of the roof and over it, then let go.
+    await page.waitForFunction(({ roofY, minX }) => {
+      const d = window.__ug.modes.registry.get('pedestrian').debug();
+      return d.y > roofY + 2 && d.x > minX + 1;
+    }, setup, { timeout: 30000 });
+    const mid = await dbg(page);
+    expect(mid.jet).toBe(true);
+    expect(mid.state).toBe('air');
+    // Mode SFX follow the physics: the jetpack roars while it thrusts ...
+    expect((await page.evaluate(() => window.__ug.modes.sfx.levels())).jetpack).toBeGreaterThan(0.2);
+    await page.keyboard.up(' ');
+    await page.evaluate(() => window.__ug.fpsControls.keys.delete('w'));
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().state === 'ground',
+      null, { timeout: 30000 });
+    // ... and falls silent once it stops.
+    await frames(page, 30);
+    expect((await page.evaluate(() => window.__ug.modes.sfx.levels())).jetpack).toBeLessThan(0.05);
+    const d = await dbg(page);
+    expect(d.x).toBeGreaterThan(setup.minX);
+    expect(d.x).toBeLessThan(setup.maxX);
+    const roof = await page.evaluate(([x, z]) => window.__ug.modes.collision.roofHeightAt(x, z), [d.x, d.z]);
+    expect(d.y).toBeCloseTo(roof, 3);
+    expect(d.y).toBeGreaterThan(setup.roofY - 0.01);
+  });
+
   test('station: E descends the shaft to the platform at true depth; tunnel lock, sprint, E ascends', async ({ page }) => {
     await boot(page);
     await enter(page);
@@ -243,6 +298,54 @@ test.describe('Pedestrian mode', () => {
     const g = await page.evaluate(([x, z]) => window.__ug.modes.collision.groundHeightAt(x, z), [d.x, d.z]);
     expect(d.y).toBeCloseTo(g, 3);
     expect((d.eyeY - d.y) / VE).toBeCloseTo(1.7, 3);
+  });
+
+  test('at a real branch fork, the facing direction picks the branch', async ({ page }) => {
+    await boot(page);
+    await enter(page);
+    const r = await page.evaluate(async () => {
+      const T = await import('/src/modes/pedestrian-tunnels.js');
+      const net = window.__ug.modes.registry.get('pedestrian').rebuildNetwork();
+      // Find a Y fork: a trunk heading A whose two other headings both continue "ahead" of it.
+      for (const entries of new Set(net.junctionAt.values())) {
+        const heads = [];
+        for (const e of entries) {
+          const p = net.paths[e.path];
+          for (const d of [1, -1]) {
+            if (d > 0 ? e.s >= p.length - 1e-6 : e.s <= 1e-6) continue;
+            const h = T.headingAt(p, e.s, d);
+            if (!heads.some(o => o.h.x * h.x + o.h.z * h.z > 0.95)) heads.push({ h, path: e.path, s: e.s, d });
+          }
+        }
+        if (heads.length !== 3) continue;
+        for (const A of heads) {
+          const [B, C] = heads.filter(x => x !== A);
+          const ahead = (x) => -(x.h.x * A.h.x + x.h.z * A.h.z);
+          if (ahead(B) < 0.3 || ahead(C) < 0.3 || B.h.x * C.h.x + B.h.z * C.h.z > 0.8) continue;
+          // Start 150m out along the trunk, then walk back through the fork facing B, then facing C.
+          const start = { path: A.path, s: A.s + A.d * 150, dir: -A.d };
+          const runTo = (want) => {
+            const pos = { ...start };
+            T.advance(net, pos, 400, want);
+            return { pos, p: T.pointAt(net.paths[pos.path], pos.s) };
+          };
+          const toB = runTo(B.h), toC = runTo(C.h);
+          const j = T.pointAt(net.paths[A.path], A.s);
+          const dirOf = (q) => { const dx = q.p.x - j.x, dz = q.p.z - j.z, l = Math.hypot(dx, dz) || 1; return { x: dx / l, z: dz / l }; };
+          const db = dirOf(toB), dc = dirOf(toC);
+          return {
+            found: true, line: net.paths[A.path].lineId, apart: Math.hypot(toB.p.x - toC.p.x, toB.p.z - toC.p.z),
+            bOnB: db.x * B.h.x + db.z * B.h.z, bOnC: db.x * C.h.x + db.z * C.h.z,
+            cOnC: dc.x * C.h.x + dc.z * C.h.z, cOnB: dc.x * B.h.x + dc.z * B.h.z,
+          };
+        }
+      }
+      return { found: false };
+    });
+    expect(r.found).toBe(true);
+    expect(r.apart).toBeGreaterThan(40);
+    expect(r.bOnB).toBeGreaterThan(r.bOnC);
+    expect(r.cOnC).toBeGreaterThan(r.cOnB);
   });
 
   test('the river: walking off a real Thames bank enters swim; Space strokes up; climbing out at the bank', async ({ page }) => {

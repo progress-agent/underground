@@ -215,6 +215,13 @@ test.describe('Conveyance modes', () => {
   test('collision service stops a body at a real building facade and reads its roof', async ({ page }) => {
     await boot(page, '/?skip=1&buildings=baked');
     await page.waitForFunction(() => window.__ug.buildingInstanceCount > 100000, null, { timeout: 90000 });
+    // Lane A2: also wait for every baked tile. Tiles build in batches, so the
+    // count alone can pass while no tile near the camera exists yet (seen:
+    // 233 of 600 meshes, zero buildings within 1.5km, a spurious failure).
+    await page.waitForFunction(() => {
+      const b = window.__ug.bakedStats;
+      return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal;
+    }, null, { timeout: 90000 });
     const r = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision;
       c.sync();
