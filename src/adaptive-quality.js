@@ -20,6 +20,14 @@
 //   within budget), it returns to where the descent began and holds there.
 //   Any improvement re-anchors the descent. The shadows rung is exempt: it is
 //   the agreed first thing to go.
+// - The shadows rung keeps the old controller's tolerance (integration fix,
+//   24Sep26h). Leaving full quality (shadows on) needs the mean interval over
+//   1.14 x target (19ms, ~52.6 fps), the old controller's 19ms line, rather
+//   than the 1.10 band used below it. River at Greenwich runs at about 17.7 to
+//   18ms with shadows on the M5 (plus ~0.2ms of sky); at 1.10 (18.3ms) its
+//   noisy windows tripped the rung and shadows were lost there, which the
+//   previous controller never did. A probe back up to shadows is judged
+//   against the same 19ms line, so a ~56 fps view is allowed to keep them.
 // - Probes back off per level and only retry early when the scene has become
 //   clearly lighter, which stops the 2<->3 bounce every 4 to 5s.
 export const QUALITY_LEVELS = [
@@ -43,6 +51,7 @@ export const QUALITY_LEVELS = [
 export const ADAPTIVE_TUNING = {
   targetMs: 1000 / 60,
   overBudget: 1.10,     // drop when the mean interval exceeds 1.10 x target (~54.5 fps)
+  shadowsOverBudget: 1.14, // but leave level 0 (shadows on) only above 19ms (~52.6 fps)
   severe: 1.8,          // one window is enough above this (~33 fps)
   doubleStep: 2.5,      // and two rungs at once above this (~24 fps)
   underBudget: 1.03,    // probe up only at or below 1.03 x target (~58 fps)
@@ -70,6 +79,8 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   const history = [];        // recent decisions, for tests and the dev HUD
 
   const over = () => K.targetMs * K.overBudget;
+  // The over-budget line for a given level: level 0 (the shadows rung) is more tolerant.
+  const overAt = l => K.targetMs * (l === 0 ? K.shadowsOverBudget : K.overBudget);
   const EDGE_WORK = { 4: 1, 2: 0.8, 0: 0.62 };
   const work = l => { const q = QUALITY_LEVELS[l]; return q.scale * q.scale * EDGE_WORK[q.samples]; };
 
@@ -123,7 +134,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     // 2. Did the last probe hold?
     if (pendingProbe) {
       const p = pendingProbe; pendingProbe = null;
-      if (mean > over()) {
+      if (mean > overAt(p.to)) {
         const b = backoff.get(p.to), count = (b?.count ?? 0) + 1;
         backoff.set(p.to, { until: now + Math.min(K.backoffMaxMs, K.backoffMs * 2 ** (count - 1)), mean: p.before, count });
         overWindows = 0; stableMs = 0;
@@ -133,7 +144,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
       backoff.delete(p.to);
     }
 
-    if (mean > over()) {
+    if (mean > overAt(level)) {
       stableMs = 0; overWindows++;
       const severe = mean > K.targetMs * K.severe;
       if (level >= MAX || (overWindows < 2 && !severe && !continuing)) return;

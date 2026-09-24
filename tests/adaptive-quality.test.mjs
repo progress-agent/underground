@@ -110,3 +110,25 @@ test('uncapped fast display with ample headroom does not bounce between rungs',(
  h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,60000);
  assert.ok(h.changes.length-settle<=6,`changes in 60s: ${h.changes.length-settle}`);
 });
+// Integration fix, 24Sep26h (verifier FAIL): river at Greenwich runs at about
+// 17.7 to 18ms with shadows on the M5, and its window means wander above the
+// 1.10 band (18.3ms). The e367efd controller (p75 over 19ms) kept shadows
+// there in every run; the shadows rung must be at least as tolerant.
+const riverLike=(base)=>(q,k)=>(q.shadows?base:base-1.5)+0.7*Math.sin(k*0.02);
+test('a ~56 fps view with shadows (river at Greenwich) keeps them',()=>{
+ for(const base of [17.7,17.9,18.1]){
+  const h=harness();h.sim(riverLike(base),60000);
+  assert.equal(h.controller.get().level,0,`base ${base}: ${JSON.stringify(h.controller.state().history)}`);
+  assert.equal(h.changes.length,1,`base ${base}: no changes`);
+ }
+});
+test('a probe back up to shadows at ~56 fps holds',()=>{
+ // Pushed off shadows by a heavy moment, then back at the river view.
+ const h=harness();h.sim(()=>24,4000);assert.ok(h.controller.get().level>=1);
+ h.sim(riverLike(17.9),90000);
+ assert.equal(h.controller.get().level,0,JSON.stringify(h.controller.state().history.slice(-6)));
+});
+test('shadows still go first once a view is clearly below ~52 fps',()=>{
+ const h=harness();h.sim((q,k)=>(q.shadows?20.5:17)+0.3*Math.sin(k*0.02),10000);
+ assert.equal(h.changes[1].shadows,false);assert.equal(h.controller.get().level,1);
+});
