@@ -81,28 +81,46 @@ test('Thames volume covers every centreline waypoint (water continuity)', async 
   await page.waitForFunction(() => {
     let water = null;
     window.__ug.scene.traverse((o) => { if (o.name === 'thamesRiver') water = o; });
-    return !!water;
+    // The edge trim runs in the M25 boundary step, which ends by adding the
+    // exterior geology group.
+    return !!water && !!window.__ug.scene.getObjectByName('geology-exterior');
   }, { timeout: 60000 });
 
   const out = await page.evaluate(async ([originE, originN]) => {
-    const THREE = await import('/@fs/Users/jc/repos/underground/node_modules/three/build/three.module.js');
+    // The app's own THREE (dev build exposes it); the absolute /@fs path only
+    // resolves from the main checkout, not from a git worktree.
+    const THREE = window.__ugTHREE || await import('/@fs/Users/jc/repos/underground/node_modules/three/build/three.module.js');
     const ug = window.__ug;
     const res = await fetch('/data/thames.json', { cache: 'no-store' });
     const pts = (await res.json()).points;
     let water = null;
     ug.scene.traverse((o) => { if (o.name === 'thamesRiver') water = o; });
+    // Sprint 23Sep26w (D-037 Lane B): the map ends at the outer carriageway
+    // and the river volume is trimmed there, so continuity is required over
+    // every waypoint ON the map; waypoints beyond the edge (thames.json runs
+    // 3.4km W / 1km E past it) must now carry no water. A 5m band either
+    // side of the edge is not asserted (the cut lies on the edge line).
+    const { getMapEdgeRing, signedDistanceToRing } = await import('/src/m25-edge.js');
+    const ring = getMapEdgeRing();
     const ray = new THREE.Raycaster();
     const down = new THREE.Vector3(0, -1, 0);
-    const misses = [];
+    const misses = [], beyond = [];
+    let onMap = 0, offMap = 0;
     for (const p of pts) {
       const x = p.e - originE, z = originN - p.n;
+      const sd = signedDistanceToRing(x, z, ring);
+      if (Math.abs(sd) < 5) continue;
       ray.set(new THREE.Vector3(x, 5000, z), down);
       const hits = ray.intersectObject(water, false);
-      if (!hits.length) misses.push({ e: p.e, n: p.n, w: p.w });
+      if (sd > 0) { onMap++; if (!hits.length) misses.push({ e: p.e, n: p.n, w: p.w }); }
+      else { offMap++; if (hits.length) beyond.push({ e: p.e, n: p.n, sd: Math.round(sd) }); }
     }
-    return { total: pts.length, misses };
+    return { total: pts.length, onMap, offMap, misses, beyond };
   }, [BNG_REF_E, BNG_REF_N]);
 
   expect(out.total).toBeGreaterThan(300);
+  expect(out.onMap).toBeGreaterThan(300);
   expect(out.misses, `waypoints with no water mesh overhead: ${JSON.stringify(out.misses.slice(0, 12))}`).toEqual([]);
+  expect(out.offMap).toBeGreaterThan(0);
+  expect(out.beyond, `water beyond the map edge: ${JSON.stringify(out.beyond.slice(0, 12))}`).toEqual([]);
 });

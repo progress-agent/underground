@@ -4,16 +4,16 @@
 // pale shaft of chalk receding down into abstraction. This module builds that
 // silhouette:
 //
-//   1. Clay disc skirt   — a vertical wall on the M25 boundary polyline, from
+//   1. Clay disc skirt   — a vertical wall on the map edge ring, from
 //      the local terrain surface down to the chalk top (CHALK_TOP_Y). London-
 //      clay brown, matte, faint horizontal strata banding. FrontSide (outward)
 //      so it is invisible from inside the disc. Notched where the two Thames
 //      waterfall ribbons spill over the edge.
 //
 //   2. Chalk column     — a tall, slender tapering ring wall from CHALK_TOP_Y
-//      down to ~-19000, following the smoothed M25 footprint (inset ~600m at
-//      the top so the disc overhangs) and narrowing to ~45% radius at the
-//      geometric bottom. Chalk white, subtle vertical striation, fog:true,
+//      down to ~-19000, starting flush with the map edge (the outer face of
+//      the outer carriageway, sprint 23Sep26w; the 600m overhang is gone) and
+//      narrowing to ~45% radius at the geometric bottom. Chalk white, subtle vertical striation, fog:true,
 //      vertex-alpha ramp opaque→0 over a deep fade (-2500 → -18000). FrontSide.
 //      "Receding into abstraction" = deep taper + long alpha fade + fog.
 //
@@ -68,18 +68,20 @@ void main() {`
 
 // Decide whether a ring-wall built with a fixed winding faces outward. We emit
 // every quad in the same local order, so a consistently-ordered ring produces
-// consistently-facing normals — one global test + flip suffices. Returns true
-// if the FIRST segment's front-face normal points AWAY from the centroid.
-function firstSegmentFacesOutward(ringXZ, centroid) {
-  const a = ringXZ[0], b = ringXZ[1 % ringXZ.length];
-  const dx = b.x - a.x, dz = b.z - a.z;
-  // Front-face normal of a vertical wall emitted (TL,BL,TR) with +Y up:
-  // for the corner order we use, the outward test reduces to the sign of the
-  // 2D cross product of the segment tangent with the centroid→midpoint vector.
-  const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-  const ox = mx - centroid.x, oz = mz - centroid.z;
-  // Wall normal candidate (-dz, dx); outward if it aligns with (ox, oz).
-  return (-dz * ox + dx * oz) > 0;
+// consistently-facing normals — one global test + flip suffices.
+//
+// Sprint 23Sep26w: decided by the ring's SIGNED AREA, not by its first
+// segment. The map-edge ring carries short steps where the carriageway width
+// changes; a first segment that is one of those (or any locally concave one)
+// answered the centroid test the wrong way and turned the whole skirt inside
+// out. For positive signed area (x, z) the emitted front face points inward.
+function firstSegmentFacesOutward(ringXZ /*, centroid */) {
+  let area = 0;
+  for (let i = 0; i < ringXZ.length; i++) {
+    const a = ringXZ[i], b = ringXZ[(i + 1) % ringXZ.length];
+    area += a.x * b.z - b.x * a.z;
+  }
+  return area < 0;
 }
 
 /**
@@ -95,11 +97,21 @@ function firstSegmentFacesOutward(ringXZ, centroid) {
  */
 function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   // Ring vertices in scene coords + their local surface Y (skirt top).
+  // Sprint 23Sep26w: the ring is densified to <= SKIRT_STEP_M so the lip
+  // follows the terrain it clips; long straight motorway chords would
+  // otherwise leave the cliff top under or over the ground between vertices.
+  const SKIRT_STEP_M = 30;
+  const flat = m25Points.map(p => bngToScene(p.e, p.n));
+  if (flat.length > 1 && flat[0].x === flat.at(-1).x && flat[0].z === flat.at(-1).z) flat.pop();
   const ring = [];
-  for (const p of m25Points) {
-    const { x, z } = bngToScene(p.e, p.n);
-    const y = getSurfaceY({ x, z });
-    ring.push({ x, z, topY: y !== null ? y + 2 : 60 });
+  for (let i = 0; i < flat.length; i++) {
+    const a = flat[i], b = flat[(i + 1) % flat.length];
+    const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / SKIRT_STEP_M));
+    for (let k = 0; k < steps; k++) {
+      const x = a.x + (b.x - a.x) * k / steps, z = a.z + (b.z - a.z) * k / steps;
+      const y = getSurfaceY({ x, z });
+      ring.push({ x, z, topY: y !== null ? y + 2 : 60 });
+    }
   }
   const N = ring.length;
   if (N < 3) return null;
@@ -109,16 +121,17 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   for (const r of ring) { cx += r.x; cz += r.z; }
   cx /= N; cz /= N;
 
-  // Notch: skip any segment whose midpoint is within (ribbon half-width +
-  // margin) of a Thames crossing, so the wall opens where water spills over.
-  const NOTCH_MARGIN = 90;
-  function inNotch(mx, mz) {
+  // Notch (sprint 23Sep26w): the skirt is no longer cut open at the Thames.
+  // The river volume now ends at the cliff (trimmed to the edge in main.js),
+  // so across the channel the skirt top is held at the waterfall lip and the
+  // cliff stays closed beneath the water. A cut notch showed a window onto the
+  // hollow disc interior either side of the ribbon.
+  const NOTCH_MARGIN = 0;
+  for (const r of ring) {
     for (const c of crossings) {
       const half = c.width / 2 + NOTCH_MARGIN;
-      const dx = mx - c.x, dz = mz - c.z;
-      if (dx * dx + dz * dz < half * half) return true;
+      if ((r.x - c.x) ** 2 + (r.z - c.z) ** 2 < half * half) r.topY = Math.min(r.topY, c.surfaceY + 2);
     }
-    return false;
   }
 
   const ROWS = 8;               // vertical subdivisions → carry strata banding
@@ -152,8 +165,6 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   for (let ri = 0; ri < N; ri++) {
     const a = ring[ri];
     const b = ring[(ri + 1) % N];
-    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-    if (inNotch(mx, mz)) continue;             // leave the passage for the water
     const ni = (ri + 1) % N;
     for (let row = 0; row < ROWS; row++) {
       const TL = rowVert(ri, row),     BL = rowVert(ri, row + 1);
@@ -196,6 +207,7 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
 // smooth with a couple of moving-average passes so the raw ~270-vertex M25
 // jaggedness becomes a clean column footprint.
 function smoothRing(ringXZ, count = 128, smoothPasses = 2) {
+  if (ringXZ.length > 1 && ringXZ[0].x === ringXZ.at(-1).x && ringXZ[0].z === ringXZ.at(-1).z) ringXZ = ringXZ.slice(0, -1);
   // Cumulative arc length.
   const n = ringXZ.length;
   const seg = [];
@@ -246,18 +258,19 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
     levels = 64,            // vertical divisions (raised with the deeper column)
     bottomTaper = 0.45,     // radius at the bottom (fraction of the top ring) —
                             // a distinctly slender tip, not a cylinder
-    ringCount = 128,        // smoothed footprint resolution
+    ringCount = 1024,       // footprint resolution (~190m chords on the M25)
+    smoothPasses = 0,       // sprint 23Sep26w: follow the edge, do not round it
     fadeTop = -2500,        // opaque above this depth → the visible column runs
                             // deep before it starts dissolving (no bowl/saucer)
     fadeBottom = -18000,    // fully dissolved by this depth (receding to nothing)
-    topInset = 600,         // shrink the top ring this many metres inside the
-                            // M25 line so the clay disc subtly overhangs the
-                            // column (chalk floor is rim-flattened for 800m, so
-                            // no seam opens; skirt stays at the true boundary)
+    topInset = 0,           // sprint 23Sep26w (Jordan): the map ends in a clean
+                            // cliff at the outer carriageway, so the column
+                            // now continues the skirt flush. Was 600 (6e157dc):
+                            // a disc overhang with a wavy masked rim.
   } = opts;
 
   const rawRing = m25Points.map(p => bngToScene(p.e, p.n));
-  const ring = smoothRing(rawRing, ringCount);
+  const ring = smoothRing(rawRing, ringCount, smoothPasses);
   const M = ring.length;
   if (M < 3) return null;
 

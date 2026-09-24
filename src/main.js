@@ -24,6 +24,13 @@ import { loadThamesData, createThamesVolume, WATER_LEVEL_M, WATER_TOP_Y, updateW
 import { createThamesProfileSampler } from './thames-profile.js';
 import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
 import { createGeologyExterior } from './geology-exterior.js';
+// ── sprint:B ──
+import { getMapEdgePointsBNG, getMapEdgeRing, trimRibbonVolumeToRing, isOffMapEdge } from './m25-edge.js';
+// Buildings between the outer barrier and the bake's support ring would stand
+// over the void now the ground ends at the barrier; suppress them alongside
+// any existing suppression (airports).
+const withOffMapSuppression = (suppress) => (b) => isOffMapEdge(b) || !!suppress?.(b);
+// ── /sprint:B ──
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { getInfraHazeStrength } from './infra-materials.js';
@@ -1159,9 +1166,16 @@ const thamesDataPromise = loadThamesData();
           return;
         }
         const supportPoints = m25Data.supportPoints || m25Data.points;
+        // ── sprint:B ──
+        // Map edge = outer face of the outer carriageway (D-037). Rendering
+        // only: terrain/chalk mask, waterfalls, skirt notches and the cliff use
+        // it; membership (isInsideM25) and the bake keep the support ring.
+        let mapEdgePoints = supportPoints;
+        try { mapEdgePoints = getMapEdgePointsBNG(); } catch (error) { console.warn(`Map edge unavailable (${error.message}); using support ring`); }
+        // ── /sprint:B ──
 
         // Generate mask and apply to both terrain materials
-        const maskTex = generateM25Mask(supportPoints);
+        const maskTex = generateM25Mask(mapEdgePoints); // sprint:B
         if (result.topMat) applyM25Mask(result.topMat, maskTex);
         if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
         // Exact wet polygons hide terrain only when their water replacement
@@ -1199,17 +1213,26 @@ const thamesDataPromise = loadThamesData();
         // Thames waterfalls at disc edge (needs both Thames and M25 data)
         let thamesCrossings = [];
         if (thamesData?.points?.length) {
-          const waterfalls = createThamesWaterfalls(thamesData.points, supportPoints, getTerrainMeshSurfaceY);
+          const waterfalls = createThamesWaterfalls(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY); // sprint:B
           if (waterfalls) scene.add(waterfalls);
           // Boundary crossings feed the skirt notch so water spills over cleanly.
-          thamesCrossings = computeThamesCrossings(thamesData.points, supportPoints, getTerrainMeshSurfaceY);
+          thamesCrossings = computeThamesCrossings(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY); // sprint:B
         }
+        // ── sprint:B ──
+        // The river ends at the cliff where its waterfall spills, rather than
+        // floating on past the map edge (thames.json runs 3.4km W / 1km E past it).
+        if (thamesMesh && mapEdgePoints !== supportPoints) {
+          const edgeRing = getMapEdgeRing();
+          trimRibbonVolumeToRing(thamesMesh.geometry, edgeRing);
+          if (thamesMesh.userData.interiorShell) trimRibbonVolumeToRing(thamesMesh.userData.interiorShell.geometry, edgeRing);
+        }
+        // ── /sprint:B ──
 
         // Exterior tapered column (D1): clay disc skirt + fading chalk column.
         // FrontSide-outward, so invisible from inside the disc; the skirt is
         // notched at the Thames crossings so the waterfalls spill over the edge.
         geologyExteriorGroup = createGeologyExterior(
-          supportPoints, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings
+          mapEdgePoints, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings // sprint:B
         );
         if (geologyExteriorGroup) {
           geologyExteriorGroup.visible = geologyGroup ? geologyGroup.visible : true;
@@ -1258,7 +1281,7 @@ const thamesDataPromise = loadThamesData();
             const mesh = createTileBuildings(
               filteredBuildings, getStructuralSurfaceY,
               VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file),
-              airportsGroup ? isAirportBuilding : null
+              withOffMapSuppression(airportsGroup ? isAirportBuilding : null) // sprint:B
             );
             if (mesh) {
               mesh.name = `buildings-${tileEntry.file}`;
@@ -1651,7 +1674,7 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
-      suppressBuilding: airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null,
+      suppressBuilding: withOffMapSuppression(airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null), // sprint:B
       onMesh: (mesh) => {
         bakedMeshes.push(mesh);
         // A switch during the incremental build must not mix both cities.

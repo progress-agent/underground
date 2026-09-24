@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { xzToTerrainUV } from './terrain.js';
+import { rasterSignedDistanceMask, MAP_EDGE_SDF_BAND_M } from './m25-edge.js';
 
 /**
  * Fetch M25 route data from public/data/m25.json.
@@ -47,62 +48,40 @@ function bngToMaskUV(e, n) {
 }
 
 /**
- * Render M25 polygon to a canvas mask (white inside, black outside).
- * Used as a discard mask in terrain material shaders.
+ * Render the boundary ring to a canvas mask for the terrain discard.
  *
- * @param {Array<{e:number,n:number}>} points  M25 BNG waypoints (closed ring)
+ * Sprint 23Sep26w (Lane B): the mask stores a clamped SIGNED DISTANCE
+ * (0.5 on the ring, rising inside, falling outside; see m25-edge.js). A binary
+ * fill at ~34m texels, bilinearly filtered, drew a wavy border up to tens of
+ * metres off the ring; the distance field interpolates to a line that holds
+ * the ring to well under a metre. The shader's `< 0.5` discard is unchanged.
+ *
+ * @param {Array<{e:number,n:number}>} points  boundary BNG ring (closed)
  * @param {number} [size]   Output texture resolution
- * @param {number} [feather] Edge feather in pixels
+ * @param {number} [band]   Signed-distance band in metres
  * @returns {THREE.CanvasTexture}
  */
-export function generateM25Mask(points, size = 2048, feather = 3) {
+export function generateM25Mask(points, size = 2048, band = MAP_EDGE_SDF_BAND_M) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-
-  // Black background (outside M25 = discard)
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, size, size);
-
-  // Draw M25 polygon in white (inside = keep)
-  ctx.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    const { u, v } = bngToMaskUV(points[i].e, points[i].n);
-    const px = u * size;
-    const py = v * size;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+  const ring = points.map(p => { const { x, z } = bngToScene(p.e, p.n); return [x, z]; });
+  const field = rasterSignedDistanceMask(ring, size, xzToTerrainUV, band);
+  const image = ctx.createImageData(size, size);
+  for (let k = 0; k < field.length; k++) {
+    const o = k * 4, v = field[k];
+    image.data[o] = v; image.data[o + 1] = v; image.data[o + 2] = v; image.data[o + 3] = 255;
   }
-  ctx.closePath();
-  ctx.fillStyle = '#fff';
-  ctx.fill();
-
-  // Feathered edge: draw a slightly smaller polygon with blur
-  // to soften the disc boundary
-  if (feather > 0) {
-    // Stroke the boundary in grey with blur for soft edge
-    ctx.save();
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.filter = `blur(${feather}px)`;
-    ctx.beginPath();
-    for (let i = 0; i < points.length; i++) {
-      const { u, v } = bngToMaskUV(points[i].e, points[i].n);
-      const px = u * size;
-      const py = v * size;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fillStyle = '#fff';
-    ctx.fill();
-    ctx.restore();
-  }
+  ctx.putImageData(image, 0, 0);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.magFilter = THREE.LinearFilter;
+  // No mipmaps: averaging a distance field across levels would move the edge.
   tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.userData.signedDistanceBandM = band;
   return tex;
 }
 
@@ -344,6 +323,45 @@ export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
   });
   const centroid = sceneCentroid(m25Scene);
 
+  // Sprint 23Sep26w (Lane B): where the river's own centreline crosses the
+  // ring. thames.json now runs past the map edge (3.4km west, 1km east), so an
+  // outward ray from each endpoint started OUTSIDE the ring: the west ribbon
+  // landed on the far side of a bend, 14km from the river. The first and
+  // last centreline intersections are the true spill points; the endpoint
+  // ray below remains only for data that stops inside the ring.
+  const line = thamesPoints.map(p => bngToScene(p.e, p.n));
+  const hits = [];
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i], b = line[i + 1], rx = b.x - a.x, rz = b.z - a.z;
+    for (let j = 0; j < m25Scene.length - 1; j++) {
+      const p = m25Scene[j], q = m25Scene[j + 1], sx = q.x - p.x, sz = q.z - p.z;
+      const den = rx * sz - rz * sx;
+      if (Math.abs(den) < 1e-10) continue;
+      const t = ((p.x - a.x) * sz - (p.z - a.z) * sx) / den;
+      const u = ((p.x - a.x) * rz - (p.z - a.z) * rx) / den;
+      if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+      const len = Math.hypot(rx, rz) || 1;
+      hits.push({
+        chain: i + t, x: a.x + rx * t, z: a.z + rz * t,
+        surfaceY: p.surfaceY + u * (q.surfaceY - p.surfaceY),
+        fx: rx / len, fz: rz / len,
+        width: (thamesPoints[i].w || 100) + t * ((thamesPoints[i + 1].w || 100) - (thamesPoints[i].w || 100)),
+      });
+    }
+  }
+  if (hits.length >= 2) {
+    hits.sort((a, b) => a.chain - b.chain);
+    for (const [h, sign, side] of [[hits[0], -1, 'west'], [hits.at(-1), 1, 'east']]) {
+      // Flow off the edge: upstream at the west end, downstream at the east.
+      let dirX = h.fx * sign, dirZ = h.fz * sign;
+      if (dirX * (h.x - centroid.x) + dirZ * (h.z - centroid.z) < 0) { dirX = -dirX; dirZ = -dirZ; }
+      const y = getSurfaceY({ x: h.x, z: h.z });
+      crossings.push({ x: h.x, z: h.z, surfaceY: y !== null && Number.isFinite(y) ? y : h.surfaceY,
+        dirX, dirZ, width: h.width, side });
+    }
+    return crossings;
+  }
+
   const endpoints = [
     { pt: thamesPoints[0], next: thamesPoints[1],
       dirSign: -1, width: thamesPoints[0].w || 100 },
@@ -396,59 +414,12 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
 
   if (!thamesPoints?.length || !m25Points?.length) return group;
 
-  // Convert M25 points to scene coordinates with surface Y
-  const m25Scene = m25Points.map(p => {
-    const { x, z } = bngToScene(p.e, p.n);
-    const y = getSurfaceY({ x, z });
-    return { x, z, surfaceY: y !== null ? y : 50 };
-  });
-  const centroid = sceneCentroid(m25Scene);
-
-  // Thames endpoints and flow directions
-  const endpoints = [
-    { // West end (first point in Thames data)
-      pt: thamesPoints[0],
-      next: thamesPoints[1],
-      dirSign: -1, // flowing westward off the edge
-      width: thamesPoints[0].w || 100,
-    },
-    { // East end (last point in Thames data)
-      pt: thamesPoints[thamesPoints.length - 1],
-      prev: thamesPoints[thamesPoints.length - 2],
-      dirSign: 1,  // flowing eastward off the edge
-      width: thamesPoints[thamesPoints.length - 1].w || 300,
-    },
-  ];
-
-  for (const ep of endpoints) {
-    const { x: epX, z: epZ } = bngToScene(ep.pt.e, ep.pt.n);
-
-    // Flow direction from Thames data
-    let dirX, dirZ;
-    if (ep.next) {
-      const { x: nx, z: nz } = bngToScene(ep.next.e, ep.next.n);
-      dirX = epX - nx; // reverse: flowing away from next
-      dirZ = epZ - nz;
-    } else {
-      const { x: px, z: pz } = bngToScene(ep.prev.e, ep.prev.n);
-      dirX = epX - px; // forward: flowing away from prev
-      dirZ = epZ - pz;
-    }
-    const dirLen = Math.sqrt(dirX * dirX + dirZ * dirZ) || 1;
-    dirX /= dirLen;
-    dirZ /= dirLen;
-
-    // Find where the flow direction ray hits the M25 boundary. If the directed
-    // ray misses (the west endpoint sits near-tangent to the ring), fall back
-    // to the nearest boundary point with an outward flow direction — so BOTH
-    // ribbons render, not just the east one.
-    let intersection = findRayM25Intersection(epX, epZ, dirX, dirZ, m25Scene);
-    if (!intersection) {
-      const fb = nearestM25Boundary(epX, epZ, m25Scene, centroid);
-      if (!fb) continue;
-      intersection = { x: fb.x, z: fb.z, surfaceY: fb.surfaceY };
-      dirX = fb.dirX; dirZ = fb.dirZ;
-    }
+  // One source of truth with the skirt notch (sprint 23Sep26w): each ribbon
+  // spills exactly where computeThamesCrossings says the river leaves the map.
+  for (const c of computeThamesCrossings(thamesPoints, m25Points, getSurfaceY)) {
+    const ep = { width: c.width, dirSign: c.side === 'east' ? 1 : -1 };
+    const intersection = { x: c.x, z: c.z, surfaceY: c.surfaceY };
+    const dirX = c.dirX, dirZ = c.dirZ;
 
     // Build waterfall arc: horizontal approach → 90° curve → vertical fall
     const surfaceY = intersection.surfaceY;
