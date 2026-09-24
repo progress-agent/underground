@@ -72,6 +72,11 @@
         overflow: auto;
         overscroll-behavior: contain;
       }
+      /* sprint:integrate (D-037): the Dawn/Dusk and Shadows rows (lane D) make
+         the open settings panel two rows taller, which pushed Reset settings
+         under the controls guide (z-index 28) on a 720px-tall window. While the
+         panel is open it is what the viewer is using, so it sits above the guide. */
+      .hud:has(details[open]) { z-index: 30; }
       .hud h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
       .hud p { margin: 0; font-size: 12px; opacity: 0.92; max-width: 380px; }
       .hud code { opacity: 0.95; }
