@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { createServer } from 'vite';
+import { fileURLToPath } from 'node:url';
+const ROOT = fileURLToPath(new URL('..', import.meta.url)); // repo root, whatever the launch directory
 let server, api;
-test.beforeAll(async()=>{server=await createServer({server:{middlewareMode:true,hmr:{port:24831}},appType:'custom'});api=await server.ssrLoadModule('/src/airports.js');});
+test.beforeAll(async()=>{server=await createServer({root:ROOT,server:{middlewareMode:true,hmr:{port:24831}},appType:'custom'});api=await server.ssrLoadModule('/src/airports.js');});
 test.afterAll(async()=>{await server?.close();});
 test('nine airports retain mapped source layouts and four current Heathrow terminal groups',()=>{
  expect(api.AIRPORT_DATA.airports.map(a=>a.id)).toEqual(['heathrow','london-city','biggin-hill','northolt','elstree','denham','stapleford','kenley','damyns-hall']);

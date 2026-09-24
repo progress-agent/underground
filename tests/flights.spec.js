@@ -5,6 +5,11 @@
 import { test, expect } from '@playwright/test';
 import { createServer } from 'vite';
 import UPNG from 'upng-js';
+import { fileURLToPath } from 'node:url';
+
+// Pin Vite's root to the repo so the SSR model loads whatever directory the
+// runner was launched from (worktrees are run by absolute path).
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 let server, F, motorway;
 const DEG = Math.PI / 180;
@@ -12,7 +17,7 @@ const tilted = ({ x, z }) => (20 + x * 0.0002 + z * 0.0001) * 5; // canonical Y,
 const EASTERLY = () => ({ dirRad: 90 * DEG, speedMps: 6 });
 
 test.beforeAll(async () => {
-  server = await createServer({ server: { middlewareMode: true, hmr: false, ws: false, watch: null }, appType: 'custom', logLevel: 'error' });
+  server = await createServer({ root: ROOT, server: { middlewareMode: true, hmr: false, ws: false, watch: null }, appType: 'custom', logLevel: 'error' });
   F = await server.ssrLoadModule('/src/flights.js');
   motorway = await server.ssrLoadModule('/src/m25-motorway.js');
 });
