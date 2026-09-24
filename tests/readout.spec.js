@@ -15,6 +15,23 @@ const BASE = '/?skipintro=1';
 async function gotoAndWait(page) {
   await page.goto(BASE);
   await page.waitForFunction(() => !!(window.__ug && window.__ug.readout), null, { timeout: 8000 });
+  // Sprint 24Sep26h (lane H): also wait for the terrain and the M25/geology
+  // step that follows it. The readout is live from module load, but the
+  // terrain is built later in one long main-thread block (tryCreateTerrainMesh,
+  // about 2.7s here) and the M25, geology and motorway callback blocks again
+  // straight after. Until the terrain exists getTerrainMeshSurfaceY() returns
+  // null, so the poses below fell back to a guessed surface of 75 and the tick
+  // classified against y = 0: "50 below the surface" was y = 25, read as AIR,
+  // and only became CLAY once the block ended. Measured on the old
+  // precondition: CLAY arrived 2934ms into the 3000ms budget at normal speed
+  // and 11.6s late at 4x CPU throttling, which is why it failed only late in a
+  // long full run. Waiting for the terrain alone still left 2.1s at 6x (the
+  // callback block); waiting for the chalk floor too (built in the M25 step)
+  // gives 56ms at 1x and 175ms at 6x. The assertions and their 3s budgets are
+  // unchanged; the precondition ("camera below the real terrain, app ticking")
+  // is now true when the pose is set.
+  await page.waitForFunction(() => window.__ug.getTerrainMeshSurfaceY({ x: 0, z: 0 }) !== null
+    && !!window.__ug.scene.getObjectByName('chalkFloor'), null, { timeout: 60000 });
 }
 
 test('readout element exists in DOM after init', async ({ page }) => {

@@ -97,19 +97,25 @@ test('inside chalk: all station label layers hidden', async ({ page }) => {
   );
   await placeRelChalk(page, -50);
   await page.waitForFunction(() => window.__ug.chalkClarity > 0.95, null, { timeout: 5000 });
-  // Two rAF ticks so the label update loop has applied hideForChalk.
-  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const layers = await page.evaluate(() =>
-    [...document.querySelectorAll('.station-overlay-layer')].map(el => el.style.display));
+  // Read the layers as they are PAINTED: inside a rAF callback, which runs
+  // after the app's tick in the same frame (the tick registered its rAF
+  // first), so no task can slip in between. Sprint 24Sep26h (lane H): the old
+  // read ran in a later task, and a tube line still loading from the TfL API
+  // could create its layers there (display 'block' from setLabelsVisible)
+  // before the next tick hid them. Holding one line's route request until
+  // chalk entry and releasing it reproduced that 2 of 2 times (2 of 4 layers
+  // 'block' at creation, 0 of 4 at the next painted frame), so no viewer ever
+  // sees it; the full run is where line arrival drifts into that window.
+  const paintedLayers = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() =>
+    requestAnimationFrame(() => r([...document.querySelectorAll('.station-overlay-layer')].map(el => el.style.display))))));
+  const layers = await paintedLayers();
   expect(layers.length).toBeGreaterThan(0);
   for (const d of layers) expect(d).toBe('none');
 
   // ...and they restore when the camera leaves the chalk (mid-clay pose).
   await placeRelChalk(page, 150);
   await page.waitForFunction(() => window.__ug.chalkClarity === 0, null, { timeout: 5000 });
-  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const anyVisible = await page.evaluate(() =>
-    [...document.querySelectorAll('.station-overlay-layer')].some(el => el.style.display !== 'none'));
+  const anyVisible = (await paintedLayers()).some(d => d !== 'none');
   expect(anyVisible).toBe(true);
 });
 
