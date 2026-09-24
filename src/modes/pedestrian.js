@@ -169,6 +169,7 @@ export function createPedestrianMode(ctx) {
       else if (e.type === 'climb') s.splash(0.25);
       else if (e.type === 'land' && e.speed > 4) s.footsteps(0); // reset cadence; the next step sounds at once
     }
+    lastEvents = []; // one-shots play once, whichever phase runs next
   }
 
   // ── phases ────────────────────────────────────────────────────────────────
