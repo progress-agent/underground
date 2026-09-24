@@ -342,9 +342,9 @@ function applyLayerEconomies() {
     if (!group || _s24Applied.get(group) === _s24LayerEconomyVersion) return;
     fn(group.userData); _s24Applied.set(group, _s24LayerEconomyVersion);
   };
-  apply(motorwayGroup, u => u.setEconomies?.({ frustumCulling: on.m25Cull, instanceRanges: on.instanceRanges, hiddenSkip: on.hiddenSkip }));
+  apply(motorwayGroup, u => u.setEconomies?.({ frustumCulling: on.m25Cull, fogCulling: on.m25FogCull, instanceRanges: on.instanceRanges, hiddenSkip: on.hiddenSkip }));
   apply(overgroundGroup, u => u.setEconomies?.({ compact: on.instanceRanges, ranges: on.instanceRanges, skipHidden: on.hiddenSkip }));
-  apply(flightsGroup, u => u.setEconomies?.({ ranges: on.instanceRanges, skipHidden: on.hiddenSkip }));
+  apply(flightsGroup, u => u.setEconomies?.({ ranges: on.instanceRanges, skipHidden: on.hiddenSkip, pool: on.flightsPool, cull: on.flightCull }));
   setTrainEconomies({ reusePose: on.trainPose });
 }
 // ── /s24:R ──
@@ -3879,6 +3879,10 @@ function tick(frameTime) {
     else adaptiveQuality.reset(frameTime);
   }
   underwaterSurface.update(renderer,dt,insideThames?_submergedBlend:0);
+  // ── s24:R ── last word on M25 culling, after fog and camera are final for
+  // this frame: write any skipped chunk that could now show (fix round 1).
+  if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
+  // ── /s24:R ──
   composer.render(dt);
   sampleCushion();
   requestAnimationFrame(tick);

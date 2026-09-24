@@ -103,6 +103,70 @@ for (const [name, pose] of Object.entries(VIEWS)) {
   });
 }
 
+// Fix round 1: the verifier's pan case. The M25 fleet recomputes every third
+// tick; with culling on, a camera that turns between those ticks used to show
+// late pop-in at the entering edge (15 degrees and more). revalidate() now
+// writes any chunk that can newly show, from the same elapsed time and LOD
+// projection, before the frame is drawn, so the frame must equal the unculled
+// one. The fog cull is live at landing and river views, so both are covered.
+for (const [name, pose, yaws] of [['m25Edge', VIEWS.m25Edge, [8, 20, 40]], ['riverGreenwich', VIEWS.riverGreenwich, [25, 60]], ['landing', VIEWS.landing, [45, 120, 200]]]) {
+  test(`pan between traffic updates leaves the ${name} view unchanged`, async () => {
+    const res = await page.evaluate(async ({ pose, yaws }) => {
+      const u = window.__ug, T = window.__ugTHREE, tl = u.motorwayGroup.userData.trafficLod;
+      u.controls.enableDamping = false;
+      const r = u.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      const place = yaw => {
+        u.camera.position.fromArray(pose.p);
+        const d = new T.Vector3().fromArray(pose.t).sub(u.camera.position).applyAxisAngle(new T.Vector3(0, 1, 0), yaw * Math.PI / 180);
+        u.controls.target.copy(u.camera.position).add(d); u.controls.update();
+      };
+      const grab = (on, yaw) => {
+        u.economies.setAll(on);
+        place(0);
+        window.__step(4); while (tl.frame % 3) window.__step(1); // an update tick just ran at yaw 0
+        place(yaw);
+        window.__step(1); // not an update tick: only revalidate can react
+        const nonUpdate = tl.frame % 3 !== 0;
+        u.composer.render(0); r.setRenderTarget(null);
+        const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); return { b, nonUpdate };
+      };
+      const diff = (a, b) => { let n = 0, max = 0; for (let i = 0; i < a.length; i += 4) { const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])); if (d) { n++; if (d > max) max = d; } } return { px: n, pct: n / (W * H) * 100, max }; };
+      place(0); await new Promise(res => setTimeout(res, 1200));
+      window.__freeze = true; await new Promise(res => setTimeout(res, 100));
+      const out = [];
+      for (const yaw of yaws) {
+        const rv0 = tl.revalidations || 0;
+        const a1 = grab(false, yaw), b1 = grab(true, yaw), a2 = grab(false, yaw), b2 = grab(true, yaw);
+        out.push({ yaw, nonUpdate: a1.nonUpdate && b1.nonUpdate && a2.nonUpdate && b2.nonUpdate, revalidations: (tl.revalidations || 0) - rv0,
+          noise: diff(a1.b, a2.b), onNoise: diff(b1.b, b2.b), ab1: diff(a1.b, b1.b), ab2: diff(a2.b, b2.b), fogChunks: tl.fogCulledChunks });
+      }
+      // Negative control: with revalidate stubbed out, the widest pan must lose
+      // pixels, or this test could not see the pop-in it guards against.
+      const ud = u.motorwayGroup.userData, real = ud.revalidate;
+      ud.revalidate = () => false;
+      let control;
+      try { const yaw = yaws[yaws.length - 1]; control = diff(grab(false, yaw).b, grab(true, yaw).b); } finally { ud.revalidate = real; }
+      window.__thaw(); u.controls.enableDamping = true;
+      return { out, control };
+    }, { pose, yaws });
+    const { out: r, control } = res;
+    console.log(`pan ${name}`, JSON.stringify(r), 'control', JSON.stringify(control));
+    // The M25 edge view is where late pop-in shows (verifier: 1,142 to 58,173 px
+    // at 15 degrees and more); elsewhere the entering chunks may be hidden anyway.
+    if (name === 'm25Edge') expect(control.px).toBeGreaterThan(50);
+    for (const d of r) {
+      expect(d.nonUpdate).toBe(true);
+      const allowPct = MAX_PCT + Math.max(d.noise.pct, d.onNoise.pct);
+      for (const x of [d.ab1, d.ab2]) {
+        expect(x.pct).toBeLessThanOrEqual(allowPct);
+        if (x.px > Math.max(d.noise.px, d.onNoise.px)) expect(x.max).toBeLessThanOrEqual(MAX_LEVEL);
+      }
+    }
+    // At least one pan in this view made revalidate write newly visible chunks.
+    expect(r.some(d => d.revalidations > 0)).toBe(true);
+  });
+}
+
 test('negative control: the M25 fleet is visible at the edge view, so culling had pixels to lose', async () => {
   const r = await page.evaluate(async pose => {
     const u = window.__ug;

@@ -13,6 +13,9 @@
 export const ECONOMIES = {
   dsplit: 'Double-sided transparent objects drawn as explicit back/front passes (no program churn)',
   m25Cull: 'M25 fleet: vehicles outside the view frustum are not recomputed or uploaded',
+  m25FogCull: 'M25 fleet: vehicles wholly beyond fog.far (drawn in pure fog colour over fogged ground) are skipped too',
+  flightsPool: 'Flights: the per-frame aircraft list is built into pooled records with cached variants (no per-frame allocation)',
+  flightCull: 'Flights: aircraft outside the view frustum get no instance',
   instanceRanges: 'Instanced fleets upload only the live instance range',
   hiddenSkip: 'Layers that are hidden skip their pose and matrix work (time still advances)',
   shadowCache: 'Shadow map re-rendered only when the sun, the fit or the casters change',

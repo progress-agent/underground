@@ -101,6 +101,156 @@ test('Overground: compacted live cars match the full layout; hidden fleets advan
   expect(drawn(compact)).toEqual(drawn(full));
 });
 
+// ── Fix round 1: fog cull, pre-draw revalidation, flights ──────────────────
+const m4At = (g, id) => { for (const m of g.children.filter(m => m.isInstancedMesh)) for (let i = 0; i < m.count; i++) if (m.userData.vehicleIds[i] === id) return Array.from(m.instanceMatrix.array.slice(i * 16, i * 16 + 16)); return null; };
+const writtenIds = g => { const ids = []; for (const m of g.children.filter(m => m.isInstancedMesh)) for (let i = 0; i < m.count; i++) ids.push(m.userData.vehicleIds[i]); return ids; };
+
+test('M25 fog cull: chunks wholly beyond fog.far are skipped; everything nearer in view is written', async () => {
+  const T = await import('three');
+  const scene = new T.Scene(); scene.fog = new T.Fog(0x1a2a3a, 5000, 9000);
+  const g = createMotorway({ getSurfaceY: () => 30, viewportHeightPx: 1800 }); scene.add(g);
+  const total = g.userData.stats.vehicles;
+  // From the middle of London, low, looking along a long stretch of the ring.
+  const camera = new T.PerspectiveCamera(55, 1.6, 1, 50000);
+  const a = g.userData.vehicleAt(0);
+  camera.position.set(a.x * 0.6, 400, a.z * 0.6); camera.lookAt(a.x, 0, a.z); camera.updateMatrixWorld(true);
+  const run = () => { for (let i = 0; i < 3; i++) g.userData.update(0, camera); };
+  g.userData.setEconomies({ frustumCulling: true, fogCulling: false }); run();
+  const frustumOnly = new Set(writtenIds(g));
+  g.userData.setEconomies({ frustumCulling: true, fogCulling: true }); run();
+  const both = new Set(writtenIds(g));
+  expect(g.userData.trafficLod.fogCulledChunks).toBeGreaterThan(0);
+  expect(both.size).toBeLessThan(frustumOnly.size);
+  // Nothing that fog lets through is lost: every vehicle in view whose nearest
+  // point (body sphere) is short of fog.far is still written.
+  const view = camera.matrixWorldInverse, v = new T.Vector3();
+  let missing = 0, beyond = 0;
+  for (const id of frustumOnly) {
+    const p = g.userData.vehicleAt(id), depth = -v.set(p.x, p.y + 4.4, p.z).applyMatrix4(view).z;
+    if (depth - 12 < scene.fog.far && !both.has(id)) missing++;
+    if (!both.has(id) && depth - 12 >= scene.fog.far) beyond++;
+  }
+  expect(missing).toBe(0);
+  expect(beyond).toBeGreaterThan(0);
+  // Fog off (no scene fog): the fog cull adds nothing.
+  scene.fog = null; g.userData.setEconomies({ fogCulling: false }); g.userData.setEconomies({ fogCulling: true }); run();
+  expect(new Set(writtenIds(g))).toEqual(frustumOnly);
+  expect(total).toBeGreaterThan(both.size);
+  g.userData.dispose();
+});
+
+test('M25 revalidate: a pan or a fog change between updates writes exactly what the unculled fleet shows', async () => {
+  const T = await import('three');
+  const mk = () => { const s = new T.Scene(); s.fog = new T.Fog(0x1a2a3a, 5000, 9000); const g = createMotorway({ getSurfaceY: () => 30, viewportHeightPx: 1800 }); s.add(g); return { s, g }; };
+  const culled = mk(), full = mk();
+  culled.g.userData.setEconomies({ frustumCulling: true, fogCulling: true });
+  const camera = new T.PerspectiveCamera(55, 1.6, 1, 50000);
+  const a = culled.g.userData.vehicleAt(0);
+  camera.position.set(a.x + 900, 500, a.z + 900); camera.lookAt(a.x, 0, a.z); camera.updateMatrixWorld(true);
+  // Both fleets recompute on the same frame at the same elapsed time.
+  do { culled.g.userData.update(0.05, camera); full.g.userData.update(0.05, camera); } while (culled.g.userData.trafficLod.frame % 3);
+  expect(full.g.userData.trafficLod.frame % 3).toBe(0);
+  // The next frame is not an update frame: the clock moves on, the camera pans
+  // 40 degrees and fog.far grows, and only revalidate may widen the written set.
+  culled.g.userData.update(0.05, camera); full.g.userData.update(0.05, camera);
+  const before = new Set(writtenIds(culled.g));
+  camera.rotateY(40 * Math.PI / 180); camera.updateMatrixWorld(true);
+  culled.s.fog.far = full.s.fog.far = 20000;
+  expect(culled.g.userData.revalidate(camera)).toBe(true);
+  const after = writtenIds(culled.g);
+  expect(after.length).toBeGreaterThan(before.size);
+  // Every vehicle the camera can now see is written, with the matrix the
+  // unculled fleet holds for it (same elapsed time, same LOD projection).
+  const f = new T.Frustum().setFromProjectionMatrix(new T.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  const set = new Set(after); let missing = 0, mismatched = 0;
+  for (const id of writtenIds(full.g)) {
+    const m = m4At(full.g, id), c = new T.Vector3(m[12], m[13], m[14]);
+    if (f.intersectsSphere(new T.Sphere(c, 12)) && !set.has(id)) missing++;
+  }
+  for (const id of after) { const x = m4At(culled.g, id), y = m4At(full.g, id); if (!y || x.some((v, i) => Math.abs(v - y[i]) > 1e-9)) mismatched++; }
+  expect(missing).toBe(0);
+  expect(mismatched).toBe(0);
+  // Nothing new to show: revalidate is a no-op.
+  expect(culled.g.userData.revalidate(camera)).toBe(false);
+  culled.g.userData.dispose(); full.g.userData.dispose();
+});
+
+test('M25: a still camera on a paused clock skips the projection build', () => {
+  const g = createMotorway({ getSurfaceY: () => 30, viewportHeightPx: 1800 });
+  for (let i = 0; i < 3; i++) g.userData.update(0, null);
+  const ms = g.userData.trafficLod.updateMs; g.userData.trafficLod.updateMs = -1;
+  for (let i = 0; i < 9; i++) g.userData.update(0, null);
+  expect(g.userData.trafficLod.updateMs).toBe(-1); // no recompute ran
+  g.userData.update(1, null); g.userData.update(0, null); g.userData.update(0, null);
+  expect(g.userData.trafficLod.updateMs).toBeGreaterThanOrEqual(0);
+  expect(ms).toBeGreaterThanOrEqual(0);
+  g.userData.dispose();
+});
+
+test('flights: pooled per-frame list equals flightsAt, allocates no records once warm, and draws the same matrices', async () => {
+  const T = await import('three');
+  const { createFlights } = await import('../src/flights.js');
+  const flat = () => 100;
+  const pooled = createFlights({ getSurfaceY: flat }), plain = createFlights({ getSurfaceY: flat });
+  pooled.userData.setEconomies({ pool: true });
+  const camera = new T.PerspectiveCamera(55, 1.6, 1, 200000);
+  camera.position.set(-12000, 9000, 16000); camera.lookAt(-20000, 0, 4000); camera.updateMatrixWorld(true);
+  const tm = pooled.userData.traffic, out = [];
+  for (const t of [0, 17.25, 1000, 2000.5, 4321.5, 86400]) {
+    const n = tm.flightsInto(t, out), ref = tm.flightsAt(t);
+    expect(n).toBe(ref.length);
+    expect(out.slice(0, n).map(f => { const { displayScale, ...rest } = f; return rest; })).toEqual(ref);
+  }
+  // Warm: the same records are reused frame after frame.
+  const recs = out.slice(); const len = out.length;
+  for (let t = 4321.5; t < 4330; t += 1 / 60) tm.flightsInto(t, out);
+  expect(out.length).toBe(len === 0 ? out.length : Math.max(len, out.length));
+  expect(recs.every((r, i) => out[i] === r)).toBe(true);
+  // Drawn matrices are identical to the unpooled path.
+  for (const t of [1000, 2000.5, 4321.5]) {
+    pooled.userData.setElapsed(t); plain.userData.setElapsed(t);
+    pooled.userData.update(0, camera); plain.userData.update(0, camera);
+    for (const k of Object.keys(plain.userData.meshes)) {
+      const a = pooled.userData.meshes[k], b = plain.userData.meshes[k];
+      expect(a.count).toBe(b.count);
+      expect(Array.from(a.instanceMatrix.array.slice(0, a.count * 16))).toEqual(Array.from(b.instanceMatrix.array.slice(0, b.count * 16)));
+    }
+    // The public list is a snapshot, not the live pool.
+    expect(pooled.userData.flights.map(f => f.id)).toEqual(plain.userData.flights.map(f => f.id));
+    expect(pooled.userData.flights[0]).not.toBe(pooled.userData.flights[0]);
+  }
+  pooled.userData.dispose(); plain.userData.dispose();
+});
+
+test('flights: frustum cull keeps exactly the aircraft whose drawn body can touch the view', async () => {
+  const T = await import('three');
+  const { createFlights } = await import('../src/flights.js');
+  const g = createFlights({ getSurfaceY: () => 100 }), ref = createFlights({ getSurfaceY: () => 100 });
+  g.userData.setEconomies({ cull: true, pool: true });
+  const camera = new T.PerspectiveCamera(40, 1.6, 1, 200000);
+  camera.position.set(-15000, 3000, 9000); camera.lookAt(-22000, 500, 4700); camera.updateMatrixWorld(true);
+  let sawCull = false;
+  for (const t of [1000, 2000.5, 3000, 4321.5]) {
+    g.userData.setElapsed(t); ref.userData.setElapsed(t); g.userData.update(0, camera); ref.userData.update(0, camera);
+    sawCull ||= g.userData.stats.culled > 0;
+    const drawn = (grp) => { const s = new Set(); for (const [k, m] of Object.entries(grp.userData.meshes)) for (let i = 0; i < m.count; i++) s.add(k + ':' + Array.from(m.instanceMatrix.array.slice(i * 16, i * 16 + 16)).join(',')); return s; };
+    const kept = drawn(g), all = drawn(ref);
+    for (const x of kept) expect(all.has(x)).toBe(true); // nothing invented or moved
+    expect(kept.size + g.userData.stats.culled).toBe(all.size);
+    // Every culled instance's grown body sphere misses the frustum.
+    const f = new T.Frustum().setFromProjectionMatrix(new T.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    for (const [k, m] of Object.entries(ref.userData.meshes)) for (let i = 0; i < m.count; i++) {
+      const key = k + ':' + Array.from(m.instanceMatrix.array.slice(i * 16, i * 16 + 16)).join(',');
+      if (kept.has(key)) continue;
+      const mat = new T.Matrix4().fromArray(m.instanceMatrix.array, i * 16);
+      const box = m.geometry.boundingBox || (m.geometry.computeBoundingBox(), m.geometry.boundingBox);
+      expect(f.intersectsBox(box.clone().applyMatrix4(mat))).toBe(false);
+    }
+  }
+  expect(sawCull).toBe(true);
+  g.userData.dispose(); ref.userData.dispose();
+});
+
 // ── In the app ────────────────────────────────────────────────────────────
 test.describe('in the running app', () => {
   test.describe.configure({ mode: 'serial' });
@@ -118,19 +268,24 @@ test.describe('in the running app', () => {
   test('hidden flights skip their per-frame list and matrices; the clock still runs', async () => {
     const r = await page.evaluate(async () => {
       const f = window.__ug.flightsGroup, ud = f.userData;
-      const t0 = ud.getElapsed(), skipped0 = ud.stats.skippedHidden || 0, list = ud.flights;
+      // Counted by render() itself: ud.flights is a snapshot copy once the
+      // pooled list is on (fix round 1), so list identity no longer tells.
+      const t0 = ud.getElapsed(), skipped0 = ud.stats.skippedHidden || 0;
       f.visible = false;
+      await new Promise(r => setTimeout(r, 100));
+      const renders0 = ud.stats.renders;
       await new Promise(r => setTimeout(r, 600));
-      const hidden = { skipped: (ud.stats.skippedHidden || 0) - skipped0, sameList: ud.flights === list, advanced: ud.getElapsed() > t0 };
+      const hidden = { skipped: (ud.stats.skippedHidden || 0) - skipped0, renders: ud.stats.renders - renders0, advanced: ud.getElapsed() > t0 };
       f.visible = true;
       await new Promise(r => setTimeout(r, 200));
+      const rendersShown = ud.stats.renders - renders0 - hidden.renders;
       // Shown again: the list is rebuilt from the pure function of elapsed time.
       ud.setElapsed(ud.getElapsed());
       const expected = ud.flightsAt(ud.getElapsed()).map(x => x.id).sort(), shown = ud.flights.map(x => x.id).sort();
-      return { hidden, fresh: ud.flights !== list, match: JSON.stringify(expected) === JSON.stringify(shown) };
+      return { hidden, fresh: rendersShown > 0, match: JSON.stringify(expected) === JSON.stringify(shown) };
     });
     expect(r.hidden.skipped).toBeGreaterThan(5);
-    expect(r.hidden.sameList).toBe(true);
+    expect(r.hidden.renders).toBe(0);
     expect(r.hidden.advanced).toBe(true);
     expect(r.fresh).toBe(true);
     expect(r.match).toBe(true);
