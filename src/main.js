@@ -77,6 +77,11 @@ import { createUnderwaterSurface } from './underwater-surface.js';
 // ── sprint:C ──
 import { createSeaLife } from './sea-life.js';
 // ── /sprint:C ──
+// ── sprint:A1 ──
+import { installModes } from './modes/index.js';
+import { deityRegimeSpeed } from './modes/deity-speed.js';
+import { getMasterBus } from './audio.js';
+// ── /sprint:A1 ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -438,8 +443,21 @@ window.addEventListener('keydown', (e) => {
   }
 }, { passive: false });
 
+// ── sprint:A1 ──
+// Conveyance modes (D-037). Installed at the end of module evaluation; a mode
+// that owns the camera this frame replaces the Deity keyboard code below.
+let modeSystem = null;
+// ── /sprint:A1 ──
 function updateFpsControls(dt) {
   if (!fpsControls.enabled) return;
+  // ── sprint:A1 ──
+  if (modeSystem?.update(dt)) {
+    fpsControls.active = true;   // holds OrbitControls off in tick()
+    controls.enabled = false;
+    materialResistance.cancel();
+    return;
+  }
+  // ── /sprint:A1 ──
 
   const keys = fpsControls.keys;
   const hasFpsKey = ['w', 's', 'a', 'd', 'e', 'q', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']
@@ -470,12 +488,17 @@ function updateFpsControls(dt) {
   _surfQuery.x = camera.position.x;
   _surfQuery.z = camera.position.z;
   const surfaceY = getTerrainMeshSurfaceY(_surfQuery);
-  let regimeSpeed = moveSpeed;
-  if (!submerged && surfaceY !== null && camera.position.y >= surfaceY) {
-    const alt = (camera.position.y - surfaceY) / VERTICAL_EXAGGERATION; // real m
-    regimeSpeed = moveSpeed * THREE.MathUtils.clamp(alt / 500, 0.3, 20);
-  }
+  // ── sprint:A1 ──
+  // D-037 water rule (supersedes D-020 §3): a submerged camera moves at the
+  // speed just above the surface at the same point, not the constant base
+  // (measured 500 vs 150 m/s, 3.33x). See src/modes/deity-speed.js.
+  const regimeSpeed = deityRegimeSpeed({
+    moveSpeed, y: camera.position.y, surfaceY, submerged, VE: VERTICAL_EXAGGERATION,
+    waterSurfaceY: submerged ? waterSurfaceAt(camera.position.x, camera.position.z) : null,
+  });
   const effectiveSpeed = regimeSpeed * speedMult * substrateSpeedFactor;
+  fpsControls.lastSpeed = effectiveSpeed; // controller speed (scene units/s) for tests
+  // ── /sprint:A1 ──
 
   // Get camera's current forward direction (from camera matrix)
   camera.getWorldDirection(_fwd);
@@ -3799,6 +3822,33 @@ function tick(frameTime) {
   requestAnimationFrame(tick);
 }
 
+// ── sprint:A1 ──
+modeSystem = installModes({
+  THREE, camera, controls, canvas: renderer.domElement, fpsControls,
+  VE: VERTICAL_EXAGGERATION, masterHeight,
+  getTerrainY: (x, z) => getTerrainMeshSurfaceY({ x, z }),
+  getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }),
+  isSubmergedAt, waterSurfaceAt,
+  // Both render paths: live 'buildings-*' tiles and baked 'baked-buildings-*'.
+  getBuildingMeshes: () => (surfaceGeometryGroup?.visible
+    ? surfaceGeometryGroup.children.filter(c => c.isInstancedMesh
+      && (c.name?.startsWith('buildings-') || c.name?.startsWith('baked-buildings-')))
+    : []),
+  getHeightScale: getBuildingHeightScale,
+  getMasterBus,
+});
+// ── /sprint:A1 ──
+// ── sprint:A2 ──
+// Pedestrian mode reads the tube network lazily (stations, platforms and the
+// snapped tunnel centrelines); getters so it always sees the current snap.
+modeSystem.ctx.tubeNetwork = {
+  get branches() { return lineBranchCenterPts; },
+  get stationLayers() { return lineShaftLayers; },
+  // The rendered tunnels are twin bores this far either side of the centreline.
+  get halfSpacing() { return twinTunnelsEnabled ? tunnelOffsetM : 0; },
+};
+// ── /sprint:A2 ──
+
 requestAnimationFrame(tick);
 
 // Dev-only debug exposure for Playwright / console testing
@@ -3830,6 +3880,9 @@ if (import.meta.env.DEV) {
     adaptiveQuality, setRenderQualityMode,
     get renderQualityMode() { return renderQualityMode; },
     fpsControls, intro, landscapeLock, controlsGuide, readout,
+    // ── sprint:A1 ──
+    get modes() { return modeSystem; },
+    // ── /sprint:A1 ──
     nearestThamesSegment, getZoneAt,
     isInThames,
     // Submerged regime (12Jul26u): shared inside-the-river predicate + signals.

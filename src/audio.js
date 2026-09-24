@@ -921,6 +921,19 @@ export function getPoolDebug() {
   };
 }
 
+// ── sprint:A1 ──
+/**
+ * Master bus for NON-spatial mode sound effects (src/modes/mode-sfx.js).
+ * Returns the context and the master gain node (post-mute, post-volume,
+ * pre-compressor), or null before the first user gesture starts audio.
+ * Anything connected here bypasses the spatial panner pool and the ambient
+ * underground low-pass by design, and still obeys mute / volume / tab fade.
+ */
+export function getMasterBus() {
+  return _initialised && ctx && masterGain ? { ctx, input: masterGain } : null;
+}
+// ── /sprint:A1 ──
+
 /**
  * Whether audio has been initialised.
  */
