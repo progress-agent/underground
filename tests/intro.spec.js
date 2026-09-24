@@ -38,9 +38,14 @@ async function waitForUg(page) {
 // though __ug is exposed at module init, the intro doesn't start for a
 // second or two. Tests that need to observe the live intro must wait until
 // isRunning() flips true before sampling state.
+//
+// Sprint 24Sep26h (lane O, D-038): the intro now owns the camera from boot
+// (isRunning() is true while it waits behind the loading bar) but its clock
+// only advances once the opening gate calls begin(). "Started" therefore
+// means isPlaying(); the assertions below are unchanged.
 async function waitForIntroStart(page, timeoutMs = 120000) {
   await page.waitForFunction(
-    () => !!(window.__ug && window.__ug.intro && window.__ug.intro.isRunning && window.__ug.intro.isRunning()),
+    () => !!(window.__ug && window.__ug.intro && window.__ug.intro.isPlaying && window.__ug.intro.isPlaying()),
     { timeout: timeoutMs },
   );
 }

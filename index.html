@@ -96,7 +96,8 @@
         .hud details[open] > summary { margin-bottom: 8px; }
       }
 
-      /* Loading bar - centered on screen */
+      /* Loading bar - centered on screen. Deep links (D-028) keep this
+         compact form over a scene that builds progressively behind it. */
       #loadingBar {
         position: fixed;
         top: 50%;
@@ -125,11 +126,65 @@
         transition: width 0.2s ease-out;
         border-radius: 2px;
       }
+      #loadingBar .title, #loadingBar .pct { display: none; }
+      #loadingBar .meta .label { margin: 8px 0 0; }
       #loadingBar.done {
         opacity: 0;
         transition: opacity 0.4s ease-out;
         pointer-events: none;
       }
+
+      /* Opening veil (sprint 24Sep26h, lane O). The honest loading bar covers
+         the whole canvas while the descent's layers load, its shaders compile
+         and warm-up frames render at poses along the path; then it fades and
+         the descent plays from frame 0. */
+      #loadingBar.veil {
+        inset: 0;
+        top: 0; left: 0;
+        transform: none;
+        width: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #05070b;
+        text-align: left;
+      }
+      #loadingBar.veil .title {
+        display: block;
+        width: min(320px, calc(100vw - 32px));
+        margin-bottom: 14px;
+        font-size: 13px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.86);
+      }
+      #loadingBar.veil .track {
+        width: min(320px, calc(100vw - 32px));
+        height: 2px;
+        background: rgba(255,255,255,0.10);
+        border-radius: 1px;
+      }
+      #loadingBar.veil .fill {
+        background: rgba(255,255,255,0.82);
+        border-radius: 1px;
+        transition: width 0.25s ease-out;
+      }
+      #loadingBar.veil .meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        width: min(320px, calc(100vw - 32px));
+        margin-top: 10px;
+      }
+      #loadingBar.veil .label { margin: 0; font-size: 11px; color: rgba(255,255,255,0.55); }
+      #loadingBar.veil .pct {
+        display: block;
+        font-size: 11px;
+        color: rgba(255,255,255,0.55);
+        font-variant-numeric: tabular-nums;
+      }
+      #loadingBar.veil.done { transition: opacity 0.35s ease-out; }
 
       .net-status {
         position: fixed;
@@ -276,9 +331,10 @@
   </head>
   <body>
     <div id="app"></div>
-    <div id="loadingBar">
-      <div class="label">Loading London Underground…</div>
+    <div id="loadingBar" class="veil" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="title">Under Ground</div>
       <div class="track"><div class="fill" id="loadingFill"></div></div>
+      <div class="meta"><div class="label">Loading London Underground…</div><div class="pct">0%</div></div>
     </div>
     <div id="netStatus" class="net-status" style="display:none"></div>
     <div id="hoverTip" class="hover-tip" style="display:none"></div>

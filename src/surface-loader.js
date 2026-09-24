@@ -187,6 +187,18 @@ export function resetLoadedTiles() {
 }
 
 /**
+ * Per-tile centre and state (sprint 24Sep26h, lane O): the opening gate's
+ * live-path readiness checks the tiles under the descent, not a global count.
+ * @returns {{cx:number, cz:number, state:string}[]}
+ */
+export function getSurfaceTileStates() {
+  if (!tileStates) return [];
+  const out = [];
+  for (const ts of tileStates.values()) out.push({ cx: ts.cx, cz: ts.cz, state: ts.state });
+  return out;
+}
+
+/**
  * Get loading statistics.
  */
 export function getSurfaceLoaderStats() {
