@@ -6,8 +6,15 @@
 // baked city, wind drift, time warp, and the physics panel.
 //
 // Movement is injected through fpsControls.keys (as controls-week1.spec.js
-// does) and look through the registry, so no pointer lock is needed. Timing
-// uses real frames; assertions are about direction and state, never fps.
+// does) and look through the registry, so no pointer lock is needed.
+//
+// Timing: anything that moves is gated on SIMULATED time (the modes' ctx.time,
+// the sum of the dt each mode is stepped with), never on a frame count. Under a
+// shared GPU a fixed number of frames can add up to very different amounts of
+// simulated time (60 frames measured 0.84 s against the 1 s they are at 60 Hz),
+// so a frame-gated displacement check passes or fails with the machine's load.
+// simFor() runs frames until the simulated clock has advanced by the amount the
+// assertion's physics needs; maxFrames is only a hang guard.
 
 import { test, expect } from '@playwright/test';
 
@@ -20,6 +27,14 @@ async function boot(page, url = '/?skip=1') {
 const frames = (page, n) => page.evaluate(async (n) => {
   for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(r));
 }, n);
+
+const simFor = (page, seconds, maxFrames = 3000) => page.evaluate(async ({ seconds, maxFrames }) => {
+  const ctx = window.__ug.modes.ctx, t0 = ctx.time || 0;
+  for (let i = 0; i < maxFrames && (ctx.time || 0) - t0 < seconds; i++) {
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  return (ctx.time || 0) - t0;
+}, { seconds, maxFrames });
 
 const dbg = (page, id) => page.evaluate((id) => window.__ug.modes.registry.get(id).debug(), id);
 
@@ -79,7 +94,9 @@ test.describe('Drone and Balloon modes', () => {
     });
     const start = await dbg(page, 'drone');
     await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
-    await frames(page, 60);
+    // 1.5 s of simulated thrust: the flight model (v = 45(1 - e^-0.71t) at
+    // defaults) predicts ~29 m/s and ~26 m travelled, well clear of the bounds.
+    expect(await simFor(page, 1.5)).toBeGreaterThanOrEqual(1.5);
     const flying = await dbg(page, 'drone');
     expect(flying.speed).toBeGreaterThan(10);
     expect(flying.pos.z).toBeLessThan(start.pos.z - 10); // north is -Z
@@ -90,7 +107,7 @@ test.describe('Drone and Balloon modes', () => {
     let maxRoll = 0;
     for (let i = 0; i < 12; i++) {
       await page.evaluate(() => window.__ug.modes.registry.look(-25, 0));
-      await frames(page, 2);
+      await simFor(page, 1 / 30);
       maxRoll = Math.max(maxRoll, (await dbg(page, 'drone')).roll);
     }
     expect(maxRoll).toBeGreaterThan(5 * Math.PI / 180);
@@ -138,14 +155,20 @@ test.describe('Drone and Balloon modes', () => {
     });
     expect(setup.found).toBe(true);
     await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
-    let maxX = -Infinity, reversed = false, hits = 0;
-    for (let i = 0; i < 90; i++) {
-      await frames(page, 1);
-      const d = await dbg(page, 'drone');
-      maxX = Math.max(maxX, d.pos.x);
-      if (d.hits > 0 && d.vel.x < 0) reversed = true;
-      hits = d.hits;
-    }
+    // Sample every frame for 4 s of simulated time (the 25 m approach takes
+    // about 1.6 s at defaults), whatever the frame rate.
+    const { maxX, reversed, hits } = await page.evaluate(async () => {
+      const ug = window.__ug, ctx = ug.modes.ctx, m = ug.modes.registry.get('drone'), t0 = ctx.time;
+      let maxX = -Infinity, reversed = false, hits = 0;
+      for (let i = 0; i < 3000 && ctx.time - t0 < 4; i++) {
+        await new Promise(r => requestAnimationFrame(r));
+        const d = m.debug();
+        maxX = Math.max(maxX, d.pos.x);
+        if (d.hits > 0 && d.vel.x < 0) reversed = true;
+        hits = d.hits;
+      }
+      return { maxX, reversed, hits };
+    });
     await page.evaluate(() => window.__ug.fpsControls.keys.delete('w'));
     expect(hits).toBeGreaterThan(0);
     expect(reversed).toBe(true);
@@ -162,13 +185,17 @@ test.describe('Drone and Balloon modes', () => {
     await expect(page.locator('#ug-mode-hint')).toContainText('E/Space burner');
     await expect(page.locator('#ug-physics-panel section[data-mode="balloon"] input[data-key="lag"]')).toHaveCount(1);
 
-    // 250 m up, neutral envelope.
+    // 250 m up, neutral envelope. The balloon enters carrying the wind of the
+    // camera's altitude, so it must converge onto the 250 m layer: tighten the
+    // wind coupling through the physics panel (a real tunable, not persisted)
+    // so 4 simulated seconds is 8 lags, then restore the default.
     await page.evaluate(() => {
       const ug = window.__ug, p = ug.camera.position;
       const g = ug.modes.collision.groundHeightAt(p.x, p.z) ?? 0;
+      ug.modes.physics.set('balloon', 'windLag', 0.5, { save: false });
       ug.modes.registry.get('balloon').place({ x: p.x, y: g + (250 + 1.5) * 5, z: p.z, dT: 60 });
     });
-    await frames(page, 40);
+    await simFor(page, 4);
     const drift = await page.evaluate(() => {
       const ug = window.__ug, d = ug.modes.registry.get('balloon').debug();
       const w = ug.modes.ctx.wind.getWindAt(d.altitude, d.windTime);
@@ -178,6 +205,7 @@ test.describe('Drone and Balloon modes', () => {
     });
     expect(drift.ang).toBeLessThan(5 * Math.PI / 180);
     expect(Math.abs(drift.speed - drift.wind)).toBeLessThan(0.1 * drift.wind);
+    await page.evaluate(() => window.__ug.modes.physics.set('balloon', 'windLag', 6, { save: false }));
 
     // Time warp: T toggles; simulated time runs ten times the frame time.
     const rate = async () => page.evaluate(async () => {
@@ -196,7 +224,8 @@ test.describe('Drone and Balloon modes', () => {
 
     // Burner: E held feeds the lagged heat; released it decays.
     await page.keyboard.down('e');
-    await frames(page, 30);
+    // 0.5 s simulated through a 3 s lag: heat ~0.15, far from full.
+    await simFor(page, 0.5);
     const burning = await dbg(page, 'balloon');
     await page.keyboard.up('e');
     expect(burning.burner).toBe(true);
