@@ -31,6 +31,10 @@ import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV
 // ── sprint:D ──
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
+// ── s24:S ──
+import { createSkySystem } from './sky.js';
+import { attachSky } from './environment.js';
+// ── /s24:S ──
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -1052,6 +1056,15 @@ skyDome = createSkyDome(scene);
 const sunSystem = createSunSystem({ renderer, scene, lights: atmosphereLights, prefs, savePrefs });
 sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? null);
 // ── /sprint:D ──
+
+// ── s24:S ──
+// Visible sun disc and analytic sky (D-038). Looks switch with ?sky=<name> or
+// the hidden Sky row (shown with ?sky=, or by double-clicking "Sun:").
+// updateEnvironment drives it each frame; nothing else in the tick changes.
+const skySystem = createSkySystem({ scene });
+attachSky(skySystem);
+skySystem.mountControls(document.getElementById('sunShadows')?.closest('p') ?? null);
+// ── /s24:S ──
 
 // Keep rim light for tube highlighting
 const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
