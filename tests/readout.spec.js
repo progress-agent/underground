@@ -9,6 +9,7 @@
 // approximately (-200, 85, 400) scene units — above ground in central London.
 
 import { test, expect } from '@playwright/test';
+import { waitForSceneLoaded } from './helpers/scene-loaded.js';
 
 const BASE = '/?skipintro=1';
 
@@ -30,8 +31,7 @@ async function gotoAndWait(page) {
   // gives 56ms at 1x and 175ms at 6x. The assertions and their 3s budgets are
   // unchanged; the precondition ("camera below the real terrain, app ticking")
   // is now true when the pose is set.
-  await page.waitForFunction(() => window.__ug.getTerrainMeshSurfaceY({ x: 0, z: 0 }) !== null
-    && !!window.__ug.scene.getObjectByName('chalkFloor'), null, { timeout: 60000 });
+  await waitForSceneLoaded(page);
 }
 
 test('readout element exists in DOM after init', async ({ page }) => {
