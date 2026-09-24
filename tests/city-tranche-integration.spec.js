@@ -62,9 +62,21 @@ test('integrated master preference keeps the opening and reset restores both hei
   await master.evaluate(el=>{el.value='3';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(new URL(page.url()).searchParams.get('mh')).toBe('3');
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('ug:prefs:v2')).masterHeight)).toBe(3);
-  await page.locator('#resetPrefs').click();await page.waitForFunction(()=>window.__ug?.masterHeight?.value===5);
+  // Reset defaults are Master 1.1 and Structure 2 since D-036 (9990a5c changed
+  // resetPrefs from setValue(5) to setValue(1.1) and the fresh Structure
+  // default to 2; this test was written against the older 5/5 in 8e60ea2 and
+  // was not updated). Sprint 24Sep26h (lane H): expect the D-036 values, and
+  // wait for the reload Reset performs, so the checks read the reloaded page and
+  // not the pre-reload one (the 2.0 Structure value is also its pre-reload value).
+  await Promise.all([page.waitForNavigation(),page.locator('#resetPrefs').click()]);
+  await page.waitForFunction(()=>window.__ug?.masterHeight);
+  expect(await page.evaluate(()=>window.__ug.masterHeight.value)).toBe(1.1);
   expect(new URL(page.url()).searchParams.has('mh')).toBe(false);
-  expect(await page.locator('#buildingHeight').inputValue()).toBe('5');
+  // Reset clears the saved height choices (the reloaded page re-saves only its
+  // simulation settings, so the key itself comes back).
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('ug:prefs:v2')||'{}'));
+  expect(saved.masterHeight).toBeUndefined();expect(saved.buildingHeight).toBeUndefined();
+  expect(await page.locator('#buildingHeight').inputValue()).toBe('2');
 });
 
 test('integrated master preserves canonical positions, datums and form-focused navigation',async({page})=>{

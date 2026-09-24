@@ -16,14 +16,11 @@ import {
   BALLOON_TUNABLES, BALLOON_DEFAULTS, BASKET_EYE_M, createBalloonState, stepBalloon, windVector,
 } from './balloon-physics.js';
 import { applyAttitude, yawPitchFromQuaternion } from './drone-camera.js';
+import { isFormInput, modeClaimsSpace } from './space-key.js';
 
 const DEG = Math.PI / 180;
 const PITCH_LIMIT = 85 * DEG;
 export const WARP_KEY = 't';
-
-function isFormInput(target) {
-  return target?.matches?.('input, select, textarea') || target?.isContentEditable;
-}
 
 /**
  * @param {object} ctx shared mode context (see src/modes/index.js)
@@ -55,10 +52,11 @@ export function createBalloonMode(ctx) {
   }
 
   // Warp toggle and Space (which would otherwise press a focused HUD button).
+  // Space inside the Physics panel stays the panel's own (space-key.js).
   const onKeyDown = (e) => {
+    if (modeClaimsSpace(e)) e.preventDefault();
     if (e.metaKey || e.ctrlKey || e.altKey || isFormInput(e.target)) return;
     const k = e.key?.toLowerCase?.();
-    if (k === ' ') e.preventDefault();
     if (k === WARP_KEY && !e.repeat) { e.preventDefault(); setWarp(!warpOn); }
   };
   function listen(on) {

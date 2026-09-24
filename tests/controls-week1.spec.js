@@ -37,18 +37,36 @@ async function snapshotCamera(page) {
   });
 }
 
-// Hold a set of movement keys for `durationMs` by injecting them into the
-// fpsControls.keys Set. Keeps them resident across frames; then clears.
-async function holdKeys(page, keys, durationMs) {
-  await page.evaluate((ks) => {
-    for (const k of ks) window.__ug.fpsControls.keys.add(k);
-  }, keys);
-  await page.waitForTimeout(durationMs);
-  await page.evaluate((ks) => {
-    for (const k of ks) window.__ug.fpsControls.keys.delete(k);
-  }, keys);
+// Hold a set of movement keys and return the SIMULATED time they moved the
+// camera for. Sprint 24Sep26h (lane H): these holds used to be a wall-clock
+// waitForTimeout(400), but since 1429863 (11Sep26, "Bound camera recovery
+// after stalls") tick() feeds updateFpsControls a delta clamped to 50ms, so a
+// frame gap during loading (the terrain build alone blocks the main thread for
+// about 2.7s just after ?skip=1 hands over) moves the camera 50ms, not the gap.
+// A 400ms hold that met a stall measured 26 units where 200 were expected, and
+// the Shift ratio compared a stalled hold with a clean one (ratio 47). That is
+// the product working as designed, so the test was stale, not the controls.
+//
+// Now the keys go in and out inside rAF callbacks, which run after the app's
+// tick in the same frame (tick registered its rAF first), and the hold sums
+// exactly the delta each of those ticks used: min(frame delta, 50ms). Every
+// distance below is divided by that, so the assertions compare speeds.
+async function holdKeys(page, keys, frames = 24) {
+  const simS = await page.evaluate(({ ks, frames }) => new Promise((resolve) => {
+    const fc = window.__ug.fpsControls;
+    let n = 0, last = 0, sim = 0;
+    const step = (t) => {
+      if (n === 0) { for (const k of ks) fc.keys.add(k); }
+      else sim += Math.min((t - last) / 1000, 0.05); // the delta this frame's tick moved with
+      last = t;
+      if (n++ >= frames) { for (const k of ks) fc.keys.delete(k); resolve(sim); return; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }), { ks: keys, frames });
   // Let one more tick settle with keys released.
-  await page.waitForTimeout(80);
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  return simS;
 }
 
 function dist(a, b) {
@@ -82,23 +100,29 @@ test.describe('Week-1 desktop keyboard controls', () => {
   test('W moves forward, S moves back (symmetric)', async ({ page }) => {
     const start = await snapshotCamera(page);
 
-    await holdKeys(page, ['w'], 400);
+    const simW = await holdKeys(page, ['w']);
     const afterW = await snapshotCamera(page);
     const forwardDist = dist(start, afterW);
-    expect(forwardDist).toBeGreaterThan(50); // 500 u/s × 0.4s = 200u nominal
+    // Base speed (500 u/s) x substrate factor; below ground there is no
+    // altitude scaling. Well clear of any stall now that time is simulated.
+    const speed = await page.evaluate(() => window.__ug.fpsControls.lastSpeed);
+    expect(forwardDist / simW).toBeGreaterThan(50);
+    expect(Math.abs(forwardDist / simW - speed) / speed).toBeLessThan(0.02);
 
-    await holdKeys(page, ['s'], 400);
+    const simS = await holdKeys(page, ['s']);
     const afterS = await snapshotCamera(page);
     const backDist = dist(afterW, afterS);
-    // S should undo most of W — end position close to start
+    // S moves back along the same line at the same speed: the rates match and
+    // what remains after cancelling the (simulated) time difference is tiny.
     const netDist = dist(start, afterS);
-    console.log(`[controls] W=${forwardDist.toFixed(1)} S=${backDist.toFixed(1)} net=${netDist.toFixed(1)}`);
-    expect(netDist).toBeLessThan(forwardDist * 0.4); // nearly cancel (allow dt jitter)
+    console.log(`[controls] W=${forwardDist.toFixed(1)}/${simW.toFixed(3)}s S=${backDist.toFixed(1)}/${simS.toFixed(3)}s net=${netDist.toFixed(1)}`);
+    expect(Math.abs(forwardDist / simW - backDist / simS) / (forwardDist / simW)).toBeLessThan(0.02);
+    expect(netDist).toBeLessThan(Math.abs(simW - simS) * speed + forwardDist * 0.02);
   });
 
   test('X key is inert (removed from control set)', async ({ page }) => {
     const start = await snapshotCamera(page);
-    await holdKeys(page, ['x'], 400);
+    await holdKeys(page, ['x']);
     const after = await snapshotCamera(page);
     const moved = dist(start, after);
     expect(moved).toBeLessThan(1); // no motion from X alone
@@ -106,22 +130,24 @@ test.describe('Week-1 desktop keyboard controls', () => {
 
   test('Shift + W triples movement distance vs W alone', async ({ page }) => {
     const p0 = await snapshotCamera(page);
-    await holdKeys(page, ['w'], 400);
+    const simN = await holdKeys(page, ['w']);
     const p1 = await snapshotCamera(page);
-    const normalDist = dist(p0, p1);
+    const normalDist = dist(p0, p1) / simN; // units per simulated second
 
-    await holdKeys(page, ['s'], 400); // return (approximately)
-    await page.waitForTimeout(100);
+    await holdKeys(page, ['s']); // return (approximately)
     const p2 = await snapshotCamera(page);
 
-    await holdKeys(page, ['shift', 'w'], 400);
+    const simF = await holdKeys(page, ['shift', 'w']);
     const p3 = await snapshotCamera(page);
-    const sprintDist = dist(p2, p3);
+    const sprintDist = dist(p2, p3) / simF;
 
     const ratio = sprintDist / normalDist;
     console.log(`[controls] normal=${normalDist.toFixed(1)} sprint=${sprintDist.toFixed(1)} ratio=${ratio.toFixed(2)}`);
-    expect(ratio).toBeGreaterThan(2.3); // allow dt jitter either side of 3×
-    expect(ratio).toBeLessThan(3.7);
+    // Speeds per simulated second leave no dt jitter to allow for: measured
+    // exactly 500 and 1500 (3.00) on every run, so the old 2.3-3.7 band is
+    // tightened, not loosened.
+    expect(ratio).toBeGreaterThan(2.9);
+    expect(ratio).toBeLessThan(3.1);
   });
 
   test('HUD flight toggle latches and triples movement without Shift', async ({ page }) => {
@@ -132,11 +158,10 @@ test.describe('Week-1 desktop keyboard controls', () => {
     await expect(btn).toHaveAttribute('aria-pressed', 'false');
 
     const p0 = await snapshotCamera(page);
-    await holdKeys(page, ['w'], 400);
-    const normalDist = dist(p0, await snapshotCamera(page));
+    const simN = await holdKeys(page, ['w']);
+    const normalDist = dist(p0, await snapshotCamera(page)) / simN;
 
-    await holdKeys(page, ['s'], 400);
-    await page.waitForTimeout(100);
+    await holdKeys(page, ['s']);
 
     // Click toggle — should latch on.
     await btn.click();
@@ -145,13 +170,13 @@ test.describe('Week-1 desktop keyboard controls', () => {
     expect(toggleState).toBe(true);
 
     const p1 = await snapshotCamera(page);
-    await holdKeys(page, ['w'], 400); // no shift this time
-    const toggledDist = dist(p1, await snapshotCamera(page));
+    const simT = await holdKeys(page, ['w']); // no shift this time
+    const toggledDist = dist(p1, await snapshotCamera(page)) / simT;
 
     const ratio = toggledDist / normalDist;
     console.log(`[controls] toggle normal=${normalDist.toFixed(1)} toggled=${toggledDist.toFixed(1)} ratio=${ratio.toFixed(2)}`);
-    expect(ratio).toBeGreaterThan(2.3);
-    expect(ratio).toBeLessThan(3.7);
+    expect(ratio).toBeGreaterThan(2.9);
+    expect(ratio).toBeLessThan(3.1);
 
     // Click again — should release.
     await btn.click();

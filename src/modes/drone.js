@@ -21,6 +21,7 @@ import {
 import {
   applyAttitude, yawPitchFromQuaternion, verticalFovFromHorizontal,
 } from './drone-camera.js';
+import { createSpaceGuard } from './space-key.js';
 
 const ARROW_RATE = 90;           // °/s of look target from the arrow keys
 const ENTRY_CLEARANCE_M = 30;    // entering from underground or the river surfaces here
@@ -47,6 +48,9 @@ export function createDroneMode(ctx) {
     : { ...DRONE_DEFAULTS };
   let state = null;
   let saved = null;
+  // Space is rise here: while Drone is active it must not also press the
+  // button that kept focus after a click (sprint 24Sep26h, lane H).
+  const spaceGuard = createSpaceGuard();
 
   const world = (c) => ({
     VE: c.VE ?? 5,
@@ -86,9 +90,11 @@ export function createDroneMode(ctx) {
       const top = Math.max(Number.isFinite(ground) ? ground : -Infinity, Number.isFinite(water) ? water : -Infinity);
       if (Number.isFinite(top) && p.y < top) state.pos.y = top + ENTRY_CLEARANCE_M * VE;
       cam.position.set(state.pos.x, state.pos.y, state.pos.z);
+      spaceGuard.set(true);
     },
 
     deactivate(c) {
+      spaceGuard.set(false);
       const cam = c.camera;
       if (state) {
         const a = droneCameraAttitude(state);

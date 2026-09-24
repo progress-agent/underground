@@ -15,6 +15,7 @@
 // and polls the exposed __ug signals until the regime settles.
 
 import { test, expect } from '@playwright/test';
+import { waitForSceneLoaded } from './helpers/scene-loaded.js';
 
 const BASE = '/?skipintro=1';
 
@@ -25,6 +26,11 @@ async function gotoAndWait(page) {
       && typeof window.__ug.chalkClarity === 'number'),
     null, { timeout: 15000 }
   );
+  // Sprint 24Sep26h (lane H): every test here poses the camera and gives the
+  // tick 5s to reach a regime. Without this wait the pose could land before
+  // the terrain and M25/geology main-thread blocks, which stall the tick (see
+  // helpers/scene-loaded.js). Test :91 failed that way in 2 of 3 loaded runs.
+  await waitForSceneLoaded(page);
 }
 
 // Place the camera dY scene units relative to the LOCAL chalk surface at the
@@ -77,9 +83,13 @@ test('inside chalk: fog released, ambient lifted, chalk regimes intact', async (
   expect(a.r).toBeGreaterThan(0.5);
   // Up-view features are lit, not just unfogged (chalkClarityAmbient = 0.55).
   expect(a.ambient).toBeGreaterThan(0.5);
-  // Substrate speed regime untouched: chalk still halves movement.
-  expect(a.ssf).toBeLessThan(0.7);
-  expect(a.ssf).toBeGreaterThanOrEqual(0.5);
+  // Substrate speed: D-036 (13Sep26u, commit 9990a5c) removed the lasting
+  // chalk slowdown. Resistance is now a ~700ms membrane on held keys only
+  // (src/material-resistance.js), and the tick holds substrateSpeedFactor at
+  // exactly 1 once a camera is parked in the chalk. The old "chalk still
+  // halves movement" band (0.5-0.7) predates that ruling; this pins the
+  // current contract exactly rather than dropping the check.
+  expect(a.ssf).toBe(1);
   // The chalk sheet itself releases (opacity + depthWrite) so the network
   // above is visible — not just unfogged — when looking up from inside.
   if (a.chalkOpacity !== null) {
@@ -97,19 +107,25 @@ test('inside chalk: all station label layers hidden', async ({ page }) => {
   );
   await placeRelChalk(page, -50);
   await page.waitForFunction(() => window.__ug.chalkClarity > 0.95, null, { timeout: 5000 });
-  // Two rAF ticks so the label update loop has applied hideForChalk.
-  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const layers = await page.evaluate(() =>
-    [...document.querySelectorAll('.station-overlay-layer')].map(el => el.style.display));
+  // Read the layers as they are PAINTED: inside a rAF callback, which runs
+  // after the app's tick in the same frame (the tick registered its rAF
+  // first), so no task can slip in between. Sprint 24Sep26h (lane H): the old
+  // read ran in a later task, and a tube line still loading from the TfL API
+  // could create its layers there (display 'block' from setLabelsVisible)
+  // before the next tick hid them. Holding one line's route request until
+  // chalk entry and releasing it reproduced that 2 of 2 times (2 of 4 layers
+  // 'block' at creation, 0 of 4 at the next painted frame), so no viewer ever
+  // sees it; the full run is where line arrival drifts into that window.
+  const paintedLayers = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() =>
+    requestAnimationFrame(() => r([...document.querySelectorAll('.station-overlay-layer')].map(el => el.style.display))))));
+  const layers = await paintedLayers();
   expect(layers.length).toBeGreaterThan(0);
   for (const d of layers) expect(d).toBe('none');
 
   // ...and they restore when the camera leaves the chalk (mid-clay pose).
   await placeRelChalk(page, 150);
   await page.waitForFunction(() => window.__ug.chalkClarity === 0, null, { timeout: 5000 });
-  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const anyVisible = await page.evaluate(() =>
-    [...document.querySelectorAll('.station-overlay-layer')].some(el => el.style.display !== 'none'));
+  const anyVisible = (await paintedLayers()).some(d => d !== 'none');
   expect(anyVisible).toBe(true);
 });
 

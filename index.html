@@ -76,7 +76,13 @@
          the open settings panel two rows taller, which pushed Reset settings
          under the controls guide (z-index 28) on a 720px-tall window. While the
          panel is open it is what the viewer is using, so it sits above the guide. */
-      .hud:has(details[open]) { z-index: 30; }
+      .hud:has(details[open]) { z-index: 29; }
+      /* s24:H (D-038): the open panel above no longer buries the hover tooltip.
+         While the panel is open the tooltip stacks above it (and so above the
+         guide and readout at 28); closed, the original order is unchanged
+         (tooltip 25 under guide 28, panel 15 under both). Order while open:
+         tooltip 30 > panel 29 > guide / readout 28. */
+      body:has(.hud details[open]) .hover-tip { z-index: 30; }
       .hud h1 { margin: 0 0 6px; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
       .hud p { margin: 0; font-size: 12px; opacity: 0.92; max-width: 380px; }
       .hud code { opacity: 0.95; }
