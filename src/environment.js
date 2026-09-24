@@ -99,10 +99,25 @@ export function resolveSunDirection(out = new THREE.Vector3()) {
   return out.copy(_legacyDir).lerp(_air.state.direction, w).normalize();
 }
 
+// ── Analytic sky and sun disc (sprint 24Sep26h, Lane S) ────────────────────
+// sky.js draws the sky; this module decides how much of it shows and couples
+// the air fog to it. Registered by main.js; absent (as in the node tests), the
+// environment behaves exactly as before.
+let _skySystem = null;
+const _cSkyHorizon = new THREE.Color();
+let _skyHazeWeight = 0;
+
+/** Register the sky system that updateEnvironment drives each frame. */
+export function attachSky(skySystem) { _skySystem = skySystem ?? null; }
+
 /** Read-only view of the current air sun blend (tests, tuning). */
 export function getAirSun() {
   return { weight: _air.weight, t: _air.state?.t ?? null, distance: _air.distance };
 }
+
+// Abyss haze band: from the horizon (v = 0.5) down to this v (about 12 degrees
+// below it) the abyss blends into the fog colour.
+const HORIZON_HAZE_V = 0.5 - 12 / 180;
 
 // Create sky dome — a camera-following "abyss cap" (D1.4).
 //
@@ -163,13 +178,24 @@ export function createSkyDome(scene) {
   // this existing draw. Opaque banks/bed still win depth; the lower hemisphere
   // stays transparent underwater. No extra city render or sky mesh is needed.
   const submergedSky = { value: 0 };
+  // Lane S (24Sep26h): with the analytic sky, the top of the abyss fades up
+  // into the air-fog colour, so the band between the map's edge and the
+  // horizon reads as distant haze rather than a dark slot. Weight 0 (no sky,
+  // flat look, underground) leaves the abyss exactly as before.
+  const horizonHaze = { value: new THREE.Color() };
+  const horizonHazeWeight = { value: 0 };
   material.onBeforeCompile = shader => {
+    shader.uniforms.uHorizonHaze = horizonHaze;
+    shader.uniforms.uHorizonHazeWeight = horizonHazeWeight;
     shader.uniforms.uSubmergedSky = submergedSky;
     shader.uniforms.uSubmergedSkyColor = { value: new THREE.Color(ENV_CONFIG.skyColor) };
     shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
 uniform float uSubmergedSky;
 uniform vec3 uSubmergedSkyColor;
+uniform vec3 uHorizonHaze;
+uniform float uHorizonHazeWeight;
 void main() {`).replace('#include <map_fragment>', `#include <map_fragment>
+diffuseColor.rgb=mix(diffuseColor.rgb,uHorizonHaze,smoothstep(${HORIZON_HAZE_V.toFixed(4)},0.5,vMapUv.y)*uHorizonHazeWeight);
 float aboveWaterHorizon=smoothstep(0.5,0.51,vMapUv.y);
 diffuseColor.rgb=mix(diffuseColor.rgb,uSubmergedSkyColor,aboveWaterHorizon*uSubmergedSky);
 diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
@@ -177,6 +203,8 @@ diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
   };
   const sky = new THREE.Mesh(geometry, material);
   sky.userData.submergedSky = submergedSky;
+  sky.userData.horizonHaze = horizonHaze;
+  sky.userData.horizonHazeWeight = horizonHazeWeight;
   sky.renderOrder = -1000; // draw first in the transparent queue (background)
   sky.name = 'skyDome';
   scene.add(sky);
@@ -241,6 +269,20 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   if (_air.weight > 0) {
     _cSkyAir.lerp(_air.state.fogSky, _air.weight);
     _cBgSkyAir.lerp(_air.state.skyColor, _air.weight);
+  }
+
+  // Analytic sky (Lane S): the sky and disc show by the air weight (0 below
+  // the surface and in the river), and the air fog is pulled towards the
+  // sky's own horizon colour so distance and sky read as one atmosphere.
+  if (_skySystem) {
+    const skyWeight = _air.weight * (1 - chalkBlend) * (1 - submergedBlend);
+    resolveSunDirection(_sunDir);
+    const coupling = _skySystem.update({ camera, state: _air.state, direction: _sunDir,
+      weight: skyWeight, discWeight: skyWeight, fogOut: _cSkyHorizon });
+    if (coupling > 0) _cSkyAir.lerp(_cSkyHorizon, coupling * _air.weight);
+    _skyHazeWeight = coupling * skyWeight;
+  } else {
+    _skyHazeWeight = 0;
   }
 
   // Base fog colour: airy-clay graphite underground → warm-grey toward sky.
@@ -318,10 +360,20 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     // UN-lifted skyBlend here (not surfaceBlend): clayLift must brighten
     // fog/lights only — the abyss dome has no business rendering underground.
     sky.position.copy(camera.position);
+    // Master height squashes the display vertically (vertical-scale.js);
+    // counter-scale so the displayed dome stays a 45000 sphere inside the far
+    // plane at every Master value (at Master 10 it would reach 90000 and lose
+    // its nadir to the far plane).
+    const masterRatio = camera.userData?.masterHeightController?.ratio ?? 1;
+    sky.scale.set(1, 1 / masterRatio, 1);
     const ordinarySkyOpacity=skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
     sky.material.opacity = Math.max(ordinarySkyOpacity,submergedBlend);
     sky.visible = (skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99) || submergedBlend > 0.001;
     if(sky.userData.submergedSky)sky.userData.submergedSky.value=submergedBlend;
+    if (sky.userData.horizonHazeWeight) {
+      sky.userData.horizonHaze.value.copy(_fogColor);
+      sky.userData.horizonHazeWeight.value = _skyHazeWeight;
+    }
   }
 
   // Background colour: clay graphite → sky; then flooded dusty white in chalk so
@@ -334,6 +386,7 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   if (renderer) {
     renderer.setClearColor(_bgColor, 1);
   }
+  if (_skySystem) _skySystem.setClear(_bgColor);
 
   return {
     surfaceBlend,
