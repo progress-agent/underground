@@ -1,8 +1,8 @@
 // pedestrian.spec.js: Pedestrian mode in the real app (sprint 23Sep26w, D-037,
 // lane A2). Pins what can be pinned: the real-scale ease and its restore, the
 // sliders staying adjustable, facade collision against the real baked city,
-// station descent to the platform's true modelled depth, the tunnel
-// centreline lock and sprint, ascent at a platform, and swim entry and exit
+// station descent to the platform's true modelled depth, the lock inside a
+// rendered tunnel bore and sprint, ascent at a platform, and swim entry and exit
 // at a real Thames bank. Physics details (jump arcs, jetpack roof landing,
 // Mario-swim sink and strokes, junction choice) are pinned deterministically
 // in tests/pedestrian.test.mjs.
@@ -232,45 +232,86 @@ test.describe('Pedestrian mode', () => {
     expect(d.eyeY).toBeCloseTo(st.platformY, 6);
     expect(st.platformY).toBeCloseTo(st.markerY, 3);
     expect((st.markerSurfaceY - d.eyeY) / VE).toBeCloseTo(st.markerDepthM, 2);
-    const cam = await page.evaluate(() => ({ x: window.__ug.camera.position.x, z: window.__ug.camera.position.z }));
-    expect(Math.hypot(cam.x - st.x, cam.z - st.z)).toBeLessThan(3);
+    // The platform is in one of the twin bores main.js draws either side of
+    // the line's centreline (a cross passage from the shaft foot leads to it),
+    // so the camera sits one half-spacing off the station's centreline point.
+    const cam = await page.evaluate(() => ({ x: window.__ug.camera.position.x, z: window.__ug.camera.position.z,
+      half: window.__ug.modes.ctx.tubeNetwork.halfSpacing }));
+    expect(cam.half).toBeGreaterThan(0);
+    expect(Math.hypot(cam.x - st.x, cam.z - st.z)).toBeCloseTo(cam.half, 3);
+    expect(Math.abs(d.tunnel.side)).toBe(1);
     expect(d.tunnel.lineId).toBe(st.lineId);
     await expect(page.locator('#ug-mode-hint')).toContainText(/E: up/);
 
-    // Tunnel lock: hold W; every frame the camera is on the tunnel centreline.
-    const walk = await page.evaluate(async () => {
+    // Tunnel lock: hold W, then sprint; every frame the camera must be inside a
+    // tunnel that is actually DRAWN. This measures against the rendered
+    // TubeGeometry meshes of the line (their own curves and radius, read from
+    // the scene), not against anything the mode computes.
+    const walk = await page.evaluate(async (lineId) => {
       const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
       const frame = () => new Promise(r => requestAnimationFrame(r));
       const net = m.network;
-      let worst = 0, moved = 0;
+      const tubes = [];
+      ug.scene.traverse(o => {
+        if (o.isMesh && o.userData.type === 'tube-line' && o.userData.lineId === lineId
+          && o.geometry?.parameters?.path) {
+          o.updateWorldMatrix(true, false);
+          const pts = o.geometry.parameters.path.getPoints(6000).map(q => q.applyMatrix4(o.matrixWorld));
+          tubes.push({ pts, radius: o.geometry.parameters.radius });
+        }
+      });
+      const segDist = (pts, p) => {
+        let best = Infinity;
+        for (let k = 0; k < pts.length - 1; k++) {
+          const a = pts[k], b = pts[k + 1];
+          const vx = b.x - a.x, vy = b.y - a.y, vz = b.z - a.z, len2 = vx * vx + vy * vy + vz * vz || 1;
+          const u = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy + (p.z - a.z) * vz) / len2));
+          best = Math.min(best, Math.hypot(p.x - a.x - vx * u, p.y - a.y - vy * u, p.z - a.z - vz * u));
+        }
+        return best;
+      };
+      const inside = () => {
+        const p = ug.camera.position;
+        let best = Infinity, radius = 0;
+        for (const t of tubes) { const d = segDist(t.pts, p); if (d < best) { best = d; radius = t.radius; } }
+        return { best, radius };
+      };
+      // Distance to the mode's own polyline for this bore (bookkeeping check).
+      const onOwn = () => {
+        const t = m.debug().tunnel, path = net.paths[t.path];
+        const a = t.side > 0 ? path.left : t.side < 0 ? path.right : path;
+        const pts = Array.from({ length: path.n }, (_, k) => ({ x: a.x[k], y: a.y[k], z: a.z[k] }));
+        return segDist(pts, ug.camera.position);
+      };
+      const trace = [];
+      let own = 0;
       const start = ug.camera.position.clone();
+      trace.push(inside());
       ug.fpsControls.keys.add('w');
       for (let i = 0; i < 40; i++) {
         await frame();
-        const t = m.debug().tunnel;
-        const path = net.paths[t.path];
-        // Nearest polyline point to the camera (brute force; tests only).
-        let best = Infinity;
-        for (let k = 0; k < path.n - 1; k++) {
-          const ax = path.x[k], ay = path.y[k], az = path.z[k];
-          const bx = path.x[k + 1], by = path.y[k + 1], bz = path.z[k + 1];
-          const vx = bx - ax, vy = by - ay, vz = bz - az, len2 = vx * vx + vy * vy + vz * vz || 1;
-          const p = ug.camera.position;
-          const u = Math.max(0, Math.min(1, ((p.x - ax) * vx + (p.y - ay) * vy + (p.z - az) * vz) / len2));
-          best = Math.min(best, Math.hypot(p.x - ax - vx * u, p.y - ay - vy * u, p.z - az - vz * u));
-        }
-        worst = Math.max(worst, best);
+        trace.push(inside());
+        own = Math.max(own, onOwn());
       }
-      moved = ug.camera.position.distanceTo(start);
-      // Shift: superhuman sprint.
+      const moved = ug.camera.position.distanceTo(start);
+      // Shift: superhuman sprint, still inside the drawn bore.
       ug.fpsControls.keys.add('shift');
-      for (let i = 0; i < 90; i++) await frame();
+      for (let i = 0; i < 90; i++) { await frame(); if (i % 5 === 0) trace.push(inside()); }
       const sprint = m.debug().tunnel.speed;
+      const sprintMoved = ug.camera.position.distanceTo(start);
       ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
-      return { worst, moved, sprint, phase: m.debug().phase };
-    });
-    expect(walk.worst).toBeLessThan(0.01);
+      return { tubes: tubes.length, trace, own, moved, sprintMoved, sprint, phase: m.debug().phase };
+    }, st.lineId);
+    expect(walk.tubes).toBeGreaterThanOrEqual(2);
+    for (const f of walk.trace) {
+      expect(f.radius).toBe(4.5);
+      // On the bore's axis: far inside its 4.5m wall (the verifier measured
+      // 6.0 to 6.9m here when the walker was on the shared centreline).
+      expect(f.best).toBeLessThan(0.5);
+    }
+    expect(walk.own).toBeLessThan(0.01);
     expect(walk.moved).toBeGreaterThan(1);
+    expect(walk.sprintMoved).toBeGreaterThan(walk.moved);
     expect(walk.phase).toBe('tunnel');
     expect(walk.sprint).toBeCloseTo(20, 1);
 

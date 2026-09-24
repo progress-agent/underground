@@ -14,10 +14,14 @@
 //           (pedestrian-body.js), colliding with building footprints through
 //           the shared collision service, walkable roofs included.
 //   shaft   E near a station: straight down the shaft to the platform at its
-//           true modelled depth; E on a platform: back up to the street.
-//   tunnel  below ground the body is a point on the tunnel centreline
-//           (pedestrian-tunnels.js): W/S along it, free look, facing picks the
-//           branch at junctions, Shift is a superhuman ~20 m/s sprint.
+//           true modelled depth, then through a short cross passage into the
+//           bore whose trains run the way you face; E on a platform: back
+//           through the passage and up to the street.
+//   tunnel  below ground the body is a point on the centreline of the rendered
+//           bore it is in (pedestrian-tunnels.js; main.js draws twin bores 6m
+//           either side of the line's shared centreline, which is solid ground):
+//           W/S along it, free look, facing picks the branch at junctions,
+//           Shift is a superhuman ~20 m/s sprint.
 //
 // Leaving the mode puts the sliders back as they were before entry (the
 // registry has already silenced the mode SFX and released pointer lock).
@@ -42,6 +46,7 @@ export { PEDESTRIAN_TUNABLES };
 export const ENTRANCE_RADIUS_M = 35;   // how close to a station you must stand to go down
 export const PLATFORM_RADIUS_M = 30;   // how close along the tunnel to a platform to go up
 const ALIGN_S = 0.35;                  // shaft: slide onto the shaft axis before descending
+const PASSAGE_S = 0.6;                 // shaft foot <-> bore: the cross passage at platform level
 const PITCH_LIMIT = 1.45;              // display pitch clamp (about 83 degrees)
 const NETWORK_RETRY_S = 2;
 
@@ -70,8 +75,8 @@ export function createPedestrianMode(ctx) {
   let phase = 'off';
   let yaw = 0, pitch = 0;                 // pitch is DISPLAY pitch
   let enter = null;                       // { from: Vector3, fromQ: Quaternion, t }
-  let shaft = null;                       // { dir, x0, z0, x1, z1, y, targetY, t, stop, tunnelDir }
-  let tunnel = null;                      // { path, s, dir, speed }
+  let shaft = null;                       // { dir, x0, z0, x1, z1, y, targetY, t, stop, tunnelDir, side, passage }
+  let tunnel = null;                      // { path, s, dir, side }  side: +1 / -1 bore, 0 centreline
   let net = null, netTriedAt = -Infinity, clock = 0;
   let lastHint = undefined;
   let jumpLatch = false, useLatch = false;
@@ -99,7 +104,8 @@ export function createPedestrianMode(ctx) {
     const src = ctx.tubeNetwork;
     if (!src) return net;
     try {
-      net = buildTunnelNetwork({ THREE, branchesByLine: src.branches, stationLayers: src.stationLayers, VE });
+      net = buildTunnelNetwork({ THREE, branchesByLine: src.branches, stationLayers: src.stationLayers, VE,
+        halfSpacing: src.halfSpacing ?? 0 });
     } catch (err) {
       console.warn('[pedestrian] tunnel network', err);
     }
@@ -180,8 +186,11 @@ export function createPedestrianMode(ctx) {
     const pick = e ? chooseStop(n, e, facing()) : null;
     if (!pick) return false;
     const eye = body.y + P.eye * VE;
+    // The bore whose trains run the way you face (main.js runs +u trains on
+    // its leftCurve, side +1), so side = travel direction along the path.
+    const side = n.halfSpacing > 0 ? pick.dir : 0;
     shaft = { dir: 'down', x0: body.x, z0: body.z, x1: pick.stop.x, z1: pick.stop.z, y: eye,
-      targetY: pick.stop.platformY, t: 0, stop: pick.stop, tunnelDir: pick.dir };
+      targetY: pick.stop.platformY, t: 0, stop: pick.stop, tunnelDir: pick.dir, side, passage: null };
     phase = 'shaft';
     body.vx = body.vy = body.vz = 0; body.jet = false;
     hint(`Descending to ${pick.stop.name ? `${cleanLabel(pick.stop.name)} ` : ''}platform, ${pick.stop.depthM.toFixed(0)} m down`);
@@ -190,8 +199,11 @@ export function createPedestrianMode(ctx) {
 
   function startAscent(stop) {
     const ground = ctx.collision.groundHeightAt(stop.x, stop.z) ?? stop.surfaceY ?? ctx.camera.position.y;
-    shaft = { dir: 'up', x0: stop.x, z0: stop.z, x1: stop.x, z1: stop.z, y: ctx.camera.position.y,
-      targetY: ground + P.eye * VE, t: ALIGN_S, stop, groundY: ground };
+    const c = ctx.camera.position;
+    // Back through the cross passage from the bore to the foot of the shaft, then up.
+    shaft = { dir: 'up', x0: stop.x, z0: stop.z, x1: stop.x, z1: stop.z, y: stop.platformY,
+      targetY: ground + P.eye * VE, t: ALIGN_S, stop, groundY: ground,
+      passage: { x0: c.x, y0: c.y, z0: c.z, x1: stop.x, y1: stop.platformY, z1: stop.z, t: 0 } };
     phase = 'shaft';
     tunnel = null;
     hint(`Up to the street at ${cleanLabel(stop.name)}`);
@@ -234,7 +246,36 @@ export function createPedestrianMode(ctx) {
     sound(body.state === 'ground' ? Math.hypot(body.vx, body.vz) : 0);
   }
 
+  /** Advance the cross passage; true once it has arrived. */
+  function stepPassage(dt) {
+    const g = shaft.passage;
+    g.t += dt;
+    const k = PASSAGE_S > 0 ? Math.min(1, g.t / PASSAGE_S) : 1;
+    const e = easeOutCubic(k);
+    placeCamera(g.x0 + (g.x1 - g.x0) * e, g.y0 + (g.y1 - g.y0) * e, g.z0 + (g.z1 - g.z0) * e);
+    return k >= 1;
+  }
+
+  function enterTunnel() {
+    tunnel = { path: shaft.stop.path, s: shaft.stop.s, dir: shaft.tunnelDir, side: shaft.side || 0 };
+    tunnelSpeed = 0;
+    phase = 'tunnel';
+    hint(null);
+    shaft = { ...shaft, done: true };
+  }
+
   function updateShaft(dt) {
+    sound(0);
+    // Up: the passage from the bore to the shaft foot comes first.
+    if (shaft.dir === 'up' && shaft.passage && !shaft.passage.done) {
+      if (stepPassage(dt)) shaft.passage.done = true;
+      else return;
+    }
+    // Down: the passage from the shaft foot into the bore comes last.
+    if (shaft.dir === 'down' && shaft.passage) {
+      if (stepPassage(dt)) enterTunnel();
+      return;
+    }
     shaft.t += dt;
     const a = Math.min(1, shaft.t / ALIGN_S);
     const x = shaft.x0 + (shaft.x1 - shaft.x0) * easeOutCubic(a);
@@ -245,13 +286,11 @@ export function createPedestrianMode(ctx) {
       shaft.y = Math.abs(d) <= step ? shaft.targetY : shaft.y + Math.sign(d) * step;
     }
     placeCamera(x, shaft.y, z);
-    sound(0);
     if (a >= 1 && shaft.y === shaft.targetY) {
       if (shaft.dir === 'down') {
-        tunnel = { path: shaft.stop.path, s: shaft.stop.s, dir: shaft.tunnelDir };
-        tunnelSpeed = 0;
-        phase = 'tunnel';
-        hint(null);
+        const bore = pointAt(net.paths[shaft.stop.path], shaft.stop.s, {}, shaft.side || 0);
+        shaft.passage = { x0: x, y0: shaft.y, z0: z, x1: bore.x, y1: bore.y, z1: bore.z, t: 0 };
+        return;
       } else {
         body.x = shaft.x1; body.z = shaft.z1; body.y = shaft.groundY;
         body.vx = body.vy = body.vz = 0; body.state = 'ground';
@@ -282,7 +321,7 @@ export function createPedestrianMode(ctx) {
       tunnelSpeed = 0;
       tunnel.dir = travelDir(n.paths[tunnel.path], tunnel.s, want, tunnel.dir);
     }
-    const p = pointAt(n.paths[tunnel.path], tunnel.s);
+    const p = pointAt(n.paths[tunnel.path], tunnel.s, {}, tunnel.side);
     placeCamera(p.x, p.y, p.z);
     lastEvents = [];
     sound(tunnelSpeed);
@@ -364,7 +403,8 @@ export function createPedestrianMode(ctx) {
         phase, state: body.state, x: body.x, y: body.y, z: body.z, vx: body.vx, vy: body.vy, vz: body.vz,
         jet: body.jet, yaw, pitch, eyeY: ctx.camera.position.y,
         ease: { running: ease.running, saved: ease.saved, held: ease.held },
-        tunnel: tunnel && n ? { path: tunnel.path, s: tunnel.s, dir: tunnel.dir, lineId: n.paths[tunnel.path]?.lineId,
+        tunnel: tunnel && n ? { path: tunnel.path, s: tunnel.s, dir: tunnel.dir, side: tunnel.side,
+          lineId: n.paths[tunnel.path]?.lineId,
           speed: tunnelSpeed } : null,
         shaft: shaft ? { dir: shaft.dir, y: shaft.y, targetY: shaft.targetY, done: !!shaft.done,
           stop: { name: shaft.stop.name, lineId: shaft.stop.lineId, platformY: shaft.stop.platformY,

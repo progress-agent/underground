@@ -3740,6 +3740,8 @@ modeSystem = installModes({
 modeSystem.ctx.tubeNetwork = {
   get branches() { return lineBranchCenterPts; },
   get stationLayers() { return lineShaftLayers; },
+  // The rendered tunnels are twin bores this far either side of the centreline.
+  get halfSpacing() { return twinTunnelsEnabled ? tunnelOffsetM : 0; },
 };
 // ── /sprint:A2 ──
 

@@ -3,12 +3,20 @@
 // THREE.CatmullRomCurve3; no DOM, so node tests pin it.
 //
 // Jordan: "Going underground only at stations, and then only moving within
-// tunnels whilst underground." So below ground a pedestrian is a point on a
-// tunnel centreline, never a free body:
-//   - the centreline is the SAME curve the tunnels are drawn on (main.js
-//     buildOffsetCurvesFromCenterline: a centripetal CatmullRomCurve3 through
-//     each branch's snapped centre points; the twin tunnels are offset either
-//     side of it), sampled every ~10m into a polyline with real-metre arc length;
+// tunnels whilst underground." So below ground a pedestrian is a point on the
+// centreline of one of the RENDERED bores, never a free body:
+//   - topology and arc length come from the line's shared centreline (a
+//     centripetal CatmullRomCurve3 through each branch's snapped centre points),
+//     sampled every ~10m into a polyline with real-metre arc length;
+//   - the tunnels main.js actually draws are twin bores either side of that
+//     centreline (buildOffsetCurvesFromCenterline, offset `halfSpacing`, 6m by
+//     default, with a 4.5m tube radius), so the shared centreline itself runs
+//     through solid ground between them. Each sample therefore also carries the
+//     matching point on both bore curves, built exactly as main.js builds them
+//     (boreVertices below), and the walker is placed on the bore it is in
+//     (`side` +1 = main.js leftCurve, -1 = rightCurve, 0 = the shared centreline);
+//   - a walker keeps to its bore: turning round does not teleport it into the
+//     other one, and at a junction the bore carries over by travel sense;
 //   - W / S walk along it, in whichever direction the view faces;
 //   - at a junction (a vertex shared by two or more branches of the same line)
 //     the continuation that best matches the facing direction wins;
@@ -17,20 +25,23 @@
 //
 // ─── API ────────────────────────────────────────────────────────────────────
 //
-//   const net = buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE })
+//   const net = buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE, halfSpacing })
+//     halfSpacing     main.js twin-bore half spacing in metres (0 = single bore on the centreline)
 //     branchesByLine  Map lineId -> [[{x,y,z}, ...], ...]   (main.js lineBranchCenterPts)
 //     stationLayers   Map lineId -> { stationsLayer: { stations: [{ id, name, pos, surfaceY, depthM }] } }
 //   net.paths         [{ id, lineId, n, x, y, z, s, length, junctions, stops }]
 //   net.entrances     [{ name, x, z, surfaceY, stops: [stop] }]   one per station site
 //   stop              { path, s, lineId, name, platformY, surfaceY, depthM }
 //
-//   pointAt(path, s, out?)                 -> {x, y, z}
+//   pointAt(path, s, out?, side?)          -> {x, y, z} on the centreline (side 0) or a bore (+1 / -1)
+//   boreVertices(THREE, pts, halfSpacing)  -> { left, right } offset vertices, as main.js builds them
 //   headingAt(path, s, dir)                -> {x, z} unit horizontal direction of travel
 //   nearestEntrance(net, x, z, maxR)       -> entrance or null
 //   chooseStop(net, entrance, facing)      -> { stop, dir } best matching the facing direction
 //   travelDir(path, s, want, prevDir)      -> +1 / -1 along the path for a desired direction
-//   advance(net, pos, dist, want)          -> moves pos {path, s, dir} dist metres toward `want`
-//                                             (unit {x,z}), choosing at junctions; returns { stopped }
+//   advance(net, pos, dist, want)          -> moves pos {path, s, dir, side?} dist metres toward `want`
+//                                             (unit {x,z}), choosing at junctions (the bore side carries
+//                                             over by travel sense); returns { stopped }
 //   nearestStopOnPath(net, path, s, maxD)  -> stop within maxD metres of arc, or null
 
 export const SAMPLE_STEP_M = 10;
@@ -41,22 +52,51 @@ const ENTRANCE_MERGE_M = 40;             // stops closer than this share one ent
 
 const key = (lineId, x, z) => `${lineId}:${Math.round(x)}:${Math.round(z)}`;
 
-function samplePath(THREE, lineId, pts, VE, id, sampleStep) {
+/**
+ * The twin-bore control points, built EXACTLY as main.js
+ * buildOffsetCurvesFromCenterline builds them (keep the two in step; the
+ * Playwright tunnel spec measures the walker against the rendered tube meshes,
+ * so a drift here fails it): per vertex, the XZ chord from the previous to the
+ * next vertex, its perpendicular (x, z) -> (-z, x), offset +/- halfSpacing.
+ * main.js runs a centripetal CatmullRomCurve3 through each list.
+ */
+export function boreVertices(THREE, pts, halfSpacing) {
+  const left = [], right = [];
+  const tangent = new THREE.Vector3(), normal = new THREE.Vector3();
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], pPrev = pts[Math.max(0, i - 1)], pNext = pts[Math.min(pts.length - 1, i + 1)];
+    tangent.subVectors(pNext, pPrev);
+    tangent.y = 0;
+    tangent.normalize();
+    normal.set(-tangent.z, 0, tangent.x).normalize();
+    left.push(new THREE.Vector3().copy(p).addScaledVector(normal, halfSpacing));
+    right.push(new THREE.Vector3().copy(p).addScaledVector(normal, -halfSpacing));
+  }
+  return { left, right };
+}
+
+function samplePath(THREE, lineId, pts, VE, id, sampleStep, halfSpacing) {
   const V = pts.map(p => new THREE.Vector3(p.x, p.y, p.z));
   const n = V.length;
   const curve = new THREE.CatmullRomCurve3(V);
-  const xs = [], ys = [], zs = [], vIdx = new Array(n);
+  const bores = halfSpacing > 0 ? boreVertices(THREE, V, halfSpacing) : null;
+  const lCurve = bores ? new THREE.CatmullRomCurve3(bores.left) : null;
+  const rCurve = bores ? new THREE.CatmullRomCurve3(bores.right) : null;
+  const xs = [], ys = [], zs = [], vIdx = new Array(n), us = [];
   const tmp = new THREE.Vector3();
   for (let i = 0; i < n - 1; i++) {
     const segH = Math.hypot(V[i + 1].x - V[i].x, V[i + 1].z - V[i].z);
     const m = Math.max(1, Math.ceil(segH / sampleStep));
     for (let k = 0; k < m; k++) {
       if (k === 0) vIdx[i] = xs.length;
-      curve.getPoint((i + k / m) / (n - 1), tmp);
+      const u = (i + k / m) / (n - 1);
+      us.push(u);
+      curve.getPoint(u, tmp);
       xs.push(tmp.x); ys.push(tmp.y); zs.push(tmp.z);
     }
   }
   vIdx[n - 1] = xs.length;
+  us.push(1);
   xs.push(V[n - 1].x); ys.push(V[n - 1].y); zs.push(V[n - 1].z);
   // Vertices land exactly on their input point (CatmullRom interpolates them).
   for (let i = 0; i < n; i++) { xs[vIdx[i]] = V[i].x; ys[vIdx[i]] = V[i].y; zs[vIdx[i]] = V[i].z; }
@@ -65,9 +105,20 @@ function samplePath(THREE, lineId, pts, VE, id, sampleStep) {
   for (let j = 1; j < count; j++) {
     s[j] = s[j - 1] + Math.hypot(xs[j] - xs[j - 1], (ys[j] - ys[j - 1]) / VE, zs[j] - zs[j - 1]);
   }
+  // The matching point on each rendered bore, at the same curve parameter: the
+  // bore curves have the same vertex count, so parameter u sits at the same
+  // place along both (a vertex lands exactly on its offset vertex).
+  const boreArrays = (c, verts) => {
+    const bx = new Float64Array(count), by = new Float64Array(count), bz = new Float64Array(count);
+    for (let j = 0; j < count; j++) { c.getPoint(us[j], tmp); bx[j] = tmp.x; by[j] = tmp.y; bz[j] = tmp.z; }
+    for (let i = 0; i < n; i++) { const j = vIdx[i]; bx[j] = verts[i].x; by[j] = verts[i].y; bz[j] = verts[i].z; }
+    return { x: bx, y: by, z: bz };
+  };
   return {
     id, lineId, n: count,
     x: Float64Array.from(xs), y: Float64Array.from(ys), z: Float64Array.from(zs), s,
+    left: lCurve ? boreArrays(lCurve, bores.left) : null,
+    right: rCurve ? boreArrays(rCurve, bores.right) : null,
     length: s[count - 1],
     vertexS: vIdx.map(j => s[j]),
     vertices: V,
@@ -77,14 +128,15 @@ function samplePath(THREE, lineId, pts, VE, id, sampleStep) {
 }
 
 export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 5,
-  sampleStep = SAMPLE_STEP_M, minDepthM = MIN_PLATFORM_DEPTH_M } = {}) {
+  sampleStep = SAMPLE_STEP_M, minDepthM = MIN_PLATFORM_DEPTH_M, halfSpacing = 0 } = {}) {
+  const hs = Number.isFinite(halfSpacing) && halfSpacing > 0 ? halfSpacing : 0;
   const paths = [];
   const byKey = new Map(); // junction key -> [{ path, s }]
   for (const [lineId, branches] of branchesByLine || []) {
     for (const branch of branches || []) {
       const pts = (branch || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z));
       if (pts.length < 2) continue;
-      const path = samplePath(THREE, lineId, pts, VE, paths.length, sampleStep);
+      const path = samplePath(THREE, lineId, pts, VE, paths.length, sampleStep, hs);
       if (!(path.length > 0)) continue;
       paths.push(path);
       path.vertices.forEach((v, i) => {
@@ -146,7 +198,7 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
     }
     e.stops.push(stop);
   }
-  return { paths, entrances, junctionAt, VE, stats: { paths: paths.length, stops: stops.length, entrances: entrances.length,
+  return { paths, entrances, junctionAt, VE, halfSpacing: hs, stats: { paths: paths.length, stops: stops.length, entrances: entrances.length,
     junctions: [...byKey.values()].filter(x => x.length > 1).length } };
 }
 
@@ -163,14 +215,15 @@ function indexAt(path, s) {
   return Math.min(lo, path.n - 2);
 }
 
-export function pointAt(path, s, out = {}) {
+export function pointAt(path, s, out = {}, side = 0) {
   const c = Math.min(path.length, Math.max(0, s));
   const i = indexAt(path, c);
   const span = path.s[i + 1] - path.s[i];
   const t = span > 0 ? (c - path.s[i]) / span : 0;
-  out.x = path.x[i] + (path.x[i + 1] - path.x[i]) * t;
-  out.y = path.y[i] + (path.y[i + 1] - path.y[i]) * t;
-  out.z = path.z[i] + (path.z[i + 1] - path.z[i]) * t;
+  const a = (side > 0 ? path.left : side < 0 ? path.right : null) || path;
+  out.x = a.x[i] + (a.x[i + 1] - a.x[i]) * t;
+  out.y = a.y[i] + (a.y[i + 1] - a.y[i]) * t;
+  out.z = a.z[i] + (a.z[i + 1] - a.z[i]) * t;
   return out;
 }
 
@@ -257,6 +310,10 @@ export function advance(net, pos, dist, want) {
     remaining -= Math.abs(j - pos.s);
     pos.s = j;
     const next = chooseAt(net, pos.path, j, pos.dir, want);
+    // The bore side is relative to each path's own orientation; carry it over
+    // by travel sense (side x dir), so a branch drawn the other way round keeps
+    // the walker in the same physical bore.
+    if (pos.side && next.path !== pos.path) pos.side = pos.side * pos.dir * next.dir;
     pos.path = next.path; pos.s = next.s; pos.dir = next.dir;
   }
   return { stopped };

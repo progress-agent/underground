@@ -7,8 +7,9 @@ import * as THREE from 'three';
 import { createScaleEase, REAL_MASTER, REAL_STRUCTURE } from '../src/modes/pedestrian-scale.js';
 import { PEDESTRIAN_TUNABLES, BODY, createBody, stepBody } from '../src/modes/pedestrian-body.js';
 import { createCollisionService } from '../src/modes/collision.js';
+import { readFileSync } from 'node:fs';
 import {
-  buildTunnelNetwork, pointAt, advance, nearestEntrance, chooseStop, nearestStopOnPath,
+  buildTunnelNetwork, pointAt, advance, nearestEntrance, chooseStop, nearestStopOnPath, boreVertices,
 } from '../src/modes/pedestrian-tunnels.js';
 
 const VE = 5;
@@ -295,4 +296,143 @@ test('shallow and elevated stations have no platform to descend to', () => {
   ] } }]]);
   const net = buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE });
   assert.equal(net.entrances.length, 0);
+});
+
+// ── twin bores: the walker is inside a RENDERED tunnel, not between them ─────
+//
+// main.js draws each branch as two tubes (radius 4.5m) either side of the
+// shared centreline. main.js is not importable in node, so the real
+// buildOffsetCurvesFromCenterline is lifted from its source text: if the
+// mirror in pedestrian-tunnels.js ever drifts from it, these fail.
+const MAIN_SRC = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+const mainOffsetFn = (() => {
+  const start = MAIN_SRC.indexOf('function buildOffsetCurvesFromCenterline(');
+  assert.ok(start >= 0, 'main.js still defines buildOffsetCurvesFromCenterline');
+  let i = MAIN_SRC.indexOf('{', start), depth = 0;
+  for (; i < MAIN_SRC.length; i++) {
+    if (MAIN_SRC[i] === '{') depth++;
+    else if (MAIN_SRC[i] === '}' && --depth === 0) break;
+  }
+  const src = MAIN_SRC.slice(start, i + 1);
+  return new Function('THREE', `${src}; return buildOffsetCurvesFromCenterline;`)(THREE);
+})();
+const TUBE_RADIUS = Number(/const radius = ([\d.]+);/.exec(MAIN_SRC)[1]);
+const HALF = Number(/const TUNNEL_OFFSET_METRES = ([\d.]+);/.exec(MAIN_SRC)[1]);
+
+function distToCurve(curve, p, samples = 4000) {
+  const pts = curve.getPoints(samples);
+  let best = Infinity;
+  for (let k = 0; k < pts.length - 1; k++) {
+    const a = pts[k], b = pts[k + 1];
+    const vx = b.x - a.x, vy = b.y - a.y, vz = b.z - a.z, len2 = vx * vx + vy * vy + vz * vz || 1;
+    const u = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy + (p.z - a.z) * vz) / len2));
+    best = Math.min(best, Math.hypot(p.x - a.x - vx * u, p.y - a.y - vy * u, p.z - a.z - vz * u));
+  }
+  return best;
+}
+
+// A curving line so the bores are not trivially straight offsets, plus a
+// branch drawn the OTHER way round (from its far end back to the junction).
+const Cq = v(1400, 28, -250), Cr = v(1700, 24, -700);
+function twinNetwork(halfSpacing = HALF) {
+  const trunk = [A, B, J, Cq, Cr];
+  const spur = [v(1300, 30, 500), v(1150, 30, 200), J]; // ends at J: reversed relative to travel
+  const branchesByLine = new Map([['jubilee', [trunk, spur]]]);
+  const st = (id, name, p, depthM) => ({ id, name, pos: new THREE.Vector3(p.x, p.y, p.z), surfaceY: 0, depthM });
+  const stationLayers = new Map([['jubilee', { stationsLayer: { stations: [
+    st('b', 'Bravo', B, 25), st('q', 'Quebec', Cq, 28),
+  ] } }]]);
+  const net = buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE, halfSpacing });
+  const rendered = [trunk, spur].map(pts => mainOffsetFn(pts.map(p => new THREE.Vector3(p.x, p.y, p.z)), halfSpacing));
+  return { net, rendered };
+}
+
+test('boreVertices is main.js buildOffsetCurvesFromCenterline, vertex for vertex', () => {
+  const { net, rendered } = twinNetwork();
+  assert.equal(TUBE_RADIUS, 4.5);
+  assert.equal(HALF, 6);
+  net.paths.forEach((path, i) => {
+    const mine = boreVertices(THREE, path.vertices, HALF);
+    for (const [k, side] of [['left', 'leftCurve'], ['right', 'rightCurve']]) {
+      rendered[i][side].points.forEach((q, j) => {
+        assert.ok(q.distanceTo(mine[k][j]) < 1e-9, `${k} vertex ${j}`);
+      });
+    }
+  });
+});
+
+test('below ground the walker is inside a rendered bore, never in the rock between them', () => {
+  const { net, rendered } = twinNetwork();
+  const bravo = nearestEntrance(net, 500, 0, 35);
+  const pick = chooseStop(net, bravo, { x: 1, z: 0 });
+  for (const side of [1, -1]) {
+    const pos = { path: pick.stop.path, s: pick.stop.s, dir: pick.dir, side };
+    const bore = (p) => (p.side > 0 ? rendered[p.path].leftCurve : rendered[p.path].rightCurve);
+    let worst = 0, minCentre = Infinity;
+    // Walk the trunk east past the curve, then back and down the reversed spur.
+    const legs = [[{ x: 1, z: 0 }, 1200], [{ x: -1, z: 0 }, 900], [{ x: 0.6, z: 0.8 }, 700]];
+    for (const [want, total] of legs) {
+      for (let d = 0; d < total; d += 25) {
+        advance(net, pos, 25, want);
+        const p = pointAt(net.paths[pos.path], pos.s, {}, pos.side);
+        worst = Math.max(worst, distToCurve(bore(pos), p));
+        minCentre = Math.min(minCentre, Math.hypot(p.x - pointAt(net.paths[pos.path], pos.s).x,
+          p.z - pointAt(net.paths[pos.path], pos.s).z));
+      }
+    }
+    // On the bore's own axis (well inside the 4.5m radius), and never on the
+    // shared centreline, which lies 6m from both bores.
+    assert.ok(worst < 0.5, `side ${side}: ${worst.toFixed(3)}m off the rendered bore axis`);
+    assert.ok(minCentre > HALF - 1, `side ${side}: came within ${minCentre.toFixed(2)}m of the centreline`);
+    assert.equal(pos.path, 1, 'ended on the spur');
+  }
+});
+
+test('a walker keeps to its bore: turning round and crossing a reversed branch never swap bores', () => {
+  const { net } = twinNetwork();
+  const bravo = nearestEntrance(net, 500, 0, 35);
+  const pick = chooseStop(net, bravo, { x: 1, z: 0 });
+  const pos = { path: pick.stop.path, s: pick.stop.s, dir: pick.dir, side: pick.dir };
+  const at = () => pointAt(net.paths[pos.path], pos.s, {}, pos.side);
+  // Physical side of travel: cross product sign of heading x (point - centre).
+  let prev = at();
+  let maxJump = 0;
+  const step = (want, dist) => {
+    for (let d = 0; d < dist; d += 5) {
+      advance(net, pos, 5, want);
+      const p = at();
+      maxJump = Math.max(maxJump, Math.hypot(p.x - prev.x, p.z - prev.z));
+      prev = p;
+    }
+  };
+  step({ x: 1, z: 0 }, 300);
+  const sideBefore = pos.side;
+  step({ x: -1, z: 0 }, 100);             // turn round: same path, same bore
+  assert.equal(pos.side, sideBefore);
+  step({ x: 1, z: 0 }, 250);              // back east, short of the junction
+  step({ x: 0.6, z: 0.8 }, 400);          // onto the reversed spur
+  assert.equal(pos.path, 1);
+  // Never a teleport: 5m steps move at most ~5m plus the small kink where the
+  // two branches' bores meet at the junction (each is offset along its own
+  // chord there, exactly as main.js draws them), never the 12m bore-to-bore swap.
+  assert.ok(maxJump < 2 * HALF - 1, `largest single-step move ${maxJump.toFixed(2)}m`);
+  // Spur is drawn toward J, so travelling away from J is dir -1 and the side flips sign
+  // to stay in the same physical bore.
+  assert.equal(pos.dir, -1);
+  assert.equal(pos.side, -sideBefore);
+});
+
+test('platform in a bore is still at the platform\'s true depth', () => {
+  const { net } = twinNetwork();
+  const bravo = nearestEntrance(net, 500, 0, 35);
+  const stop = bravo.stops[0];
+  for (const side of [1, -1]) {
+    const p = pointAt(net.paths[stop.path], stop.s, {}, side);
+    assert.equal(p.y, stop.platformY);
+    assert.ok(Math.abs(Math.hypot(p.x - stop.x, p.z - stop.z) - HALF) < 1e-9);
+  }
+  // Single-bore (twin tunnels off): the centreline is the tunnel.
+  const single = twinNetwork(0).net;
+  const q = pointAt(single.paths[0], single.paths[0].stops[0].s, {}, 1);
+  assert.ok(Math.hypot(q.x - B.x, q.z - B.z) < 1e-9);
 });
