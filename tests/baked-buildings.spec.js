@@ -69,6 +69,15 @@ async function bootLive(page) {
     () => document.querySelector('#loadingBar')?.classList.contains('done'),
     { timeout: 90000 },
   );
+  // Since D-038 (sprint 24Sep26h, lane O) the bar fades when the descent
+  // STARTS, not after it: the camera is still flying and live tiles outside
+  // the descent footprint are paused until landing. Wait for the opening to
+  // finish, as the bar's 'done' used to imply, so both collects see the same
+  // camera and a settled loader.
+  await page.waitForFunction(
+    () => ['done', 'bypassed'].includes(window.__ug?.intro?.getPhase?.()),
+    { timeout: 60000 },
+  );
   await page.waitForTimeout(6000); // let the proximity loader settle
 }
 

@@ -9,6 +9,13 @@
 // version caused a one-tick "cut" discontinuity). Controls are locked
 // for the duration.
 //
+// Two phases (sprint 24Sep26h, lane O). run() primes the start pose and locks
+// the controls at module load, as before, but the descent then WAITS: the
+// opening gate (src/loading-gate.js) calls begin() once the honest loading bar
+// reports everything the descent shows, shaders compiled and a warm-up render
+// done. isRunning() is true in both phases (the intro owns the camera from
+// run()); isPlaying() is true only once the descent clock is advancing.
+//
 // All pose parameters are mutable via tune() + replay() so the tuning HUD
 // (src/intro-tuner.js, gated on ?tuneIntro=1) can drive live iteration
 // without a page reload. holdMs / phase1EndMs remain in the parameter
@@ -16,7 +23,15 @@
 
 import * as THREE from 'three';
 
-const MAX_DURATION_MS = 15000; // hard watchdog — intro must finalize by this
+const MAX_DURATION_MS = 15000; // hard watchdog, counted from the moment the descent starts playing
+
+// Frame-safe clock (sprint 24Sep26h, lane O). The descent advances by the
+// display frame delta, clamped to this many milliseconds per frame, so a
+// main-thread stall pauses the flight instead of skipping part of it. The
+// old wall clock kept running through the ~5s boot block and the camera
+// resumed near its end pose (roughly 95% of the descent was never shown).
+// 50ms matches the interactive recovery cap (D-027): full speed down to 20fps.
+export const MAX_STEP_MS = 50;
 
 // ─── Tunable parameters (defaults) ─────────────────────────────────────────
 // All coords are in scene units. `null` placeholders are resolved to the
@@ -36,7 +51,8 @@ const DEFAULTS = {
   phase1EndMs: 0,      // XZ holds at start until this elapsed time (0 = start moving immediately)
   // totalMs tuned for 25000-scene-unit start — 9s gives dramatic plunge with the
   // easeOutCubic curve shape Jordan approved. Shorter made it rushed; longer
-  // overstayed. Also provides ~3s of cover for surface tiles loading beneath.
+  // overstayed. (Since sprint 24Sep26h it no longer covers loading: the
+  // opening gate holds the descent until what it shows is ready.)
   totalMs:     9000,
 };
 
@@ -57,16 +73,46 @@ function easeOutCubic(t) {
   return 1 - inv * inv * inv;
 }
 
+// ─── Path (pure) ───────────────────────────────────────────────────────────
+
+/**
+ * Camera position on the descent path after `ms` of played time. Pure, so the
+ * tests can check sampled frames against the exact curve the intro flies.
+ */
+export function introPoseAt(params, ms) {
+  const T = params.totalMs;
+  if (ms >= T) return { x: params.endX, y: params.endY, z: params.endZ };
+  const t = Math.max(0, ms);
+  let y = params.startY;
+  if (t >= params.holdMs) {
+    const u = easeOutCubic((t - params.holdMs) / (T - params.holdMs));
+    y = params.startY + (params.endY - params.startY) * u;
+  }
+  let x = params.startX, z = params.startZ;
+  if (t > params.phase1EndMs) {
+    const u = easeOutCubic((t - params.phase1EndMs) / (T - params.phase1EndMs));
+    x = params.startX + (params.endX - params.startX) * u;
+    z = params.startZ + (params.endZ - params.startZ) * u;
+  }
+  return { x, y, z };
+}
+
+export { easeOutCubic, DEFAULTS as INTRO_DEFAULTS };
+
 // ─── Factory ───────────────────────────────────────────────────────────────
 
-export function createIntro({ camera, controls, fpsControls, llToXZ }) {
+export function createIntro({ camera, controls, fpsControls, llToXZ, now = () => performance.now() }) {
   const params = { ...DEFAULTS };
 
   let finished = false;
-  let started = false;
+  let started = false;      // run() called: intro owns the camera
+  let playing = false;      // begin() called: descent clock advancing
   let skipRequested = false;
-  let startTime = 0;
+  let playedMs = 0;
+  let playStartWall = 0;
+  let firstPlayFrame = false;
   let anchorsResolved = false;
+  let bypassed = false;
 
   function onSkip() { skipRequested = true; }
 
@@ -92,14 +138,16 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
     anchorsResolved = true;
   }
 
-  function applyPoseK3() {
-    camera.position.set(params.endX, params.endY, params.endZ);
+  function applyPose(p) {
+    camera.position.set(p.x, p.y, p.z);
     camera.lookAt(params.lookX, params.lookY, params.lookZ);
-    // Flush matrixWorld so the next station-label projection reads the
-    // final pose (same-frame, not next-frame). Without this the labels
-    // appear to "drift" behind the camera during fast motion.
+    // Flush matrixWorld so the next station-label projection reads this
+    // pose (same-frame, not next-frame). Without this the labels appear to
+    // "drift" behind the camera during fast motion.
     camera.updateMatrixWorld(true);
   }
+
+  function applyPoseK3() { applyPose({ x: params.endX, y: params.endY, z: params.endZ }); }
 
   function removeListeners() {
     document.removeEventListener('click', onSkip);
@@ -110,6 +158,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
   function finalize() {
     if (finished) return;
     finished = true;
+    playing = false;
     removeListeners();
 
     if (controls) controls.enabled = true;
@@ -133,6 +182,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
     started = true;
 
     if (shouldSkipByUrl()) {
+      bypassed = true;
       finished = true;
       try { window.dispatchEvent(new CustomEvent('ug:intro-done')); } catch (e) {}
       return;
@@ -143,67 +193,52 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
     if (controls) controls.enabled = false;
     if (fpsControls) fpsControls.enabled = false;
 
+    // Prime at K0 so every frame rendered while the loading bar is up (and
+    // the warm-up render behind it) is the start pose. The descent itself
+    // waits for begin().
+    primeStart();
+  }
+
+  /** Put the camera back on the start pose (after the gate's warm-up renders). */
+  function primeStart() {
+    if (!started || finished) return;
+    applyPose(introPoseAt(params, 0));
+  }
+
+  /**
+   * Start the descent clock. Called by the opening gate when everything the
+   * descent shows is ready. Frame 0 of the path is rendered on the next
+   * update(); skip-on-input is armed only now, so a click during loading does
+   * not forfeit the descent.
+   */
+  function begin() {
+    if (!started || finished || playing) return;
+    playing = true;
+    playedMs = 0;
+    firstPlayFrame = true;
+    playStartWall = now();
     document.addEventListener('click',      onSkip, { once: true });
     document.addEventListener('touchstart', onSkip, { once: true, passive: true });
     document.addEventListener('keydown',    onSkip, { once: true });
-
-    // Prime at K0 so the very first render frame is correct even before
-    // update() ticks.
-    camera.position.set(params.startX, params.startY, params.startZ);
-    camera.lookAt(params.lookX, params.lookY, params.lookZ);
-    camera.updateMatrixWorld(true);
-
-    // startTime=0 is a sentinel meaning "not armed yet". The first update()
-    // call sets it to performance.now(). This excludes any sync-setup block
-    // between run() and the first tick() from the elapsed clock — without
-    // this guard, heavy boot work (mesh creation, shader compile, tile prefetch)
-    // would eat 2-3 seconds off the front of the descent, causing the camera
-    // to visibly start at ~1000m instead of startY.
-    startTime = 0;
+    primeStart();
   }
 
-  function update(/* dt */) {
-    if (finished || !started) return;
-
-    // Arm the clock on first tick — see startTime=0 comment in run().
-    if (startTime === 0) {
-      startTime = performance.now();
-      return;
-    }
+  function update(dt) {
+    if (finished || !playing) return;
 
     try {
-      const elapsedMs = performance.now() - startTime;
-
       if (skipRequested) { applyPoseK3(); finalize(); return; }
 
-      const T = params.totalMs;
-      if (elapsedMs >= T || elapsedMs >= MAX_DURATION_MS) {
+      // Frame 0 of the path is drawn on the first frame after begin(),
+      // whatever that frame's delta was.
+      if (firstPlayFrame) firstPlayFrame = false;
+      else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS);
+
+      if (playedMs >= params.totalMs || now() - playStartWall >= MAX_DURATION_MS) {
         applyPoseK3(); finalize(); return;
       }
 
-      // Altitude — optional hold for holdMs (default 0), then easeOutCubic
-      // to endY. With holdMs=0 the camera is in motion from frame 0.
-      let y;
-      if (elapsedMs < params.holdMs) {
-        y = params.startY;
-      } else {
-        const u = easeOutCubic((elapsedMs - params.holdMs) / (T - params.holdMs));
-        y = params.startY + (params.endY - params.startY) * u;
-      }
-
-      // XZ — optional hold for phase1EndMs (default 0), then easeOutCubic
-      // to end. With phase1EndMs=0 the XZ drift tracks altitude from t=0.
-      let px = params.startX;
-      let pz = params.startZ;
-      if (elapsedMs > params.phase1EndMs) {
-        const u = easeOutCubic((elapsedMs - params.phase1EndMs) / (T - params.phase1EndMs));
-        px = params.startX + (params.endX - params.startX) * u;
-        pz = params.startZ + (params.endZ - params.startZ) * u;
-      }
-
-      camera.position.set(px, y, pz);
-      camera.lookAt(params.lookX, params.lookY, params.lookZ);
-      camera.updateMatrixWorld(true);
+      applyPose(introPoseAt(params, playedMs));
     } catch (e) {
       console.error('[intro] update failed', e);
       try { finalize(); } catch (_) { /* noop */ }
@@ -211,6 +246,15 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
   }
 
   function isRunning() { return started && !finished; }
+  function isPlaying() { return playing && !finished; }
+  function isBypassed() { return bypassed; }
+  function getPlayedMs() { return playedMs; }
+  function getPhase() {
+    if (!started) return 'idle';
+    if (bypassed) return 'bypassed';
+    if (finished) return 'done';
+    return playing ? 'playing' : 'waiting';
+  }
 
   // ─── Tuner surface ───────────────────────────────────────────────────────
 
@@ -222,16 +266,24 @@ export function createIntro({ camera, controls, fpsControls, llToXZ }) {
   }
 
   // Reset state and re-run with current params. Used by the tuning HUD's
-  // Replay button. Safe to call whether intro is running or already done.
+  // Replay button, after the page has loaded, so it begins at once. Safe to
+  // call whether intro is running or already done.
   function replay() {
     removeListeners();
     finished = false;
     started = false;
+    playing = false;
+    bypassed = false;
     skipRequested = false;
-    startTime = 0;
+    playedMs = 0;
     run();
+    begin();
   }
 
-  const api = { run, update, isRunning, tune, replay, getParams };
+  /** Pose the camera at `ms` along the path (warm-up renders behind the bar). */
+  function showPoseAt(ms) { applyPose(introPoseAt(params, ms)); }
+
+  const api = { run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
+    getPlayedMs, tune, replay, getParams, poseAt: ms => introPoseAt(params, ms) };
   return api;
 }

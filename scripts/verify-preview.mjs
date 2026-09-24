@@ -11,7 +11,11 @@ try {
   await page.addInitScript(() => {
     window.__openingCheck = { done: false, doneAt: null };
     window.addEventListener('ug:intro-done', () => {
-      window.__openingCheck = { done: true, doneAt: performance.now() };
+      window.__openingCheck = { ...window.__openingCheck, done: true, doneAt: performance.now() };
+    });
+    // Sprint 24Sep26h (lane O): the loading bar lets go when the descent starts.
+    window.addEventListener('ug:opening-reveal', () => {
+      window.__openingCheck = { ...window.__openingCheck, revealAt: performance.now() };
     });
   });
   const errors = [], tiles = [], warnings = [];
@@ -25,6 +29,12 @@ try {
   await page.waitForFunction(() => !window.__openingCheck.done &&
     Number(document.getElementById('ug-readout-alt')?.textContent) > 1000,
     null, { timeout: 15000 });
+  await page.screenshot({ path: `${out}/loading.png` });
+  // The descent is held behind the loading bar until its readiness set is
+  // complete; capture the first moments of the flight once the bar lets go.
+  await page.waitForFunction(() => document.getElementById('loadingBar')?.classList.contains('done'),
+    null, { timeout: 60000 });
+  await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/opening.png` });
   const assets = await Promise.all([ground, buildings]);
   for (const response of assets) {
@@ -34,7 +44,10 @@ try {
   await page.waitForFunction(() => window.__openingCheck.done, null, { timeout: 30000 });
   await page.screenshot({ path: `${out}/landing.png` });
   const opening = await page.evaluate(() => window.__openingCheck);
-  if (opening.doneAt < 8000) throw new Error('Opening was skipped or ended prematurely');
+  // The descent itself lasts 9s from the moment the bar lets go.
+  if (opening.doneAt < 8000 || (opening.revealAt && opening.doneAt - opening.revealAt < 8500)) {
+    throw new Error('Opening was skipped or ended prematurely');
+  }
   await page.waitForTimeout(1000);
   await page.keyboard.down('KeyE');
   await page.waitForTimeout(6000);

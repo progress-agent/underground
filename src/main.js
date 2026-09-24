@@ -78,6 +78,11 @@ import { createLensSystem } from './lens.js';
 import { initAudio, updateAudio, setMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources } from './audio.js';
 import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
+// ── s24:O ──
+import { createOpeningGate } from './loading-gate.js';
+import { applyShadowPolicy } from './sun.js';
+import { getSurfaceTileStates } from './surface-loader.js';
+// ── /s24:O ──
 import { initLandscapeLock } from './landscape-lock.js';
 import { initControlsGuide } from './controls-guide.js';
 import { initCushionLuma, sampleCushion, resetCushion, _cushionState } from './cushion-luma.js';
@@ -2506,8 +2511,9 @@ async function buildNetworkMvp() {
 
     // Loading bar helper
     function updateLoadingProgress(current, total) {
+      _s24TubeProgress = total ? current / total : 0; // s24:O (the opening gate owns the bar)
       const fill = document.getElementById('loadingFill');
-      if (fill) {
+      if (fill && intro.isBypassed()) {
         const pct = Math.round((current / total) * 100);
         fill.style.width = `${pct}%`;
       }
@@ -2678,7 +2684,9 @@ async function buildNetworkMvp() {
     const remaining = Math.max(0, MIN_LOADING_DISPLAY_MS - elapsed);
     setTimeout(() => {
       const loadingBar = document.getElementById('loadingBar');
-      if (loadingBar) loadingBar.classList.add('done');
+      // s24:O: with the opening, the gate fades the bar when the whole
+      // readiness set is complete; deep links keep this tube-line bar.
+      if (loadingBar && intro.isBypassed()) loadingBar.classList.add('done');
       // Cinematic intro was started before network build began (main.js:1578)
       // so it runs concurrently with tile/terrain streaming. No controls call
       // here — intro.finalize() re-enables controls on every exit path.
@@ -2752,6 +2760,88 @@ if (sharedView?.length === 6 && sharedView.every(n=>Number.isFinite(n)&&Math.abs
   }
 }
 initIntroTuner({ intro, camera, controls });
+
+// ── s24:O ──
+// Opening gate (D-038): the honest loading bar holds the descent until what it
+// shows is ready, shaders are compiled and warm-up frames rendered; then the
+// descent plays silently from frame 0 (src/loading-gate.js). Deep links keep
+// the compact tube-line bar over a progressively building scene (D-028).
+let _s24TubeProgress = 0;
+const _s24Failed = new Set();
+thamesDataPromise.then(d => { if (!d?.points?.length) _s24Failed.add('thames'); }, () => _s24Failed.add('thames'));
+m25DataPromise.then(d => { if (!d?.points?.length) _s24Failed.add('m25'); }, () => _s24Failed.add('m25'));
+reservoirDataPromise.then(d => { if (!d) _s24Failed.add('reservoirs'); }, () => _s24Failed.add('reservoirs'));
+canalDataPromise.then(d => { if (!d) _s24Failed.add('canals'); }, () => _s24Failed.add('canals'));
+// Live path (the default without ?buildings=baked): waiting for every tile
+// within the loader's 12km of both poses measured ~22s on the M5, over the
+// plan's ~20s limit, so the bar waits for the descent's footprint instead:
+// tiles whose centres lie within 6km of the path's ground track (about 34
+// tiles, ~10s). The rest wait while the descent plays (see the loader call in
+// tick) and then stream in, nearest first, after landing.
+const S24_FOOTPRINT_M = 6000;
+function _s24FootprintTiles() {
+  if (!surfaceDataLoaded) return false;
+  const p = intro.getParams();
+  const vx = p.endX - p.startX, vz = p.endZ - p.startZ, vv = vx * vx + vz * vz || 1;
+  let total = 0, settled = 0;
+  for (const t of getSurfaceTileStates()) {
+    const u = Math.max(0, Math.min(1, ((t.cx - p.startX) * vx + (t.cz - p.startZ) * vz) / vv));
+    if (Math.hypot(t.cx - p.startX - vx * u, t.cz - p.startZ - vz * u) > S24_FOOTPRINT_M) continue;
+    total++;
+    if (t.state === 'loaded' || t.state === 'disposed') settled++;
+  }
+  return total && settled === total ? true : (total ? settled / total : false);
+}
+const _s24Or = (ready, failedKey) => ready ? true : (_s24Failed.has(failedKey) ? 'failed' : false);
+const openingGate = createOpeningGate({
+  intro, renderer, composer, scene, camera,
+  el: document.getElementById('loadingBar'),
+  coreIds: ['terrain', 'ground', 'buildings', 'tube'],
+  items: [
+    { id: 'terrain', label: 'Shaping the terrain', weight: 4,
+      check: () => terrain ? true : (scene.children.some(c => c.isGridHelper && c.visible) ? 'failed' : false) },
+    { id: 'water', label: 'Filling the Thames', weight: 1, check: () => _s24Or(!!thamesMesh, 'thames') },
+    { id: 'm25', label: 'Laying the M25', weight: 1,
+      check: () => _s24Or(!!(motorwayGroup || m25Road) && !!geologyGroup && !!geologyExteriorGroup, 'm25') },
+    { id: 'airports', label: 'Building the airports', weight: 1, check: () => !!airportsGroup || !!airportInitError },
+    { id: 'ground', label: 'Painting the ground', weight: 2,
+      check: () => surfaceDataLoaded && (groundPath === 'baked' || _s24FootprintTiles() === true) },
+    { id: 'buildings', label: 'Raising the buildings', weight: 4, check: () => {
+      if (buildingsPath === 'baked') {
+        if (!bakedBuilder) return false;
+        const st = bakedBuilder.stats();
+        return bakedBuilder.isDone() && !!landmarkGroup ? true : (st.tilesTotal ? st.tilesBuilt / st.tilesTotal : false);
+      }
+      return _s24FootprintTiles();
+    } },
+    { id: 'tube', label: 'Tracing the tube lines', weight: 3,
+      check: () => tubeStationsReady && !!unifiedShaftLayer && document.querySelector('.station-label') ? true : _s24TubeProgress },
+    { id: 'reservoirs', label: 'Filling the reservoirs', weight: 0.5, check: () => _s24Or(!!reservoirsMesh, 'reservoirs') },
+    { id: 'canals', label: 'Cutting the canals', weight: 0.5, check: () => _s24Or(!!canalsMesh, 'canals') },
+    { id: 'bridges', label: 'Spanning the river', weight: 0.5, check: () => !!bridgesGroup },
+    { id: 'overground', label: 'Running the Overground', weight: 0.5,
+      check: () => !!overgroundGroup?.userData?.stationsAttached },
+    { id: 'parks', label: 'Naming the parks', weight: 0.5, check: () => !!parkLabelsGroup },
+    { id: 'infrastructure', label: 'Tunnelling the infrastructure', weight: 1,
+      check: () => !!(crossrailMesh && tidewayMesh && sewersMesh) },
+  ],
+  beforeCompile: () => { for (const child of scene.children) applyShadowPolicy(child); },
+  whileWaiting: () => {
+    // Behind the bar the frame is not being watched: spend more of it
+    // building the baked city (the tick spends its usual 6ms slice as well).
+    if (bakedBuilder && !bakedBuilder.isDone()) bakedBuilder.pump(24);
+    // Live tiles load around the camera; also load around the landing, so
+    // the descent does not stream tiles in (load 12km, unload 18km, and the
+    // two poses are about 2.2km apart). Alternate 500ms loader windows.
+    if (surfaceDataLoaded && !(buildingsPath === 'baked' && groundPath === 'baked')
+      && Math.floor(performance.now() / 500) % 2 === 1) {
+      const p = intro.getParams();
+      updateSurfaceLoader(p.endX, p.endZ);
+    }
+  },
+});
+if (intro.isBypassed()) document.getElementById('loadingBar')?.classList.remove('veil');
+// ── /s24:O ──
 
 buildNetworkMvp();
 
@@ -3610,6 +3700,10 @@ function tick(frameTime) {
   const dt = lastFrameTime === null ? 0 : Math.max(0, (frameTime - lastFrameTime) / 1000);
   lastFrameTime = frameTime;
 
+  // ── s24:O ──
+  // Opening gate first: it may start the descent, whose frame 0 is drawn below.
+  openingGate.frame();
+  // ── /s24:O ──
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);
 
@@ -3778,7 +3872,10 @@ function tick(frameTime) {
   // Update surface tile loader (camera-proximity based loading/unloading)
   // With both static layers resident there is no reason to fetch/parse source
   // tiles. Readiness also prevents a load racing the initial ground download.
-  if (surfaceDataLoaded && !(buildingsPath === 'baked' && groundPath === 'baked')) {
+  // s24:O: live tiles outside the descent footprint pause while the descent
+  // plays (in-flight fetches still land) and resume at landing; streaming them
+  // mid-flight cost frame gaps of up to 100ms on the M5.
+  if (surfaceDataLoaded && !(buildingsPath === 'baked' && groundPath === 'baked') && !intro.isPlaying()) {
     updateSurfaceLoader(camera.position.x, camera.position.z);
   }
 
@@ -3959,6 +4056,9 @@ if (import.meta.env.DEV) {
     adaptiveQuality, setRenderQualityMode,
     get renderQualityMode() { return renderQualityMode; },
     fpsControls, intro, landscapeLock, controlsGuide, readout,
+    // ── s24:O ──
+    openingGate,
+    // ── /s24:O ──
     // ── sprint:A1 ──
     get modes() { return modeSystem; },
     // ── /sprint:A1 ──
@@ -4009,6 +4109,7 @@ if (import.meta.env.DEV) {
     get bridgesGroup() { return bridgesGroup; },
     get bridgeRegistry() { return bridgesGroup?.userData?.registry ?? new Map(); },
     get surfaceLoaderStats() { return getSurfaceLoaderStats(); },
+    getSurfaceTileStates, // s24:O
     get surfaceGeometryGroup() { return surfaceGeometryGroup; },
     get landmarkGroup() { return landmarkGroup; },
     get airportsGroup() { return airportsGroup; },
