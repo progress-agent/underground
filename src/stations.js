@@ -295,7 +295,7 @@ export function createStationMarkers({
   const tmpUnderground = new THREE.Vector3();
   let updateCount = 0;
 
-  function update({ camera, renderer, terrainSurfaceY, insideM25 = true, hideForChalk = false, hideForWater = false }) {
+  function update({ camera, renderer, terrainSurfaceY, insideM25 = true, hideForChalk = false, hideForWater = false, viewport = null }) {
     updateCount++;
     if (!labelsVisible) return;
 
@@ -311,8 +311,10 @@ export function createStationMarkers({
 
     if (surfaceEls.length === 0) return;
 
-    const w = renderer.domElement.clientWidth;
-    const h = renderer.domElement.clientHeight;
+    // s24:R: the caller may pass the canvas size read once per frame; reading
+    // clientWidth here after the previous line's label writes forced a layout.
+    const w = viewport ? viewport.w : renderer.domElement.clientWidth;
+    const h = viewport ? viewport.h : renderer.domElement.clientHeight;
     // When outside M25, always show surface labels (never underground mode)
     const cameraAboveGround = !insideM25 || (Number.isFinite(terrainSurfaceY)
       ? camera.position.y >= terrainSurfaceY

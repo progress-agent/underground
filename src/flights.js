@@ -558,6 +558,10 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
     meshes[model] = mesh; root.add(mesh);
   }
   let elapsed = 0, current = [], lastCamera = null, floorPx = minPixels;
+  // ── s24:R ── economies, switched on by the app (sprint 24Sep26h, D-038)
+  const economies = { ranges: false, skipHidden: false };
+  const shown = () => { for (let o = root; o; o = o.parent) if (o.visible === false) return false; return true; };
+  // ── /s24:R ──
   const q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), m = new THREE.Matrix4();
   const stats = { flights: 0, visible: 0, drawCalls: Object.keys(meshes).length };
 
@@ -595,7 +599,19 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
       el[12] = f.x; el[13] = f.y; el[14] = f.z;
       mesh.setMatrixAt(i, m); counts[f.model] = i + 1;
     }
-    for (const key in meshes) { meshes[key].count = counts[key]; meshes[key].instanceMatrix.needsUpdate = true; }
+    for (const key in meshes) {
+      const mesh = meshes[key], was = mesh.count;
+      mesh.count = counts[key];
+      // ── s24:R ── upload only the live range; an empty mesh that was already
+      // empty has nothing to upload (sprint 24Sep26h, D-038).
+      if (economies.ranges) {
+        if (!mesh.count && !was) continue;
+        mesh.instanceMatrix.clearUpdateRanges();
+        if (mesh.count) mesh.instanceMatrix.addUpdateRange(0, mesh.count * 16);
+      }
+      // ── /s24:R ──
+      mesh.instanceMatrix.needsUpdate = true;
+    }
     stats.flights = current.length; stats.visible = current.length;
   }
 
@@ -618,7 +634,17 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
   }
 
   root.userData = {
-    update(dt, camera) { if (Number.isFinite(dt) && dt > 0) elapsed += dt; render(camera); },
+    update(dt, camera) {
+      if (Number.isFinite(dt) && dt > 0) elapsed += dt;
+      // ── s24:R ── a hidden fleet keeps its clock but builds no list or matrices
+      if (economies.skipHidden && !shown()) { if (camera) lastCamera = camera; stats.skippedHidden = (stats.skippedHidden || 0) + 1; return; }
+      // ── /s24:R ──
+      render(camera);
+    },
+    // ── s24:R ──
+    setEconomies(next = {}) { for (const k of Object.keys(economies)) if (k in next) economies[k] = !!next[k]; },
+    economies,
+    // ── /s24:R ──
     setElapsed(t) { elapsed = Number(t) || 0; render(); },
     setMinPixels(px) { floorPx = Math.max(0, Number(px) || 0); render(); },
     get minPixels() { return floorPx; },

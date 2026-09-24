@@ -85,6 +85,12 @@ import { createUnderwaterSurface } from './underwater-surface.js';
 // ── sprint:C ──
 import { createSeaLife } from './sea-life.js';
 // ── /sprint:C ──
+// ── s24:R ──
+import { createEconomies, isShown } from './render-economies.js';
+import { installDoubleSideSplit } from './double-side-split.js';
+import { createShadowCache, casterVersionOf } from './shadow-cache.js';
+import { setTrainEconomies } from './trains.js';
+// ── /s24:R ──
 // ── sprint:A1 ──
 import { installModes } from './modes/index.js';
 import { deityRegimeSpeed } from './modes/deity-speed.js';
@@ -315,6 +321,33 @@ const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
   renderQuality.set(quality);
   syncRenderQualityUi();
 } });
+
+// ── s24:R ──
+// Render economies (sprint 24Sep26h, D-038): savings that leave the picture
+// unchanged, each switchable (?econ=0 restores the e367efd path for ABBA).
+const economies = createEconomies();
+const doubleSideSplit = installDoubleSideSplit({ renderer, scene, enabled: economies.on('dsplit') });
+let shadowCache = null;
+let _s24LayerEconomyVersion = 0;
+const _s24Applied = new WeakMap();
+const _s24Viewport = { w: 0, h: 0 };
+economies.onChange((name, value) => {
+  if (name === 'dsplit') doubleSideSplit.setEnabled(value);
+  if (name === 'shadowCache') shadowCache?.invalidate();
+  _s24LayerEconomyVersion++;
+});
+function applyLayerEconomies() {
+  const on = economies.flags;
+  const apply = (group, fn) => {
+    if (!group || _s24Applied.get(group) === _s24LayerEconomyVersion) return;
+    fn(group.userData); _s24Applied.set(group, _s24LayerEconomyVersion);
+  };
+  apply(motorwayGroup, u => u.setEconomies?.({ frustumCulling: on.m25Cull, instanceRanges: on.instanceRanges, hiddenSkip: on.hiddenSkip }));
+  apply(overgroundGroup, u => u.setEconomies?.({ compact: on.instanceRanges, ranges: on.instanceRanges, skipHidden: on.hiddenSkip }));
+  apply(flightsGroup, u => u.setEconomies?.({ ranges: on.instanceRanges, skipHidden: on.hiddenSkip }));
+  setTrainEconomies({ reusePose: on.trainPose });
+}
+// ── /s24:R ──
 
 // ── Train system (shared state) ──
 const trainSystem = createTrainSystem({ scene, renderer, camera });
@@ -1050,6 +1083,9 @@ skyDome = createSkyDome(scene);
 // Time-of-day sun (Dawn to Dusk) and near-camera shadows, persisted in prefs.
 // Controls are inserted into the settings HUD above the Rendering row.
 const sunSystem = createSunSystem({ renderer, scene, lights: atmosphereLights, prefs, savePrefs });
+// ── s24:R ──
+shadowCache = createShadowCache({ renderer, light: atmosphereLights.sun });
+// ── /s24:R ──
 sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? null);
 // ── /sprint:D ──
 
@@ -3743,6 +3779,9 @@ function tick(frameTime) {
     }
   }
 
+  // ── s24:R ──
+  applyLayerEconomies();
+  // ── /s24:R ──
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
 
@@ -3760,6 +3799,11 @@ function tick(frameTime) {
   // Update living-water shader uniforms.
   updateWater(dt);
 
+  // ── s24:R ── canvas size read once per frame, before any label writes
+  const _s24LabelViewport = economies.on('labelViewport')
+    ? (_s24Viewport.w = renderer.domElement.clientWidth, _s24Viewport.h = renderer.domElement.clientHeight, _s24Viewport)
+    : null;
+  // ── /s24:R ──
   // Update station label projections for ALL lines
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
@@ -3772,6 +3816,7 @@ function tick(frameTime) {
         // shine through the opaque interior shell walls.
         hideForChalk: _chalkClarity > 0.5,
         hideForWater: submerged,
+        viewport: _s24LabelViewport, // s24:R
       });
       updateCallCount++;
     }
@@ -3787,6 +3832,15 @@ function tick(frameTime) {
   sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
     adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
   // ── /sprint:D ──
+  // ── s24:R ── withdraw a shadow-map render that would repeat the last one
+  shadowCache.update({
+    enabled: economies.on('shadowCache'),
+    active: sunSystem.status.active,
+    heightScale: getBuildingHeightScale(),
+    casterVersion: casterVersionOf([surfaceGeometryGroup, landmarkGroup, bridgesGroup, airportsGroup]) ^ sunSystem.status.policyChanges,
+    settled: !bakedBuilder || bakedBuilder.isDone(),
+  });
+  // ── /s24:R ──
 
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
@@ -3982,4 +4036,10 @@ if (import.meta.env.DEV) {
   // ── sprint:C ──
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
+  // ── s24:R ──
+  window.__ug.economies = economies;
+  window.__ug.doubleSideSplit = doubleSideSplit;
+  window.__ug.shadowCache = shadowCache;
+  window.__ug.isShown = isShown;
+  // ── /s24:R ──
 }

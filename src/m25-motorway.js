@@ -195,9 +195,46 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   mesh.userData.vehicleIds[index]=id;
  }
  const nearCounts=new Int32Array(VEHICLE_TYPES.length*VEHICLE_COLOURS.length),farCounts=new Int32Array(VEHICLE_COLOURS.length);
+ // ── s24:R ── Frustum culling by route chunk (sprint 24Sep26h, D-038).
+ // Off by default so the module keeps its whole-fleet partition contract; the
+ // app switches it on. A vehicle outside the view frustum draws no pixels, so
+ // skipping its recompute and upload leaves the picture unchanged. Positions
+ // remain a pure function of elapsed time, so a skipped vehicle reappears
+ // exactly where it would have been. Its near/far LOD state is simply held.
+ const CHUNK_SAMPLES=32,CULL_MARGIN=60;
+ let cullToFrustum=false,uploadRanges=false,skipHidden=false,chunkScale=NaN;
+ const shown=()=>{for(let o=root;o;o=o.parent)if(o.visible===false)return false;return true;};
+ const frustum=new THREE.Frustum(),viewProjection=new THREE.Matrix4(),sphere=new THREE.Sphere();
+ const chunksByRoute=new Map();
+ for(const c of carriers){if(chunksByRoute.has(c.route))continue;const p=c.route.path,list=[];
+  for(let i0=0;i0<p.length-1;i0+=CHUNK_SAMPLES){const i1=Math.min(p.length-1,i0+CHUNK_SAMPLES);list.push({i0,i1,d0:p[i0].distance,cx:0,cy:0,cz:0,r:0,visible:true});}
+  chunksByRoute.set(c.route,{list,starts:Float64Array.from(list,k=>k.d0)});}
+ function chunkBounds(){
+  chunkScale=scale;
+  for(const [route,{list}] of chunksByRoute){const p=route.path;for(const k of list){
+   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity;
+   for(let i=k.i0;i<=k.i1;i++){const s=p[i],y=s.baseY+s.deltaY*scale;if(s.x<minX)minX=s.x;if(s.x>maxX)maxX=s.x;if(y<minY)minY=y;if(y>maxY)maxY=y;if(s.z<minZ)minZ=s.z;if(s.z>maxZ)maxZ=s.z;}
+   k.cx=(minX+maxX)/2;k.cy=(minY+maxY)/2;k.cz=(minZ+maxZ)/2;k.r=Math.hypot(maxX-minX,maxY-minY,maxZ-minZ)/2+CULL_MARGIN+2*VE*scale;}}
+ }
+ function markVisibleChunks(camera){
+  if(chunkScale!==scale)chunkBounds();
+  viewProjection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(viewProjection);
+  let any=false;
+  for(const {list} of chunksByRoute.values())for(const k of list){sphere.center.set(k.cx,k.cy,k.cz);sphere.radius=k.r;k.visible=frustum.intersectsSphere(sphere);any||=k.visible;}
+  return any;
+ }
+ function chunkVisible(route,distance){
+  const {list,starts}=chunksByRoute.get(route);let lo=0,hi=starts.length-1;
+  while(lo<hi){const m=(lo+hi+1)>>1;if(starts[m]<=distance)lo=m;else hi=m-1;}
+  return list[lo].visible;
+ }
+ // ── /s24:R ──
  function update(dt,camera,force=false){
   if(Number.isFinite(dt)&&dt>0)elapsed+=dt;
   if(camera)lastCamera=camera;
+  // ── s24:R ── hidden layer: time advances, nothing is recomputed or uploaded
+  if(skipHidden&&!force&&!shown()){lastProjectionKey=null;trafficStats.skippedHidden=(trafficStats.skippedHidden||0)+1;return;}
+  // ── /s24:R ──
   frame++;if(!force&&frame%3)return;
   const height=typeof viewportHeightPx==='function'?viewportHeightPx():viewportHeightPx;
   const projection=trafficProjection(lastCamera,height),key=projection?.key||'none';
@@ -207,9 +244,16 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   // LOD radius stays the car's, so the switch is identical for every identity.
   const radius=Math.hypot(1.05,1.125*VE*scale,2.2),verticalScale=VE*scale;
   nearCounts.fill(0);farCounts.fill(0);
+  // ── s24:R ──
+  const culling=cullToFrustum&&!!lastCamera?.projectionMatrix;trafficStats.culled=0;
+  if(culling)markVisibleChunks(lastCamera);
+  // ── /s24:R ──
   for(const c of carriers){
    const L=c.layout;
    for(let i=0;i<c.count;i++){
+    // ── s24:R ──
+    if(culling&&!chunkVisible(c.route,mod(vehicleChainage(L,i,elapsed),c.route.length))){trafficStats.culled++;continue;}
+    // ── /s24:R ──
     const p=vehicleAt(c,i,scratch),pixels=vehiclePixelSize(projection,p,radius);
     if(c.lod[i]){if(pixels>LOD_NEAR_PX)c.lod[i]=0;}else if(pixels<LOD_FAR_PX)c.lod[i]=1;
     const type=L.type[i],colour=L.colour[i];
@@ -235,11 +279,20 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   }
   const finish=(mesh,count)=>{
    mesh.count=count;mesh.visible=count>0;
-   if(count){mesh.instanceMatrix.needsUpdate=true;trafficStats.drawCalls++;trafficStats.triangles+=count*mesh.userData.trianglesPerVehicle;}
+   if(count){
+    // ── s24:R ── upload only the live instances (the rest are never drawn)
+    if(uploadRanges){mesh.instanceMatrix.clearUpdateRanges();mesh.instanceMatrix.addUpdateRange(0,count*16);}
+    // ── /s24:R ──
+    mesh.instanceMatrix.needsUpdate=true;trafficStats.drawCalls++;trafficStats.triangles+=count*mesh.userData.trianglesPerVehicle;}
   };
   nearMeshes.forEach((m,k)=>finish(m,nearCounts[k]));farMeshes.forEach((m,k)=>finish(m,farCounts[k]));
   trafficStats.updateMs=performance.now()-start;
  }
  root.userData.setHeightScale=value=>{if(!Number.isFinite(value)||value<=0)throw new Error('Motorway height scale must be positive');scale=value;for(const m of staticMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++)p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;p.needsUpdate=true;g.computeVertexNormals();g.computeBoundingSphere();}update(0,lastCamera,true);};
- root.userData.update=update;root.userData.trafficLod=trafficStats;root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};root.userData.setHeightScale(heightScale);return root;
+ root.userData.update=update;root.userData.trafficLod=trafficStats;
+ // ── s24:R ──
+ root.userData.setEconomies=({frustumCulling=cullToFrustum,instanceRanges=uploadRanges,hiddenSkip=skipHidden}={})=>{const changed=frustumCulling!==cullToFrustum;cullToFrustum=!!frustumCulling;uploadRanges=!!instanceRanges;skipHidden=!!hiddenSkip;if(changed)lastProjectionKey=null;};
+ root.userData.getEconomies=()=>({frustumCulling:cullToFrustum,instanceRanges:uploadRanges,hiddenSkip:skipHidden});
+ // ── /s24:R ──
+ root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};root.userData.setHeightScale(heightScale);return root;
 }

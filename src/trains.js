@@ -232,8 +232,32 @@ export function createTrain({ system, curve, stationUs, lineId, colour, dir, pha
 /**
  * Per-frame update: simulation and orientation.
  */
+// ── s24:R ── Pose reuse (sprint 24Sep26h, D-038). A train's pose is a pure
+// function of (t, dir), so while it dwells (t fixed) the pose already applied
+// is the one orient() would compute again, and a train on a hidden line need
+// not be posed at all until it is shown. Simulation state always advances.
+const trainEconomies = { reusePose: false };
+export function setTrainEconomies(next = {}) {
+  for (const k of Object.keys(trainEconomies)) if (k in next) trainEconomies[k] = !!next[k];
+  return { ...trainEconomies };
+}
+export const trainPoseStats = { posed: 0, reused: 0, hidden: 0 };
+function lineShown(train) {
+  for (let o = train; o; o = o.parent) if (o.visible === false) return false;
+  return true;
+}
+function pose(train) {
+  const ud = train.userData;
+  ud.curve.getPointAt(ud.t, train.position);
+  orient(train);
+  ud._poseT = ud.t; ud._poseDir = ud.dir;
+  trainPoseStats.posed++;
+}
+// ── /s24:R ──
+
 export function updateTrains(system, sim, camera, dt) {
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
+  const reuse = trainEconomies.reusePose;
 
   for (const train of system.allTrains) {
     const ud = train.userData;
@@ -241,6 +265,14 @@ export function updateTrains(system, sim, camera, dt) {
     // Dwell at stations
     if (ud._pausedLeft > 0) {
       ud._pausedLeft = Math.max(0, ud._pausedLeft - simDt);
+      // ── s24:R ──
+      if (reuse) {
+        if (!lineShown(train)) { trainPoseStats.hidden++; continue; }
+        if (ud._poseT === ud.t && ud._poseDir === ud.dir) { trainPoseStats.reused++; continue; }
+        pose(train);
+        continue;
+      }
+      // ── /s24:R ──
       orient(train);
       continue;
     }
@@ -276,6 +308,13 @@ export function updateTrains(system, sim, camera, dt) {
     }
 
     ud.t = u;
+    // ── s24:R ──
+    if (reuse) {
+      if (!lineShown(train)) { ud._poseT = NaN; trainPoseStats.hidden++; continue; }
+      pose(train);
+      continue;
+    }
+    // ── /s24:R ──
     train.position.copy(ud.curve.getPointAt(u));
     orient(train);
   }
@@ -287,7 +326,7 @@ export function updateTrains(system, sim, camera, dt) {
 function orient(train) {
   const ud = train.userData;
   const uAhead = Math.min(ud.t + 0.001, 0.999);
-  _lookTarget.copy(ud.curve.getPointAt(uAhead));
+  ud.curve.getPointAt(uAhead, _lookTarget); // s24:R: same point, no per-frame allocation
   train.lookAt(_lookTarget);
 
   if (ud.dir === -1) train.rotateY(Math.PI);
