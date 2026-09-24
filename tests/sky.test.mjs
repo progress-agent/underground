@@ -5,8 +5,10 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {
   SUN_APPARENT_DIAMETER_DEG, SUN_ANGULAR_RADIUS, SKY_CEILING, computeSkyParams, skyRadianceAt,
-  horizonColorToward, readSkyLookFromUrl, createSkySystem, softCeiling,
+  horizonColorToward, readSkyLookFromUrl, createSkySystem, softCeiling, displaySunDirection,
 } from '../src/sky.js';
+import { createVerticalScaleController } from '../src/vertical-scale.js';
+import { readFileSync } from 'node:fs';
 import { SKY_LOOKS, DEFAULT_SKY_LOOK, FLAT_SKY, resolveSkyLookName, skyLookNames } from '../src/sky-looks.js';
 import { sunState, DEFAULT_SUN_TIME, airWeightFor } from '../src/sun.js';
 import { updateEnvironment, setAirSun, attachSky, resolveSunDirection } from '../src/environment.js';
@@ -160,4 +162,73 @@ test('in the air the fog is pulled to the sky horizon; underground nothing chang
     attachSky(null);
     setAirSun({ weight: 0, state: null });
   }
+});
+
+// Fix round 1 (height contract, CLAUDE.md and the sprint's hard rules): Master
+// scales the scene through the camera only. The sky's rays are canonical, the
+// disc is centred where the camera displays the light direction, and no layer
+// (the abyss dome included) is rescaled for Master height.
+test('height contract: the displayed disc sits where the camera displays the light', () => {
+  const state = sunState(DEFAULT_SUN_TIME);
+  const p = computeSkyParams(DEFAULT_SKY_LOOK, state);
+  for (const ratio of [1.1 / 5, 1, 2]) {
+    const d = displaySunDirection(p, ratio, new THREE.Vector3());
+    // The display transform is diag(1, ratio, 1) applied to canonical points.
+    const expected = state.direction.clone().multiply(new THREE.Vector3(1, ratio, 1)).normalize();
+    assert.ok(d.angleTo(expected) < 1e-12, `ratio ${ratio}`);
+    const shadowElev = Math.atan(ratio * Math.tan(Math.asin(state.direction.y))) / DEG;
+    assert.ok(Math.abs(Math.asin(d.y) / DEG - shadowElev) < 1e-9, `ratio ${ratio}`);
+  }
+  // Fresh-visit Master 1.1: the default morning sun is seen about 3 degrees up.
+  const d = displaySunDirection(p, 1.1 / 5, new THREE.Vector3());
+  assert.ok(Math.abs(Math.asin(d.y) / DEG - 3.02) < 0.01, `${Math.asin(d.y) / DEG}`);
+});
+
+test('height contract: the sky shader does not remove the Master scale, and no layer is counter-scaled', () => {
+  const src = readFileSync(new URL('../src/sky.js', import.meta.url), 'utf8');
+  // The ray is the inverse of the whole view transform; nothing divides by its scale.
+  assert.match(src, /vDir = inverse\( mat3\( viewMatrix \) \)/);
+  assert.doesNotMatch(src, /length\( m\[ 1 \] \)/);
+  const env = readFileSync(new URL('../src/environment.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(env, /masterRatio|masterHeightController/);
+
+  // Behaviour: with the camera at Master 1.1, updateEnvironment leaves a dome at unit scale
+  // and the sky's disc uniforms carry the camera's own ratio.
+  const { scene, camera, renderer } = envRig();
+  camera.position.set(0, 900, 0); camera.lookAt(0, 800, 5000); camera.updateMatrixWorld();
+  const mh = createVerticalScaleController({ camera, value: 1.1 });
+  const sky = createSkySystem({ scene, look: DEFAULT_SKY_LOOK });
+  const dome = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ transparent: true }));
+  try {
+    attachSky(sky);
+    const state = sunState(DEFAULT_SUN_TIME);
+    setAirSun({ weight: 1, state });
+    updateEnvironment(camera, scene, dome, renderer);
+    assert.deepEqual(dome.scale.toArray(), [1, 1, 1]);
+    const u = sky.mesh.material.uniforms;
+    assert.ok(Math.abs(u.uMasterRatio.value - 0.22) < 1e-12);
+    assert.ok(u.uSunDir.value.angleTo(state.direction) < 1e-9);
+    const expected = state.direction.clone().multiply(new THREE.Vector3(1, 0.22, 1)).normalize();
+    assert.ok(u.uSunDirDisplay.value.angleTo(expected) < 1e-9);
+  } finally {
+    attachSky(null);
+    setAirSun({ weight: 0, state: null });
+    mh.dispose();
+  }
+});
+
+test('below the dome\'s opaque line the sky is the abyss ramp; above it the sky is unchanged', async () => {
+  const { abyssColorAt, abyssWeight, ABYSS_OPAQUE_DEG } = await import('../src/sky.js');
+  const p = computeSkyParams(DEFAULT_SKY_LOOK, sunState(DEFAULT_SUN_TIME));
+  const at = deg => skyRadianceAt(new THREE.Vector3(0, -Math.sin(deg * DEG), Math.cos(deg * DEG)), p);
+  const horizon = skyRadianceAt(new THREE.Vector3(0, 0, 1), p);
+  // Where the dome is translucent (above its opaque line) the sky underneath is untouched.
+  assert.equal(abyssWeight(ABYSS_OPAQUE_DEG - 0.21), 0);
+  assert.equal(abyssWeight(ABYSS_OPAQUE_DEG), 1);
+  assert.ok(Math.abs(luma(at(ABYSS_OPAQUE_DEG - 0.3)) / luma(horizon) - 1) < 0.05, 'translucent band keeps the horizon sky');
+  for (const deg of [4, 12.6, 30, 60, 90]) {
+    const c = at(deg), a = abyssColorAt(deg);
+    for (const i of [0, 1, 2]) assert.ok(Math.abs(c.toArray()[i] - a.toArray()[i]) < 1e-9, `${deg}`);
+  }
+  assert.ok(luma(at(60)) < 0.1 * luma(horizon), "the deep abyss is dark");
 });

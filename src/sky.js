@@ -24,17 +24,26 @@
 // write depth, the terrain's underside, is only visible from below ground,
 // where the sky is not drawn.
 //
-// THE SKY IS AT INFINITY, SO IT IGNORES VERTICAL EXAGGERATION. Master height
-// scales the scene vertically through the camera's view matrix
-// (vertical-scale.js). The shader removes that scale from its rays, so the sky
-// is evaluated in true angles: the sun stands at its real elevation whatever
-// the Master height, and the sky does not change when the slider moves. At
-// Master 5 (display = canonical) this is exactly the space the city is lit in.
+// THE SKY OBEYS THE HEIGHT CONTRACT. The scene is canonical VE5 and Master
+// height scales it vertically through the camera's view matrix alone
+// (vertical-scale.js). The sky is part of that scene: its rays are the
+// canonical world rays (the inverse of the full view rotation-and-scale), so
+// the camera squashes or stretches the sky exactly as it does the city, and
+// nothing here removes or counters the Master scale. The sun therefore stands
+// in the sky where the city's lighting and shadows say it is at every Master
+// height: at the fresh-visit Master 1.1 the default morning sun, 13.5 degrees
+// up in canonical space, is seen 3.0 degrees above the horizon, which is the
+// angle its shadows imply. (Fix round 1 of this lane: the first build took
+// rays in true angles instead, which put the disc above the light.)
 //
-// THE SUN DISC sits exactly on the light direction (environment.js's
-// resolveSunDirection, the vector the sun light and its shadows use), at the
-// true apparent diameter of 0.53 degrees, coloured by the Dawn-to-Dusk
-// slider's sun colour. It is written as HDR light far above the bloom
+// THE SUN DISC is centred exactly on the light direction (environment.js's
+// resolveSunDirection, the vector the sun light and its shadows use), seen
+// through the same camera, so on screen it sits where that direction lands.
+// Its SIZE is the sun's true apparent diameter, 0.53 degrees, measured on
+// screen (the angle between the displayed ray and the displayed light
+// direction): an apparent size is a property of the picture, so the disc stays
+// round and 0.53 degrees across at every Master height. Coloured by the
+// Dawn-to-Dusk slider's sun colour. It is written as HDR light far above the bloom
 // threshold, so the existing UnrealBloom pass paints its halo; nothing extra is
 // rendered for it. Because the scene draws over the sky, hills, towers and the
 // map's own edge hide the disc when they stand in front of it, and the
@@ -94,6 +103,52 @@ export const SKY_CEILING = 0.8;
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
+// ── Below the horizon ───────────────────────────────────────────────────────
+// environment.js's abyss dome paints everything more than a few degrees below
+// the horizon (opaque from ABYSS_OPAQUE_DEG down). It is scene geometry, so at
+// a high Master height the camera stretches it past the far plane and loses
+// its nadir. The sky carries the same ramp (the dome's canvas stops, degrees
+// below the canonical horizon, sRGB), so a clipped dome shows the abyss rather
+// than daylight. Above ABYSS_OPAQUE_DEG the dome is translucent and the sky
+// underneath is left exactly as it was. The dome's canvas texture carries no
+// colour space, so three.js samples its bytes as linear values: so do these.
+export const ABYSS_OPAQUE_DEG = 3.6;
+const ABYSS_STOPS = [[3.6, [40, 46, 54]], [12.6, [18, 21, 27]], [25.2, [9, 11, 15]], [90, [4, 5, 8]]]
+  .map(([deg, rgb]) => [deg, new THREE.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)]);
+
+/** The abyss colour `deg` degrees below the horizon (linear). */
+export function abyssColorAt(deg, out = new THREE.Color()) {
+  if (deg <= ABYSS_STOPS[0][0]) return out.copy(ABYSS_STOPS[0][1]);
+  for (let i = 1; i < ABYSS_STOPS.length; i++) {
+    const [d1, c1] = ABYSS_STOPS[i], [d0, c0] = ABYSS_STOPS[i - 1];
+    if (deg <= d1) return out.copy(c0).lerp(c1, (deg - d0) / (d1 - d0));
+  }
+  return out.copy(ABYSS_STOPS[ABYSS_STOPS.length - 1][1]);
+}
+// THE ABYSS IS HAZED LIKE THE GROUND. Beyond the map's edge there is no land,
+// only the abyss, but the eye expects the land to carry on into the haze. So
+// a ray below the horizon is fogged exactly as three.js's linear fog would fog
+// a point of ground at Ordnance Datum where that ray meets it: its view-space
+// depth, taken through the camera's own view matrix (Master scale included,
+// like every fogged surface), against the scene fog's near and far. The haze
+// reaches the fog colour at the horizon and thins as the view steepens, so
+// the land's fogged edge, the abyss beyond it and the sky's horizon read as
+// one atmosphere at every Master height and altitude. Used by the abyss dome
+// (environment.js) and by the sky below the dome's opaque line.
+export const ABYSS_HAZE_GLSL = /* glsl */`
+float abyssHaze( vec3 dir, float near, float far ) {
+  if ( dir.y > -1e-6 ) return 1.0;
+  float t = min( max( cameraPosition.y, 1.0 ) / -dir.y, 1e8 );
+  float depth = -( mat3( viewMatrix ) * ( dir * t ) ).z;
+  return smoothstep( near, far, depth );
+}`;
+
+/** Weight of the abyss in the sky along a ray `deg` below the horizon. */
+export function abyssWeight(deg) {
+  const t = Math.min(1, Math.max(0, (deg - (ABYSS_OPAQUE_DEG - 0.2)) / 0.2));
+  return t * t * (3 - 2 * t);
+}
+
 // ── Parameters (pure) ───────────────────────────────────────────────────────
 
 export function createSkyParams() {
@@ -110,10 +165,18 @@ export function createSkyParams() {
     keySky: new THREE.Color(), keyMix: 0,
     discColor: new THREE.Color(),
     discRadius: SUN_ANGULAR_RADIUS,
+    // Master height ratio of the viewing camera (display y = canonical y x
+    // ratio) and the light direction as that camera displays it: only the
+    // disc's on-screen size uses them.
+    masterRatio: 1,
+    sunDirDisplay: new THREE.Vector3(0, 1, 0),
     fogCoupling: 1, fogGain: 1, fogMaxLum: 0.6,
     // Mixing weights. weight 0 = the legacy clear colour, 1 = this sky.
     weight: 0, discWeight: 0,
     clear: new THREE.Color(),
+    // Abyss haze (below the dome's opaque line): the fog colour, distances and
+    // weight environment.js gives the abyss dome.
+    haze: new THREE.Color(), hazeNear: 1, hazeFar: 2, hazeWeight: 0,
   };
 }
 
@@ -173,8 +236,14 @@ export function computeSkyParams(lookName, state, { direction = null, out = crea
   return out;
 }
 
+/** The light direction `p.sunDir` as a camera with Master ratio `ratio` shows it. */
+export function displaySunDirection(p, ratio = 1, out = p.sunDirDisplay) {
+  p.masterRatio = ratio > 0 && Number.isFinite(ratio) ? ratio : 1;
+  return out.set(p.sunDir.x, p.sunDir.y * p.masterRatio, p.sunDir.z).normalize();
+}
+
 /**
- * The sky's radiance along a unit display-space direction, before the weight
+ * The sky's radiance along a unit canonical (world) direction, before the weight
  * blend and without the disc. Linear working space. This is the CPU mirror of
  * skyRadiance() in the fragment shader: keep the two in lockstep.
  */
@@ -208,8 +277,15 @@ export function skyRadianceAt(dir, p, out = new THREE.Color()) {
   }
   const l2 = c[0] * LUMA[0] + c[1] * LUMA[1] + c[2] * LUMA[2];
   const k = softCeiling(l2) / Math.max(l2, 1e-6);
-  return out.setRGB(c[0] * k, c[1] * k, c[2] * k);
+  out.setRGB(c[0] * k, c[1] * k, c[2] * k);
+  if (dir.y < 0) {
+    const below = Math.asin(Math.min(1, -dir.y / Math.hypot(dir.x, dir.y, dir.z))) / DEG;
+    const w = abyssWeight(below);
+    if (w > 0) out.lerp(abyssColorAt(below, _abyss), w);
+  }
+  return out;
 }
+const _abyss = new THREE.Color();
 
 /** Luminance roll-off: identity to SKY_KNEE, then asymptotic to SKY_CEILING. */
 export function softCeiling(l) {
@@ -238,19 +314,17 @@ export function horizonColorToward(forward, p, out = new THREE.Color()) {
 // ── Shader ──────────────────────────────────────────────────────────────────
 
 const f = v => Number(v).toFixed(6);
+const v3 = c => `vec3( ${f(c.r)}, ${f(c.g)}, ${f(c.b)} )`;
 
 const VERTEX = /* glsl */`
 varying vec3 vDir;
 void main() {
   // position.xy is a clip-space corner of one screen-covering triangle.
   vec4 view = inverse( projectionMatrix ) * vec4( position.xy, 1.0, 1.0 );
-  // viewMatrix is R^T * S * T(-p) with S = diag(1, ratio, 1) (vertical-scale.js).
-  // transpose(mat3) * v = S * R * v, and length(column 1) = ratio, so dividing
-  // y by it leaves the true-angle ray R * v.
-  mat3 m = mat3( viewMatrix );
-  vec3 dir = transpose( m ) * ( view.xyz / view.w );
-  dir.y /= max( length( m[ 1 ] ), 1e-6 );
-  vDir = dir;
+  // The canonical world ray through this corner: the inverse of the camera's
+  // whole view transform (rotation and Master scale alike), as for any
+  // other point of the scene. Linear in view space, so it interpolates.
+  vDir = inverse( mat3( viewMatrix ) ) * ( view.xyz / view.w );
   gl_Position = vec4( position.xy, 1.0, 1.0 );
 }`;
 
@@ -271,10 +345,17 @@ uniform vec3 uKeySky;
 uniform float uKeyMix;
 uniform vec3 uDiscColor;
 uniform float uDiscRadius;
+uniform float uMasterRatio;
+uniform vec3 uSunDirDisplay;
 uniform float uWeight;
 uniform float uDiscWeight;
 uniform vec3 uClear;
+uniform vec3 uHaze;
+uniform float uHazeNear;
+uniform float uHazeFar;
+uniform float uHazeWeight;
 varying vec3 vDir;
+${ABYSS_HAZE_GLSL}
 
 // Mirror of skyRadianceAt() in sky.js.
 vec3 skyRadiance( vec3 d ) {
@@ -301,20 +382,38 @@ vec3 skyRadiance( vec3 d ) {
   return c * ( soft / max( l2, 1e-6 ) );
 }
 
+// Mirror of abyssColorAt() / abyssWeight() in sky.js.
+vec3 abyss( float deg ) {
+  if ( deg <= ${f(ABYSS_STOPS[1][0])} ) return mix( ${v3(ABYSS_STOPS[0][1])}, ${v3(ABYSS_STOPS[1][1])}, max( deg - ${f(ABYSS_STOPS[0][0])}, 0.0 ) / ${f(ABYSS_STOPS[1][0] - ABYSS_STOPS[0][0])} );
+  if ( deg <= ${f(ABYSS_STOPS[2][0])} ) return mix( ${v3(ABYSS_STOPS[1][1])}, ${v3(ABYSS_STOPS[2][1])}, ( deg - ${f(ABYSS_STOPS[1][0])} ) / ${f(ABYSS_STOPS[2][0] - ABYSS_STOPS[1][0])} );
+  return mix( ${v3(ABYSS_STOPS[2][1])}, ${v3(ABYSS_STOPS[3][1])}, min( ( deg - ${f(ABYSS_STOPS[2][0])} ) / ${f(ABYSS_STOPS[3][0] - ABYSS_STOPS[2][0])}, 1.0 ) );
+}
+
 // Cloud hook (cloud scope, 23Sep26w): a later cirrus layer composites here,
 // over the sky and under the sun disc. Identity today.
 vec3 highCloud( vec3 c, vec3 d ) { return c; }
 
 void main() {
   vec3 d = normalize( vDir );
-  // Angular size of this pixel (radians), taken in uniform control flow.
-  float aa = max( 0.5 * length( fwidth( d ) ), 1e-7 );
-  vec3 col = mix( uClear, highCloud( skyRadiance( d ), d ), uWeight );
-  // Sun disc, true size, anti-aliased over one pixel. |d x s| is the sine of
-  // the angle to the sun: exact for tiny angles, where 1 - dot() would lose
-  // most of its float precision. Only pixels near the sun pay for it.
-  if ( uDiscWeight > 0.0 && dot( d, uSunDir ) > 0.99 ) {
-    float s = length( cross( d, uSunDir ) );
+  // The same ray as the camera displays it: only the disc's apparent size is
+  // measured here, so the disc is round and 0.53 degrees on screen.
+  vec3 dd = normalize( vec3( vDir.x, vDir.y * uMasterRatio, vDir.z ) );
+  // Angular size of this pixel on screen (radians), in uniform control flow.
+  float aa = max( 0.5 * length( fwidth( dd ) ), 1e-7 );
+  vec3 sky = highCloud( skyRadiance( d ), d );
+  if ( d.y < 0.0 ) {
+    float below = degrees( asin( min( -d.y, 1.0 ) ) );
+    vec3 abyssHazed = mix( abyss( below ), uHaze, abyssHaze( d, uHazeNear, uHazeFar ) * uHazeWeight );
+    sky = mix( sky, abyssHazed, smoothstep( ${f(ABYSS_OPAQUE_DEG - 0.2)}, ${f(ABYSS_OPAQUE_DEG)}, below ) );
+  }
+  vec3 col = mix( uClear, sky, uWeight );
+  // Sun disc, true size, anti-aliased over one pixel. |dd x s| is the sine of
+  // the on-screen angle to the displayed light direction, which is exactly
+  // where the canonical light direction lands: exact for tiny angles, where
+  // 1 - dot() would lose most of its float precision. Only pixels near the
+  // sun pay for it.
+  if ( uDiscWeight > 0.0 && dot( dd, uSunDirDisplay ) > 0.99 ) {
+    float s = length( cross( dd, uSunDirDisplay ) );
     float cover = 1.0 - smoothstep( uDiscRadius - aa, uDiscRadius + aa, s );
     float r = clamp( s / uDiscRadius, 0.0, 1.0 );
     float limb = 1.0 - 0.45 * ( 1.0 - sqrt( max( 1.0 - r * r, 0.0 ) ) );
@@ -348,9 +447,15 @@ function createSkyMesh() {
     uKeyMix: { value: 0 },
     uDiscColor: { value: new THREE.Color() },
     uDiscRadius: { value: SUN_ANGULAR_RADIUS },
+    uMasterRatio: { value: 1 },
+    uSunDirDisplay: { value: new THREE.Vector3(0, 1, 0) },
     uWeight: { value: 0 },
     uDiscWeight: { value: 0 },
     uClear: { value: new THREE.Color() },
+    uHaze: { value: new THREE.Color() },
+    uHazeNear: { value: 1 },
+    uHazeFar: { value: 2 },
+    uHazeWeight: { value: 0 },
   };
   const material = new THREE.ShaderMaterial({
     name: 'analyticSky',
@@ -387,9 +492,15 @@ function writeUniforms(u, p) {
   u.uKeyMix.value = p.keyMix;
   u.uDiscColor.value.copy(p.discColor);
   u.uDiscRadius.value = p.discRadius;
+  u.uMasterRatio.value = p.masterRatio;
+  u.uSunDirDisplay.value.copy(p.sunDirDisplay);
   u.uWeight.value = p.weight;
   u.uDiscWeight.value = p.discWeight;
   u.uClear.value.copy(p.clear);
+  u.uHaze.value.copy(p.haze);
+  u.uHazeNear.value = p.hazeNear;
+  u.uHazeFar.value = p.hazeFar;
+  u.uHazeWeight.value = p.hazeWeight;
 }
 
 // ── URL ─────────────────────────────────────────────────────────────────────
@@ -446,6 +557,7 @@ export function createSkySystem({ scene, look = null } = {}) {
     const flat = lookName === FLAT_SKY;
     computeSkyParams(flat ? DEFAULT_SKY_LOOK : lookName, state, { direction, out: params });
     params.look = lookName;
+    displaySunDirection(params, camera?.userData?.masterHeightController?.ratio ?? 1);
     params.weight = flat ? 0 : THREE.MathUtils.clamp(weight, 0, 1);
     params.discWeight = THREE.MathUtils.clamp(discWeight, 0, 1);
     status.weight = params.weight;
@@ -455,6 +567,14 @@ export function createSkySystem({ scene, look = null } = {}) {
     camera.getWorldDirection(forward);
     horizonColorToward(forward, params, fogOut);
     return params.fogCoupling;
+  }
+
+  /** The abyss haze: the fog colour and distances, and its weight. */
+  function setHaze(color, near, far, weight) {
+    params.haze.copy(color);
+    params.hazeNear = near;
+    params.hazeFar = Math.max(far, near + 1);
+    params.hazeWeight = weight;
   }
 
   /** The legacy clear colour the sky blends with (set after it is computed). */
@@ -467,7 +587,7 @@ export function createSkySystem({ scene, look = null } = {}) {
     mesh, params, status,
     get look() { return lookName; },
     looks: [...skyLookNames()],
-    setLook, update, setClear,
+    setLook, update, setClear, setHaze,
     sample: (dir, out) => skyRadianceAt(dir, params, out),
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mountControls: anchor => mountSkyControls(api, anchor),

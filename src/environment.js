@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { setInfraHazeStrength } from './infra-materials.js';
+import { ABYSS_HAZE_GLSL } from './sky.js';
 
 // Environment configuration for above/below ground differentiation
 export const ENV_CONFIG = {
@@ -115,9 +116,6 @@ export function getAirSun() {
   return { weight: _air.weight, t: _air.state?.t ?? null, distance: _air.distance };
 }
 
-// Abyss haze band: from the horizon (v = 0.5) down to this v (about 12 degrees
-// below it) the abyss blends into the fog colour.
-const HORIZON_HAZE_V = 0.5 - 12 / 180;
 
 // Create sky dome — a camera-following "abyss cap" (D1.4).
 //
@@ -178,15 +176,25 @@ export function createSkyDome(scene) {
   // this existing draw. Opaque banks/bed still win depth; the lower hemisphere
   // stays transparent underwater. No extra city render or sky mesh is needed.
   const submergedSky = { value: 0 };
-  // Lane S (24Sep26h): with the analytic sky, the top of the abyss fades up
-  // into the air-fog colour, so the band between the map's edge and the
-  // horizon reads as distant haze rather than a dark slot. Weight 0 (no sky,
-  // flat look, underground) leaves the abyss exactly as before.
+  // Lane S (24Sep26h): with the analytic sky, the abyss is hazed like the
+  // ground it replaces (sky.js ABYSS_HAZE_GLSL: the scene fog at the depth
+  // where the ray would meet Ordnance Datum), so the band between the map's
+  // edge and the horizon reads as distant haze rather than a dark slot, at
+  // every Master height. Weight 0 (no sky, flat look, underground) leaves the
+  // abyss exactly as before.
   const horizonHaze = { value: new THREE.Color() };
   const horizonHazeWeight = { value: 0 };
+  const horizonHazeNear = { value: 1 };
+  const horizonHazeFar = { value: 2 };
   material.onBeforeCompile = shader => {
     shader.uniforms.uHorizonHaze = horizonHaze;
     shader.uniforms.uHorizonHazeWeight = horizonHazeWeight;
+    shader.uniforms.uHorizonHazeNear = horizonHazeNear;
+    shader.uniforms.uHorizonHazeFar = horizonHazeFar;
+    shader.vertexShader = shader.vertexShader.replace('void main() {', `
+varying vec3 vDomeDir;
+void main() {`).replace('#include <begin_vertex>', `#include <begin_vertex>
+vDomeDir = position;`);
     shader.uniforms.uSubmergedSky = submergedSky;
     shader.uniforms.uSubmergedSkyColor = { value: new THREE.Color(ENV_CONFIG.skyColor) };
     shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
@@ -194,8 +202,12 @@ uniform float uSubmergedSky;
 uniform vec3 uSubmergedSkyColor;
 uniform vec3 uHorizonHaze;
 uniform float uHorizonHazeWeight;
+uniform float uHorizonHazeNear;
+uniform float uHorizonHazeFar;
+varying vec3 vDomeDir;
+${ABYSS_HAZE_GLSL}
 void main() {`).replace('#include <map_fragment>', `#include <map_fragment>
-diffuseColor.rgb=mix(diffuseColor.rgb,uHorizonHaze,smoothstep(${HORIZON_HAZE_V.toFixed(4)},0.5,vMapUv.y)*uHorizonHazeWeight);
+diffuseColor.rgb=mix(diffuseColor.rgb,uHorizonHaze,abyssHaze(normalize(vDomeDir),uHorizonHazeNear,uHorizonHazeFar)*uHorizonHazeWeight);
 float aboveWaterHorizon=smoothstep(0.5,0.51,vMapUv.y);
 diffuseColor.rgb=mix(diffuseColor.rgb,uSubmergedSkyColor,aboveWaterHorizon*uSubmergedSky);
 diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
@@ -205,6 +217,8 @@ diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
   sky.userData.submergedSky = submergedSky;
   sky.userData.horizonHaze = horizonHaze;
   sky.userData.horizonHazeWeight = horizonHazeWeight;
+  sky.userData.horizonHazeNear = horizonHazeNear;
+  sky.userData.horizonHazeFar = horizonHazeFar;
   sky.renderOrder = -1000; // draw first in the transparent queue (background)
   sky.name = 'skyDome';
   scene.add(sky);
@@ -360,12 +374,6 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     // UN-lifted skyBlend here (not surfaceBlend): clayLift must brighten
     // fog/lights only — the abyss dome has no business rendering underground.
     sky.position.copy(camera.position);
-    // Master height squashes the display vertically (vertical-scale.js);
-    // counter-scale so the displayed dome stays a 45000 sphere inside the far
-    // plane at every Master value (at Master 10 it would reach 90000 and lose
-    // its nadir to the far plane).
-    const masterRatio = camera.userData?.masterHeightController?.ratio ?? 1;
-    sky.scale.set(1, 1 / masterRatio, 1);
     const ordinarySkyOpacity=skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
     sky.material.opacity = Math.max(ordinarySkyOpacity,submergedBlend);
     sky.visible = (skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99) || submergedBlend > 0.001;
@@ -373,6 +381,8 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     if (sky.userData.horizonHazeWeight) {
       sky.userData.horizonHaze.value.copy(_fogColor);
       sky.userData.horizonHazeWeight.value = _skyHazeWeight;
+      sky.userData.horizonHazeNear.value = scene.fog?.near ?? 1;
+      sky.userData.horizonHazeFar.value = Math.max(scene.fog?.far ?? 2, (scene.fog?.near ?? 1) + 1);
     }
   }
 
@@ -386,7 +396,10 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
   if (renderer) {
     renderer.setClearColor(_bgColor, 1);
   }
-  if (_skySystem) _skySystem.setClear(_bgColor);
+  if (_skySystem) {
+    _skySystem.setHaze(_fogColor, scene.fog?.near ?? 1, scene.fog?.far ?? 2, _skyHazeWeight);
+    _skySystem.setClear(_bgColor);
+  }
 
   return {
     surfaceBlend,

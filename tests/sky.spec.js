@@ -2,8 +2,10 @@
 // sky in the running app.
 //
 // Pinned here:
-//   1. The disc is centred exactly on the sun light's direction and is 0.53
-//      degrees across, at every Master height (the sky ignores exaggeration).
+//   1. The disc is centred exactly on the sun light's direction as the camera
+//      displays it (the Master scale applies to the sky through the camera,
+//      like every layer), and is 0.53 degrees across on screen, at every
+//      Master height.
 //   2. Sky and disc are never drawn underground or underwater.
 //   3. The sky responds to the Dawn-to-Dusk slider, and the GPU matches the
 //      CPU mirror (sky.js skyRadianceAt) that the fog coupling relies on.
@@ -41,16 +43,17 @@ async function setSun(page, t) {
 }
 
 // Render the live scene (no post-processing) into a float target through a
-// narrow camera aimed at the sun's display direction; return disc statistics.
+// narrow camera aimed along the light direction; return disc statistics.
 const measureDisc = (page, { fovDeg = 2, size = 256 } = {}) => page.evaluate(({ fovDeg, size }) => {
   const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
   const sunLight = u.scene.getObjectByName('sunLight');
   const light = sunLight.position.clone().sub(sunLight.target.position).normalize();
   const uni = window.__ugSky.mesh.material.uniforms;
-  const ratio = cam.userData.masterHeightController?.ratio ?? 1;
   const saved = { fov: cam.fov, aspect: cam.aspect, pos: cam.position.clone(), quat: cam.quaternion.clone() };
-  // Canonical look direction whose DISPLAY direction (vertical-scale.js) is the sun's.
-  const look = new T.Vector3(light.x, light.y / ratio, light.z).normalize();
+  // Aim along the canonical light direction itself: vertical-scale.js then
+  // centres the view on that direction as the Master scale displays it, which
+  // is where the lighting and shadows put the sun.
+  const look = light.clone();
   cam.fov = fovDeg; cam.aspect = 1; cam.updateProjectionMatrix();
   cam.lookAt(cam.position.clone().add(look));
   cam.updateMatrixWorld(true);
@@ -268,4 +271,134 @@ test('no look at any sun position gives a NaN or black frame through bloom', asy
       expect(f.blackFraction, `${look} t=${t}`).toBeLessThan(0.05);
     }
   }
+});
+
+// Fix round 1: the disc is ordinary far-plane sky, so whatever stands in front
+// of it (land, buildings, the map's own edge) hides it. From the river at the
+// Pool of London the dawn sun (1.5 degrees, D-037's floor) sets behind the
+// land to the east at the fresh-visit Master 1.1 and at Master 5; with the rest
+// of the scene hidden the same disc is drawn whole.
+test('the low sun sinks behind the land in front of it', async ({ page }) => {
+  await boot(page);
+  const count = skyOnly => page.evaluate(skyOnly => {
+    const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
+    const sl = u.scene.getObjectByName('sunLight');
+    const light = sl.position.clone().sub(sl.target.position).normalize();
+    const saved = { fov: cam.fov, aspect: cam.aspect, quat: cam.quaternion.clone() };
+    cam.fov = 2; cam.aspect = 1; cam.updateProjectionMatrix();
+    cam.lookAt(cam.position.clone().add(light)); cam.updateMatrixWorld(true);
+    const hidden = [];
+    if (skyOnly) for (const c of u.scene.children) if (c.name !== 'analyticSky' && c.visible && !c.isLight) { hidden.push(c); c.visible = false; }
+    const S = 128, rt = new T.WebGLRenderTarget(S, S, { type: T.FloatType });
+    r.setRenderTarget(rt); r.render(u.scene, cam);
+    for (const c of hidden) c.visible = true;
+    const px = new Float32Array(S * S * 4); r.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    r.setRenderTarget(null); rt.dispose();
+    cam.fov = saved.fov; cam.aspect = saved.aspect; cam.updateProjectionMatrix();
+    cam.quaternion.copy(saved.quat); cam.updateMatrixWorld(true);
+    let n = 0;
+    for (let i = 0; i < S * S; i++) if (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2] > 2) n++;
+    return n;
+  }, skyOnly);
+  await setSun(page, 0);
+  for (const mh of [1.1, 5]) {
+    await page.evaluate(v => window.__ug.camera.userData.masterHeightController.setValue(v), mh);
+    await page.evaluate(() => {
+      const u = window.__ug, d = window.__ugSun.state.direction, h = Math.hypot(d.x, d.z);
+      u.fpsControls.enabled = false;
+      u.camera.position.set(3200, 130, -10);
+      u.controls.target.set(3200 + d.x / h * 1000, 150, -10 + d.z / h * 1000);
+    });
+    await frames(page, 4);
+    const whole = await count(true), seen = await count(false);
+    expect(whole, `mh=${mh}`).toBeGreaterThan(700);
+    expect(seen / whole, `mh=${mh}`).toBeLessThan(0.1);
+  }
+  await page.evaluate(() => window.__ug.camera.userData.masterHeightController.setValue(1.1));
+});
+
+// Fix round 1: no layer is counter-scaled for Master height, so at Master 10
+// the abyss dome is stretched past the far plane like the rest of the scene and
+// loses its nadir. The sky carries the dome's own ramp and haze below the
+// horizon, so where the dome is lost the sky shows what the dome would have:
+// no hole, no seam.
+test('at Master 10 the stretched abyss dome leaves no hole or seam', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__ug.camera.userData.masterHeightController.setValue(10));
+  await place(page, [0, 30000, 20000], [0, 0, 0]);
+  await frames(page, 4);
+  const r = await page.evaluate(() => {
+    const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
+    const dome = u.scene.getObjectByName('skyDome'), sky = window.__ugSky.mesh;
+    const S = 96;
+    const saved = new T.Color(); r.getClearColor(saved); const savedA = r.getClearAlpha();
+    const shoot = only => {
+      const vis = new Map();
+      u.scene.traverse(o => { if (o.isMesh || o.isPoints || o.isLine || o.isSprite) { vis.set(o, o.visible); o.visible = o === only; } });
+      const rt = new T.WebGLRenderTarget(S, S, { type: T.FloatType });
+      r.setClearColor(0xff00ff, 1);
+      r.setRenderTarget(rt); r.render(u.scene, cam);
+      const px = new Float32Array(S * S * 4); r.readRenderTargetPixels(rt, 0, 0, S, S, px);
+      r.setRenderTarget(null); rt.dispose();
+      for (const [o, v] of vis) o.visible = v;
+      return px;
+    };
+    const a = shoot(dome), b = shoot(sky);
+    r.setClearColor(saved, savedA);
+    let hole = 0, worst = 0;
+    for (let i = 0; i < S * S; i++) {
+      const magenta = a[i * 4] > 0.9 && a[i * 4 + 1] < 0.1 && a[i * 4 + 2] > 0.9;
+      if (magenta) { hole++; continue; }
+      for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(a[i * 4 + c] - b[i * 4 + c]));
+    }
+    return { hole: hole / (S * S), worst, domeScale: dome.scale.toArray(), skyVisible: sky.visible };
+  });
+  await page.evaluate(() => window.__ug.camera.userData.masterHeightController.setValue(1.1));
+  expect(r.skyVisible).toBe(true);
+  expect(r.domeScale).toEqual([1, 1, 1]);
+  expect(r.hole).toBeGreaterThan(0.05);   // the dome really is clipped here
+  expect(r.worst).toBeLessThan(0.02);     // and the sky continues it seamlessly
+});
+
+// Fix round 1: beyond the map's edge the abyss is hazed like the ground it
+// replaces (the scene fog at the depth where the ray meets Ordnance Datum), so
+// at the fresh-visit Master 1.1 overview there is no dark slot between the
+// fogged edge and the horizon. Pixels whose ray reaches OD beyond fog.far must
+// show the fog colour.
+test('at the Master 1.1 overview the abyss beyond the edge is fog, not a dark slot', async ({ page }) => {
+  await boot(page);
+  await place(page, [0, 20000, 18000], [0, 0, 0]);
+  await frames(page, 4);
+  const r = await page.evaluate(() => {
+    const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
+    const dome = u.scene.getObjectByName('skyDome');
+    const S = 96;
+    const vis = new Map();
+    u.scene.traverse(o => { if (o.isMesh || o.isPoints || o.isLine || o.isSprite) { vis.set(o, o.visible); o.visible = o === dome; } });
+    const rt = new T.WebGLRenderTarget(S, S, { type: T.FloatType });
+    r.setRenderTarget(rt); r.render(u.scene, cam);
+    const px = new Float32Array(S * S * 4); r.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    r.setRenderTarget(null); rt.dispose();
+    for (const [o, v] of vis) o.visible = v;
+    const fog = u.scene.fog, view = new T.Matrix3().setFromMatrix4(cam.matrixWorldInverse);
+    const invPV = cam.projectionMatrixInverse.clone().premultiply(cam.matrixWorld);
+    let hazed = 0, worst = 0, deep = 0;
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      // Canonical ray through the pixel centre (matrixWorld is the inverse of the scaled view).
+      const p = new T.Vector3((x + 0.5) / S * 2 - 1, (y + 0.5) / S * 2 - 1, 0.5).applyMatrix4(invPV);
+      const d = p.sub(cam.position).normalize();
+      if (d.y > -0.08) continue;                // clear of the dome's translucent rim (opaque from 3.6 deg)
+      const t = Math.max(cam.position.y, 1) / -d.y;
+      const depth = -d.clone().multiplyScalar(t).applyMatrix3(view).z;
+      const i = (y * S + x) * 4;
+      if (depth > fog.far) {
+        hazed++;
+        for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(px[i + c] - fog.color.toArray()[c]));
+      } else deep++;
+    }
+    return { hazed, deep, worst, weight: window.__ugSky.status.weight };
+  });
+  expect(r.weight).toBe(1);
+  expect(r.hazed).toBeGreaterThan(50);
+  expect(r.worst, JSON.stringify(r)).toBeLessThan(0.03);
 });
