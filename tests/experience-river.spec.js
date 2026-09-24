@@ -37,7 +37,13 @@ test('rendered river bed bounds water and external labels restore on exit', asyn
     return { floor: u.classifySubstrateAt({ x, y: bed - 1, z }),
       ceiling: u.thamesInteriorShell.geometry.index.count,
       parks: u.parkLabelsGroup.visible,
-      labels: [...document.querySelectorAll('.station-label')].filter(e => getComputedStyle(e).display !== 'none').length,
+      // Rendered visibility, not the element's own computed display: stations.js
+      // hides labels underwater at the LAYER (setLayerDisplay), and a child of a
+      // display:none layer keeps its own computed display 'block'. The former
+      // own-display count read 193-405 while zero labels were on screen
+      // (measured 24Sep26h, and at 9990a5c where this spec was introduced).
+      labels: [...document.querySelectorAll('.station-label')].filter(e => e.checkVisibility()).length,
+      labelsTotal: document.querySelectorAll('.station-label').length,
       distortion: u.underwaterSurface.uniforms.uUnderwaterAmount.value,
       hasSceneDepth: !!u.composer.renderTarget1.depthTexture,
       samples: [u.composer.renderTarget1.samples, u.composer.renderTarget2.samples],
@@ -46,6 +52,7 @@ test('rendered river bed bounds water and external labels restore on exit', asyn
   expect(state.floor).toBe('CLAY');
   expect(state.above).toBe(false);
   expect(state.parks).toBe(false);
+  expect(state.labelsTotal).toBeGreaterThan(0); // labels exist, so 0 visible is meaningful
   expect(state.labels).toBe(0);
   expect(state.distortion).toBe(1);
   expect(state.hasSceneDepth).toBe(true);
@@ -57,6 +64,9 @@ test('rendered river bed bounds water and external labels restore on exit', asyn
     u.camera.position.y += delta; u.controls.target.y += delta; u.controls.update();
   });
   await expect.poll(() => page.evaluate(() => window.__ug.parkLabelsGroup.visible)).toBe(true);
+  // External station labels restore on exit: the surface label layers display again.
+  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('.station-layer-surface')]
+    .some(layer => getComputedStyle(layer).display !== 'none'))).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__ug.underwaterSurface.uniforms.uUnderwaterAmount.value)).toBe(0);
   expect(errors).toEqual([]);
 });

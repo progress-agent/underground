@@ -3,6 +3,7 @@ import * as THREE from 'three';
 // Schematic services, not live arrival predictions. Instancing keeps an entire
 // line's fleet to three draws, with no per-instance colours (M5 constraint).
 const CAR_LENGTH=19, CAR_STEP=20.5, CAR_WIDTH=3.6, CAR_HEIGHT=3.5;
+export const BODY_GREY=0xe2e3de;
 const SPEED=13, SPACING=2400, VISIBLE_DISTANCE=12000;
 const bodyGeometry=new THREE.BoxGeometry(CAR_WIDTH,CAR_HEIGHT,CAR_LENGTH);
 const roofGeometry=new THREE.BoxGeometry(CAR_WIDTH+.15,.28,CAR_LENGTH-.5);
@@ -31,9 +32,11 @@ export function createOvergroundFleet(paths,colour,lineId){
    instances+=cars;
   }
  });
+ // Roofs share the body's light grey (Jordan, 23Sep26w): line-coloured roofs were
+ // hard to read from above. Line identity stays on the track ribbon and labels.
  const materials=[
-  new THREE.MeshStandardMaterial({color:0xe2e3de,roughness:.65,metalness:.15}),
-  new THREE.MeshStandardMaterial({color:new THREE.Color(colour).lerp(new THREE.Color(0x85827a),.22).multiplyScalar(.9),roughness:.6,metalness:.2}),
+  new THREE.MeshStandardMaterial({color:BODY_GREY,roughness:.65,metalness:.15}),
+  new THREE.MeshStandardMaterial({color:BODY_GREY,roughness:.6,metalness:.2}),
   new THREE.MeshBasicMaterial({color:0x24384b,toneMapped:false}),
  ];
  const meshes=[bodyGeometry,roofGeometry,windowGeometry].map((geometry,i)=>{

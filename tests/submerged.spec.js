@@ -5,7 +5,7 @@
 //      above the surface and outside the corridor.
 //   2. Submerged regime activates INSIDE: substrate reads WATER (fixing the
 //      previously inverted predicate that read AIR in the water column),
-//      fog collapses to the short murky band, interior shell renders.
+//      fog collapses to the short clear-water band (D-036), interior shell renders.
 //   3. Regime does NOT activate outside: fog released, substrate AIR above
 //      the surface. The opaque bank shell still draws above ground, since
 //      without it the banks are a translucent window onto the underground
@@ -60,7 +60,7 @@ test('isSubmergedAt: true in the water column, false above surface and outside c
   expect(r.trafalgar).toBe(false);
 });
 
-test('inside the volume: substrate WATER, murky short fog, interior shell visible', async ({ page }) => {
+test('inside the volume: substrate WATER, short clear-water fog, interior shell visible', async ({ page }) => {
   await gotoAndWait(page);
   await teleport(page, MID.x, 6, MID.z);
 
@@ -81,8 +81,15 @@ test('inside the volume: substrate WATER, murky short fog, interior shell visibl
   });
   expect(state.submergedBlend).toBeGreaterThan(0.99); // 6 units below top, ramp is 2
   expect(state.shellVisible).toBe(true);
-  // Short murk: tunnels/infrastructure emerge only within the fog band.
-  expect(state.fogFar).toBeLessThanOrEqual(400);
+  // Enclosed water: tunnels/infrastructure emerge only within the fog band.
+  // D-036 (9990a5c, Jordan 13Sep26u: "much clearer water") deliberately
+  // retuned the regime from murk (near 10 / far 250) to clearer green water
+  // (ENV_CONFIG.waterFogNear 35 / waterFogFar 1100); the former <=400 bound
+  // encoded the superseded 250 tuning. Pin the accepted value exactly (fully
+  // submerged, so the lerp lands on it) and keep it far tighter than the
+  // 25000 surface/clay regime so the river stays a distinct environment.
+  expect(state.fogFar).toBeCloseTo(1100, 3);
+  expect(state.fogFar).toBeLessThan(25000 / 10);
   expect(state.fogNear).toBeLessThanOrEqual(50);
 });
 
