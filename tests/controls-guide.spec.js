@@ -45,6 +45,11 @@
 // recorded sequence against the real reveal instant. Timers never fire
 // early, so lower bounds relative to the reveal are deterministic; freezes
 // can only delay events, which the generous waits absorb.
+// Fix round 1: the shift fade-in used to be checked by polling computed
+// opacity for 1500ms, which a freeze landing inside the 800ms fade still
+// failed. It is now asserted from the transition the page itself starts
+// (target 1, 800ms) and from that transition's recorded end state, with a
+// dedicated freeze regression test.
 
 import { test, expect } from '@playwright/test';
 
@@ -111,8 +116,32 @@ async function recordTimeline(page) {
       const faded = [...targets].filter((el) => el.classList.contains('is-faded')).length;
       if (t.firstFadedAt === undefined && faded > 0) t.firstFadedAt = now();
       if (t.allFadedAt === undefined && targets.length && faded === targets.length) t.allFadedAt = now();
-      const shift = root.querySelector('.shift-message')?.classList.contains('is-visible');
-      if (t.shiftOnAt === undefined && shift) t.shiftOnAt = now();
+      const shiftEl = root.querySelector('.shift-message');
+      const shift = shiftEl?.classList.contains('is-visible');
+      if (t.shiftOnAt === undefined && shift) {
+        t.shiftOnAt = now();
+        // Capture the fade-in the class change starts, synchronously and on
+        // the page: flush style so the CSS transition exists, then read its
+        // declared target and duration. This is a property of the stylesheet
+        // plus the class, so no later main-thread freeze can alter it
+        // (a wall-clock opacity poll could: see the header).
+        getComputedStyle(shiftEl).opacity;
+        const tr = shiftEl.getAnimations().find((a) => a.transitionProperty === 'opacity');
+        const frames = tr?.effect.getKeyframes() ?? [];
+        t.shiftFadeIn = tr ? {
+          to: frames[frames.length - 1]?.opacity,
+          duration: tr.effect.getTiming().duration,
+        } : null;
+        // Terminal outcome of that transition: it either completes (and the
+        // element then rests at its target) or is cancelled because the hold
+        // ended during a freeze. Either way it is recorded, never polled.
+        const done = (kind) => (ev) => {
+          if (ev.propertyName !== 'opacity' || t.shiftFadeInEnd) return;
+          t.shiftFadeInEnd = { kind, opacity: getComputedStyle(shiftEl).opacity, visible: shiftEl.classList.contains('is-visible') };
+        };
+        shiftEl.addEventListener('transitionend', done('end'));
+        shiftEl.addEventListener('transitioncancel', done('cancel'));
+      }
       if (t.shiftOnAt !== undefined && t.shiftOffAt === undefined && !shift) t.shiftOffAt = now();
     }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
   });
@@ -183,10 +212,46 @@ test('shift-message visible ~3.2s after reveal', async ({ page }) => {
   expect(t.shiftOnAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS - EARLY_EPSILON_MS);
   expect(t.shiftOnAt).toBeGreaterThanOrEqual(t.firstFadedAt);
 
-  // Computed opacity reaches 1 after 800ms transition (still inside the 5s hold).
-  if (t.shiftOffAt === undefined) {
-    await expect(page.locator('#ug-controls-guide .shift-message')).toHaveCSS('opacity', '1', { timeout: 1500 });
-  }
+  await assertShiftFadeIn(page, t);
+});
+
+// The fade-in contract, asserted from page-side records only (fix round 1).
+// The previous check polled computed opacity with a 1500ms Node-side
+// timeout, so any main-thread freeze of more than ~0.7s landing inside the
+// 800ms fade failed it (verifier: 3/3 fails with a 2.5s busy-wait injected
+// 100ms after shift-in; opacity read 0.61, 0.58, 0.086).
+async function assertShiftFadeIn(page, t) {
+  // The class change starts an 800ms opacity transition whose target is 1.
+  expect(t.shiftFadeIn).toEqual({ to: '1', duration: 800 });
+  // And that transition resolves. While the message is still held visible
+  // it can only resolve by completing, at rest on opacity 1. Only if a
+  // freeze outlasted the whole 5s hold can the removal of .is-visible get
+  // there first, and then the fade-out test owns the outcome.
+  await page.waitForFunction(() => !!window.__cgTimeline?.shiftFadeInEnd, null, { timeout: TIMELINE_WAIT_MS });
+  const end = await page.evaluate(() => window.__cgTimeline.shiftFadeInEnd);
+  if (end.visible) expect(end).toEqual({ kind: 'end', opacity: '1', visible: true });
+  return end;
+}
+
+// Regression for the verifier's deterministic reproduction: freeze the main
+// thread for 2.5s starting 100ms after .is-visible lands, i.e. mid fade-in.
+// The old opacity poll failed this 3/3; the page-side records must not care.
+test('shift-message fade-in contract survives a freeze mid fade-in', async ({ page }) => {
+  await page.addInitScript(() => {
+    new MutationObserver((_, obs) => {
+      const el = document.querySelector('#ug-controls-guide .shift-message.is-visible');
+      if (!el) return;
+      obs.disconnect();
+      setTimeout(() => { const until = performance.now() + 2500; while (performance.now() < until) { /* freeze */ } }, 100);
+    }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
+  });
+  await gotoAndReveal(page);
+  const t = await timelineWhen(page, 'shiftOnAt');
+  expect(t.shiftOnAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS - EARLY_EPSILON_MS);
+  // A 2.5s freeze ends ~2.4s inside the 5s hold, so the fade-in must have
+  // completed at opacity 1 while still visible: strict, no branch.
+  const end = await assertShiftFadeIn(page, t);
+  expect(end).toEqual({ kind: 'end', opacity: '1', visible: true });
 });
 
 test('shift-message gone ~9s after reveal (after 5s hold + 800ms fade)', async ({ page }) => {
