@@ -132,3 +132,20 @@ test('shadows still go first once a view is clearly below ~52 fps',()=>{
  const h=harness();h.sim((q,k)=>(q.shadows?20.5:17)+0.3*Math.sin(k*0.02),10000);
  assert.equal(h.changes[1].shadows,false);assert.equal(h.controller.get().level,1);
 });
+test('arriving at a ~56 fps view without shadows probes back up to them',()=>{
+ // River without shadows runs at about 17.1 to 17.3ms: above the 1.03 probe
+ // line (17.17ms), below the old controller's 17.5ms. Shadows cost ~0.8ms more.
+ for(const base of [17.1,17.3]){
+  // A heavy moment with shadows on (21ms) pushes it to level 1 and no further.
+  const h=harness();h.sim(q=>q.shadows?21:base,4000);assert.equal(h.controller.get().level,1);
+  h.sim((q,k)=>(q.shadows?base+0.8:base)+0.1*Math.sin(k*0.02),30000);
+  assert.equal(h.controller.get().level,0,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-4))}`);
+ }
+});
+test('a view that cannot afford shadows does not flicker them at the looser probe line',()=>{
+ // Level 1 at 17.4ms (inside the 17.5ms probe line), shadows push it to 19.6ms.
+ const h=harness();const cost=(q,k)=>(q.shadows?19.6:17.4)+0.1*Math.sin(k*0.02);
+ h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,90000);
+ assert.equal(h.controller.get().level,1);
+ assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
+});

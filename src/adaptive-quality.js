@@ -28,6 +28,11 @@
 //   noisy windows tripped the rung and shadows were lost there, which the
 //   previous controller never did. A probe back up to shadows is judged
 //   against the same 19ms line, so a ~56 fps view is allowed to keep them.
+//   Coming back is symmetric: from level 1 the probe up to shadows starts at
+//   or below 1.05 x target (17.5ms, the old controller's probe line), not
+//   1.03 (17.2ms). River without shadows runs at about 17.1 to 17.2ms, so at
+//   1.03 a camera arriving there without shadows (from street, say) never
+//   probed back and stayed without them in 2 of 3 measured runs.
 // - Probes back off per level and only retry early when the scene has become
 //   clearly lighter, which stops the 2<->3 bounce every 4 to 5s.
 export const QUALITY_LEVELS = [
@@ -55,6 +60,7 @@ export const ADAPTIVE_TUNING = {
   severe: 1.8,          // one window is enough above this (~33 fps)
   doubleStep: 2.5,      // and two rungs at once above this (~24 fps)
   underBudget: 1.03,    // probe up only at or below 1.03 x target (~58 fps)
+  shadowsUnderBudget: 1.05, // except from level 1 back to shadows: 17.5ms (~57 fps)
   ample: 0.8,           // clear headroom (fast display, light view)
   windowMs: 750, minSamples: 8, cooldownMs: 650,
   stableMs: 3000, ampleStableMs: 700,
@@ -160,7 +166,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     }
 
     overWindows = 0; descent = null;
-    if (mean <= K.targetMs * K.underBudget) {
+    if (mean <= K.targetMs * (level === 1 ? K.shadowsUnderBudget : K.underBudget)) {
       stableMs += span;
       if (level === 0) return;
       const ample = mean <= K.targetMs * K.ample;
