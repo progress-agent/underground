@@ -9,6 +9,9 @@ import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSu
 import { airportSuppressionSignature } from './airport-suppression.js';
 import { createDlrProfile } from './dlr-profile.js';
 import { createMotorway, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
+// ── sprint:F ──
+import { createFlights } from './flights.js';
+// ── /sprint:F ──
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
@@ -791,6 +794,11 @@ let airportDockGroup = null;
 let airportDockInitError = null;
 let motorwayGroup = null;
 let motorwayInitError = null;
+// ── sprint:F ──
+// Living air traffic (flights.js). The integrator wires setWindSource(getSurfaceWind).
+let flightsGroup = null;
+let flightsInitError = null;
+// ── /sprint:F ──
 function syncMotorwayBridges() {
   if (!motorwayGroup || !bridgesGroup) return;
   for (const slug of MOTORWAY_REPLACED_BRIDGES) {
@@ -1079,6 +1087,18 @@ const thamesDataPromise = loadThamesData();
         airportsGroup = null;
         console.warn(`Airport models unavailable (${error.message}); retaining generic buildings`);
       }
+      // ── sprint:F ──
+      try {
+        flightsGroup?.userData.dispose();
+        flightsGroup = createFlights({ getSurfaceY: getStructuralSurfaceY,
+          VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale });
+        scene.add(flightsGroup);
+      } catch (error) {
+        flightsInitError = error.message;
+        flightsGroup = null;
+        console.warn(`Flights unavailable (${error.message})`);
+      }
+      // ── /sprint:F ──
 
       try {
         airportDockGroup=createAirportDockWater({VE:VERTICAL_EXAGGERATION});
@@ -3248,6 +3268,25 @@ let _clearHoverForMotion = null;
       return;
     }
 
+    // ── sprint:F ──
+    // Aircraft: screen-space pick (small, fast-moving), only from above ground.
+    if (flightsGroup?.visible) {
+      const groundY = getStructuralSurfaceY({ x: camera.position.x, z: camera.position.z });
+      if (!Number.isFinite(groundY) || camera.position.y > groundY) {
+        getMouseNdc(ev);
+        const flight = flightsGroup.userData.pick(mouse, camera, renderer.domElement.getBoundingClientRect());
+        if (flight && tip) {
+          tip.innerHTML = flightsGroup.userData.formatLabel(flight);
+          tip.style.display = 'block';
+          lastHoverLineId = null;
+          tip.style.transform = `translate(${(ev.clientX ?? 0) + 12}px, ${(ev.clientY ?? 0) + 14}px)`;
+          setHoverHighlight(null);
+          return;
+        }
+      }
+    }
+    // ── /sprint:F ──
+
     // Tier 2: Infrastructure hover
     const infraHit = pickInfraUnderPointer(ev);
     if (infraHit) {
@@ -3683,6 +3722,9 @@ function tick(frameTime) {
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
   // ── /sprint:C ──
+  // ── sprint:F ──
+  flightsGroup?.userData.update(surfaceSimulationDt, camera);
+  // ── /sprint:F ──
 
   // Update living-water shader uniforms.
   updateWater(dt);
@@ -3844,6 +3886,10 @@ if (import.meta.env.DEV) {
     getAirportDockInfo, getAirportDockSurfaceY,
     get motorwayGroup() { return motorwayGroup; },
     get motorwayInitError() { return motorwayInitError; },
+    // ── sprint:F ──
+    get flightsGroup() { return flightsGroup; },
+    get flightsInitError() { return flightsInitError; },
+    // ── /sprint:F ──
     getTerrainBounds,
     get arrivalCosts() { return arrivalCosts.slice(); },
     clearArrivalCosts() { arrivalCosts.length = 0; },
