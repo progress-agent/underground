@@ -68,23 +68,33 @@ test('rungs are fine: no step removes more than a quarter of the pixels',()=>{
  }
  assert.ok(QUALITY_LEVELS.length>=12);
 });
-test('CPU-bound: a drop that does not help is reverted and held, not followed to the floor',()=>{
+test('CPU-bound: dropping that does not help is undone and held, not followed to the floor',()=>{
  // Constant 25ms whatever the resolution (the street/river case in the profile).
- const h=harness();const levels=h.sim(()=>25,60000);
+ const h=harness();const levels=h.sim(()=>25,120000);
  assert.equal(h.controller.get().level,1,'shadows off, full resolution');
- assert.ok(h.controller.state().history.some(e=>e.why==='revert: drop did not help'));
+ assert.ok(h.controller.state().history.some(e=>e.why==='revert: dropping did not help'));
  const lowTime=levels.filter(([,l])=>l>1).reduce((s,[ms])=>s+ms,0);
- assert.ok(lowTime<0.12*60000,`time below level 1: ${lowTime}ms`);
- assert.ok(Math.max(...levels.map(([,l])=>l))<=2,'never falls more than one rung below');
+ assert.ok(lowTime<0.2*120000,`time below level 1: ${lowTime}ms`);
+ const deepest=Math.max(...levels.map(([,l])=>l));
+ assert.ok(deepest<=5&&QUALITY_LEVELS[deepest].scale>=0.8,`never deeper than a trial descent: ${deepest}`);
+});
+test('noisy GPU-bound view: fine rungs that each help only a little still descend to the budget',()=>{
+ // Each fine rung helps less than frame noise, but together they do help.
+ const h=harness();h.sim(model({cpu:8,gpu:28,shadowMs:1}),60000,{jitter:.08});
+ const q=h.controller.get();
+ assert.ok(q.scale<1&&q.scale>=0.6,`settled at ${JSON.stringify(q)}`);
 });
 test('60Hz display, heavy street-like view: settles at 85% or 75%, not 50%',()=>{
  // 45 fps at full quality, frames paced by a 60Hz display with a little jitter.
- const h=harness();h.sim(model({cpu:9,gpu:22,shadowMs:2}),45000,{hz:60,jitter:.06});
+ const h=harness();const levels=h.sim(model({cpu:9,gpu:22,shadowMs:2}),45000,{hz:60,jitter:.06});
  const q=h.controller.get();
  assert.ok(q.scale>=0.75,`settled at ${JSON.stringify(q)}`);
- // Settled: at most one change in the last 20s.
- const late=h.changes.filter(c=>c.at>h.now-20000).length;
- assert.ok(late<=1,`late changes ${late}`);
+ // Settled: in the last 20s at most one upward probe (and its return), and
+ // at least 90% of the time at the settled level.
+ const probes=h.controller.state().history.filter(e=>e.why==='probe'&&e.at>h.now-20000).length;
+ assert.ok(probes<=1,`late probes ${probes}`);
+ let t=0,at=0;for(let i=levels.length-1;i>=0&&t<20000;i--){t+=levels[i][0];if(levels[i][1]===q.level)at+=levels[i][0];}
+ assert.ok(at/t>=0.9,`time at settled level ${(at/t).toFixed(2)}`);
 });
 test('60Hz display: a partly CPU-bound view stops where resolution stops helping',()=>{
  // CPU 15ms floor; GPU 30ms at full. Below ~70% the frame no longer gets faster.
