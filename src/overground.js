@@ -321,6 +321,9 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation,
     station.groundY=getTerrainMeshSurfaceY(station.pos);station.liftM=(station.pos.y-station.groundY)/VE;
   }
   group.userData.update=(dt,camera)=>{for(const fleet of fleets)fleet.userData.update(dt,camera,multiplier);};
+  // ── s24:R ── fleet economies (compact live cars, live-range upload, hidden skip)
+  group.userData.setEconomies=next=>{for(const fleet of fleets)fleet.userData.setEconomies(next);};
+  // ── /s24:R ──
   group.userData.setHeightScale(heightScale);
   return group;
 }

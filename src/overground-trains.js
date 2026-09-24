@@ -45,15 +45,33 @@ export function createOvergroundFleet(paths,colour,lineId){
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;group.add(mesh);return mesh;
  });
  const point=new THREE.Vector3(),localUp=new THREE.Vector3();
+ // ── s24:R ── (sprint 24Sep26h, D-038) Economies, switched on by the app:
+ // compact: live cars are written to the front of each instanced mesh and
+ // `count` stops there, instead of writing every distant car as a zero-scale
+ // matrix. ranges: only that live range is uploaded. skipHidden: a hidden
+ // fleet still advances its phases (they are integrated state) but writes
+ // no matrices. None of these changes a drawn pixel.
+ const economies={compact:false,ranges:false,skipHidden:false};
+ const shown=()=>{for(let o=group;o;o=o.parent)if(o.visible===false)return false;return true;};
+ // ── /s24:R ──
  function update(dt,camera,heightMultiplier){
+  // ── s24:R ──
+  const hidden=economies.skipHidden&&!shown();let slot=0;
+  // ── /s24:R ──
   for(const train of trains){
    train.phase=(train.phase+Math.max(0,dt)*SPEED)%(2*train.run);
+   // ── s24:R ──
+   if(hidden){train.visible=false;continue;}
+   // ── /s24:R ──
    const dir=train.phase<train.run?1:-1;
    const s=train.margin+(dir===1?train.phase:2*train.run-train.phase);
    sample(train.path,train.cum,s,train.position);
    train.visible=!camera||Math.hypot(camera.position.x-train.position.x,camera.position.z-train.position.z)<VISIBLE_DISTANCE;
+   // ── s24:R ──
+   if(economies.compact&&!train.visible)continue;
+   // ── /s24:R ──
    for(let c=0;c<train.cars;c++){
-    const index=train.first+c;
+    const index=economies.compact?slot++:train.first+c;
     if(!train.visible){dummy.position.set(0,0,0);dummy.scale.set(0,0,0);dummy.updateMatrix();for(const mesh of meshes)mesh.setMatrixAt(index,dummy.matrix);continue;}
     sample(train.path,train.cum,s+(c-(train.cars-1)/2)*CAR_STEP*dir,point);
     direction.multiplyScalar(dir);
@@ -69,8 +87,22 @@ export function createOvergroundFleet(paths,colour,lineId){
     dummy.position.addScaledVector(localUp,-CAR_HEIGHT*.35*heightMultiplier);dummy.updateMatrix();meshes[2].setMatrixAt(index,dummy.matrix);
    }
   }
-  for(const mesh of meshes)mesh.instanceMatrix.needsUpdate=true;
+  // ── s24:R ──
+  if(hidden)return;
+  for(const mesh of meshes){
+   const live=economies.compact?slot:instances;
+   if(economies.compact)mesh.count=live;
+   if(economies.ranges){mesh.instanceMatrix.clearUpdateRanges();if(live)mesh.instanceMatrix.addUpdateRange(0,live*16);}
+   if(live||!economies.ranges)mesh.instanceMatrix.needsUpdate=true;
+  }
+  // ── /s24:R ──
  }
- group.userData={trains,meshes,update,schematic:true};
+ // ── s24:R ──
+ function setEconomies(next={}){
+  for(const k of Object.keys(economies))if(k in next)economies[k]=!!next[k];
+  if(!economies.compact)for(const mesh of meshes)mesh.count=instances;
+ }
+ group.userData={trains,meshes,update,schematic:true,setEconomies,economies};
+ // ── /s24:R ──
  return group;
 }

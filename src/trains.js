@@ -226,14 +226,199 @@ export function createTrain({ system, curve, stationUs, lineId, colour, dir, pha
   train.position.copy(curve.getPointAt(train.userData.t));
   group.add(train);
   system.allTrains.push(train);
+  addToBatch(group, train, lineId, colour); // s24:R
   return train;
 }
+
+// ── s24:R ── Per-line train batches (sprint 24Sep26h, D-038, fix round 2).
+// Each train used to be three draw calls (capsule body plus two window
+// strips) with its own copy of two materials, so a line of 40 trains cost 120
+// draws that all share one geometry pair and, within the line, one colour.
+// A batch draws a whole line's trains as two InstancedMeshes: bodies (one
+// instance per train) and window strips (two per train). Colour stays
+// per-line, in the material, so D-015 holds: no per-instance colour.
+//
+// Picture: every train part is opaque (the strips are alphaTest cutouts, not
+// transparent), so draw order inside the batch cannot change a pixel; the
+// depth test decides, exactly as it did for the separate meshes. Instance
+// matrices are the train's own local matrix (and that matrix times the strip
+// offset), relative to the line group the batch also lives in, so hiding a
+// line (solo filter) hides its batch with it.
+//
+// The per-train meshes stay in place, hidden, so the economy switches off at
+// runtime to the e367efd path (?econ=-trainBatch, and the ABBA specs).
+// The batch is a Group carrying userData.lineId, so main.js's line rebuild
+// sweep treats it like a train group: kept for the DLR (whose trains are
+// kept), otherwise handed to disposeTrains, which calls userData.dispose().
+const _batches = new Set();
+const _batchOf = new WeakMap();                // line group -> batch
+const _stripL = new THREE.Matrix4().makeTranslation(-STRIP_X, STRIP_Y, 0);
+const _stripR = new THREE.Matrix4().makeTranslation(STRIP_X, STRIP_Y, 0);
+const _m = new THREE.Matrix4();
+export const trainBatchStats = { batches: 0, instances: 0, uploads: 0, frames: 0, syncMs: 0 };
+
+function makeBatchMeshes(batch, capacity) {
+  const body = new THREE.InstancedMesh(_capsuleGeo, batch.bodyMat, capacity);
+  const win = new THREE.InstancedMesh(_stripGeo, batch.winMat, capacity * 2);
+  for (const m of [body, win]) {
+    m.frustumCulled = false; // instances span the whole line; bounds would go stale
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.count = 0;
+  }
+  body.name = `train-batch-body-${batch.lineId}`;
+  win.name = `train-batch-windows-${batch.lineId}`;
+  return { body, win };
+}
+
+function addToBatch(group, train, lineId, colour) {
+  let batch = _batchOf.get(group);
+  if (!batch || batch.disposed || batch.root.parent !== group) {
+    const root = new THREE.Group();
+    root.name = `train-batch-${lineId}`;
+    batch = {
+      lineId, root, trains: [], capacity: 0, body: null, win: null, disposed: false,
+      // Same parameters as the per-train materials above.
+      bodyMat: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7, metalness: 0.1,
+        emissive: new THREE.Color(colour), emissiveIntensity: 0.03 }),
+      winMat: new THREE.MeshBasicMaterial({ map: _windowTex, alphaTest: 0.5, toneMapped: false, side: THREE.DoubleSide }),
+      last: null, // Float32Array of the matrices last uploaded, for change detection
+    };
+    root.userData = { lineId, trainBatch: batch, dispose: () => disposeBatch(batch) };
+    root.visible = trainEconomies.batch;
+    group.add(root);
+    _batchOf.set(group, batch);
+    _batches.add(batch);
+  }
+  batch.trains.push(train);
+  train.userData.batch = batch;
+  train.userData.nearGroup.visible = !trainEconomies.batch;
+  if (batch.trains.length > batch.capacity) {
+    const capacity = Math.max(8, batch.capacity * 2, batch.trains.length);
+    if (batch.body) { batch.root.remove(batch.body, batch.win); batch.body.dispose(); batch.win.dispose(); }
+    Object.assign(batch, makeBatchMeshes(batch, capacity), { capacity, last: null });
+    batch.root.add(batch.body, batch.win);
+  }
+  batch.dirty = true;
+}
+
+function removeFromBatch(train) {
+  const batch = train.userData.batch;
+  if (!batch) return;
+  const i = batch.trains.indexOf(train);
+  if (i >= 0) { batch.trains.splice(i, 1); batch.dirty = true; }
+  train.userData.batch = null;
+}
+
+function disposeBatch(batch) {
+  if (batch.disposed) return;
+  batch.disposed = true;
+  for (const t of batch.trains) if (t.userData.batch === batch) t.userData.batch = null;
+  batch.trains.length = 0;
+  batch.body?.dispose(); batch.win?.dispose();
+  batch.bodyMat.dispose(); batch.winMat.dispose();
+  _batches.delete(batch);
+}
+
+function setBatchesEnabled(on) {
+  for (const b of _batches) {
+    b.root.visible = on; b.dirty = true;
+    for (const t of b.trains) t.userData.nearGroup.visible = !on;
+  }
+}
+
+/** Write each shown batch's instance matrices from its trains' current poses.
+ * Uploads only when a matrix changed (a still or paused line costs nothing).
+ *
+ * Precision: a separate mesh gets its model-view matrix built on the CPU in
+ * double precision, so a train near the camera is placed to a tiny fraction
+ * of a pixel however far it is from the world origin. An instanced draw
+ * multiplies model-view by the instance matrix on the GPU in single
+ * precision, where two translations of thousands of metres nearly cancel and
+ * edges shift by a fraction of a pixel (measured: 430 px at the landing view,
+ * up to 36 levels, on MSAA edge samples). So each batch is rebased on a grid
+ * point near the camera: the batch root sits at that point and the instances
+ * hold small offsets from it, which keeps nearby trains as exact as before.
+ * The grid step only decides how often the camera's travel forces a rewrite. */
+const REBASE_STEP = 32;
+const _origin = new THREE.Vector3();
+const _rebase = new THREE.Matrix4();
+function syncBatches(camera) {
+  if (!trainEconomies.batch) return;
+  const t0 = performance.now();
+  trainBatchStats.frames++;
+  let batches = 0, instances = 0;
+  for (const b of _batches) {
+    if (!b.body || !lineShown(b.root)) continue;
+    const n = b.trains.length;
+    // Rebase on the grid point nearest the camera, in the line group's space.
+    if (camera?.position) {
+      const parent = b.root.parent;
+      _origin.copy(camera.position);
+      if (parent) { parent.updateWorldMatrix(true, false); parent.worldToLocal(_origin); }
+      _origin.set(Math.round(_origin.x / REBASE_STEP) * REBASE_STEP, Math.round(_origin.y / REBASE_STEP) * REBASE_STEP, Math.round(_origin.z / REBASE_STEP) * REBASE_STEP);
+      if (!_origin.equals(b.root.position)) { b.root.position.copy(_origin); b.root.updateMatrix(); b.dirty = true; }
+    }
+    _rebase.makeTranslation(-b.root.position.x, -b.root.position.y, -b.root.position.z);
+    const bodyArr = b.body.instanceMatrix.array, winArr = b.win.instanceMatrix.array;
+    if (!b.last || b.last.length !== n * 16) { b.last = new Float32Array(n * 16).fill(NaN); b.dirty = true; }
+    let changed = b.dirty;
+    for (let i = 0; i < n; i++) {
+      const t = b.trains[i];
+      t.updateMatrix();
+      const e = t.matrix.elements, o = i * 16;
+      let same = true;
+      for (let k = 0; k < 16; k++) if (b.last[o + k] !== Math.fround(e[k])) { same = false; break; }
+      if (same && !b.dirty) continue;
+      changed = true;
+      for (let k = 0; k < 16; k++) b.last[o + k] = e[k];
+      _m.multiplyMatrices(_rebase, t.matrix).toArray(bodyArr, o);
+      _m.multiplyMatrices(_rebase, t.matrix).multiply(_stripL).toArray(winArr, 2 * o);
+      _m.multiplyMatrices(_rebase, t.matrix).multiply(_stripR).toArray(winArr, 2 * o + 16);
+    }
+    if (b.body.count !== n) { b.body.count = n; b.win.count = 2 * n; changed = true; }
+    if (changed) {
+      b.body.instanceMatrix.needsUpdate = true; b.win.instanceMatrix.needsUpdate = true;
+      trainBatchStats.uploads++;
+    }
+    b.dirty = false;
+    batches++; instances += 3 * n;
+  }
+  trainBatchStats.batches = batches; trainBatchStats.instances = instances;
+  trainBatchStats.syncMs = performance.now() - t0;
+}
+// ── /s24:R ──
 
 /**
  * Per-frame update: simulation and orientation.
  */
+// ── s24:R ── Pose reuse (sprint 24Sep26h, D-038). A train's pose is a pure
+// function of (t, dir), so while it dwells (t fixed) the pose already applied
+// is the one orient() would compute again, and a train on a hidden line need
+// not be posed at all until it is shown. Simulation state always advances.
+const trainEconomies = { reusePose: false, batch: false };
+export function setTrainEconomies(next = {}) {
+  const wasBatch = trainEconomies.batch;
+  for (const k of Object.keys(trainEconomies)) if (k in next) trainEconomies[k] = !!next[k];
+  if (trainEconomies.batch !== wasBatch) setBatchesEnabled(trainEconomies.batch);
+  return { ...trainEconomies };
+}
+export const trainPoseStats = { posed: 0, reused: 0, hidden: 0 };
+function lineShown(train) {
+  for (let o = train; o; o = o.parent) if (o.visible === false) return false;
+  return true;
+}
+function pose(train) {
+  const ud = train.userData;
+  ud.curve.getPointAt(ud.t, train.position);
+  orient(train);
+  ud._poseT = ud.t; ud._poseDir = ud.dir;
+  trainPoseStats.posed++;
+}
+// ── /s24:R ──
+
 export function updateTrains(system, sim, camera, dt) {
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
+  const reuse = trainEconomies.reusePose;
 
   for (const train of system.allTrains) {
     const ud = train.userData;
@@ -241,6 +426,14 @@ export function updateTrains(system, sim, camera, dt) {
     // Dwell at stations
     if (ud._pausedLeft > 0) {
       ud._pausedLeft = Math.max(0, ud._pausedLeft - simDt);
+      // ── s24:R ──
+      if (reuse) {
+        if (!lineShown(train)) { trainPoseStats.hidden++; continue; }
+        if (ud._poseT === ud.t && ud._poseDir === ud.dir) { trainPoseStats.reused++; continue; }
+        pose(train);
+        continue;
+      }
+      // ── /s24:R ──
       orient(train);
       continue;
     }
@@ -276,9 +469,17 @@ export function updateTrains(system, sim, camera, dt) {
     }
 
     ud.t = u;
+    // ── s24:R ──
+    if (reuse) {
+      if (!lineShown(train)) { ud._poseT = NaN; trainPoseStats.hidden++; continue; }
+      pose(train);
+      continue;
+    }
+    // ── /s24:R ──
     train.position.copy(ud.curve.getPointAt(u));
     orient(train);
   }
+  syncBatches(camera); // s24:R
 }
 
 /**
@@ -287,7 +488,7 @@ export function updateTrains(system, sim, camera, dt) {
 function orient(train) {
   const ud = train.userData;
   const uAhead = Math.min(ud.t + 0.001, 0.999);
-  _lookTarget.copy(ud.curve.getPointAt(uAhead));
+  ud.curve.getPointAt(uAhead, _lookTarget); // s24:R: same point, no per-frame allocation
   train.lookAt(_lookTarget);
 
   if (ud.dir === -1) train.rotateY(Math.PI);
@@ -300,6 +501,7 @@ export function disposeTrains(system, trainsToRemove) {
   for (const train of trainsToRemove) {
     const idx = system.allTrains.indexOf(train);
     if (idx >= 0) system.allTrains.splice(idx, 1);
+    removeFromBatch(train); // s24:R
     if (train.userData.dispose) train.userData.dispose();
     if (train.parent) train.parent.remove(train);
   }

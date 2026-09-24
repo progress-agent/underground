@@ -492,21 +492,65 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
         if (tau < 0 || tau > path.duration) continue;
         const st = stateAt(path, tau, {});
         if (!st.inside && !includeHidden) continue;
-        const type = AIRCRAFT_TYPES[v.model];
-        list.push({
-          id: v.id, stream: stream.id, kind: stream.kind, airport: stream.site.id, airportName: stream.site.name,
-          model: v.model, typeLabel: type.label, length: type.length, runway: v.end.designator, stack: v.stack || null,
-          anchor: v.anchor, tau, x: st.x, y: st.y, z: st.z, altM: st.alt, speedMps: st.v, heading: st.heading,
-          pitch: st.pitch, bank: st.bank, onGround: st.ground, visible: st.inside,
-          onFinal: stream.kind === 'arrival' && st.s >= path.fafS && st.s <= path.aimS,
-          distanceToAimM: stream.kind === 'arrival' ? path.aimS - st.s : null, elevationM: path.elevation,
-        });
+        list.push(writeFlight({}, stream, v, path, tau, st));
       }
     }
     return list;
   }
 
-  return { flightsAt, edge, chooseRunways: (id, wind) => chooseRunways(sites.get(id), wind), pathFor, flightVariant, streams: live, VE };
+  function writeFlight(rec, stream, v, path, tau, st) {
+    const type = AIRCRAFT_TYPES[v.model];
+    rec.id = v.id; rec.stream = stream.id; rec.kind = stream.kind; rec.airport = stream.site.id; rec.airportName = stream.site.name;
+    rec.model = v.model; rec.typeLabel = type.label; rec.length = type.length; rec.runway = v.end.designator; rec.stack = v.stack || null;
+    rec.anchor = v.anchor; rec.tau = tau; rec.x = st.x; rec.y = st.y; rec.z = st.z; rec.altM = st.alt; rec.speedMps = st.v; rec.heading = st.heading;
+    rec.pitch = st.pitch; rec.bank = st.bank; rec.onGround = st.ground; rec.visible = st.inside;
+    rec.onFinal = stream.kind === 'arrival' && st.s >= path.fafS && st.s <= path.aimS;
+    rec.distanceToAimM = stream.kind === 'arrival' ? path.aimS - st.s : null; rec.elevationM = path.elevation;
+    return rec;
+  }
+
+  // ── s24:R ── Allocation-free twin of flightsAt for the per-frame render
+  // (sprint 24Sep26h, D-038, fix round 1). Same streams, same k window, same
+  // variants and the same state maths, written into pooled records: variants
+  // are cached per stream and k (dropped whenever the wind changes the runway
+  // choice, exactly as flightVariant's own choice cache is), each variant keeps
+  // its path, and one scratch state is reused. Returns the count; out.length is
+  // left alone so the pool keeps its records. flightsAt stays the public,
+  // fresh-object contract the tests and tooling use.
+  const variantCache = new Map(); let variantWind = windVersion;
+  const stScratch = {};
+  function cachedVariant(stream, k) {
+    if (variantWind !== windVersion) { variantCache.clear(); variantWind = windVersion; }
+    let byK = variantCache.get(stream);
+    if (!byK) { byK = new Map(); variantCache.set(stream, byK); }
+    let v = byK.get(k);
+    if (!v) {
+      if (byK.size > 256) byK.clear(); // k only ever moves forward; old ones are dead
+      v = flightVariant(stream, k); v.path = pathFor(stream, v); byK.set(k, v);
+    }
+    return v;
+  }
+  function flightsInto(t, out) {
+    let n = 0;
+    for (const stream of live) {
+      const before = MAX_BEFORE[stream.kind] + stream.jitter, after = MAX_AFTER[stream.kind] + stream.jitter;
+      const k0 = Math.floor((t - after - stream.offset) / stream.period) - 1;
+      const k1 = Math.ceil((t + before - stream.offset) / stream.period) + 1;
+      for (let k = k0; k <= k1; k++) {
+        const v = cachedVariant(stream, k), path = v.path;
+        const tau = t - v.anchor + path.anchorT;
+        if (tau < 0 || tau > path.duration) continue;
+        const st = stateAt(path, tau, stScratch);
+        if (!st.inside) continue;
+        const rec = out[n] || (out[n] = {});
+        writeFlight(rec, stream, v, path, tau, st); rec.displayScale = undefined; n++;
+      }
+    }
+    return n;
+  }
+  // ── /s24:R ──
+
+  return { flightsAt, flightsInto, edge, chooseRunways: (id, wind) => chooseRunways(sites.get(id), wind), pathFor, flightVariant, streams: live, VE };
 }
 
 // ── Hover label: flight-like, never a claim about a real flight ─────────────
@@ -558,6 +602,17 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
     meshes[model] = mesh; root.add(mesh);
   }
   let elapsed = 0, current = [], lastCamera = null, floorPx = minPixels;
+  // ── s24:R ── economies, switched on by the app (sprint 24Sep26h, D-038)
+  // pool: allocation-free list (flightsInto); cull: aircraft whose bounding
+  // sphere is outside the view frustum get no instance (flights never cast or
+  // receive shadows, so an off-screen aircraft draws nothing anywhere).
+  const economies = { ranges: false, skipHidden: false, pool: false, cull: false };
+  const pool = [], counts = {}, frustum = new THREE.Frustum(), viewProj = new THREE.Matrix4(), cullSphere = new THREE.Sphere();
+  let poolCount = 0, listIsPool = false;
+  const bounds = {};
+  for (const model of Object.keys(AIRCRAFT_TYPES)) bounds[model] = null;
+  const shown = () => { for (let o = root; o; o = o.parent) if (o.visible === false) return false; return true; };
+  // ── /s24:R ──
   const q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), m = new THREE.Matrix4();
   const stats = { flights: 0, visible: 0, drawCalls: Object.keys(meshes).length };
 
@@ -568,13 +623,21 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
   }
   function render(camera = lastCamera) {
     if (camera) lastCamera = camera;
-    current = traffic.flightsAt(elapsed);
+    // ── s24:R ──
+    listIsPool = economies.pool && typeof traffic.flightsInto === 'function';
+    let n;
+    if (listIsPool) { n = poolCount = traffic.flightsInto(elapsed, pool); current = pool; }
+    else { current = traffic.flightsAt(elapsed); n = current.length; }
+    const culling = economies.cull && !!camera?.projectionMatrix && !!camera?.matrixWorldInverse;
+    if (culling) frustum.setFromProjectionMatrix(viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    let culled = 0;
+    // ── /s24:R ──
     const k = VE * Math.max(.05, Number(getHeightScale()) || 1);
     const focal = floorPx > 0 && camera?.matrixWorldInverse ? focalPx(camera) : 0;
     const masterRatio = camera?.userData?.masterHeightController?.ratio ?? 1;
-    const counts = {};
-    for (const key in meshes) counts[key] = 0;
-    for (const f of current) {
+    for (const key in meshes) counts[key] = 0; // s24:R: counts is reused, not rebuilt
+    for (let fi = 0; fi < n; fi++) {
+      const f = current[fi]; // s24:R: indexed, so the pool's spare records are never read
       const mesh = meshes[f.model], i = counts[f.model];
       if (i >= capacity) continue;
       // Model nose is -z: yaw so -z points along the heading; bank right = right wing down.
@@ -591,22 +654,47 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
       // World-vertical structure stretch. A far speck keeps true proportions on
       // screen (undoing Master's flattening) so it reads as an aircraft, not a hair.
       const kv = grow > 1 && masterRatio > 0 ? Math.max(k, 1 / masterRatio) : k;
+      // ── s24:R ── off-screen aircraft: no instance. The sphere is the type's
+      // own geometry bound, grown by the speck floor and the vertical stretch.
+      if (culling) {
+        const b = bounds[f.model] || (bounds[f.model] = mesh.geometry.boundingSphere);
+        cullSphere.center.set(f.x, f.y, f.z);
+        cullSphere.radius = (b.center.length() + b.radius) * grow * Math.max(1, kv) + 1;
+        if (!frustum.intersectsSphere(cullSphere)) { culled++; continue; }
+      }
+      // ── /s24:R ──
       el[1] *= kv; el[5] *= kv; el[9] *= kv;
       el[12] = f.x; el[13] = f.y; el[14] = f.z;
       mesh.setMatrixAt(i, m); counts[f.model] = i + 1;
     }
-    for (const key in meshes) { meshes[key].count = counts[key]; meshes[key].instanceMatrix.needsUpdate = true; }
-    stats.flights = current.length; stats.visible = current.length;
+    for (const key in meshes) {
+      const mesh = meshes[key], was = mesh.count;
+      mesh.count = counts[key];
+      // ── s24:R ── upload only the live range; an empty mesh that was already
+      // empty has nothing to upload (sprint 24Sep26h, D-038).
+      if (economies.ranges) {
+        if (!mesh.count && !was) continue;
+        mesh.instanceMatrix.clearUpdateRanges();
+        if (mesh.count) mesh.instanceMatrix.addUpdateRange(0, mesh.count * 16);
+      }
+      // ── /s24:R ──
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    stats.flights = n; stats.visible = n; stats.culled = culled; stats.renders = (stats.renders || 0) + 1; // s24:R: n, not current.length
   }
 
   const ndc = new THREE.Vector3(), view = new THREE.Vector3();
   /** Screen-space pick: nearest aircraft whose marker radius covers the pointer. */
+  // ── s24:R ── the live records (the pool may hold spare ones past the count)
+  const liveCount = () => listIsPool ? poolCount : current.length;
+  // ── /s24:R ──
   function pick(pointerNdc, camera, rect) {
-    if (!camera || !current.length) return null;
+    if (!camera || !liveCount()) return null;
     const w = rect?.width || 1, h = rect?.height || 1;
     const focal = camera.isPerspectiveCamera ? (h / 2) / Math.tan(camera.fov * DEG / 2) : h;
     let best = null, bestScore = Infinity;
-    for (const f of current) {
+    for (let fi = 0, n = liveCount(); fi < n; fi++) {
+      const f = current[fi]; // s24:R
       view.set(f.x, f.y + f.length * .1 * VE, f.z).applyMatrix4(camera.matrixWorldInverse);
       if (view.z >= -1) continue;
       ndc.copy(view).applyMatrix4(camera.projectionMatrix);
@@ -614,16 +702,27 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
       const radius = Math.max(10, Math.min(80, f.length * (f.displayScale || 1) * .6 * focal / -view.z));
       if (dist <= radius && dist < bestScore) { best = f; bestScore = dist; }
     }
-    return best;
+    return best && listIsPool ? { ...best } : best; // s24:R: a pooled record is reused next frame
   }
 
   root.userData = {
-    update(dt, camera) { if (Number.isFinite(dt) && dt > 0) elapsed += dt; render(camera); },
+    update(dt, camera) {
+      if (Number.isFinite(dt) && dt > 0) elapsed += dt;
+      // ── s24:R ── a hidden fleet keeps its clock but builds no list or matrices
+      if (economies.skipHidden && !shown()) { if (camera) lastCamera = camera; stats.skippedHidden = (stats.skippedHidden || 0) + 1; return; }
+      // ── /s24:R ──
+      render(camera);
+    },
+    // ── s24:R ──
+    setEconomies(next = {}) { for (const k of Object.keys(economies)) if (k in next) economies[k] = !!next[k]; },
+    economies,
+    // ── /s24:R ──
     setElapsed(t) { elapsed = Number(t) || 0; render(); },
     setMinPixels(px) { floorPx = Math.max(0, Number(px) || 0); render(); },
     get minPixels() { return floorPx; },
     getElapsed: () => elapsed,
-    get flights() { return current; },
+    // s24:R: with the pool on, a snapshot (pooled records are rewritten each frame)
+    get flights() { return listIsPool ? current.slice(0, poolCount).map(f => ({ ...f })) : current; },
     flightsAt: (t, opts) => traffic.flightsAt(t, opts),
     // The module's own setter, so dev tooling reaches the same module instance
     // the scene imported (a fresh dynamic import can be a separate HMR copy).
