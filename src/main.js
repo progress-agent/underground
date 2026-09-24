@@ -12,6 +12,14 @@ import { createMotorway, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
 // ── sprint:F ──
 import { createFlights } from './flights.js';
 // ── /sprint:F ──
+// ── sprint:integrate ──
+// One world wind (D-037): aircraft choose runways from the same surface wind
+// the Balloon drifts on. Wired once, at module evaluation, before any flight
+// is planned (setWindSource clears the runway cache, so never re-wire live).
+import { setWindSource, getFlightWind } from './flights.js';
+import { getSurfaceWind } from './wind.js';
+setWindSource(getSurfaceWind);
+// ── /sprint:integrate ──
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
@@ -3967,6 +3975,10 @@ if (import.meta.env.DEV) {
       return total;
     },
   };
+  // ── sprint:integrate ──
+  window.__ug.getFlightWind = getFlightWind;
+  window.__ug.getSurfaceWind = getSurfaceWind;
+  // ── /sprint:integrate ──
   // ── sprint:C ──
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
