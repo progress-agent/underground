@@ -89,7 +89,7 @@ import { createSeaLife } from './sea-life.js';
 import { createEconomies, isShown } from './render-economies.js';
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
-import { setTrainEconomies } from './trains.js';
+import { setTrainEconomies, trainBatchStats } from './trains.js';
 // ── /s24:R ──
 // ── sprint:A1 ──
 import { installModes } from './modes/index.js';
@@ -345,7 +345,7 @@ function applyLayerEconomies() {
   apply(motorwayGroup, u => u.setEconomies?.({ frustumCulling: on.m25Cull, fogCulling: on.m25FogCull, instanceRanges: on.instanceRanges, hiddenSkip: on.hiddenSkip }));
   apply(overgroundGroup, u => u.setEconomies?.({ compact: on.instanceRanges, ranges: on.instanceRanges, skipHidden: on.hiddenSkip }));
   apply(flightsGroup, u => u.setEconomies?.({ ranges: on.instanceRanges, skipHidden: on.hiddenSkip, pool: on.flightsPool, cull: on.flightCull }));
-  setTrainEconomies({ reusePose: on.trainPose });
+  setTrainEconomies({ reusePose: on.trainPose, batch: on.trainBatch });
 }
 // ── /s24:R ──
 
@@ -4042,6 +4042,7 @@ if (import.meta.env.DEV) {
   // ── /sprint:C ──
   // ── s24:R ──
   window.__ug.economies = economies;
+  window.__ug.trainBatchStats = trainBatchStats;
   window.__ug.doubleSideSplit = doubleSideSplit;
   window.__ug.shadowCache = shadowCache;
   window.__ug.isShown = isShown;

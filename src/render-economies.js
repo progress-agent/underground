@@ -21,6 +21,7 @@ export const ECONOMIES = {
   shadowCache: 'Shadow map re-rendered only when the sun, the fit or the casters change',
   labelViewport: 'Station labels read the canvas size once per frame',
   trainPose: 'Tube trains reuse their pose while dwelling and when their line is hidden',
+  trainBatch: 'Tube trains drawn as one instanced body mesh and one instanced window mesh per line (per-line colour, no per-instance colour)',
 };
 
 export function parseEconomies(search = '') {

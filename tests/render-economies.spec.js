@@ -11,6 +11,12 @@ import { test, expect } from '@playwright/test';
 // differ, by at most 8 levels. Instance order inside an instanced draw is the
 // only thing an economy may change (live cars compacted to the front), which
 // can only matter where two instances meet at exactly equal depth.
+//
+// Fix round 2: the train batch (`trainBatch`) is held ON through these
+// comparisons, so they cover every other economy at the tolerance above. Its
+// own ABBA, footprint containment and stated tolerance are in
+// tests/render-merges.spec.js: instanced drawing moves the last bits of depth,
+// which flips a few hundred depth-tied samples on trains kilometres away.
 
 const VIEWS = {
   landing: { p: [-194.2, -39, -2162.8], t: [-988.5, 9, -1557.1] },
@@ -66,7 +72,7 @@ for (const [name, pose] of Object.entries(VIEWS)) {
       await new Promise(res => setTimeout(res, 100));
       const r = u.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
       const grab = on => {
-        u.economies.setAll(on);
+        u.economies.setAll(on); u.economies.set('trainBatch', true); // own spec and tolerance: render-merges.spec.js
         window.__step(4); // M25 traffic recomputes every third tick
         u.composer.render(0);
         r.setRenderTarget(null);
@@ -121,7 +127,7 @@ for (const [name, pose, yaws] of [['m25Edge', VIEWS.m25Edge, [8, 20, 40]], ['riv
         u.controls.target.copy(u.camera.position).add(d); u.controls.update();
       };
       const grab = (on, yaw) => {
-        u.economies.setAll(on);
+        u.economies.setAll(on); u.economies.set('trainBatch', true); // own spec and tolerance: render-merges.spec.js
         place(0);
         window.__step(4); while (tl.frame % 3) window.__step(1); // an update tick just ran at yaw 0
         place(yaw);
