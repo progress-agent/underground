@@ -1136,12 +1136,14 @@ sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? n
 // ── /sprint:D ──
 
 // ── s24:S ──
-// Visible sun disc and analytic sky (D-038). Looks switch with ?sky=<name> or
-// the hidden Sky row (shown with ?sky=, or by double-clicking "Sun:").
+// Visible sun disc and analytic sky (D-038).
 // updateEnvironment drives it each frame; nothing else in the tick changes.
 const skySystem = createSkySystem({ scene });
 attachSky(skySystem);
-skySystem.mountControls(document.getElementById('sunShadows')?.closest('p') ?? null);
+// ── s25:L ──
+// Clear is the only sky (D-039): the hidden Sky row and ?sky= are retired, so
+// nothing is mounted here any more.
+// ── /s25:L ──
 // ── /s24:S ──
 
 // Keep rim light for tube highlighting

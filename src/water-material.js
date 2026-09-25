@@ -58,6 +58,16 @@ const PRESETS = {
   },
 };
 
+// ── s25:L ──
+// Sun glint clamp (sprint 25Sep26f, Lane L, D-039). At roughness 0.13 to 0.18
+// the GGX highlight of the sun on the water reaches hundreds of times the sun
+// colour, and UnrealBloom turned it into a hot soft square on the river. The
+// water's outgoing light is capped at this luminance (linear, before its alpha
+// blend), which keeps a bright, white-ish glint while the blended pixel stays
+// under the bloom threshold (0.88).
+export const WATER_GLINT_MAX_LUMINANCE = 1.1;
+// ── /s25:L ──
+
 const WATER_MATERIALS = new Set();
 let waterNormalMap = null;
 let elapsed = 0;
@@ -243,7 +253,11 @@ void main() {`
   gl_FragColor.rgb = mix( gl_FragColor.rgb, uFresnelTint, waterFresnel );
   float shoreline = smoothstep( 0.82, 1.0, abs( vWaterEdge ) ) * vWaterUpness;
   gl_FragColor.rgb *= 1.0 - shoreline * uEdgeDarkenStrength;
-  gl_FragColor.a *= 1.0 - shoreline * uEdgeFadeStrength;`
+  gl_FragColor.a *= 1.0 - shoreline * uEdgeFadeStrength;
+  // ── s25:L ── glint clamp
+  float waterLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  if ( waterLum > ${WATER_GLINT_MAX_LUMINANCE.toFixed(4)} ) gl_FragColor.rgb *= ${WATER_GLINT_MAX_LUMINANCE.toFixed(4)} / waterLum;
+  // ── /s25:L ──`
     );
   };
 
