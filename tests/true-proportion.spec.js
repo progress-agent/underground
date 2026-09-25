@@ -199,3 +199,67 @@ test('every bridge deck meets its banks at Master 1, 1.1 and the maximum', async
   const bySlug = new Map();
   for (const r of rows) { if (!bySlug.has(r.slug)) bySlug.set(r.slug, r.clearance); expect(r.clearance, r.slug).toBeCloseTo(bySlug.get(r.slug), 4); }
 });
+
+// Fix round 1 (verifier, 25Sep26f): M25 vehicles and Overground cars leaned by
+// up to 67 degrees and stood up to 3.5x tall on grades, because their vertical
+// unscale acted in local axes before a rotation aimed along the canonical
+// path. Here every live instance matrix is read as the viewer sees it
+// (canonical y x Master / 5) and must be a pure rotation: orthonormal columns.
+test('M25 vehicles and Overground cars keep true proportions on grades at every Master', async ({ page }) => {
+  test.setTimeout(300000);
+  await ready(page);
+  const rows = await page.evaluate(async ({ setMasterSrc }) => {
+    const u = window.__ug, T = window.__ugTHREE, setMaster = eval(setMasterSrc), cam = u.camera;
+    u.sim.paused = true;
+    const worstOf = (e, o, ratio) => {
+      const c = [0, 4, 8].map(k => new T.Vector3(e[o + k], e[o + k + 1] * ratio, e[o + k + 2]));
+      let shear = 0, stretch = 0;
+      for (let i = 0; i < 3; i++) {
+        stretch = Math.max(stretch, Math.abs(c[i].length() - 1));
+        for (let j = i + 1; j < 3; j++) shear = Math.max(shear, Math.abs(90 - T.MathUtils.radToDeg(Math.acos(T.MathUtils.clamp(c[i].dot(c[j]) / (c[i].length() * c[j].length()), -1, 1)))));
+      }
+      return { shear, stretch };
+    };
+    // Beside the M25, low enough that nearby vehicles are the near (3D) LOD.
+    const route = u.motorwayGroup.userData.routes[0], p0 = u.motorwayGroup.userData.pointAt(route.id, 5000);
+    const out = [];
+    for (const m of [1, 1.1, 10]) {
+      setMaster(m);
+      const ratio = u.masterHeight.ratio;
+      cam.position.set(p0.x + 60, p0.y + 40, p0.z + 60); cam.lookAt(p0.x, p0.y, p0.z); cam.updateMatrixWorld(true);
+      u.motorwayGroup.userData.update(0, cam, true);
+      let near = 0, graded = 0, m25 = { shear: 0, stretch: 0 };
+      u.motorwayGroup.traverse(mesh => {
+        if (!mesh.isInstancedMesh || mesh.userData.lod !== 'near' || !mesh.visible) return;
+        for (let i = 0; i < mesh.count; i++) {
+          const w = worstOf(mesh.instanceMatrix.array, i * 16, ratio);
+          m25 = { shear: Math.max(m25.shear, w.shear), stretch: Math.max(m25.stretch, w.stretch) };
+          const v = u.motorwayGroup.userData.vehicleAt(mesh.userData.vehicleIds[i]);
+          if (Math.abs(v.dy) / Math.hypot(v.dx, v.dz) > 0.02) graded++;
+          near++;
+        }
+      });
+      let cars = 0, og = { shear: 0, stretch: 0 };
+      for (const fleet of u.overground.userData.fleets) for (const mesh of fleet.userData.meshes) {
+        const e = mesh.instanceMatrix.array;
+        for (let i = 0; i < mesh.count; i++) {
+          if (Math.hypot(e[i * 16], e[i * 16 + 1], e[i * 16 + 2]) < 1e-9) continue; // a hidden, zero-scale slot
+          const w = worstOf(e, i * 16, ratio);
+          og = { shear: Math.max(og.shear, w.shear), stretch: Math.max(og.stretch, w.stretch) };
+          cars++;
+        }
+      }
+      out.push({ m, near, graded, m25, cars, og });
+    }
+    return out;
+  }, { setMasterSrc });
+  for (const r of rows) {
+    expect(r.near, `near M25 vehicles at Master ${r.m}`).toBeGreaterThan(20);
+    expect(r.m25.shear, `M25 shear at Master ${r.m}`).toBeLessThan(0.01);
+    expect(r.m25.stretch, `M25 stretch at Master ${r.m}`).toBeLessThan(1e-3);
+    expect(r.cars, `Overground car matrices at Master ${r.m}`).toBeGreaterThan(10);
+    expect(r.og.shear, `Overground shear at Master ${r.m}`).toBeLessThan(0.01);
+    expect(r.og.stretch, `Overground stretch at Master ${r.m}`).toBeLessThan(1e-3);
+  }
+  expect(rows.some(r => r.graded > 0), 'some near vehicles are on a grade').toBe(true);
+});

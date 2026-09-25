@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { trueHeadingBasis } from './true-proportion.js'; // s25:S
 
 // Schematic services, not live arrival predictions. Instancing keeps an entire
 // line's fleet to three draws, with no per-instance colours (M5 constraint).
@@ -8,7 +9,7 @@ const SPEED=13, SPACING=2400, VISIBLE_DISTANCE=12000;
 const bodyGeometry=new THREE.BoxGeometry(CAR_WIDTH,CAR_HEIGHT,CAR_LENGTH);
 const roofGeometry=new THREE.BoxGeometry(CAR_WIDTH+.15,.28,CAR_LENGTH-.5);
 const windowGeometry=new THREE.BoxGeometry(CAR_WIDTH+.07,1.1,CAR_LENGTH*.82);
-const dummy=new THREE.Object3D(),forward=new THREE.Vector3(0,0,1);
+const dummy=new THREE.Object3D();
 const direction=new THREE.Vector3();
 
 function sample(path,cum,s,out){
@@ -44,7 +45,11 @@ export function createOvergroundFleet(paths,colour,lineId){
   mesh.name=['overground-train-bodies','overground-train-roofs','overground-train-windows'][i];
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;group.add(mesh);return mesh;
  });
- const point=new THREE.Vector3(),localUp=new THREE.Vector3();
+ const point=new THREE.Vector3();
+ // ── s25:S ──
+ const carMatrix=new THREE.Matrix4(),carPosition=new THREE.Vector3();
+ const basis={side:new THREE.Vector3(),up:new THREE.Vector3(),forward:new THREE.Vector3()};
+ // ── /s25:S ──
  // ── s24:R ── (sprint 24Sep26h, D-038) Economies, switched on by the app:
  // compact: live cars are written to the front of each instanced mesh and
  // `count` stops there, instead of writing every distant car as a zero-scale
@@ -78,13 +83,19 @@ export function createOvergroundFleet(paths,colour,lineId){
     // Two directions use opposite sides of the combined rail corridor.
     const horizontal=Math.hypot(direction.x,direction.z)||1;
     point.x+=direction.z/horizontal*2.6;point.z-=direction.x/horizontal*2.6;
-    dummy.quaternion.setFromUnitVectors(forward,direction);
-    dummy.scale.set(1,heightMultiplier,1);
-    localUp.set(0,1,0).applyQuaternion(dummy.quaternion);
-    dummy.position.copy(point).addScaledVector(localUp,(CAR_HEIGHT/2+.2)*heightMultiplier);
-    dummy.updateMatrix();meshes[0].setMatrixAt(index,dummy.matrix);
-    dummy.position.addScaledVector(localUp,CAR_HEIGHT/2*heightMultiplier);dummy.updateMatrix();meshes[1].setMatrixAt(index,dummy.matrix);
-    dummy.position.addScaledVector(localUp,-CAR_HEIGHT*.35*heightMultiplier);dummy.updateMatrix();meshes[2].setMatrixAt(index,dummy.matrix);
+    // ── s25:S ── True proportions (D-039). heightMultiplier is the canonical
+    // vertical factor that shows real metres at real height (5 / Master). The
+    // car is aimed along the DISPLAYED rail and unscaled in world axes after
+    // that rotation (trueHeadingBasis), so on a grade it is its real shape
+    // pitched to the grade; the old local-axis scale leaned and stretched it.
+    trueHeadingBasis(direction,heightMultiplier,basis);
+    const sd=basis.side,up=basis.up,fw=basis.forward;
+    carMatrix.set(sd.x,up.x,fw.x,0,sd.y,up.y,fw.y,0,sd.z,up.z,fw.z,0,0,0,0,1);
+    carPosition.copy(point).addScaledVector(up,CAR_HEIGHT/2+.2);
+    carMatrix.setPosition(carPosition);meshes[0].setMatrixAt(index,carMatrix);
+    carPosition.addScaledVector(up,CAR_HEIGHT/2);carMatrix.setPosition(carPosition);meshes[1].setMatrixAt(index,carMatrix);
+    carPosition.addScaledVector(up,-CAR_HEIGHT*.35);carMatrix.setPosition(carPosition);meshes[2].setMatrixAt(index,carMatrix);
+    // ── /s25:S ──
    }
   }
   // ── s24:R ──

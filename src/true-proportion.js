@@ -32,6 +32,11 @@
 //   * A moving object whose pose is recomputed each frame:
 //     composeTrueProportionMatrix(out, position, quaternion, scale), with the
 //     heading taken from displayDirection() so it points along what is drawn.
+//     An instanced vehicle running along a canonical path (trains, cars):
+//     trueHeadingBasis(dir, yScale, out) gives its three matrix columns, aimed
+//     along the displayed path with the unscale in world axes (M25 traffic,
+//     Overground cars). Never scale.y in local axes before the rotation: on a
+//     grade that leans and stretches the body.
 //     A parent Group with scale.y = structureYScale() and the rotation on a
 //     child gives the same result (that is how sea-life.js roots creatures).
 //   * Instanced geometry with translation-only instance matrices, or a mesh
@@ -136,6 +141,35 @@ export function composeTrueProportionMatrix(out, position, quaternion, scale = n
 /** A canonical direction as the viewer sees it (y x Master ratio); not normalised. */
 export function displayDirection(canonical, out = _v) {
   return out.set(canonical.x, canonical.y * masterRatio(), canonical.z);
+}
+
+/**
+ * The rotation-and-unscale basis of a vehicle that runs along a canonical
+ * (VE-steepened) path, as three canonical-space columns (side, up, forward),
+ * for a body authored in real metres with x across, y up and z along.
+ *
+ * `dir` is the canonical travel direction (any length). `yScale` is the
+ * canonical vertical factor that shows real metres at their real height
+ * (structureYScale(), or a module's own 5 / Master); the display ratio is its
+ * inverse. The heading is aimed along the DISPLAYED path (canonical rise
+ * divided by yScale), with no roll, and the vertical unscale is applied in
+ * world axes AFTER that rotation, so the body on screen is its true shape
+ * pitched to the displayed grade. Applying the unscale in local axes before
+ * the rotation (the old M25 and Overground code) leans and stretches it.
+ *
+ * Writes out.side, out.up and out.forward (THREE.Vector3). out.up is also the
+ * canonical offset of one real metre "up from the floor" of the body.
+ */
+export function trueHeadingBasis(dir, yScale, out) {
+  const k = Number.isFinite(yScale) && yScale > 0 ? yScale : 1;
+  const f = out.forward.set(dir.x, dir.y / k, dir.z);
+  if (f.lengthSq() < 1e-20) f.set(0, 0, 1); else f.normalize();
+  // side = worldUp x f = (f.z, 0, -f.x); vertical travel falls back to +x.
+  const h = Math.hypot(f.x, f.z);
+  const s = h > 1e-9 ? out.side.set(f.z / h, 0, -f.x / h) : out.side.set(1, 0, 0);
+  const u = out.up.crossVectors(f, s);
+  s.y *= k; u.y *= k; f.y *= k;
+  return out;
 }
 
 // ── Shader path ────────────────────────────────────────────────────────────

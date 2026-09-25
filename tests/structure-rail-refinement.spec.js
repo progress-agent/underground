@@ -81,11 +81,16 @@ test('pitched train bodies keep roofs and windows attached in carriage coordinat
  const result=await page.evaluate(()=>{
   const u=window.__ug,T=window.__ugTHREE;let alignment=1,pitched=0,cars=0;
   for(const f of u.overground.userData.fleets){
+   // D-039 (Lane S, 25Sep26f): multiplier 5 is the canonical factor that
+   // shows real metres at Master 1, so the viewer sees canonical y x 1/5. Pitch
+   // and attachment are measured as displayed; in canonical space a true-
+   // proportion car's up column is steepened x5 and hides its pitch.
+   const ratio=1/5,shown=v=>{v.y*=ratio;return v.normalize();};
    f.userData.update(0,null,5);const [body,roof,windows]=f.userData.meshes;
    for(let i=0;i<body.count;i++){
-    const b=new T.Matrix4();body.getMatrixAt(i,b);const up=new T.Vector3().setFromMatrixColumn(b,1).normalize(),centre=new T.Vector3().setFromMatrixPosition(b);
+    const b=new T.Matrix4();body.getMatrixAt(i,b);const up=shown(new T.Vector3().setFromMatrixColumn(b,1)),centre=new T.Vector3().setFromMatrixPosition(b);
     if(Math.abs(up.y)<.9999)pitched++;
-    for(const part of [roof,windows]){const m=new T.Matrix4();part.getMatrixAt(i,m);const offset=new T.Vector3().setFromMatrixPosition(m).sub(centre).normalize();alignment=Math.min(alignment,offset.dot(up));}cars++;
+    for(const part of [roof,windows]){const m=new T.Matrix4();part.getMatrixAt(i,m);const offset=shown(new T.Vector3().setFromMatrixPosition(m).sub(centre));alignment=Math.min(alignment,offset.dot(up));}cars++;
    }
   }return {alignment,pitched,cars};
  });
