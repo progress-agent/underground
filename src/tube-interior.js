@@ -276,7 +276,9 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
   const material = createInteriorMaterial();
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
   mesh.name = 'tube-interior';
-  mesh.userData.type = 'tube-interior';
+  // s25:integrate: no userData.type. That key marks hoverable infrastructure
+  // (main.js pickables, infra-hover-smoke.spec), and this mesh is neither: it
+  // is hidden outside Pedestrian and has no geometry until the walker enters.
   mesh.visible = false;
   mesh.frustumCulled = false;      // the shader moves the section; the walker is always inside it
   mesh.castShadow = false;
