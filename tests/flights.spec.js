@@ -150,22 +150,33 @@ test('rendered aircraft stay inside the map edge, above ground, at every sampled
   }
 });
 
-test('traffic mix: heavy Heathrow flow, London City regional jets, occasional light aircraft', () => {
-  const m = F.createTrafficModel({ getSurfaceY: tilted }), count = {}, models = {};
+// Sprint 25Sep26f (D-039, Lane F) changed the mix on Jordan's ruling: London
+// City a departure about every 2 minutes (arrivals to match), a turboprop at
+// London City and Northolt, an A380-class share at Heathrow, and each small
+// airfield a steady circuit of 2 or 3 aircraft flying touch-and-go laps. The
+// old bounds pinned the 23Sep26w pattern (London City under half of Heathrow,
+// regional jets only, 2 to 15 circuit identities an hour); each lap is now its
+// own identity, so the circuits' steadiness is pinned per instant in
+// flights-fleet.spec.js instead of by identities per hour.
+test('traffic mix: heavy Heathrow flow, busy London City, turboprops, circuit types', () => {
+  const m = F.createTrafficModel({ getSurfaceY: tilted }), count = {}, models = {}, heathrowModels = {};
   const ids = new Set();
   for (let t = 0; t < 3600; t += 10) for (const f of m.flightsAt(t, { includeHidden: true })) {
     if (ids.has(f.id)) continue; ids.add(f.id);
     count[f.airport] = (count[f.airport] || 0) + 1;
     (models[f.airport] ||= new Set()).add(f.model);
+    if (f.airport === 'heathrow') heathrowModels[f.model] = (heathrowModels[f.model] || 0) + 1;
   }
   expect(count.heathrow).toBeGreaterThan(70);                  // ~80 movements an hour
-  expect(count['london-city']).toBeGreaterThan(20);
-  expect(count['london-city']).toBeLessThan(count.heathrow / 2);
-  expect([...models['london-city']]).toEqual(['regional']);
-  expect(models.heathrow).toEqual(new Set(['heavy', 'narrow']));
-  for (const id of ['elstree', 'denham', 'stapleford', 'damyns-hall', 'biggin-hill']) {
-    expect(count[id]).toBeGreaterThan(2); expect(count[id]).toBeLessThan(15); expect([...models[id]]).toEqual(['light']);
-  }
+  expect(count['london-city']).toBeGreaterThan(50);            // ~30 departures + ~30 arrivals an hour
+  expect(count['london-city']).toBeLessThan(count.heathrow);
+  expect(models['london-city']).toEqual(new Set(['regional', 'turboprop']));
+  expect(models.heathrow).toEqual(new Set(['superjumbo', 'heavy', 'narrow']));
+  const share = heathrowModels.superjumbo / count.heathrow;
+  expect(share).toBeGreaterThan(0.03); expect(share).toBeLessThan(0.25);
+  expect(models.northolt.has('turboprop')).toBe(true);
+  for (const x of models.northolt) expect(['turboprop', 'bizjet']).toContain(x);
+  for (const id of ['elstree', 'denham', 'stapleford', 'damyns-hall', 'biggin-hill']) expect([...models[id]]).toEqual(['light']);
   expect([...models.kenley]).toEqual(['glider']);
 });
 
@@ -195,12 +206,16 @@ test('hover label reads like a flight but never claims to be a real one', () => 
   }
 });
 
-test('render group: one instanced mesh per type, baked vertex colour, finite non-degenerate matrices', async () => {
+// Sprint 25Sep26f (D-039, Lane F): one mesh per type AND livery (8 types x 3
+// liveries); the old count of 6 pinned one mesh per type before the two new
+// types and the liveries. Every other assertion is unchanged.
+test('render group: one instanced mesh per type and livery, baked vertex colour, finite non-degenerate matrices', async () => {
   let scale = 0.4;
   const g = F.createFlights({ getSurfaceY: tilted, getHeightScale: () => scale });
   g.userData.setElapsed(1000);
   const meshes = Object.values(g.userData.meshes);
-  expect(meshes).toHaveLength(6);
+  expect(meshes).toHaveLength(Object.keys(F.AIRCRAFT_TYPES).length * F.FLIGHT_LIVERIES.length);
+  expect(meshes).toHaveLength(24);
   let total = 0;
   const degenerate = [];
   const m4 = new (g.children[0].matrix.constructor)();
@@ -221,7 +236,7 @@ test('render group: one instanced mesh per type, baked vertex colour, finite non
   expect(total).toBe(g.userData.flights.length);
   expect(total).toBeGreaterThan(8);
   // Structure slider stretches aircraft like parked ones (VE x structure scale).
-  const narrow = g.userData.meshes.narrow; narrow.getMatrixAt(0, m4);
+  const narrow = meshes.find(x => x.userData.model === 'narrow' && x.count > 0); narrow.getMatrixAt(0, m4);
   const det04 = m4.determinant();
   scale = 1; g.userData.setElapsed(1000); narrow.getMatrixAt(0, m4);
   expect(m4.determinant() / det04).toBeCloseTo(2.5, 3);
