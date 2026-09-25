@@ -34,6 +34,13 @@ let shaftMeshes = [];
 let whirlpoolGroup = null;
 let whirlpoolMaterial = null;
 let whirlpoolTime = 0;
+// Every tunnel tube and the route points it was built from, so a tunnel can be
+// rebuilt through its shafts' snapped positions (25Sep26f fix round 1): a shaft
+// moved into open water or off the bank takes its tunnel vertex with it, so the
+// shaft still meets the tunnel it serves.
+let tunnelBuilds = [];
+let moduleLlToXZ = null;
+let appliedTunnelKey = '';
 
 let moduleVE = 5;
 
@@ -211,11 +218,11 @@ export async function loadTidewayData() {
 
 // ---------- Tunnel Section Builder ----------
 
-function buildTunnelSection(points, llToXZ, VE, radius, segments = 200) {
+function buildTunnelSection(points, llToXZ, VE, radius, segments = 200, placeOf = null) {
   if (points.length < 2) return null;
 
   const curvePoints = points.map(p => {
-    const xz = llToXZ(p.lat, p.lon);
+    const xz = placeOf?.(p) ?? llToXZ(p.lat, p.lon);
     return new THREE.Vector3(xz.x, -(p.depth * VE), xz.z);
   });
 
@@ -272,6 +279,9 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
 
   const VE = verticalScale;
   moduleVE = verticalScale;
+  moduleLlToXZ = llToXZ;
+  tunnelBuilds = [];
+  appliedTunnelKey = '';
   const group = new THREE.Group();
   group.name = 'tideway-system';
   shaftMeshes = [];
@@ -300,6 +310,8 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     glow.name = `tideway-glow-${sec.name}`;
     glow.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
     group.add(glow);
+    tunnelBuilds.push({ tube: tunnel, glow, points: sec.points.map(p => ({ ...p, key: `ttw:${p.id.replace(/^ttw-/, '')}` })),
+      radius, segments: 200 });
   }
 
   // ---- 2b. Vertical shaft cylinders (Tideway) ----
@@ -315,6 +327,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     const mat = makeTidewayShaftMaterial(isMainDrive);
     const mesh = buildShaftCylinder(site, llToXZ, VE, mat);
     mesh.userData.type = 'tideway-shaft';
+    mesh.userData.routeKey = `ttw:${site.id}`;
     mesh.renderOrder = RENDER_ORDER.SHAFT;
     tidewayShaftsGroup.add(mesh);
     shaftMeshes.push(mesh);
@@ -346,6 +359,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
       diameter: 2.8,
     };
     group.add(frogmoreMesh);
+    tunnelBuilds.push({ tube: frogmoreMesh, glow: null, points: frogmorePts, radius: 1.4, segments: 60 });
   }
 
   // Greenwich spur: Chambers → Earl → Deptford → Greenwich
@@ -366,6 +380,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
       diameter: 5.0,
     };
     group.add(greenwichMesh);
+    tunnelBuilds.push({ tube: greenwichMesh, glow: null, points: greenwichPts, radius: 2.5, segments: 80 });
   }
 
   // ---- 2d. Lee Tunnel ----
@@ -389,6 +404,8 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
       leeGlow.name = 'lee-glow';
       leeGlow.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
       group.add(leeGlow);
+      tunnelBuilds.push({ tube: leeTunnel, glow: leeGlow, points: leeRoutePoints.map(p => ({ ...p, key: `lee:${p.id}` })),
+        radius: 3.6, segments: 100 });
     }
 
     // Lee Tunnel shafts (brown-tinted)
@@ -401,6 +418,7 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
       const mat = makeLeeShaftMaterial();
       const mesh = buildShaftCylinder(entry, llToXZ, VE, mat);
       mesh.userData.type = 'lee-shaft';
+      mesh.userData.routeKey = `lee:${entry.id}`;
       mesh.renderOrder = RENDER_ORDER.SHAFT;
       leeShaftsGroup.add(mesh);
       shaftMeshes.push(mesh);
@@ -441,7 +459,7 @@ function splitRouteIntoSections(routePoints) {
 function findSite(sites, id) {
   const site = sites.find(s => s.id === id);
   if (!site) return null;
-  return { lat: site.lat, lon: site.lon, depth: site.depth };
+  return { lat: site.lat, lon: site.lon, depth: site.depth, key: `ttw:${site.id}` };
 }
 
 // ---------- Terrain Snapping ----------
@@ -580,6 +598,32 @@ export function snapTidewayShaftsToTerrain(getStructuralFallback) {
     const height = Math.max(1, topY - tunnelY);
     mesh.position.set(at.x, (topY + tunnelY) / 2, at.z);
     mesh.scale.y = height;
+  }
+  routeTunnelsThroughShafts();
+}
+
+// A shaft moved from its mapped point (into open water for a foreshore site,
+// or off the bank for a land site) takes its route vertex with it, so every
+// shaft axis still meets its tunnel. The real Tideway runs under the river at
+// the foreshore sites, so following the shaft into the channel is the truer
+// line. Rebuilt only when a snapped position changes; same segment counts, so
+// the draw and triangle cost is unchanged.
+function routeTunnelsThroughShafts() {
+  if (!moduleLlToXZ || !tunnelBuilds.length) return;
+  const placed = new Map();
+  for (const m of shaftMeshes) {
+    const ud = m.userData;
+    if (ud.routeKey && ud.xz) placed.set(ud.routeKey, ud.xz);
+  }
+  const key = [...placed].map(([k, p]) => `${k}:${p.x.toFixed(2)},${p.z.toFixed(2)}`).join('|');
+  if (key === appliedTunnelKey) return;
+  appliedTunnelKey = key;
+  const placeOf = p => (p.key && placed.get(p.key)) || null;
+  for (const b of tunnelBuilds) {
+    const r = buildTunnelSection(b.points, moduleLlToXZ, moduleVE, b.radius, b.segments, placeOf);
+    if (!r) continue;
+    b.tube.geometry.dispose(); b.tube.geometry = r.tubeGeo;
+    if (b.glow) { b.glow.geometry.dispose(); b.glow.geometry = r.glowGeo; } else r.glowGeo.dispose();
   }
 }
 
