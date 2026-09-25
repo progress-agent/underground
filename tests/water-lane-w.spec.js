@@ -134,6 +134,54 @@ test.describe('lane W: in the running app', () => {
     expect(r.shafts.filter(s => s.inRiver).map(s => s.id).sort()).toEqual(r.whirl.map(w => w.id).sort());
   });
 
+  // Fix round 1 (verifier): moving a foreshore shaft into open water, or a land
+  // shaft off the bank, must not cut it off from its tunnel. Measured against
+  // the tube's own centreline (the mean of each ring of TubeGeometry vertices),
+  // horizontally at the shaft axis and vertically at the shaft bottom.
+  test('Tideway and Lee: every shaft meets the tunnel it serves', async ({ page }) => {
+    await ready(page);
+    const r = await page.evaluate(() => {
+      const u = window.__ug, lines = [];
+      const sys = u.scene.getObjectByName('tideway-system');
+      sys.traverse(o => {
+        if (!o.isMesh || !/^(tideway-tunnel-|tideway-spur-|lee-tunnel$)/.test(o.name)) return;
+        const g = o.geometry, p = g.attributes.position, radial = g.parameters.radialSegments, ring = radial + 1;
+        const pts = [];
+        for (let i = 0; i + ring <= p.count; i += ring) {
+          let x = 0, y = 0, z = 0;
+          for (let k = 0; k < radial; k++) { x += p.getX(i + k); y += p.getY(i + k); z += p.getZ(i + k); }
+          pts.push([x / radial, y / radial, z / radial]);
+        }
+        lines.push({ name: o.name, pts });
+      });
+      const out = [];
+      for (const name of ['tideway-shafts', 'lee-shafts']) for (const m of u.scene.getObjectByName(name).children) {
+        const x = m.position.x, z = m.position.z, bottom = m.position.y - m.scale.y / 2;
+        let best = { d: Infinity, y: 0, line: '' };
+        for (const l of lines) for (let i = 0; i + 1 < l.pts.length; i++) {
+          const [ax, ay, az] = l.pts[i], [bx, by, bz] = l.pts[i + 1];
+          const dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz;
+          const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2)) : 0;
+          const d = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+          if (d < best.d) best = { d, y: ay + (by - ay) * t, line: l.name };
+        }
+        out.push({ id: m.userData.shaftId, d: best.d, dy: Math.abs(bottom - best.y), line: best.line,
+          moved: m.userData.movedM ?? 0, inRiver: !!m.userData.inRiver });
+      }
+      return { out, lines: lines.map(l => l.name) };
+    });
+    expect(r.lines.length).toBe(4 + 2 + 1);    // four main-bore sections, two spurs, the Lee Tunnel
+    expect(r.out.length).toBe(21 + 5);
+    // Some sites really are moved (the foreshore ones into open water), so the
+    // check below is not vacuous.
+    expect(r.out.filter(s => s.moved > 20).length).toBeGreaterThanOrEqual(5);
+    for (const s of r.out) {
+      expect(s.d, `${s.id} shaft axis to ${s.line} centreline (moved ${s.moved} m)`).toBeLessThan(2);
+      // The shaft runs down to the tunnel's centreline depth where it meets it.
+      expect(s.dy, `${s.id} shaft bottom to ${s.line} centreline`).toBeLessThan(8);
+    }
+  });
+
   test('Tideway whirlpools turn with simulation time only', async ({ page }) => {
     await ready(page);
     const t = await page.evaluate(async () => {
