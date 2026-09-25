@@ -91,6 +91,33 @@ function stripGeometry(left, right) {
   return geo;
 }
 
+// s25:E (see buildPath). Source segment i joins pts[i] to pts[i+1].
+function closeRiverTunnelSlivers(pts, classes) {
+  const runs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const tunnel = classes[i] === 'tunnel';
+    if (!runs.length || runs.at(-1).tunnel !== tunnel) runs.push({ tunnel, i0: i, i1: i });
+    runs.at(-1).i1 = i;
+  }
+  const crossesRiver = r => {
+    // Sample along the segments: a tunnel's source nodes can all sit on land.
+    for (let i = r.i0; i <= r.i1; i++) {
+      const a = llToScene(...pts[i]), b = llToScene(...pts[i + 1]);
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 10));
+      for (let j = 0; j <= n; j++) if (isInThames(a.x + (b.x - a.x) * j / n, a.z + (b.z - a.z) * j / n)) return true;
+    }
+    return false;
+  };
+  for (let k = 1; k < runs.length - 1; k++) {
+    const r = runs[k];
+    if (r.tunnel || !runs[k - 1].tunnel || !runs[k + 1].tunnel) continue;
+    let len = 0;
+    for (let i = r.i0; i <= r.i1; i++) { const a = llToScene(...pts[i]), b = llToScene(...pts[i + 1]); len += Math.hypot(b.x - a.x, b.z - a.z); }
+    if (len >= 25 || !(crossesRiver(runs[k - 1]) || crossesRiver(runs[k + 1]))) continue;
+    for (let i = r.i0; i <= r.i1; i++) classes[i] = 'tunnel';
+  }
+}
+
 // Per-corridor path in scene space with per-point earthworks class + track Y.
 function buildPath(branch, getTerrainMeshSurfaceY) {
   const pts = branch.points;
@@ -98,6 +125,12 @@ function buildPath(branch, getTerrainMeshSurfaceY) {
   for (const seg of branch.segments || []) {
     for (let i = seg.i0; i < Math.min(seg.i1, pts.length); i++) classes[i] = seg.class;
   }
+  // s25:E: the Thames Tunnel's source carries a ~20 m 'surface' sliver at
+  // Wapping station, which sits at the foot of Brunel's shaft underground; it
+  // threw the line up to street level between two tunnel runs. Close any
+  // non-tunnel gap under 25 m between tunnel runs when one of them crosses the
+  // river. Other lines' short gaps are left alone.
+  closeRiverTunnelSlivers(pts, classes);
   const path = [];
   // Sample within long source segments too: a chord between two terrain
   // samples otherwise sails across intervening street-level relief.

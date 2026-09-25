@@ -121,6 +121,8 @@ test('Thames Tunnel (Wapping to Rotherhithe) runs about 5 m below the bed, not 2
     const ug = window.__ug, VE = ug.VERTICAL_EXAGGERATION, top = ug.WATER_TOP_Y;
     const v = new ug.camera.position.constructor();
     const depths = [];
+    let shallowestM = Infinity; // on land too: Wapping and Rotherhithe are underground
+
     ug.overground.traverse(o => {
       if (!o.isMesh || o.userData?.lineId !== 'windrush') return;
       const pos = o.geometry.getAttribute('position');
@@ -128,15 +130,20 @@ test('Thames Tunnel (Wapping to Rotherhithe) runs about 5 m below the bed, not 2
         v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
         // Wapping to Rotherhithe reach only.
         if (v.x < 4700 || v.x > 5600 || v.z < 0 || v.z > 800) continue;
+        const dg = (ug.getTerrainMeshSurfaceY({ x: v.x, z: v.z }) - v.y) / VE;
+        if (dg < shallowestM) { shallowestM = dg; window.__s25eShallowAt = [Math.round(v.x), Math.round(v.y), Math.round(v.z)]; }
         if (v.y >= top || !ug.isInThames(v.x, v.z)) continue;
         depths.push((ug.getTerrainMeshSurfaceY({ x: v.x, z: v.z }) - v.y) / VE);
       }
     });
     depths.sort((a, b) => a - b);
-    return { n: depths.length, min: depths[0], median: depths[Math.floor(depths.length / 2)], max: depths.at(-1) };
+    return { shallowestM, at: window.__s25eShallowAt, n: depths.length, min: depths[0], median: depths[Math.floor(depths.length / 2)], max: depths.at(-1) };
   });
   console.log('[river-crossing] thames tunnel depth below bed (m)', JSON.stringify(r));
   expect(r.n).toBeGreaterThan(4);
+  // Before the fix a 20 m 'surface' sliver at Wapping threw the line up to
+  // street level between the two tunnel runs.
+  expect(r.shallowestM).toBeGreaterThan(THAMES_TUNNEL.centreBelowBedM - 0.5);
   // The stripe rides STRIPE_LIFT (0.16 m) above the path; the path is 5.2 m
   // down. Before the fix it read 6.7 m mid-river (20 m under the unrefined
   // structural ground, which sits 12 m above the rendered bed there).
