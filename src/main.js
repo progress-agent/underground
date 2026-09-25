@@ -1052,6 +1052,11 @@ function deleteUrlParam(key) {
     airportsGroup?.userData.setHeightScale(value);
     motorwayGroup?.userData.setHeightScale(value);
     if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
+    // ── s25:integrate ── Lane E x Lane S: the District rides the Fulham and Kew
+    // railway-bridge decks, whose height is a structure (true size, so its
+    // canonical height follows 1 / Master). Re-seat it on the morphed decks.
+    if (terrain && lineBranchCenterPts.get('district')?.some(b => b.some(p => p._bridge))) snapAllTubesToTerrain({ onlyLine: 'district' });
+    // ── /s25:integrate ──
     refreshOvergroundStationMarkers();
     structureMorph.morphs++;
   };
@@ -1561,7 +1566,6 @@ function snapAllShaftsToTerrain() {
 // get two deck points spliced in once, and every snap puts them on the deck:
 // the live bridge registry's deckY when bridges have built, otherwise the same
 // formula bridges.js uses (water level + clearance, scaled like the bridges).
-const S25E_TUBE_RADIUS = 4.5; // matches the TubeGeometry radius used for lines
 function placeTubeOnRailBridges(lineId, branchPts) {
   if (!branchPts.some(p => p._bridge)) {
     const hits = findBridgeCrossings(lineId, branchPts, { e: BNG_REF_E, n: BNG_REF_N });
@@ -1587,7 +1591,9 @@ function placeTubeOnRailBridges(lineId, branchPts) {
     const live = bridgesGroup?.userData?.registry?.get(c.bridge)?.deckY;
     const water = WATER_LEVEL_M * VERTICAL_EXAGGERATION + S25E_WATER_LIFT;
     const deckY = Number.isFinite(live) ? live : water + c.clearanceM * VERTICAL_EXAGGERATION * ratio;
-    pt.y = tubeOnDeckY(deckY, VERTICAL_EXAGGERATION * ratio, S25E_TUBE_RADIUS);
+    // s25:integrate (Lane E x Lane S seam): the bore is drawn round at its true
+    // radius, so its canonical half-height is boreRadiusM x VE x ratio (= 5 / Master).
+    pt.y = tubeOnDeckY(deckY, VERTICAL_EXAGGERATION * ratio, boreRadiusM(lineId) * VERTICAL_EXAGGERATION * ratio);
   }
 }
 // ── /s25:E ──

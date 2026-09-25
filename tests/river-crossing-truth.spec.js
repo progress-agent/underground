@@ -79,12 +79,8 @@ test('tube lines, Crossrail, Tideway and the Overground stay under the river bed
 });
 
 test('Victorian sewers stay under the river bed', async ({ page }) => {
-  // EXPECTED UNTIL MERGE: Lane W (sprint 25Sep26f) clamps the sewers under
-  // the bed in sewers.js (they stand 0.8 to 2.2 m proud near London Bridge
-  // and Vauxhall). Lane E does not edit sewers.js. On a branch without Lane W
-  // this test is expected to fail; once W is merged it passes, Playwright
-  // reports the expected failure as an error, and this marker must be removed.
-  test.fail(true, 'expected until Lane W (sewer clamp) is merged');
+  // Lane W's clamp (sewers.js) is merged on the integration branch, so the
+  // expected-failure marker Lane E left here is removed (sprint 25Sep26f).
   await ready(page);
   const r = await offenders(page, ['sewer'], []);
   console.log('[river-crossing] sewers', JSON.stringify(r.sewer));

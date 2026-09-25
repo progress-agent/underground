@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
-import { tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
+import { tubeAxisAttribute, patchTrueProportionMaterial, MASTER_BASE } from './true-proportion.js';
 import { getTerrainMeshSurfaceY } from './terrain.js';
 import { isInThames } from './thames-mask.js';
 import { WATER_TOP_Y } from './thames.js';
@@ -192,11 +192,17 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
 
 // Bed cap at (x, z): the highest centre Y that keeps the crown clear of the
 // rendered river bed, or +Infinity away from the river.
+// s25:integrate (Lane W x Lane S seam): the bore is drawn round at true size,
+// so its canonical vertical half-extent is radius x structureYScale()
+// (= MASTER_BASE / Master), not radius. Cap against the largest it can be,
+// at the Master floor of 1.0, so the crown clears the bed at every Master
+// without re-clamping on each Master change.
+const SEWER_MAX_TRUE_Y = MASTER_BASE / 1.0; // Master floor 1.0 (vertical-scale.js min)
 function bedCapAt(x, z, radius) {
   if (!isInThames(x, z)) return Infinity;
   const floor = getTerrainMeshSurfaceY({ x, z });
   if (!Number.isFinite(floor) || floor >= WATER_TOP_Y) return Infinity;
-  return floor - radius - SEWER_BED_CLEARANCE_M * sewerVE;
+  return floor - radius * SEWER_MAX_TRUE_Y - SEWER_BED_CLEARANCE_M * sewerVE;
 }
 
 /** Densely resampled, bed-clamped route of one sewer (canonical points). */
@@ -231,9 +237,10 @@ export function clampSewersUnderRiverBed() {
     t.wasClamped = clamped > 0;
     const segs = Math.min(500, points.length);
     t.tunnelMesh.geometry.dispose();
-    t.tunnelMesh.geometry = new THREE.TubeGeometry(path, clamped ? segs : 100, t.radius, 10, false);
+    // s25:integrate: keep the true-proportion axis attribute the 'axis' material patch reads.
+    t.tunnelMesh.geometry = tubeAxisAttribute(new THREE.TubeGeometry(path, clamped ? segs : 100, t.radius, 10, false));
     t.glowMesh.geometry.dispose();
-    t.glowMesh.geometry = new THREE.TubeGeometry(path, clamped ? Math.round(segs * 0.6) : 80, t.radius * 1.3, 10, false);
+    t.glowMesh.geometry = tubeAxisAttribute(new THREE.TubeGeometry(path, clamped ? Math.round(segs * 0.6) : 80, t.radius * 1.3, 10, false));
     for (const m of t.markers) {
       const cap = bedCapAt(m.position.x, m.position.z, t.radius);
       m.position.y = Math.min(m.userData.sourceY, cap);
