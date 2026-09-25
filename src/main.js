@@ -109,6 +109,9 @@ import { installModes } from './modes/index.js';
 import { deityRegimeSpeed } from './modes/deity-speed.js';
 import { getMasterBus } from './audio.js';
 // ── /sprint:A1 ──
+// ── s25:P ──
+import { createTubeInterior } from './tube-interior.js';
+// ── /s25:P ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -3951,7 +3954,7 @@ function tick(frameTime) {
         // them too — HTML overlays are not fogged, so labels would otherwise
         // shine through the opaque interior shell walls.
         hideForChalk: _chalkClarity > 0.5,
-        hideForWater: submerged,
+        hideForWater: submerged || s25InteriorHidesLabels(lineId), // s25:P
         viewport: _s24LabelViewport, // s24:R
       });
       updateCallCount++;
@@ -4050,6 +4053,26 @@ modeSystem.ctx.tubeNetwork = {
   get halfSpacing() { return twinTunnelsEnabled ? tunnelOffsetM : 0; },
 };
 // ── /sprint:A2 ──
+// ── s25:P ──
+// Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
+// bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map
+// devices that cross a bore (crown ribbons, station markers, station shafts)
+// are hidden only while it is shown and restored exactly when it hides.
+modeSystem.ctx.tubeInterior = createTubeInterior({
+  scene,
+  lineColour: (lineId) => lineColoursById.get(lineId),
+  mapDevices: () => [...lineRibbonsById.values()].flat()
+    .concat([...lineShaftLayers.values()].map(l => l.stationsLayer?.mesh).filter(Boolean))
+    .concat(unifiedShaftLayer?.group ? [unifiedShaftLayer.group] : []),
+});
+// Station labels are HTML overlays, never occluded: inside the lining only the
+// walker's own line keeps them (its next stations ahead), exactly as the
+// submerged shell hides them all (hideForWater below).
+function s25InteriorHidesLabels(lineId) {
+  const lid = modeSystem?.ctx.tubeInterior?.lineId;
+  return !!lid && lid !== lineId;
+}
+// ── /s25:P ──
 
 requestAnimationFrame(tick);
 
