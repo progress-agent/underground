@@ -98,6 +98,11 @@ import { createUnderwaterSurface } from './underwater-surface.js';
 // ── sprint:C ──
 import { createSeaLife } from './sea-life.js';
 // ── /sprint:C ──
+// ── s25:W ──
+import { updateTidewayWhirlpools, setTidewayWhirlpoolTime, getTidewayWhirlpools } from './tideway.js';
+import { clampSewersUnderRiverBed, getSewerRoutes } from './sewers.js';
+import { getAirportDockBedY } from './airport-docks.js';
+// ── /s25:W ──
 // ── s24:R ──
 import { createEconomies, isShown } from './render-economies.js';
 import { installDoubleSideSplit } from './double-side-split.js';
@@ -443,7 +448,7 @@ function isSubmergedAt(x, y, z) {
   // Docks retain their published impounded surface reference. They have no
   // bathymetry dataset; do not fabricate a floor while fixing the Thames.
   const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
-  if(dockY!==null)return y<dockY;
+  if(dockY!==null)return y<dockY && y>(getAirportDockBedY({x,z},VERTICAL_EXAGGERATION) ?? -Infinity); // s25:W dock bed
   return thamesMesh?.userData.navigation?.contains({x,y,z}) ?? false;
 }
 function classifySubstrateAt(point) {
@@ -1231,6 +1236,10 @@ const thamesDataPromise = loadThamesData();
       snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
       snapTidewayShaftsToTerrain(getStructuralSurfaceY);
+      // ── s25:W ──
+      // Victorian sewers under the modelled river bed, like the tube lines.
+      clampSewersUnderRiverBed();
+      // ── /s25:W ──
 
       // Build Thames 3D volume (flat water level, no terrain sampling needed)
       if (thamesData) {
@@ -3931,6 +3940,9 @@ function tick(frameTime) {
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
   // ── /sprint:C ──
+  // ── s25:W ──
+  updateTidewayWhirlpools(surfaceSimulationDt, camera);
+  // ── /s25:W ──
   // ── sprint:F ──
   flightsGroup?.userData.update(surfaceSimulationDt, camera);
   // ── /sprint:F ──
@@ -4206,6 +4218,12 @@ if (import.meta.env.DEV) {
   // ── sprint:C ──
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
+  // ── s25:W ──
+  Object.defineProperty(window.__ug, 'tidewayWhirlpools', { get: () => getTidewayWhirlpools(), enumerable: true });
+  window.__ug.setTidewayWhirlpoolTime = setTidewayWhirlpoolTime;
+  window.__ug.getSewerRoutes = getSewerRoutes;
+  window.__ug.getAirportDockBedY = getAirportDockBedY;
+  // ── /s25:W ──
   // ── s24:R ──
   window.__ug.economies = economies;
   window.__ug.trainBatchStats = trainBatchStats;

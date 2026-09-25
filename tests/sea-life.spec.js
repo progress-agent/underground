@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import * as THREE from 'three';
-import { createSeaLife, SEA_LIFE_SPECIES } from '../src/sea-life.js';
+import { createSeaLife, SEA_LIFE_SPECIES, SCHOOL_IDS } from '../src/sea-life.js';
 import { bridgePierAnchors } from '../src/bridges.js';
 import { createThamesProfileSampler } from '../src/thames-profile.js';
 import { makeNavigation, THAMES, BRIDGES, VE, TOP_Y, bngToScene } from './sea-life-fixture.mjs';
@@ -16,7 +16,8 @@ import { makeNavigation, THAMES, BRIDGES, VE, TOP_Y, bngToScene } from './sea-li
 const nav = makeNavigation();
 const build = () => createSeaLife({ thamesPoints: THAMES.points, navigation: nav, bridges: BRIDGES, VE, topY: TOP_Y });
 const TIMES = Array.from({ length: 120 }, (_, i) => i * 61.7);   // ~2 hours of pinned instants
-const MOVING = ['blue-whale', 'manta-1', 'turtle', 'hammerhead', 'silver-school', 'anglerfish'];
+const MOVING = ['blue-whale', 'manta-1', 'turtle', 'hammerhead', 'silver-school', 'shoal-nine-elms', 'shoal-wapping',
+  'shoal-battersea', 'bottlenose-whale'];
 
 function bridgeAxis(slug) {
   const b = BRIDGES.find(x => x.curatedSlug === slug);
@@ -41,10 +42,12 @@ function extentOf(api, name) {
 }
 
 test.describe('sea life: module contracts (node)', () => {
-  test('eight species, true scale, sparse and low-poly', () => {
+  test('species, true scale, sparse and low-poly', () => {
     const api = build();
+    // Sprint 25Sep26f (D-039): the anglerfish is retired for a northern
+    // bottlenose whale, and three more silver shoals join the Deptford school.
     expect(SEA_LIFE_SPECIES.map(s => s.id)).toEqual(['blue-whale', 'manta', 'jellyfish', 'octopus', 'turtle',
-      'hammerhead', 'silver-school', 'anglerfish']);
+      'hammerhead', 'silver-school', 'shoal-nine-elms', 'shoal-wapping', 'shoal-battersea', 'bottlenose-whale']);
     // Real-metre sizes (the parent carries VE; these are measured in the body frame).
     const whale = extentOf(api, 'sea-life:blue-whale');
     expect(whale.z).toBeGreaterThan(23); expect(whale.z).toBeLessThan(28);
@@ -55,9 +58,10 @@ test.describe('sea life: module contracts (node)', () => {
     expect(shark.z).toBeGreaterThan(4.3); expect(shark.z).toBeLessThan(6);
     const turtle = extentOf(api, 'sea-life:turtle');
     expect(turtle.z).toBeGreaterThan(2); expect(turtle.z).toBeLessThan(3.2);
-    const angler = extentOf(api, 'sea-life:anglerfish');
-    // About a metre of fish, plus the rod and lure reaching forward.
-    expect(angler.z).toBeGreaterThan(0.9); expect(angler.z).toBeLessThan(1.8);
+    // Northern bottlenose whale: about 7 m nose to flukes, under 2 m deep.
+    const bottlenose = extentOf(api, 'sea-life:bottlenose-whale');
+    expect(bottlenose.z).toBeGreaterThan(6.4); expect(bottlenose.z).toBeLessThan(7.6);
+    expect(bottlenose.y).toBeLessThan(2.2);
     // The whole layer stays a small, flat-shaded budget.
     let tris = 0, draws = 0;
     api.group.traverse(o => {
@@ -65,7 +69,7 @@ test.describe('sea life: module contracts (node)', () => {
       draws++;
       const g = o.geometry, n = g.index ? g.index.count : g.attributes.position.count;
       tris += (n / 3) * (o.isInstancedMesh ? o.count : 1);
-      if (!o.isSprite && o.material.name !== 'sea-life-lure') expect(o.material.flatShading).toBe(true);
+      expect(o.material.flatShading).toBe(true);
     });
     expect(draws).toBeLessThan(40);
     expect(tris).toBeLessThan(30000);
@@ -129,7 +133,7 @@ test.describe('sea life: module contracts (node)', () => {
     api.dispose();
   });
 
-  test('placed for discovery: whale in the Pool, mantas at Greenwich, anglerfish deepest, octopus on a pier', () => {
+  test('placed for discovery: whale in the Pool, mantas at Greenwich, bottlenose off Westminster, octopus on a pier', () => {
     const api = build();
     const tower = bridgeAxis('tower'), london = bridgeAxis('london');
     const mid = ax => ({ x: (ax.a.x + ax.b.x) / 2, z: (ax.a.z + ax.b.z) / 2 });
@@ -137,8 +141,9 @@ test.describe('sea life: module contracts (node)', () => {
     const pool = { x: (towerMid.x + londonMid.x) / 2, z: (towerMid.z + londonMid.z) / 2 };
     const poolHalf = Math.hypot(towerMid.x - londonMid.x, towerMid.z - londonMid.z) / 2;
     const greenwich = { x: 8161, z: 2340 }; // Cutty Sark reach, as river-banks.spec.js
-    const sampler = createThamesProfileSampler(THAMES.points);
-    const deepest = Math.max(...THAMES.points.map(p => p.d));
+    const westminster = mid(bridgeAxis('westminster')), lambeth = mid(bridgeAxis('lambeth'));
+    const reach = { x: (westminster.x + lambeth.x) / 2, z: (westminster.z + lambeth.z) / 2 };
+    const reachHalf = Math.hypot(westminster.x - lambeth.x, westminster.z - lambeth.z) / 2;
     const axes = BRIDGES.map(b => ({ slug: b.curatedSlug, ...bridgeAxis(b.curatedSlug) }));
     const closest = { d: Infinity };
     for (const t of TIMES) {
@@ -157,9 +162,10 @@ test.describe('sea life: module contracts (node)', () => {
         const bed = nav.bedAt(m.x, m.z);
         expect((m.y - bed) / (TOP_Y - bed)).toBeLessThan(0.5);
       }
-      const a = api.poseAt('anglerfish', t);
-      expect(sampler.sampleAt(a.x, a.z).d).toBe(deepest);
-      expect((a.y - nav.bedAt(a.x, a.z)) / VE).toBeLessThan(3.5); // hugging the bed
+      // The 2006 whale's species, off the Palace of Westminster: always in the
+      // reach between Westminster Bridge and Lambeth Bridge.
+      const b = api.poseAt('bottlenose-whale', t);
+      expect(Math.hypot(b.x - reach.x, b.z - reach.z)).toBeLessThan(reachHalf - 80);
       // No free swimmer passes through a bridge.
       for (const id of MOVING) for (const p of api.probes(id, t)) for (const ax of axes) {
         const d = distToSegment(p, ax.a, ax.b);
@@ -195,20 +201,86 @@ test.describe('sea life: module contracts (node)', () => {
     api.dispose();
   });
 
-  test('the silver school parts around the camera', () => {
+  test('no anglerfish: the species, its lure and halo are gone', () => {
     const api = build();
-    const avoid = SEA_LIFE_SPECIES.find(s => s.id === 'silver-school').school.avoidM;
-    let near = 0, parted = Infinity;
-    for (const t of [30, 400, 1200]) {
-      const c = api.poseAt('silver-school', t), cam = { x: c.x, y: c.y, z: c.z };
-      const real = f => Math.hypot(f.x - cam.x, (f.y - cam.y) / VE, f.z - cam.z);
-      near += api.fishAt(t, null).fish.filter(f => real({ ...f, y: f.y * VE }) < avoid * 0.5).length;
-      for (const f of api.fishAt(t, cam).fish) parted = Math.min(parted, real({ ...f, y: f.y * VE }));
+    expect(api.ids).not.toContain('anglerfish');
+    let lure = 0;
+    api.group.traverse(o => { if (/lure|angler/i.test(o.name) || /lure/.test(o.material?.name ?? '')) lure++; });
+    expect(lure).toBe(0);
+    const source = fs.readFileSync(new URL('../src/sea-life.js', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/anglerfish|buildAnglerfish/i);
+    api.dispose();
+  });
+
+  test('four silver shoals, avoidance about 4 m, larger fish', () => {
+    expect(SCHOOL_IDS).toEqual(['silver-school', 'shoal-nine-elms', 'shoal-wapping', 'shoal-battersea']);
+    for (const id of SCHOOL_IDS) {
+      const s = SEA_LIFE_SPECIES.find(x => x.id === id).school;
+      expect(s.avoidM).toBeGreaterThanOrEqual(3.5); expect(s.avoidM).toBeLessThanOrEqual(4.5);
+      expect(s.fishScale).toBeGreaterThanOrEqual(1.4);
     }
-    expect(near).toBeGreaterThan(10);           // undisturbed, fish fill that space
-    // With the camera there they clear it (the water top and bed can hold a
-    // fish back a little from the full avoidance radius).
-    expect(parted).toBeGreaterThan(avoid * 0.5);
+    const api = build();
+    const mesh = api.group.getObjectByName('sea-life-shoal-wapping');
+    mesh.geometry.computeBoundingBox();
+    const len = mesh.geometry.boundingBox.getSize(new THREE.Vector3()).z;
+    expect(len).toBeGreaterThan(0.55); expect(len).toBeLessThan(0.8);   // was 0.39 m
+    expect(mesh.material.name).toBe('sea-life-silver');
+    api.dispose();
+  });
+
+  for (const id of ['silver-school', 'shoal-nine-elms', 'shoal-wapping', 'shoal-battersea']) {
+    test(`${id} parts around the camera instead of vanishing`, () => {
+      const api = build();
+      const avoid = SEA_LIFE_SPECIES.find(s => s.id === id).school.avoidM;
+      let near = 0, parted = Infinity, around = 0;
+      for (const t of [30, 400, 1200]) {
+        // The camera swims into the body of the school: at an undisturbed fish.
+        const f0 = api.fishAt(t, null, id).fish[7], cam = { x: f0.x, y: f0.y * VE, z: f0.z };
+        const real = f => Math.hypot(f.x - cam.x, f.y - cam.y / VE, f.z - cam.z);
+        near += api.fishAt(t, null, id).fish.filter(f => real(f) < avoid * 0.5).length;
+        const withCam = api.fishAt(t, cam, id).fish;
+        for (const f of withCam) parted = Math.min(parted, real(f));
+        // The school stays around the viewer: most fish within three avoidance radii.
+        around += withCam.filter(f => real(f) < avoid * 3).length / withCam.length;
+      }
+      expect(near).toBeGreaterThan(3);            // undisturbed, fish fill that space (besides fish 7 itself)
+      // With the camera there they clear it (the water top and bed can hold a
+      // fish back a little from the full avoidance radius).
+      expect(parted).toBeGreaterThan(avoid * 0.5);
+      expect(around / 3).toBeGreaterThan(0.35);
+      api.dispose();
+    });
+  }
+
+  // Each fish bobs on its own hashed phase. Over a short interval the shell
+  // (u, rr) is fixed, so a fish's height relative to the school centre changes
+  // only by its bob; in lockstep every free fish would change by the same amount.
+  test('schools: every fish bobs on its own phase, not in lockstep', () => {
+    const api = build();
+    for (const id of SCHOOL_IDS) {
+      const t1 = 500, t2 = 502.2;
+      const a = api.fishAt(t1, null, id), b = api.fishAt(t2, null, id);
+      const dc = b.centre.y / b.scaleY - a.centre.y / a.scaleY;
+      const d = a.fish.map((f, i) => Math.round((b.fish[i].y - f.y - dc) * 1e4));
+      const distinct = new Set(d).size;
+      expect(distinct, `${id}: distinct bob changes`).toBeGreaterThan(a.fish.length / 2);
+    }
+    api.dispose();
+  });
+
+  test('true proportions: Master does not stretch creatures (D-039)', () => {
+    const api = build();
+    for (const master of [1, 1.1, 2.5, 5]) {
+      const camera = { position: new THREE.Vector3(0, 500, 0), userData: { masterHeightController: { base: 5, value: master } } };
+      api.update(0, camera, { submerged: true });
+      expect(api.scaleY).toBeCloseTo(5 / master, 9);
+      // Displayed vertical scale = root scale * Master / base = 1 for every body.
+      api.group.traverse(o => { if (o.name.startsWith('sea-life:')) expect(o.scale.y * master / 5).toBeCloseTo(1, 9); });
+      // Still inside the water at every Master (the landscape stretches, bodies do not).
+      for (const id of api.ids) for (const t of [0, 400, 2000]) for (const p of api.probes(id, t)) expect(nav.contains(p), `${id} @${master}`).toBe(true);
+    }
+    const source = fs.readFileSync(new URL('../src/sea-life.js', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/root\.scale\.set\(1, VE, 1\)/);
     api.dispose();
   });
 });
@@ -239,12 +311,12 @@ test.describe('sea life: in the running app', () => {
 
   test('hidden above water, visible when submerged at each placement, and in view', async ({ page }) => {
     const ids = await page.evaluate(() => window.__ug.seaLife.ids);
-    expect(ids.length).toBe(10);
+    expect(ids.length).toBe(13);
     for (const id of ids) {
       const vp = await page.evaluate(id => {
         const s = window.__ug.seaLife;
         if (id === 'jellyfish') { const p = s.jellyPose(0, 300); return { target: p, eye: { x: p.x - 14, y: p.y - 5, z: p.z } }; }
-        return s.viewpoint(id, 300, id === 'blue-whale' ? 60 : 18);
+        return s.viewpoint(id, 300, id === 'blue-whale' ? 60 : id === 'bottlenose-whale' ? 25 : 18);
       }, id);
       // Directly above the same spot, well clear of the water: never drawn.
       await lookFrom(page, { x: vp.eye.x, y: 400, z: vp.eye.z }, vp.target);

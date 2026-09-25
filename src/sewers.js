@@ -6,6 +6,22 @@ import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
 import { tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
+import { getTerrainMeshSurfaceY } from './terrain.js';
+import { isInThames } from './thames-mask.js';
+import { WATER_TOP_Y } from './thames.js';
+
+// Victorian sewers under the Thames (sprint 25Sep26f, D-039, Lane W). The CSV
+// depths are below Ordnance Datum, not below the local surface, so near London
+// Bridge and Vauxhall the 4 m bore stood 0.8 to 2.2 m proud of the modelled
+// river bed. Like the tube lines, each sewer is held under the rendered bed:
+// crown at least SEWER_BED_CLEARANCE_M below it, easing back to its sourced
+// depth at SEWER_EASE_GRADIENT so the bore dips rather than steps.
+export const SEWER_RADIUS = 2.0;               // canonical render radius (see below)
+export const SEWER_BED_CLEARANCE_M = 0.5;      // real metres, crown to bed
+const SEWER_EASE_GRADIENT = 0.1;               // canonical units per metre along the route
+const SEWER_SAMPLE_M = 15;                     // resample spacing along each route
+const sewerTunnels = [];
+let sewerVE = 5;
 
 // Infra haze band (see infra-materials.js) — coherence with Crossrail/Tideway.
 const HAZE_BAND = { near: 2500, far: 9000 };
@@ -77,6 +93,8 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
   
   const group = new THREE.Group();
   group.name = 'sewer-tunnels';
+  sewerTunnels.length = 0;
+  sewerVE = verticalScale;
   
   // Create a tunnel for each tunnel_id group
   for (const [tunnelId, points] of Object.entries(data.tunnels)) {
@@ -99,7 +117,7 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     curve.tension = 0.5;
     
     // Victorian sewers are ~4m diameter
-    const radius = 2.0;
+    const radius = SEWER_RADIUS;
     
     // D-039 (s25:S): a built bore, so its cross-section stays round at true
     // size for every Master; the centreline follows the stretched depth.
@@ -141,6 +159,8 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
     glowMesh.renderOrder = RENDER_ORDER.SEWER;
     group.add(glowMesh);
+    const entry = { tunnelId, curve, tunnelMesh, glowMesh, markers: [], radius };
+    sewerTunnels.push(entry);
     
     // Add depth markers at key points (start, end, and some intermediates)
     orderedPoints.forEach((p, i) => {
@@ -160,12 +180,72 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
         const marker = new THREE.Mesh(markerGeometry, markerMaterial);
         marker.position.set(xz.x, y, xz.z);
         marker.renderOrder = RENDER_ORDER.SEWER;
+        marker.userData.sourceY = y;
+        entry.markers.push(marker);
         group.add(marker);
       }
     });
   }
-  
+  clampSewersUnderRiverBed();
   return group;
+}
+
+// Bed cap at (x, z): the highest centre Y that keeps the crown clear of the
+// rendered river bed, or +Infinity away from the river.
+function bedCapAt(x, z, radius) {
+  if (!isInThames(x, z)) return Infinity;
+  const floor = getTerrainMeshSurfaceY({ x, z });
+  if (!Number.isFinite(floor) || floor >= WATER_TOP_Y) return Infinity;
+  return floor - radius - SEWER_BED_CLEARANCE_M * sewerVE;
+}
+
+/** Densely resampled, bed-clamped route of one sewer (canonical points). */
+export function clampedSewerRoute(curve, radius = SEWER_RADIUS) {
+  const n = Math.max(20, Math.ceil(curve.getLength() / SEWER_SAMPLE_M));
+  const pts = curve.getSpacedPoints(n);
+  const s = [0];
+  for (let i = 1; i < pts.length; i++) s.push(s[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z));
+  const cap = pts.map(p => bedCapAt(p.x, p.z, radius));
+  // Ease the cap along the route (forward then backward), so the bore dips.
+  for (let i = 1; i < cap.length; i++) cap[i] = Math.min(cap[i], cap[i - 1] + SEWER_EASE_GRADIENT * (s[i] - s[i - 1]));
+  for (let i = cap.length - 2; i >= 0; i--) cap[i] = Math.min(cap[i], cap[i + 1] + SEWER_EASE_GRADIENT * (s[i + 1] - s[i]));
+  let clamped = 0;
+  const out = pts.map((p, i) => { if (p.y > cap[i]) { clamped++; return new THREE.Vector3(p.x, cap[i], p.z); } return p.clone(); });
+  return { points: out, clamped };
+}
+
+/**
+ * Re-seat every sewer under the modelled river bed. Idempotent (always from
+ * the sourced curve); a no-op until the terrain and the Thames mask exist.
+ * Returns the number of route samples lowered.
+ */
+export function clampSewersUnderRiverBed() {
+  let total = 0;
+  for (const t of sewerTunnels) {
+    const { points, clamped } = clampedSewerRoute(t.curve, t.radius);
+    total += clamped;
+    t.clampedSamples = clamped;
+    const path = clamped ? new THREE.CatmullRomCurve3(points, false, 'centripetal') : t.curve;
+    t.path = path;
+    if (!clamped && !t.wasClamped) continue;
+    t.wasClamped = clamped > 0;
+    const segs = Math.min(500, points.length);
+    t.tunnelMesh.geometry.dispose();
+    t.tunnelMesh.geometry = new THREE.TubeGeometry(path, clamped ? segs : 100, t.radius, 10, false);
+    t.glowMesh.geometry.dispose();
+    t.glowMesh.geometry = new THREE.TubeGeometry(path, clamped ? Math.round(segs * 0.6) : 80, t.radius * 1.3, 10, false);
+    for (const m of t.markers) {
+      const cap = bedCapAt(m.position.x, m.position.z, t.radius);
+      m.position.y = Math.min(m.userData.sourceY, cap);
+    }
+  }
+  return total;
+}
+
+/** For tests: each sewer's rendered route (after clamping). */
+export function getSewerRoutes() {
+  return sewerTunnels.map(t => ({ tunnelId: t.tunnelId, radius: t.radius, clampedSamples: t.clampedSamples ?? 0,
+    path: t.path ?? t.curve, mesh: t.tunnelMesh }));
 }
 
 export function addSewersToLegend() {

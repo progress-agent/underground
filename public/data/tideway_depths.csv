@@ -25,11 +25,11 @@ ttw-falconbrook,Falconbrook PS,40,51.4710,-0.1730,central,Battersea CSO
 ttw-cremorne,Cremorne Wharf,42,51.4790,-0.1730,central,Chelsea CSO
 ttw-chelsea,Chelsea Embankment,45,51.4850,-0.1600,central,Foreshore CSO
 ttw-kirtling,Kirtling Street,48,51.4785,-0.1420,central,Central main drive — SECTION BOUNDARY
-ttw-heathwall,Heathwall PS,46,51.4760,-0.1360,central,CSO large shaft
+ttw-heathwall,Heathwall PS,46,51.4826,-0.1360,central,CSO large shaft (position corrected 25Sep26f to the shaft site)
 ttw-albert,Albert Embankment,48,51.4920,-0.1215,central,South bank CSO
 ttw-victoria,Victoria Embankment,51,51.5075,-0.1190,central,North bank CSO
 ttw-blackfriars,Blackfriars Bridge,53,51.5095,-0.1050,central,Largest CSO — Fleet intercept
-ttw-chambers,Chambers Wharf,58,51.5010,-0.0745,east,Main drive — SECTION BOUNDARY
+ttw-chambers,Chambers Wharf,58,51.5014,-0.0678,east,Main drive — SECTION BOUNDARY (position corrected 25Sep26f to the shaft site)
 ttw-kemp,King Edward Memorial Park,60,51.5095,-0.0490,east,Deepest CSO shaft
 ttw-limehouse,Limehouse Reach,50,51.5120,-0.0330,east,Route waypoint
 ttw-abbey-mills,Abbey Mills PS,67,51.5305,0.0030,east,Eastern terminus — deepest point
