@@ -4060,6 +4060,7 @@ modeSystem.ctx.tubeNetwork = {
 // are hidden only while it is shown and restored exactly when it hides.
 modeSystem.ctx.tubeInterior = createTubeInterior({
   scene,
+  camera, // inside, the camera sees the lining alone (other lines' bores cross it at interchanges)
   lineColour: (lineId) => lineColoursById.get(lineId),
   mapDevices: () => [...lineRibbonsById.values()].flat()
     .concat([...lineShaftLayers.values()].map(l => l.stationsLayer?.mesh).filter(Boolean))

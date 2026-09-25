@@ -244,7 +244,10 @@ float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( ha
   col = mix( col, uLineColour, stripe );
   col = mix( col, ${v3(P.casing)}, casing * 0.8 );
   // Headlamp: lit near the walker, dark ahead.
-  float lit = mix( 0.03, 1.0, exp( -vIntDist / uFalloff ) );
+  // (Clamped: a far, sub-pixel triangle can extrapolate vIntDist below zero
+  // under MSAA, and exp() of that reached 16376 in the half-float target at
+  // Baker Street, a white square blooming at the vanishing point.)
+  float lit = mix( 0.03, 1.0, exp( -max( vIntDist, 0.0 ) / uFalloff ) );
   col *= lit;
   // Wall lamps every ${INTERIOR.lampPitchM} m, upper wall on one side; they glow at any distance.
   float lp = fract( along / ${INTERIOR.lampPitchM.toFixed(1)} );
@@ -255,24 +258,36 @@ float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( ha
   // Warm pool of lamp light on the wall around each lamp.
   col += ${v3(P.lamp)} * 0.035 * exp( -ld * 0.6 ) * exp( -abs( ang - 2.05 ) * uRadius * 0.8 );
   if ( vIntUV.y < -0.5 ) col = vec3( 0.004 );
-  diffuseColor.rgb = col;
+  diffuseColor.rgb = clamp( col, 0.0, 1.0 );
 }`);
   };
-  mat.customProgramCacheKey = () => 'tube-interior-v1';
+  mat.customProgramCacheKey = () => 'tube-interior-v2';
   mat.userData.interiorUniforms = uniforms;
   return patchTrueProportionMaterial(mat, { mode: 'axis' });
 }
+
+/**
+ * The camera layer the lining draws on. While the walker is inside, the camera
+ * sees ONLY this layer: the capped lining encloses the camera, so nothing
+ * outside it could show anyway, and anything that crosses the bore (another
+ * line's frosted exterior tube at an interchange, a train, a sewer, a shaft)
+ * would otherwise hang inside it and break the interior's colour identity.
+ * Nothing else in the app uses camera layers.
+ */
+export const INTERIOR_LAYER = 7;
 
 /**
  * The interior controller main.js hands to Pedestrian mode.
  * @param {object} o
  * @param {THREE.Scene} o.scene
  * @param {(lineId: string) => number} o.lineColour   hex colour of a line
+ * @param {THREE.Camera | (() => THREE.Camera)} [o.camera]  the view camera; while the lining
+ *   is shown it sees only INTERIOR_LAYER, and its layers are restored exactly on hide
  * @param {() => Iterable<THREE.Object3D>} o.mapDevices  what to hide while inside: every crown
  *   ribbon, station marker and station shaft (devices drawn over the network
  *   from outside, which cross a bore and would otherwise hang inside it)
  */
-export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevices = () => [] } = {}) {
+export function createTubeInterior({ scene, camera = null, lineColour = () => 0xffffff, mapDevices = () => [] } = {}) {
   const material = createInteriorMaterial();
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
   mesh.name = 'tube-interior';
@@ -282,7 +297,10 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.matrixAutoUpdate = false;
+  mesh.layers.enable(INTERIOR_LAYER);
   scene?.add(mesh);
+  const cameraOf = () => (typeof camera === 'function' ? camera() : camera);
+  let isolated = null;             // { cam, mask } while the camera sees only the lining
 
   const hidden = new Map();        // map device -> its visibility before we hid it
   let built = null;                // { net, path, side, s, lineId, radius, points }
@@ -308,6 +326,19 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
     for (const [m, was] of hidden) m.visible = was;
     hidden.clear();
   }
+  // Foreign geometry in the bore: the camera draws the lining alone.
+  function isolateView() {
+    const cam = cameraOf();
+    if (!cam) return;
+    if (isolated && isolated.cam !== cam) restoreView();
+    if (!isolated) isolated = { cam, mask: cam.layers.mask };
+    cam.layers.set(INTERIOR_LAYER);
+  }
+  function restoreView() {
+    if (!isolated) return;
+    isolated.cam.layers.mask = isolated.mask;
+    isolated = null;
+  }
 
   function rebuild(net, pos, lineId) {
     const radius = Math.max(0.5, boreRadiusM(lineId) - INTERIOR.insetM);
@@ -331,8 +362,11 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
     /**
      * Show the lining around the walker. `pos` is the walker's tunnel state
      * ({ path, s, dir, side }) on `net`; rebuilt when they leave the window.
+     * `isolate` (default true): the camera is inside the lining, so it draws
+     * the lining alone. Pass false while the camera may still be outside it
+     * (the cross passage between the shaft foot and the bore).
      */
-    show(net, pos) {
+    show(net, pos, { isolate = true } = {}) {
       if (!net || !pos || !net.paths?.[pos.path]) { this.hide(); return false; }
       const lineId = net.paths[pos.path].lineId;
       const stale = !built || built.net !== net || built.path !== pos.path || built.side !== (pos.side || 0)
@@ -340,11 +374,13 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
       if (stale) rebuild(net, pos, lineId);
       mesh.visible = true;
       hideMapDevices();
+      if (isolate) isolateView(); else restoreView();
       return true;
     },
     hide() {
       mesh.visible = false;
       restoreMapDevices();
+      restoreView();
     },
     get visible() { return mesh.visible; },
     /** The line whose bore is shown, or null when hidden. */
@@ -353,7 +389,7 @@ export function createTubeInterior({ scene, lineColour = () => 0xffffff, mapDevi
       return {
         visible: mesh.visible, builds, lineId: built?.lineId ?? null, radius: built?.radius ?? null,
         path: built?.path ?? null, side: built?.side ?? null, points: built?.points.length ?? 0,
-        hiddenDevices: hidden.size, endAhead: built?.endAhead ?? null, endBehind: built?.endBehind ?? null,
+        hiddenDevices: hidden.size, isolated: !!isolated, endAhead: built?.endAhead ?? null, endBehind: built?.endBehind ?? null,
       };
     },
     /**
