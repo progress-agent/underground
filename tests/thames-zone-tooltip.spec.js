@@ -6,15 +6,14 @@
 //      is occlusion-fragile, lookup logic is what we actually want to test).
 //  (b) priority tier check - a Tideway shaft floating over the Thames
 //      beats the Thames in the picker (tier 1 vs tier 4).
-// Captures one screenshot of the Thames zone tooltip for the Wave 2 report.
+// Captures one screenshot of the Thames zone tooltip into test-results/.
 
 import { test, expect } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 
-const OUT_PNG = process.env.HOME + '/Wisdom/_REPORTS/25Apr26s/sources/delta-wave2/thames-tooltip-screenshot.png';
-
-test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats Thames', async ({ page }) => {
+// The capture is a test artefact: it lands in test-results/ (git-ignored) via testInfo.outputPath,
+// never in the Wisdom vault's _REPORTS tree.
+test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats Thames', async ({ page }, testInfo) => {
+  const OUT_PNG = testInfo.outputPath('thames-tooltip-screenshot.png');
   await page.goto('/?skipintro=1');
   // Wait for loading + thames mesh to mount
   await page.waitForFunction(
