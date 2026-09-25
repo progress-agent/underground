@@ -151,7 +151,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  function buildTraffic(){
   for(const route of representative){
    const sharedDirection=route.direction==='anticlockwise'?2:1,count=Math.ceil(route.length/vehicleSpacing/sharedDirection);
-   carriers.push({route,count,idOffset:nextVehicleId,lod:new Uint8Array(count)});
+   carriers.push({route,count,idOffset:nextVehicleId,lod:new Uint8Array(count),index:carriers.length}); // s25:F: index
    nextVehicleId+=count;
   }
   const wayLength=id=>roadPaths.get(id).length;
@@ -183,8 +183,8 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  buildTraffic();
  function pointAt(route,distance,out={}){const p=route.path,d=mod(distance,route.length);let lo=0,hi=p.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(p[m].distance<=d)lo=m;else hi=m;}const a=p[lo],b=p[hi],t=(d-a.distance)/(b.distance-a.distance||1);out.x=a.x+(b.x-a.x)*t;out.z=a.z+(b.z-a.z)*t;out.y=(a.baseY+(b.baseY-a.baseY)*t)+((a.deltaY+(b.deltaY-a.deltaY)*t)*scale);out.dx=b.x-a.x;out.dz=b.z-a.z;const l=Math.hypot(out.dx,out.dz)||1;out.dx/=l;out.dz/=l;out.dy=((b.baseY+b.deltaY*scale)-(a.baseY+a.deltaY*scale))/l;out.road=a.road;out.tunnel=a.tunnel;return out;}
  const scratch={};
- function vehicleAt(c,i,out={}) {
-  const L=c.layout,distance=vehicleChainage(L,i,elapsed),p=pointAt(c.route,distance,out),w=byId.get(p.road);
+ function vehicleAt(c,i,out={},t=elapsed) { // s25:F: t, so near vehicles can be posed at the current time
+  const L=c.layout,distance=vehicleChainage(L,i,t),p=pointAt(c.route,distance,out),w=byId.get(p.road);
   // Lane 0 is the inside (left) lane: offsets are negative to the left of travel.
   const lane=laneFor(L.type[i],L.lanePick[i],w.lanes),offset=(lane-(w.lanes-1)/2)*3.5*1.18;
   p.x-=p.dz*offset;p.z+=p.dx*offset;p.id=c.idOffset+i;p.routeId=c.route.id;p.distance=mod(distance,c.route.length);p.lane=lane;
@@ -197,6 +197,33 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   mesh.userData.vehicleIds[index]=id;
  }
  const nearCounts=new Int32Array(VEHICLE_TYPES.length*VEHICLE_COLOURS.length),farCounts=new Int32Array(VEHICLE_COLOURS.length);
+ // ── s25:F ── M25 judder (sprint 25Sep26f, D-039, Jordan's note 15). The whole
+ // fleet (LOD choice, culling, far silhouettes) is still recomputed every third
+ // frame, but the vehicles drawn as near meshes (> LOD_NEAR_PX on screen, the
+ // only ones big enough for a three-frame step to show) are re-posed EVERY
+ // frame at the current time, into the same instance slots. Far silhouettes
+ // are under ~3.5 px, where a three-frame step is under a pixel, so they stay
+ // on the cheap cadence. nearList holds (carrier, vehicle, mesh, slot) per near
+ // instance, written by the full pass.
+ const totalVehicles=carriers.reduce((n,c)=>n+c.count,0);
+ const nearCarrier=new Int32Array(totalVehicles),nearVehicle=new Int32Array(totalVehicles),nearMesh=new Int32Array(totalVehicles),nearSlot=new Int32Array(totalVehicles);
+ let nearN=0,nearTime=NaN;
+ const nearScratch={};
+ function writeNear(c,i,slot,index,t){
+  const p=vehicleAt(c,i,nearScratch,t),verticalScale=VE*scale;
+  trueHeadingBasis(heading.set(p.dx,p.dy,p.dz),verticalScale,basis);
+  writeMatrix(nearMeshes[slot],index,p.id,p.x,p.y+.88*verticalScale,p.z,sideVector.x,sideVector.y,sideVector.z,localUp.x,localUp.y,localUp.z,forward.x,forward.y,forward.z);
+ }
+ /** Between full passes: re-pose the near vehicles at the current time. */
+ function updateNear(){
+  if(!nearN||nearTime===elapsed)return;
+  const start=performance.now();
+  for(let n=0;n<nearN;n++)writeNear(carriers[nearCarrier[n]],nearVehicle[n],nearMesh[n],nearSlot[n],elapsed);
+  nearTime=elapsed;
+  nearMeshes.forEach(mesh=>{if(!mesh.count)return;if(uploadRanges){mesh.instanceMatrix.clearUpdateRanges();mesh.instanceMatrix.addUpdateRange(0,mesh.count*16);}mesh.instanceMatrix.needsUpdate=true;});
+  trafficStats.nearUpdates=nearN;trafficStats.nearPasses=(trafficStats.nearPasses||0)+1;trafficStats.nearMs=performance.now()-start;
+ }
+ // ── /s25:F ──
  // ── s24:R ── Frustum culling by route chunk (sprint 24Sep26h, D-038).
  // Off by default so the module keeps its whole-fleet partition contract; the
  // app switches it on. A vehicle outside the view frustum draws no pixels, so
@@ -270,7 +297,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   for(const {list} of chunksByRoute.values())for(const k of list)if(!k.visible&&chunkCanShow(k,fog,view,viewScale)){k.visible=true;grew=true;}
   if(!grew)return false;
   const now=elapsed;elapsed=lastElapsed;
-  try{writeFleet(lastCullProjection,true);}finally{elapsed=now;}
+  try{writeFleet(lastCullProjection,true,now);}finally{elapsed=now;} // s25:F: near vehicles at the current time
   trafficStats.revalidations=(trafficStats.revalidations||0)+1;
   return true;
  }
@@ -286,7 +313,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   // ── s24:R ── hidden layer: time advances, nothing is recomputed or uploaded
   if(skipHidden&&!force&&!shown()){lastProjectionKey=null;trafficStats.skippedHidden=(trafficStats.skippedHidden||0)+1;return;}
   // ── /s24:R ──
-  frame++;trafficStats.frame=frame;if(!force&&frame%3)return; // s24:R: frame exposed for cadence tests
+  frame++;trafficStats.frame=frame;if(!force&&frame%3){updateNear();return;} // s24:R: frame exposed for cadence tests; s25:F: near every frame
   const height=typeof viewportHeightPx==='function'?viewportHeightPx():viewportHeightPx;
   // ── s24:R ── a still camera on a paused clock returns before the projection
   // (and its 33-number key string) is built: no allocation when nothing moved.
@@ -304,8 +331,9 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   writeFleet(projection,culling);
   trafficStats.updateMs=performance.now()-start;
  }
- function writeFleet(projection,culling){
+ function writeFleet(projection,culling,nearAt=elapsed){
   // ── /s24:R ──
+  nearN=0;nearTime=nearAt; // s25:F
   trafficStats.near=0;trafficStats.far=0;trafficStats.triangles=0;trafficStats.drawCalls=0;
   // LOD radius stays the car's, so the switch is identical for every identity.
   const radius=Math.hypot(1.05,1.125*VE*scale,2.2),verticalScale=VE*scale;
@@ -338,9 +366,14 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
      // unscale vertically in world axes after that rotation, so a car on a
      // grade is its real shape pitched to the grade, never a leaning, stretched
      // parallelogram (true-proportion.js trueHeadingBasis).
-     trueHeadingBasis(heading.set(p.dx,p.dy,p.dz),verticalScale,basis);
      const slot=type*VEHICLE_COLOURS.length+colour,mesh=nearMeshes[slot];
-     writeMatrix(mesh,nearCounts[slot]++,p.id,p.x,p.y+.88*verticalScale,p.z,sideVector.x,sideVector.y,sideVector.z,localUp.x,localUp.y,localUp.z,forward.x,forward.y,forward.z);
+     // ── s25:F ── remembered for the per-frame near pass; posed at nearAt
+     const index=nearCounts[slot]++;
+     nearCarrier[nearN]=c.index;nearVehicle[nearN]=i;nearMesh[nearN]=slot;nearSlot[nearN]=index;nearN++;
+     if(nearAt!==elapsed){writeNear(c,i,slot,index,nearAt);continue;}
+     // ── /s25:F ──
+     trueHeadingBasis(heading.set(p.dx,p.dy,p.dz),verticalScale,basis);
+     writeMatrix(mesh,index,p.id,p.x,p.y+.88*verticalScale,p.z,sideVector.x,sideVector.y,sideVector.z,localUp.x,localUp.y,localUp.z,forward.x,forward.y,forward.z);
      // ── /s25:S ──
     }
    }

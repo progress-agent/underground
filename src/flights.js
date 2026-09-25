@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import airportData from './airport-data.json' with { type: 'json' };
 import motorwayData from './m25-motorway-data.json' with { type: 'json' };
-import { aircraftParts, AIRCRAFT_PALETTE, AIRCRAFT_REFERENCE_LENGTH_M } from './aircraft-model.js';
+import { aircraftParts, AIRCRAFT_PALETTE, AIRCRAFT_REFERENCE_LENGTH_M, AIRCRAFT_LIVERIES, AIRCRAFT_LIVERY_IDS } from './aircraft-model.js';
 
 // flights.js: living air traffic (sprint 23Sep26w, D-037, lane F).
 //
@@ -35,6 +35,7 @@ export const FINAL_APPROACH_M = 18000;
 export const AIM_POINT_M = 300;          // glide path origin beyond the threshold
 export const EDGE_INSET_M = 250;         // aircraft vanish this far inside the motorway ring
 export const HEADING_TAILWIND_LIMIT_MPS = 2.5; // preferred-direction tolerance (about 5 kt)
+export const CIRCUIT_RUNWAY_MARGIN_MPS = 2;     // s25:F: circuit runway ends this close in headwind are equal
 const GROUND_LIFT = 1.5;                 // canonical lift, matching parked aircraft
 const G = 9.81;
 
@@ -78,7 +79,13 @@ export const AIRCRAFT_TYPES = Object.freeze({
   bizjet:   { length: 23, label: 'Business jet' },
   light:    { length: 10, label: 'Light aircraft' },
   glider:   { length: 8,  label: 'Glider', glider: true },
+  // s25:F (sprint 25Sep26f, D-039): ATR 72 class and A380 class, real lengths.
+  turboprop:  { length: 27, label: 'Turboprop airliner', variant: 'turboprop' },
+  superjumbo: { length: 73, label: 'Double-deck wide-body airliner', variant: 'superjumbo' },
 });
+/** Flying liveries (s25:F): chosen per flight by the same (stream, k) hash as
+ * everything else, drawn as separate meshes per type and livery. */
+export const FLIGHT_LIVERIES = AIRCRAFT_LIVERY_IDS;
 
 // ── Holding stacks (representative placement near the published beacons) ──
 // Scene coordinates from WGS84 via the Trafalgar BNG origin (coordinates.js):
@@ -95,21 +102,41 @@ export const HOLDING_STACKS = Object.freeze({
 // ── Traffic streams: a fixed midday pattern ────────────────────────────────
 // period = mean seconds between movements. Heathrow runs segregated mode
 // (one runway landing, the other departing), London City a steady regional
-// flow, the small airfields an occasional circuit.
+// flow (s25:F: a departure about every 2 minutes, Jordan 25Sep26f, and the
+// arrivals to match), the small airfields a steady circuit.
+//
+// ── s25:F ── Circuits (sprint 25Sep26f, D-039): each small airfield keeps a
+// steady circuit of `aircraft` (2 or 3) flying touch-and-go laps. A lap is a
+// closed loop from the touchdown point back to it, and its duration D does not
+// depend on the runway (every leg is a fixed distance from the threshold), so
+// the stream's period is exactly D / aircraft: lap k ends at the instant lap
+// k + aircraft begins, at the same point and speed. Type and livery are hashed
+// from the slot (k mod aircraft), so one aircraft keeps its look lap after lap.
 export const STREAMS = Object.freeze([
-  { id: 'heathrow-arrivals', airport: 'heathrow', kind: 'arrival', period: 90, jitter: 12, fleet: [['heavy', .3], ['narrow', .7]], stacks: ['BNN', 'LAM', 'BIG', 'OCK'] },
-  { id: 'heathrow-departures', airport: 'heathrow', kind: 'departure', period: 90, offset: 45, jitter: 12, fleet: [['heavy', .3], ['narrow', .7]], fan: [-100, -50, 45, 95, 160] },
-  { id: 'london-city-arrivals', airport: 'london-city', kind: 'arrival', period: 300, offset: 40, jitter: 40, fleet: [['regional', 1]], stacks: ['LAM', 'BIG'] },
-  { id: 'london-city-departures', airport: 'london-city', kind: 'departure', period: 300, offset: 190, jitter: 40, fleet: [['regional', 1]], fan: [-60, 40, 150] },
-  { id: 'northolt-arrivals', airport: 'northolt', kind: 'arrival', period: 1500, offset: 600, jitter: 200, fleet: [['bizjet', 1]], stacks: ['BNN', 'OCK'] },
-  { id: 'northolt-departures', airport: 'northolt', kind: 'departure', period: 1500, offset: 1300, jitter: 200, fleet: [['bizjet', 1]], fan: [-70, 60] },
-  { id: 'biggin-hill-circuits', airport: 'biggin-hill', kind: 'circuit', period: 480, offset: 60, jitter: 90, fleet: [['light', 1]] },
-  { id: 'elstree-circuits', airport: 'elstree', kind: 'circuit', period: 540, offset: 200, jitter: 100, fleet: [['light', 1]] },
-  { id: 'denham-circuits', airport: 'denham', kind: 'circuit', period: 600, offset: 330, jitter: 110, fleet: [['light', 1]] },
-  { id: 'stapleford-circuits', airport: 'stapleford', kind: 'circuit', period: 660, offset: 20, jitter: 120, fleet: [['light', 1]] },
-  { id: 'damyns-hall-circuits', airport: 'damyns-hall', kind: 'circuit', period: 780, offset: 410, jitter: 130, fleet: [['light', 1]] },
-  { id: 'kenley-circuits', airport: 'kenley', kind: 'circuit', period: 720, offset: 500, jitter: 120, fleet: [['glider', 1]] },
+  { id: 'heathrow-arrivals', airport: 'heathrow', kind: 'arrival', period: 90, jitter: 12, fleet: [['superjumbo', .1], ['heavy', .22], ['narrow', .68]], stacks: ['BNN', 'LAM', 'BIG', 'OCK'] },
+  { id: 'heathrow-departures', airport: 'heathrow', kind: 'departure', period: 90, offset: 45, jitter: 12, fleet: [['superjumbo', .1], ['heavy', .22], ['narrow', .68]], fan: [-100, -50, 45, 95, 160] },
+  { id: 'london-city-arrivals', airport: 'london-city', kind: 'arrival', period: 120, offset: 40, jitter: 15, fleet: [['turboprop', .35], ['regional', .65]], stacks: ['LAM', 'BIG'] },
+  { id: 'london-city-departures', airport: 'london-city', kind: 'departure', period: 120, offset: 105, jitter: 15, fleet: [['turboprop', .35], ['regional', .65]], fan: [-60, 40, 150] },
+  { id: 'northolt-arrivals', airport: 'northolt', kind: 'arrival', period: 1500, offset: 600, jitter: 200, fleet: [['turboprop', .5], ['bizjet', .5]], stacks: ['BNN', 'OCK'] },
+  { id: 'northolt-departures', airport: 'northolt', kind: 'departure', period: 1500, offset: 1300, jitter: 200, fleet: [['turboprop', .5], ['bizjet', .5]], fan: [-70, 60] },
+  { id: 'northolt-circuits', airport: 'northolt', kind: 'circuit', aircraft: 3, pattern: 'fast', offset: 90, fleet: [['turboprop', .6], ['bizjet', .4]] },
+  { id: 'biggin-hill-circuits', airport: 'biggin-hill', kind: 'circuit', aircraft: 3, pattern: 'light', offset: 60, fleet: [['light', 1]] },
+  { id: 'elstree-circuits', airport: 'elstree', kind: 'circuit', aircraft: 3, pattern: 'light', offset: 200, fleet: [['light', 1]] },
+  { id: 'denham-circuits', airport: 'denham', kind: 'circuit', aircraft: 3, pattern: 'compact', offset: 330, fleet: [['light', 1]] },
+  { id: 'stapleford-circuits', airport: 'stapleford', kind: 'circuit', aircraft: 3, pattern: 'compact', offset: 20, fleet: [['light', 1]] },
+  { id: 'damyns-hall-circuits', airport: 'damyns-hall', kind: 'circuit', aircraft: 2, pattern: 'compact', offset: 410, fleet: [['light', 1]] },
+  { id: 'kenley-circuits', airport: 'kenley', kind: 'circuit', aircraft: 2, pattern: 'glider', offset: 500, fleet: [['glider', 1]] },
 ]);
+/** Circuit shapes (real metres, m/s): height, pattern speed, downwind offset,
+ * upwind leg past the lift-off point, touch-and-go roll, base-turn distance. */
+export const CIRCUIT_PATTERNS = Object.freeze({
+  light:  Object.freeze({ H: 300, v: 45, wide: 1300, up: 1300, roll: 250, baseD: 2400, downwindEnd: 900 }),
+  glider: Object.freeze({ H: 250, v: 28, wide: 900,  up: 1000, roll: 180, baseD: 1800, downwindEnd: 700 }),
+  fast:   Object.freeze({ H: 450, v: 72, wide: 2600, up: 2600, roll: 650, baseD: 5200, downwindEnd: 2000 }),
+  // A tight light-aircraft circuit for a field close to the map edge.
+  compact: Object.freeze({ H: 250, v: 42, wide: 900, up: 700, roll: 220, baseD: 1600, downwindEnd: 500 }),
+});
+// ── /s25:F ──
 
 // Heathrow: preferred westerly operations (the procession along the Thames),
 // switching to easterly only beyond a small tailwind. Segregated runways.
@@ -355,23 +382,30 @@ function departureNodes({ end, elev, fanDeg, fast }) {
   return { nodes, exitBearing };
 }
 
-function circuitNodes({ end, elev, glider }) {
-  const [ux, uz] = end.dir, t = end.threshold, left = [uz, -ux];
-  const H = glider ? 250 : 300, v = glider ? 28 : 45, wide = glider ? 900 : 1300;
+// ── s25:F ── A closed touch-and-go lap: touchdown point -> roll -> lift-off ->
+// upwind -> crosswind -> downwind -> base -> final -> the same touchdown point.
+// Every leg is a fixed distance from the threshold, so the lap's duration is
+// the same on every runway end. side +1 / -1 picks which side the pattern lies.
+function circuitNodes({ end, elev, pattern = 'light', side = 1 }) {
+  const P = CIRCUIT_PATTERNS[pattern] || CIRCUIT_PATTERNS.light;
+  const [ux, uz] = end.dir, t = end.threshold, left = [uz * side, -ux * side];
   const at = (along, lateral) => [t[0] + ux * along + left[0] * lateral, t[1] + uz * along + left[1] * lateral];
-  const rollLen = Math.min(glider ? 200 : 350, end.length * .6), up = Math.max(end.length, 500) + 900;
-  const nodes = [{ x: t[0], z: t[1], v: 2, ground: true }];
-  const lift = at(rollLen, 0); nodes.push({ x: lift[0], z: lift[1], v: v * .8, ground: true, liftoff: true });
-  const p1 = at(up, 0); nodes.push({ x: p1[0], z: p1[1], alt: elev + H * .7, v });
-  const p2 = at(up + 300, wide); nodes.push({ x: p2[0], z: p2[1], alt: elev + H, v });
-  const p3 = at(-900, wide); nodes.push({ x: p3[0], z: p3[1], alt: elev + H, v });
-  const baseD = 2400, p4 = at(-baseD + 300, wide * .6); nodes.push({ x: p4[0], z: p4[1], alt: glidePathAltitude(elev, baseD + 200), v: v * .95 });
-  const p5 = at(-baseD, 0); nodes.push({ x: p5[0], z: p5[1], alt: glidePathAltitude(elev, baseD + AIM_POINT_M * .5), v: v * .9, final: true });
-  for (let d = baseD - 400; d >= 0; d -= 400) { const p = at(AIM_POINT_M * .5 - d, 0); nodes.push({ x: p[0], z: p[1], alt: glidePathAltitude(elev, d), v: v * .85 }); }
-  nodes.at(-1).ground = true; nodes.at(-1).touchdown = true;
-  const stop = at(AIM_POINT_M * .5 + Math.min(300, end.length * .5), 0); nodes.push({ x: stop[0], z: stop[1], v: 6, ground: true });
+  const td = AIM_POINT_M * .5, vTouch = P.v * .85;
+  const t0 = at(td, 0);
+  const nodes = [{ x: t0[0], z: t0[1], v: vTouch, ground: true, touchdown: true }];
+  const lift = at(td + P.roll, 0); nodes.push({ x: lift[0], z: lift[1], v: P.v * .9, ground: true, liftoff: true });
+  const up = td + P.roll + P.up;
+  const p1 = at(up, 0); nodes.push({ x: p1[0], z: p1[1], alt: elev + P.H * .7, v: P.v });
+  const p2 = at(up + 300, P.wide); nodes.push({ x: p2[0], z: p2[1], alt: elev + P.H, v: P.v });
+  const p3 = at(-P.downwindEnd, P.wide); nodes.push({ x: p3[0], z: p3[1], alt: elev + P.H, v: P.v });
+  const p4 = at(-P.baseD + 300, P.wide * .6); nodes.push({ x: p4[0], z: p4[1], alt: glidePathAltitude(elev, P.baseD + 200), v: P.v * .95 });
+  const p5 = at(-P.baseD, 0); nodes.push({ x: p5[0], z: p5[1], alt: glidePathAltitude(elev, P.baseD + td), v: P.v * .9, final: true });
+  const step = P.baseD / Math.round(P.baseD / 400);
+  for (let d = P.baseD - step; d > 1e-6; d -= step) { const p = at(td - d, 0); nodes.push({ x: p[0], z: p[1], alt: glidePathAltitude(elev, d), v: P.v * .85 }); }
+  nodes.push({ x: t0[0], z: t0[1], v: vTouch, ground: true, touchdown: true });
   return { nodes };
 }
+// ── /s25:F ──
 
 // ── Traffic planner (pure; no rendering) ────────────────────────────────────
 /** Build the deterministic traffic model. getSurfaceY({x,z}) returns canonical
@@ -381,7 +415,7 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
   const sample = (x, z) => { const y = getSurfaceY({ x, z }); return Number.isFinite(y) ? y : 0; };
   const edge = createEdge(boundary, inset);
   const sites = new Map(airports.map(a => [a.id, a]));
-  const live = streams.filter(s => sites.has(s.airport)).map(s => ({ ...s, seed: strHash(s.id), site: sites.get(s.airport), offset: s.offset || 0 }));
+  const live = streams.filter(s => sites.has(s.airport)).map(s => ({ ...s, seed: strHash(s.id), site: sites.get(s.airport), offset: s.offset || 0, jitter: s.jitter || 0 }));
   const pathCache = new Map();
   const choiceCache = new Map();
   let cacheWindVersion = windVersion;
@@ -414,8 +448,12 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
       trimAfterExit(built);
       built.anchorT = 0; built.elevation = elev;
     } else {
-      const r = circuitNodes({ end, elev, glider: variant.model === 'glider' });
-      built = buildPath(r.nodes, { sample, VE, edge, step: 300, groundStep: 25 });
+      // s25:F: the side of the runway the lap lies on is the one that keeps
+      // more of it inside the visible map (a real airfield publishes its
+      // circuit direction; this keeps a steady circuit visible near the edge).
+      const lap = s => buildPath(circuitNodes({ end, elev, pattern: stream.pattern, side: s }).nodes, { sample, VE, edge, step: 300, groundStep: 25 });
+      const a = lap(1), b = lap(-1), inside = p => p.samples.reduce((n, x) => n + (x.inside ? 1 : 0), 0);
+      built = inside(b) > inside(a) ? b : a;
       built.anchorT = 0; built.elevation = elev;
     }
     built.end = end;
@@ -431,6 +469,50 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
     if (lastInside >= 0 && cut < s.length - 1) { path.samples = s.slice(0, cut + 1); path.duration = path.samples.at(-1).t; path.length = path.samples.at(-1).s; }
   }
 
+  const MAX_BEFORE = { arrival: 2400, departure: 0, circuit: 0 };
+  const MAX_AFTER = { arrival: 150, departure: 1200, circuit: 600 };
+  // ── s25:F ── A circuit flies into wind: any runway end with no tailwind
+  // qualifies, and of those the one whose lap stays most inside the visible
+  // map is used (then the most headwind, as chooseRunways). Fields close to
+  // the edge (Denham, Stapleford) keep three aircraft, so at most one is ever
+  // beyond the edge at once and two or three are always in view.
+  const lapInside = new Map();
+  function circuitRunway(stream, wind) {
+    const ends = runwayEnds(stream.site);
+    let into = ends.filter(e => headwind(wind, e.bearing) >= 0);
+    if (!into.length) into = ends;
+    const inside = e => {
+      const key = `${stream.id}|${e.designator}`;
+      let f = lapInside.get(key);
+      if (f === undefined) { const p = pathFor(stream, { key: e.designator, end: e }); f = Math.round(100 * p.samples.filter(x => x.inside).length / p.samples.length); lapInside.set(key, f); }
+      return f;
+    };
+    const paved = e => (/grass/i.test(e.surface) ? 0 : 1), score = e => headwind(wind, e.bearing) + paved(e) * .5;
+    const most = Math.max(...into.map(inside)), inView = into.filter(e => inside(e) === most);
+    const top = Math.max(...inView.map(score));
+    // Ends within CIRCUIT_RUNWAY_MARGIN_MPS of the best count as equal, and the
+    // one best into the prevailing wind (DEFAULT_WIND) decides, so a gently
+    // veering wind never swaps the circuit (a swap moves every aircraft to
+    // another runway at its next lap); a real shift of the wind still does.
+    const prevailing = e => headwind(DEFAULT_WIND, e.bearing) + paved(e) * .5;
+    const best = inView.filter(e => score(e) >= top - CIRCUIT_RUNWAY_MARGIN_MPS)
+      .sort((a, b) => prevailing(b) - prevailing(a) || a.designator.localeCompare(b.designator))[0];
+    return { land: best, depart: best, group: best.number };
+  }
+  // ── s25:F ── circuit loops: period = lap duration / aircraft, no jitter.
+  for (const stream of live) {
+    if (stream.kind !== 'circuit') continue;
+    stream.loop = true; stream.aircraft = Math.max(1, stream.aircraft | 0 || 1); stream.jitter = 0;
+    const end = runwayEnds(stream.site)[0];
+    stream.lapSeconds = pathFor(stream, { key: `${end.designator}`, end }).duration;
+    stream.period = stream.lapSeconds / stream.aircraft;
+  }
+  for (const stream of live) {
+    stream.before = MAX_BEFORE[stream.kind] + stream.jitter;
+    stream.after = stream.loop ? stream.lapSeconds + stream.period : MAX_AFTER[stream.kind] + stream.jitter;
+  }
+  // ── /s25:F ──
+
   function flightVariant(stream, k) {
     if (cacheWindVersion !== windVersion) { choiceCache.clear(); cacheWindVersion = windVersion; }
     const u = i => hash01(stream.seed, k, i);
@@ -438,12 +520,15 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
     const ck = `${stream.id}|${k}`;
     let runways = choiceCache.get(ck);
     if (!runways) {
-      runways = chooseRunways(stream.site, getFlightWind(anchor));
+      runways = stream.loop ? circuitRunway(stream, getFlightWind(anchor)) : chooseRunways(stream.site, getFlightWind(anchor));
       if (choiceCache.size > 4000) choiceCache.clear();
       choiceCache.set(ck, runways);
     }
-    const model = pickWeighted(stream.fleet, u(2));
-    const v = { k, anchor, model, id: `${stream.id}-${k}` };
+    // s25:F: a circuit aircraft keeps its type and livery lap after lap.
+    const slot = stream.loop ? ((k % stream.aircraft) + stream.aircraft) % stream.aircraft : k;
+    const model = pickWeighted(stream.fleet, hash01(stream.seed, slot, 2));
+    const livery = FLIGHT_LIVERIES[Math.min(FLIGHT_LIVERIES.length - 1, Math.floor(hash01(stream.seed, slot, 6) * FLIGHT_LIVERIES.length))];
+    const v = { k, anchor, model, livery, meshKey: `${model}:${livery}`, slot, id: `${stream.id}-${k}` };
     if (stream.kind === 'arrival') {
       v.end = runways.land; v.stack = stream.stacks[Math.floor(u(3) * stream.stacks.length)];
       v.laps = Math.floor(u(4) * 3); v.level = Math.floor(u(5) * 4); v.holdAlt = 2130 + v.level * 305;
@@ -452,14 +537,18 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
       v.end = runways.depart; v.fan = stream.fan[Math.floor(u(3) * stream.fan.length)];
       v.key = `${v.end.designator}|${v.fan}`;
     } else {
-      v.end = runways.land; v.key = `${v.end.designator}|${model}`;
+      v.end = runways.land; v.key = `${v.end.designator}`;
     }
     return v;
   }
 
-  const MAX_BEFORE = { arrival: 2400, departure: 0, circuit: 0 };
-  const MAX_AFTER = { arrival: 150, departure: 1200, circuit: 600 };
   const tmp = {}, tmpA = {}, tmpB = {};
+  // s25:F: time into lap k, held inside [0, duration) (the k window already
+  // picks exactly the laps in progress; this only absorbs rounding).
+  function loopTau(stream, v, path, t) {
+    const tau = t - v.anchor;
+    return tau < 0 ? 0 : tau >= path.duration ? Math.max(0, path.duration - 1e-6) : tau;
+  }
 
   function stateAt(path, tau, out) {
     lerpSample(path.samples, 't', tau, out);
@@ -482,13 +571,16 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
   function flightsAt(t, { includeHidden = false } = {}) {
     const list = [];
     for (const stream of live) {
-      const before = MAX_BEFORE[stream.kind] + stream.jitter, after = MAX_AFTER[stream.kind] + stream.jitter;
-      const k0 = Math.floor((t - after - stream.offset) / stream.period) - 1;
-      const k1 = Math.ceil((t + before - stream.offset) / stream.period) + 1;
+      const before = stream.before, after = stream.after; // s25:F
+      // s25:F: a loop has exactly `aircraft` laps in progress: the latest
+      // started (q) and the ones before it, whatever the rounding at a handoff.
+      const q = stream.loop ? Math.floor((t - stream.offset) / stream.period) : 0;
+      const k0 = stream.loop ? q - stream.aircraft + 1 : Math.floor((t - after - stream.offset) / stream.period) - 1;
+      const k1 = stream.loop ? q : Math.ceil((t + before - stream.offset) / stream.period) + 1;
       for (let k = k0; k <= k1; k++) {
         const v = flightVariant(stream, k);
         const path = pathFor(stream, v);
-        const tau = t - v.anchor + path.anchorT;
+        const tau = stream.loop ? loopTau(stream, v, path, t) : t - v.anchor + path.anchorT;
         if (tau < 0 || tau > path.duration) continue;
         const st = stateAt(path, tau, {});
         if (!st.inside && !includeHidden) continue;
@@ -501,7 +593,7 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
   function writeFlight(rec, stream, v, path, tau, st) {
     const type = AIRCRAFT_TYPES[v.model];
     rec.id = v.id; rec.stream = stream.id; rec.kind = stream.kind; rec.airport = stream.site.id; rec.airportName = stream.site.name;
-    rec.model = v.model; rec.typeLabel = type.label; rec.length = type.length; rec.runway = v.end.designator; rec.stack = v.stack || null;
+    rec.model = v.model; rec.livery = v.livery; rec.meshKey = v.meshKey; rec.slot = v.slot; rec.typeLabel = type.label; rec.length = type.length; rec.runway = v.end.designator; rec.stack = v.stack || null;
     rec.anchor = v.anchor; rec.tau = tau; rec.x = st.x; rec.y = st.y; rec.z = st.z; rec.altM = st.alt; rec.speedMps = st.v; rec.heading = st.heading;
     rec.pitch = st.pitch; rec.bank = st.bank; rec.onGround = st.ground; rec.visible = st.inside;
     rec.onFinal = stream.kind === 'arrival' && st.s >= path.fafS && st.s <= path.aimS;
@@ -533,12 +625,15 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
   function flightsInto(t, out) {
     let n = 0;
     for (const stream of live) {
-      const before = MAX_BEFORE[stream.kind] + stream.jitter, after = MAX_AFTER[stream.kind] + stream.jitter;
-      const k0 = Math.floor((t - after - stream.offset) / stream.period) - 1;
-      const k1 = Math.ceil((t + before - stream.offset) / stream.period) + 1;
+      const before = stream.before, after = stream.after; // s25:F
+      // s25:F: a loop has exactly `aircraft` laps in progress: the latest
+      // started (q) and the ones before it, whatever the rounding at a handoff.
+      const q = stream.loop ? Math.floor((t - stream.offset) / stream.period) : 0;
+      const k0 = stream.loop ? q - stream.aircraft + 1 : Math.floor((t - after - stream.offset) / stream.period) - 1;
+      const k1 = stream.loop ? q : Math.ceil((t + before - stream.offset) / stream.period) + 1;
       for (let k = k0; k <= k1; k++) {
         const v = cachedVariant(stream, k), path = v.path;
-        const tau = t - v.anchor + path.anchorT;
+        const tau = stream.loop ? loopTau(stream, v, path, t) : t - v.anchor + path.anchorT;
         if (tau < 0 || tau > path.duration) continue;
         const st = stateAt(path, tau, stScratch);
         if (!st.inside) continue;
@@ -564,13 +659,14 @@ export function formatFlightLabel(f) {
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
-function buildTypeGeometry(model) {
+function buildTypeGeometry(model, livery = null) {
   const type = AIRCRAFT_TYPES[model], scale = type.length / AIRCRAFT_REFERENCE_LENGTH_M, color = new THREE.Color();
-  const parts = aircraftParts(type.length, { glider: !!type.glider }).map(([g, mat]) => {
+  const colours = { ...AIRCRAFT_PALETTE, ...(livery ? AIRCRAFT_LIVERIES[livery] : {}) }; // s25:F
+  const parts = aircraftParts(type.length, { glider: !!type.glider, variant: type.variant || null }).map(([g, mat]) => {
     let geo = g.index ? g.toNonIndexed() : g; if (geo !== g) g.dispose();
     geo.deleteAttribute('uv'); if (!geo.attributes.normal) geo.computeVertexNormals();
     geo.scale(scale, scale, scale);
-    color.setHex(AIRCRAFT_PALETTE[mat]);
+    color.setHex(colours[mat]);
     const n = geo.attributes.position.count, c = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { c[i * 3] = color.r; c[i * 3 + 1] = color.g; c[i * 3 + 2] = color.b; }
     geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
@@ -582,8 +678,9 @@ function buildTypeGeometry(model) {
 }
 
 /** Scene group of flying aircraft. update(dt, camera) advances elapsed time;
- * setElapsed(t) pins it for tests. One InstancedMesh per aircraft type with
- * baked vertex colour (never instanceColor, D-015). */
+ * setElapsed(t) pins it for tests. One InstancedMesh per aircraft type AND
+ * livery (s25:F), keyed "type:livery", with baked vertex colour (never
+ * instanceColor, D-015). An empty mesh is hidden, so it costs no draw call. */
 // Far aircraft are held at a minimum on-screen length so they read as specks in
 // the sky rather than vanishing below a pixel (true scale is kept whenever the
 // aircraft is larger than this). 0 disables the floor.
@@ -594,13 +691,16 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
   const root = new THREE.Group(); root.name = 'flights';
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .78, metalness: .05, fog: true });
   const meshes = {};
-  for (const model of Object.keys(AIRCRAFT_TYPES)) {
-    const mesh = new THREE.InstancedMesh(buildTypeGeometry(model), material, capacity);
-    mesh.name = `flights-${model}`; mesh.count = 0; mesh.frustumCulled = false;
+  // ── s25:F ── separate meshes per type and livery (never per-instance colour)
+  for (const model of Object.keys(AIRCRAFT_TYPES)) for (const livery of FLIGHT_LIVERIES) {
+    const key = `${model}:${livery}`;
+    const mesh = new THREE.InstancedMesh(buildTypeGeometry(model, livery), material, capacity);
+    mesh.name = `flights-${model}-${livery}`; mesh.count = 0; mesh.frustumCulled = false; mesh.visible = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    mesh.userData = { type: 'flight', model };
-    meshes[model] = mesh; root.add(mesh);
+    mesh.userData = { type: 'flight', model, livery };
+    meshes[key] = mesh; root.add(mesh);
   }
+  // ── /s25:F ──
   let elapsed = 0, current = [], lastCamera = null, floorPx = minPixels;
   // ── s24:R ── economies, switched on by the app (sprint 24Sep26h, D-038)
   // pool: allocation-free list (flightsInto); cull: aircraft whose bounding
@@ -610,11 +710,11 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
   const pool = [], counts = {}, frustum = new THREE.Frustum(), viewProj = new THREE.Matrix4(), cullSphere = new THREE.Sphere();
   let poolCount = 0, listIsPool = false;
   const bounds = {};
-  for (const model of Object.keys(AIRCRAFT_TYPES)) bounds[model] = null;
+  for (const key of Object.keys(meshes)) bounds[key] = null;
   const shown = () => { for (let o = root; o; o = o.parent) if (o.visible === false) return false; return true; };
   // ── /s24:R ──
   const q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), m = new THREE.Matrix4();
-  const stats = { flights: 0, visible: 0, drawCalls: Object.keys(meshes).length };
+  const stats = { flights: 0, visible: 0, drawCalls: 0, meshes: Object.keys(meshes).length };
 
   const viewPos = new THREE.Vector3();
   function focalPx(camera) {
@@ -632,13 +732,15 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
     if (culling) frustum.setFromProjectionMatrix(viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     let culled = 0;
     // ── /s24:R ──
+    // s25:F: one world-vertical factor for every aircraft at every distance.
+    // getHeightScale() is the app's structure factor (1 / Master since D-039),
+    // so VE x it cancels the camera's Master / VE: true proportions on screen.
     const k = VE * Math.max(.05, Number(getHeightScale()) || 1);
     const focal = floorPx > 0 && camera?.matrixWorldInverse ? focalPx(camera) : 0;
-    const masterRatio = camera?.userData?.masterHeightController?.ratio ?? 1;
     for (const key in meshes) counts[key] = 0; // s24:R: counts is reused, not rebuilt
     for (let fi = 0; fi < n; fi++) {
       const f = current[fi]; // s24:R: indexed, so the pool's spare records are never read
-      const mesh = meshes[f.model], i = counts[f.model];
+      const mesh = meshes[f.meshKey], i = counts[f.meshKey];
       if (i >= capacity) continue;
       // Model nose is -z: yaw so -z points along the heading; bank right = right wing down.
       e.set(f.pitch, Math.atan2(-Math.sin(f.heading), Math.cos(f.heading)), -f.bank);
@@ -651,25 +753,27 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
       f.displayScale = grow;
       const el = m.elements;
       for (let c = 0; c < 12; c++) el[c] *= grow;
-      // World-vertical structure stretch. A far speck keeps true proportions on
-      // screen (undoing Master's flattening) so it reads as an aircraft, not a hair.
-      const kv = grow > 1 && masterRatio > 0 ? Math.max(k, 1 / masterRatio) : k;
+      // ── s25:F ── The speck floor (grow) is uniform, and the world-vertical
+      // factor k is the same near and far: no aircraft is ever stretched
+      // (the old far-speck branch stood specks up by 1 / Master ratio).
       // ── s24:R ── off-screen aircraft: no instance. The sphere is the type's
-      // own geometry bound, grown by the speck floor and the vertical stretch.
+      // own geometry bound, grown by the speck floor and the vertical factor.
       if (culling) {
-        const b = bounds[f.model] || (bounds[f.model] = mesh.geometry.boundingSphere);
+        const b = bounds[f.meshKey] || (bounds[f.meshKey] = mesh.geometry.boundingSphere);
         cullSphere.center.set(f.x, f.y, f.z);
-        cullSphere.radius = (b.center.length() + b.radius) * grow * Math.max(1, kv) + 1;
+        cullSphere.radius = (b.center.length() + b.radius) * grow * Math.max(1, k) + 1;
         if (!frustum.intersectsSphere(cullSphere)) { culled++; continue; }
       }
       // ── /s24:R ──
-      el[1] *= kv; el[5] *= kv; el[9] *= kv;
+      el[1] *= k; el[5] *= k; el[9] *= k;
       el[12] = f.x; el[13] = f.y; el[14] = f.z;
-      mesh.setMatrixAt(i, m); counts[f.model] = i + 1;
+      mesh.setMatrixAt(i, m); counts[f.meshKey] = i + 1;
     }
+    let draws = 0;
     for (const key in meshes) {
       const mesh = meshes[key], was = mesh.count;
       mesh.count = counts[key];
+      mesh.visible = mesh.count > 0; if (mesh.visible) draws++; // s25:F
       // ── s24:R ── upload only the live range; an empty mesh that was already
       // empty has nothing to upload (sprint 24Sep26h, D-038).
       if (economies.ranges) {
@@ -680,6 +784,7 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
       // ── /s24:R ──
       mesh.instanceMatrix.needsUpdate = true;
     }
+    stats.drawCalls = draws; // s25:F
     stats.flights = n; stats.visible = n; stats.culled = culled; stats.renders = (stats.renders || 0) + 1; // s24:R: n, not current.length
   }
 
