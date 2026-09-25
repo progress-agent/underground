@@ -14,10 +14,14 @@
 //  - Per-individual variation comes from a string hash, never Math.random.
 //  - No per-instance colour. Tones are baked vertex colour (countershading);
 //    repeated animals share one InstancedMesh with instanceMatrix only.
-//  - Height contract: geometry is authored in real metres and placed under a
-//    parent scaled (1, VE, 1), which is exactly canonical VE5 geometry. The
-//    Master slider still scales the scene through the camera; nothing here
-//    rescales a layer.
+//  - Height contract (D-039, sprint 25Sep26f): creatures are structures and
+//    keep TRUE proportions whatever Master is. Geometry is authored in real
+//    metres under a parent scaled (1, sy, 1) with sy = base / Master (the
+//    camera's master-height controller), which the Master display transform
+//    (y * Master / base) turns back into exactly 1:1. Only the landscape (the
+//    water column and bed) stretches; placement still fits the Master 1 body
+//    (the tallest a body can be in canonical space), so containment holds at
+//    every Master.
 //  - Containment: paths live in (chainage, lateral fraction, column fraction)
 //    space over the very cross-sections the water volume and its navigation
 //    predicate are built from, and every body is clamped between the real bed
@@ -45,13 +49,21 @@ export function hash01(id, k = 0) {
 }
 const hsym = (id, k) => hash01(id, k) * 2 - 1;
 
+// Shared school shape: radius in metres, vertical flattening, the camera
+// avoidance radius (was 11 m, which emptied the space around the viewer) and
+// the fish length scale over the original 0.39 m form (about 0.62 m now).
+export const SCHOOL = { radius: 8, flatten: 0.45, avoidM: 4, fishScale: 1.6 };
+// Beyond this range a school is hidden and not posed: the submerged fog has
+// long since closed (it reads by about 150 m).
+const SCHOOL_DRAW_RANGE_M = 320;
+
 // ── Species table (true scale, metres) ──────────────────────────────────
 // anchor: BNG point on the Thames centreline the path is centred on.
 // vr: vertical half extents in real metres INCLUDING animated parts and the
 // pitch limit, used to keep the whole body inside the water column.
 // r: horizontal radius used for the bank margin.
 export const SEA_LIFE_SPECIES = [
-  { id: 'blue-whale', name: 'Blue whale', note: 'The Pool of London, a nod to the 2006 Thames whale',
+  { id: 'blue-whale', name: 'Blue whale', note: 'The Pool of London, between London Bridge and Tower Bridge',
     anchor: { e: 533230, n: 180420 }, speed: 1.8, r: 13, vr: { up: 3.4, down: 3.4 }, maxPitch: 0.06,
     path: { A: 230, L: 0.26, f0: 0.5, fA: 0.3, dir: 1 } },
   { id: 'manta', name: 'Manta rays', note: 'Low over the Greenwich bed', count: 3,
@@ -67,13 +79,27 @@ export const SEA_LIFE_SPECIES = [
   { id: 'hammerhead', name: 'Great hammerhead', note: 'Patrolling Blackwall Reach',
     anchor: { e: 538566, n: 179821 }, speed: 1.5, r: 3.5, vr: { up: 1.6, down: 1.3 }, maxPitch: 0.15,
     path: { A: 220, L: 0.4, f0: 0.45, fA: 0.2, dir: -1 } },
+  // Silver shoals (sprint 25Sep26f): four reaches, larger brighter fish, and a
+  // 4 m avoidance radius so a school parts around the camera, not vanishes.
   { id: 'silver-school', name: 'Silver fish school', note: 'Deptford; parts around the camera', count: 90,
-    anchor: { e: 537245, n: 178352 }, speed: 1.0, r: 22, vr: { up: 3.8, down: 3.8 }, maxPitch: 0.2,
-    path: { A: 90, L: 0.3, f0: 0.5, fA: 0.25, dir: 1 }, school: { radius: 7, flatten: 0.45, avoidM: 11 } },
-  { id: 'anglerfish', name: 'Anglerfish', note: 'Near the bed of the deepest reach, lure lit',
-    anchor: { e: 545327, n: 181239 }, speed: 0.15, r: 2, vr: { up: 1.1, down: 0.8 }, maxPitch: 0.1,
-    path: { A: 14, L: 0.04, l0: 0.08, f0: 0.05, fA: 0.04, dir: 1 } },
+    anchor: { e: 537245, n: 178352 }, speed: 1.0, r: 24, vr: { up: 4.4, down: 4.4 }, maxPitch: 0.2,
+    path: { A: 90, L: 0.3, f0: 0.5, fA: 0.25, dir: 1 }, school: SCHOOL },
+  { id: 'shoal-nine-elms', name: 'Silver fish school', note: 'Nine Elms reach, between Vauxhall and Grosvenor bridges', count: 80,
+    anchor: { e: 529431, n: 177999 }, speed: 0.9, r: 24, vr: { up: 4.4, down: 4.4 }, maxPitch: 0.2,
+    path: { A: 160, L: 0.28, f0: 0.55, fA: 0.2, dir: -1 }, school: SCHOOL },
+  { id: 'shoal-wapping', name: 'Silver fish school', note: 'Off Wapping, below Tower Bridge', count: 80,
+    anchor: { e: 534250, n: 180250 }, speed: 1.1, r: 24, vr: { up: 4.4, down: 4.4 }, maxPitch: 0.2,
+    path: { A: 130, L: 0.3, f0: 0.45, fA: 0.22, dir: 1 }, school: SCHOOL },
+  { id: 'shoal-battersea', name: 'Silver fish school', note: 'Battersea reach, between Wandsworth and Battersea rail bridges', count: 80,
+    anchor: { e: 526262, n: 176022 }, speed: 0.95, r: 24, vr: { up: 4.4, down: 4.4 }, maxPitch: 0.2,
+    path: { A: 150, L: 0.26, f0: 0.5, fA: 0.22, dir: 1 }, school: SCHOOL },
+  // The species that swam up the Thames in January 2006, placed off the
+  // Palace of Westminster between Westminster and Lambeth bridges.
+  { id: 'bottlenose-whale', name: 'Northern bottlenose whale', note: 'Off the Palace of Westminster: the species of the 2006 Thames whale',
+    anchor: { e: 530436, n: 179310 }, speed: 1.1, r: 5, vr: { up: 1.6, down: 1.6 }, maxPitch: 0.08,
+    path: { A: 170, L: 0.3, f0: 0.5, fA: 0.25, dir: 1 } },
 ];
+export const SCHOOL_IDS = SEA_LIFE_SPECIES.filter(s => s.school).map(s => s.id);
 
 // ── River frame over the shared cross-sections ──────────────────────────
 function buildRiverFrame(points, { VE, topY, waterLevelM }) {
@@ -183,22 +209,13 @@ function createMaterials() {
   const jelly = new THREE.MeshLambertMaterial({ color: 0xcdbfa6, emissive: new THREE.Color(0x3a3024),
     flatShading: true, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide });
   jelly.name = 'sea-life-jelly';
-  // The lure ignores the murk: a point of light visible before its owner.
-  const lure = new THREE.MeshBasicMaterial({ color: 0xd8fff0, fog: false, toneMapped: false });
-  lure.name = 'sea-life-lure';
-  // Soft radial falloff, generated as data so it builds without a DOM canvas.
-  const N = 64, px = new Uint8Array(N * N * 4);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    const d = Math.hypot(x + 0.5 - N / 2, y + 0.5 - N / 2) / (N / 2);
-    const a = Math.max(0, 1 - d) ** 2.2;
-    px.set([255, 255, 255, Math.round(a * 255)], (y * N + x) * 4);
-  }
-  const haloTex = new THREE.DataTexture(px, N, N);
-  haloTex.needsUpdate = true;
-  const halo = new THREE.SpriteMaterial({ map: haloTex, color: 0x9fffe0, fog: false, transparent: true, opacity: 0.55,
-    depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
-  halo.name = 'sea-life-lure-halo';
-  return { body, jelly, lure, halo };
+  // Shoal fish: the same flat Lambert family, lifted by a cool silver
+  // emissive so a school glints in the green murk before its shape resolves.
+  // A separate material, never per-instance colour (D-015).
+  const silver = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide,
+    emissive: new THREE.Color(0x9fbcb6).multiplyScalar(0.28) });
+  silver.name = 'sea-life-silver';
+  return { body, jelly, silver };
 }
 
 // ── Species builders: return { body (Group, metres), animate(t) } ───────
@@ -295,29 +312,34 @@ function buildHammerhead(mat) {
   } };
 }
 
-function buildAnglerfish(mat, VE = 5) {
-  const top = 0x1d1917, bottom = 0x3b322c;
+// Northern bottlenose whale (Hyperoodon ampullatus), about 7 m: the bulbous
+// melon over a short distinct beak, a small falcate dorsal fin set well back,
+// small flippers and a brown-grey back over a paler belly.
+function buildBottlenoseWhale(mat) {
+  const top = 0x4b4540, bottom = 0x8d867b;
   const body = new THREE.Group();
   body.add(new THREE.Mesh(merge([
-    loft([[0.55, 0.35, 0.22, -0.05], [0.4, 0.45, 0.36, 0], [0.1, 0.42, 0.34, 0], [-0.25, 0.22, 0.2, 0], [-0.45, 0.06, 0.07, 0]], top, bottom, 7),
-    fin([0, 0, -0.45], [[0, 0.02, -0.45], [0, 0.25, -0.7], [0, -0.22, -0.72], [0, -0.02, -0.45]], 0.02, top, bottom),
-    // Illicium: the fishing rod, arching forward over the mouth.
-    loft([[0.22, 0.012, 0.012, 0.33], [0.5, 0.01, 0.01, 0.55], [0.8, 0.008, 0.008, 0.52]], top, top, 4),
+    loft([[3.55, 0.05, 0.05, -0.16], [3.3, 0.16, 0.13, -0.15], [3.0, 0.3, 0.28, -0.08], [2.8, 0.5, 0.6, 0.1],
+      [2.4, 0.66, 0.76, 0.1], [1.5, 0.82, 0.86, 0.02], [0.3, 0.88, 0.88, 0], [-0.8, 0.72, 0.74, 0.02],
+      [-1.6, 0.5, 0.55, 0.05]], top, bottom, 8),
+    fin([0, 0.72, -0.9], [[0, 0.72, -0.45], [0, 1.1, -1.05], [0, 1.02, -1.12], [0, 0.72, -1.3]], 0.04, top, top),
+    fin([0.55, -0.45, 1.8], [[0.6, -0.45, 2.0], [1.15, -0.78, 1.45], [0.95, -0.74, 1.33], [0.6, -0.5, 1.6]], 0.04, top, bottom),
+    fin([-0.55, -0.45, 1.8], mirrorX([[0.6, -0.45, 2.0], [1.15, -0.78, 1.45], [0.95, -0.74, 1.33], [0.6, -0.5, 1.6]]), 0.04, top, bottom),
   ]), mat.body));
-  const lure = new THREE.Mesh(new THREE.IcosahedronGeometry(0.06, 0), mat.lure);
-  lure.position.set(0, 0.48, 0.85);
-  const halo = new THREE.Sprite(mat.halo);
-  halo.name = 'sea-life-lure-halo';
-  halo.position.copy(lure.position);
-  body.add(lure, halo);
-  return { body, animate(t) {
-    const glow = 0.75 + 0.25 * Math.sin(t * 1.3) * Math.sin(t * 0.37);
-    const k = 0.9 + 0.5 * glow;
-    // A sprite takes its size from the world matrix: undo the (1, VE, 1)
-    // parent so the halo stays round on screen.
-    halo.scale.set(k, k / VE, k);
-    lure.position.y = 0.48 + 0.02 * Math.sin(t * 0.9);
-    halo.position.y = lure.position.y;
+  const tail = new THREE.Group(); tail.position.set(0, 0.05, -1.6); body.add(tail);
+  tail.add(new THREE.Mesh(merge([loft([[0, 0.5, 0.55, 0], [-1.2, 0.22, 0.32, 0], [-1.8, 0.08, 0.12, 0]], top, bottom, 8)]), mat.body));
+  const flukes = new THREE.Group(); flukes.position.set(0, 0, -1.8); tail.add(flukes);
+  const flukePts = [[0.1, 0, 0.1], [0.7, 0, -0.4], [1.0, 0, -0.78], [0.45, 0, -0.62], [0, 0, -0.42]];
+  flukes.add(new THREE.Mesh(merge([
+    fin([0, 0, -0.1], flukePts, 0.06, top, bottom),
+    fin([0, 0, -0.1], mirrorX(flukePts), 0.06, top, bottom),
+  ]), mat.body));
+  // Authored about 8 m nose to fluke tips; 0.9 brings it to about 7 m.
+  body.scale.setScalar(0.9);
+  return { body, animate(t, id) {
+    const w = (Math.PI * 2) / 3.6, p = hash01(id, 9) * 6.28;
+    tail.rotation.x = 0.13 * Math.sin(w * t + p);
+    flukes.rotation.x = 0.25 * Math.sin(w * t + p - 0.9);
   } };
 }
 
@@ -385,6 +407,10 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
   group.name = 'seaLife';
   group.visible = false;
   let elapsed = 0;
+  // Vertical scale of every creature root: base / Master, so bodies display
+  // at true proportions (D-039). VE (= Master 1) until a camera says otherwise.
+  let sy = VE;
+  let schoolGeo = null; // shared by every school (built on first use)
 
   const bedAt = (x, z, fallback) => {
     const b = navigation?.bedAt?.(x, z);
@@ -405,7 +431,7 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
   const byId = new Map();
   function addCreature(c) { creatures.push(c); byId.set(c.id, c); group.add(c.root); }
   function makeRoot(name) {
-    const root = new THREE.Group(); root.name = name; root.scale.set(1, VE, 1);
+    const root = new THREE.Group(); root.name = name; root.scale.set(1, sy, 1);
     const body = new THREE.Group(); body.rotation.order = 'YXZ'; root.add(body);
     return { root, holder: body };
   }
@@ -440,7 +466,7 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     const p1 = placeSLF(spec, loopSLF(spec, idx, t + 0.5));
     const dx = p1.x - p0.x, dz = p1.z - p0.z, dh = Math.hypot(dx, dz);
     const yaw = Math.atan2(dx, dz);
-    const pitch = THREE.MathUtils.clamp(Math.atan2((p1.y - p0.y) / VE, dh || 1e-6), -(spec.maxPitch ?? 0.1), spec.maxPitch ?? 0.1);
+    const pitch = THREE.MathUtils.clamp(Math.atan2((p1.y - p0.y) / sy, dh || 1e-6), -(spec.maxPitch ?? 0.1), spec.maxPitch ?? 0.1);
     return { x: p0.x, y: p0.y, z: p0.z, yaw, pitch, roll: 0 };
   }
 
@@ -450,10 +476,10 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     if (spec.anchor) spec.S0 = river.nearestS(spec.anchor.e - BNG_REF_E, -(spec.anchor.n - BNG_REF_N));
     speciesState[spec.id] = spec;
 
-    if (spec.id === 'blue-whale' || spec.id === 'turtle' || spec.id === 'hammerhead' || spec.id === 'anglerfish') {
-      const build = { 'blue-whale': buildWhale, turtle: buildTurtle, hammerhead: buildHammerhead, anglerfish: buildAnglerfish }[spec.id];
+    if (spec.id === 'blue-whale' || spec.id === 'turtle' || spec.id === 'hammerhead' || spec.id === 'bottlenose-whale') {
+      const build = { 'blue-whale': buildWhale, turtle: buildTurtle, hammerhead: buildHammerhead, 'bottlenose-whale': buildBottlenoseWhale }[spec.id];
       const { root, holder } = makeRoot(`sea-life:${spec.id}`);
-      const made = build(mat, VE); holder.add(made.body);
+      const made = build(mat); holder.add(made.body);
       addCreature({ id: spec.id, spec, root, holder, animate: made.animate,
         pose: t => pathPose(spec, 0, t) });
     } else if (spec.id === 'manta') {
@@ -486,7 +512,7 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
         pose: t => ({ x: cx, y: y + 0.15 * VE * Math.sin(t * 0.11), z: cz, yaw, pitch: 0, roll: 0.05 * Math.sin(t * 0.07) }) });
     } else if (spec.id === 'jellyfish') {
       addJellies(spec);
-    } else if (spec.id === 'silver-school') {
+    } else if (spec.school) {
       addSchool(spec);
     }
   }
@@ -532,7 +558,7 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
           const P = jellyPose(i, t);
           const beat = Math.sin((Math.PI * 2 / 3.2) * t + hash01(`jelly-${i + 1}`, 8) * 6.28);
           e.set(P.pitch, P.yaw, P.roll, 'YXZ'); q.setFromEuler(e);
-          m.compose(p.set(P.x, P.y / VE, P.z), q, s.set(1 - 0.1 * beat, 1 + 0.14 * beat, 1 - 0.1 * beat));
+          m.compose(p.set(P.x, P.y / sy, P.z), q, s.set(1 - 0.1 * beat, 1 + 0.14 * beat, 1 - 0.1 * beat));
           bells.setMatrixAt(i, m);
           m.compose(p, q, s.set(1 + 0.05 * beat, 1 - 0.04 * beat, 1 + 0.05 * beat));
           tents.setMatrixAt(i, m);
@@ -543,7 +569,7 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
         const out = [];
         for (let i = 0; i < spec.count; i++) {
           const P = jellyPose(i, t);
-          out.push({ x: P.x, y: P.y + (0.7 * 0.9 * 1.14) * VE, z: P.z }, { x: P.x, y: P.y - 5 * VE, z: P.z },
+          out.push({ x: P.x, y: P.y + (0.7 * 0.9 * 1.14) * sy, z: P.z }, { x: P.x, y: P.y - 5 * sy, z: P.z },
             { x: P.x + 0.9, y: P.y, z: P.z }, { x: P.x - 0.9, y: P.y, z: P.z });
         }
         return out;
@@ -551,57 +577,76 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     addCreature(c);
   }
 
-  // ── Fish school: one InstancedMesh; parts around the camera ──────────
+  // ── Fish schools: one InstancedMesh each; part around the camera ─────
+  // Per-fish constants are hashed once at build time; the per-frame work is
+  // arithmetic only, and a school beyond SCHOOL_DRAW_RANGE_M is neither posed
+  // nor drawn (its pose stays a pure function of time when it returns).
   function addSchool(spec) {
-    const top = 0x56666a, bottom = 0xdde6e3;
-    const fishGeo = merge([
-      loft([[0.19, 0.01, 0.01, 0], [0.12, 0.035, 0.07, 0], [-0.05, 0.03, 0.06, 0], [-0.13, 0.008, 0.02, 0]], top, bottom, 5),
-      fin([0, 0, -0.13], [[0, 0.01, -0.13], [0, 0.06, -0.2], [0, -0.06, -0.2], [0, -0.01, -0.13]], 0.005, top, bottom),
-    ]);
-    const { root, holder } = makeRoot('sea-life:silver-school');
-    const fish = new THREE.InstancedMesh(fishGeo, mat.body, spec.count);
-    fish.name = 'sea-life-silver-school'; fish.frustumCulled = false;
+    const k = spec.school.fishScale ?? 1;
+    if (!schoolGeo) {
+      // Brighter countershading than the other animals: a silver flank.
+      const top = 0x6f8388, bottom = 0xf1f6f4;
+      schoolGeo = merge([
+        loft([[0.19, 0.01, 0.01, 0], [0.12, 0.035, 0.07, 0], [-0.05, 0.03, 0.06, 0], [-0.13, 0.008, 0.02, 0]], top, bottom, 5),
+        fin([0, 0, -0.13], [[0, 0.01, -0.13], [0, 0.06, -0.2], [0, -0.06, -0.2], [0, -0.01, -0.13]], 0.005, top, bottom),
+      ]);
+      schoolGeo.scale(k, k, k);
+      schoolGeo.computeBoundingBox(); schoolGeo.computeBoundingSphere();
+    }
+    const { root, holder } = makeRoot(`sea-life:${spec.id}`);
+    const fish = new THREE.InstancedMesh(schoolGeo, mat.silver, spec.count);
+    fish.name = `sea-life-${spec.id}`; fish.frustumCulled = false;
     holder.add(fish);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3();
     const R = spec.school.radius, avoid = spec.school.avoidM;
-    // Fish positions: school centre on its loop, each fish on a hashed shell
-    // slowly wheeling around it, then pushed radially away from the camera.
+    const C1 = new Float64Array(spec.count), C2 = new Float64Array(spec.count), C3 = new Float64Array(spec.count);
+    const C4 = new Float64Array(spec.count), C5 = new Float64Array(spec.count);
+    for (let i = 0; i < spec.count; i++) {
+      const id = `${spec.id === 'silver-school' ? 'fish' : spec.id}-${i}`;
+      C1[i] = hash01(id, 1) * 2 - 1; C2[i] = hash01(id, 2) * Math.PI * 2; C3[i] = 0.6 + 0.4 * hash01(id, 3);
+      C4[i] = R * Math.cbrt(0.05 + 0.95 * hash01(id, 4)); // filled to near the core, so a camera inside meets fish C5[i] = hash01(id, 5) * 6.28;
+    }
+    // Fish positions (holder units: displayed metres): school centre on its
+    // loop, each fish on a hashed shell slowly wheeling around it, then pushed
+    // radially out to the avoidance radius around the camera.
     function fishAt(t, camera) {
       const C = pathPose(spec, 0, t);
-      const cy = C.y / VE, out = [];
-      const cam = camera ? { x: camera.x, y: camera.y / VE, z: camera.z } : null;
-      const sectionTop = (topY / VE) - MARGIN_M - 0.2;
+      const cy = C.y / sy, out = [];
+      const cam = camera ? { x: camera.x, y: camera.y / sy, z: camera.z } : null;
+      const sectionTop = (topY / sy) - MARGIN_M - 0.2;
+      const cyw = Math.cos(C.yaw), syw = Math.sin(C.yaw);
       for (let i = 0; i < spec.count; i++) {
-        const id = `fish-${i}`;
-        const u = hash01(id, 1) * 2 - 1, az = hash01(id, 2) * Math.PI * 2 + 0.05 * t * (0.6 + 0.4 * hash01(id, 3));
-        const rr = R * Math.cbrt(0.15 + 0.85 * hash01(id, 4)), rh = Math.sqrt(1 - u * u) * rr;
-        let lx = Math.cos(az) * rh, lz = Math.sin(az) * rh, ly = u * rr * spec.school.flatten;
-        ly += 0.25 * Math.sin(0.7 * t + hash01(id, 5) * 6.28);
+        const u = C1[i], az = C2[i] + 0.05 * t * C3[i];
+        const rr = C4[i], rh = Math.sqrt(1 - u * u) * rr;
+        const lx = Math.cos(az) * rh, lz = Math.sin(az) * rh;
+        const ly = u * rr * spec.school.flatten + 0.25 * Math.sin(0.7 * t + C5[i]);
         // Rotate the shell into the school heading so it streams, not orbs.
-        const cyw = Math.cos(C.yaw), syw = Math.sin(C.yaw);
         let x = C.x + lx * cyw + lz * syw * 1.6, z = C.z - lx * syw + lz * cyw * 1.6, y = cy + ly;
         let yaw = C.yaw + 0.15 * Math.sin(0.5 * t + i);
         if (cam) {
           const dx = x - cam.x, dy = y - cam.y, dz = z - cam.z, d = Math.hypot(dx, dy, dz);
           if (d < avoid) {
-            const push = avoid - d, k = push / (d || 1e-6);
-            const ux = d > 1e-6 ? dx : Math.cos(az), uy = d > 1e-6 ? dy : 0, uz = d > 1e-6 ? dz : Math.sin(az);
-            const norm = d > 1e-6 ? 1 : 1;
-            x += ux * k * norm; y += uy * k * norm; z += uz * k * norm;
-            yaw = Math.atan2(ux, uz);
+            if (d > 1e-6) { const k2 = (avoid - d) / d; x += dx * k2; y += dy * k2; z += dz * k2; yaw = Math.atan2(dx, dz); }
+            else { x += Math.cos(az) * avoid; z += Math.sin(az) * avoid; yaw = Math.atan2(Math.cos(az), Math.sin(az)); }
           }
         }
         out.push({ x, y, z, yaw });
       }
       // Keep every fish in the water column around the school centre.
-      const bedHere = bedAt(C.x, C.z, () => river.at(river.nearestS(C.x, C.z), 0).bed) / VE + MARGIN_M + 0.2;
+      const bedHere = bedAt(C.x, C.z, () => river.at(river.nearestS(C.x, C.z), 0).bed) / sy + MARGIN_M + 0.2;
       for (const f of out) f.y = Math.min(sectionTop, Math.max(bedHere, f.y));
-      return { centre: C, fish: out };
+      return { centre: C, fish: out, scaleY: sy };
     }
-    const c = { id: 'silver-school', spec, root, holder, instanced: true, count: spec.count,
-      fishAt,
+    const c = { id: spec.id, spec, root, holder, instanced: true, count: spec.count, fishAt, mesh: fish,
       pose: t => pathPose(spec, 0, t),
       apply(t, camera) {
+        if (camera) {
+          const C = pathPose(spec, 0, t);
+          const far = Math.hypot(C.x - camera.x, (C.y - camera.y) / sy, C.z - camera.z) > SCHOOL_DRAW_RANGE_M;
+          fish.visible = !far;
+          if (far) return;
+        }
+        fish.visible = true;
         const { fish: F } = fishAt(t, camera);
         for (let i = 0; i < F.length; i++) {
           e.set(0, F[i].yaw, 0.2 * Math.sin(t * 2 + i), 'YXZ'); q.setFromEuler(e);
@@ -609,7 +654,16 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
         }
         fish.instanceMatrix.needsUpdate = true;
       },
-      probes(t, camera) { return fishAt(t, camera).fish.map(f => ({ x: f.x, y: f.y * VE, z: f.z })); } };
+      probes(t, camera) {
+        // Body extent of each fish (half length, half height) around its centre.
+        const hl = 0.2 * k, hh = 0.07 * k;
+        const out = [];
+        for (const f of fishAt(t, camera).fish) {
+          out.push({ x: f.x + Math.sin(f.yaw) * hl, y: (f.y + hh) * sy, z: f.z + Math.cos(f.yaw) * hl },
+            { x: f.x - Math.sin(f.yaw) * hl, y: (f.y - hh) * sy, z: f.z - Math.cos(f.yaw) * hl });
+        }
+        return out;
+      } };
     addCreature(c);
   }
 
@@ -654,13 +708,22 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     const pad = c.id === 'octopus' ? 0 : 0.08; // animated parts swing a touch past the rest box
     return c.localProbes.map(v => {
       _v.copy(v).multiplyScalar(1 + pad).applyMatrix4(body);
-      return { x: P.x + _v.x, y: P.y + _v.y * VE, z: P.z + _v.z };
+      return { x: P.x + _v.x, y: P.y + _v.y * sy, z: P.z + _v.z };
     });
   }
 
   let _lastCamera = null;
+  // True proportions: follow the camera's Master (base / value). No
+  // controller (node tests, a bare camera) means Master 1, i.e. VE.
+  function setScaleY(next) {
+    if (!Number.isFinite(next) || next <= 0 || next === sy) return;
+    sy = next;
+    for (const c of creatures) c.root.scale.y = sy;
+  }
   function update(dt, camera, { submerged = false } = {}) {
     if (Number.isFinite(dt) && dt > 0) elapsed += dt;
+    const mh = camera?.userData?.masterHeightController;
+    if (mh) setScaleY(mh.base / mh.value);
     group.visible = !!submerged;
     if (!group.visible) return;
     _lastCamera = camera?.position ?? null;
@@ -671,15 +734,17 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
   function dispose() {
     group.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
     for (const m of Object.values(mat)) { m.map?.dispose(); m.dispose(); }
+    schoolGeo?.dispose();
     group.removeFromParent();
   }
 
   const api = {
-    group, update, setElapsed, getElapsed: () => elapsed, probes, dispose, river,
+    group, update, setElapsed, getElapsed: () => elapsed, probes, dispose, river, setScaleY,
+    get scaleY() { return sy; }, schoolIds: SCHOOL_IDS,
     species: speciesState,
     ids: creatures.map(c => c.id),
     poseAt(id, t) { const c = byId.get(id); return c ? c.pose(t) : null; },
-    fishAt(t, camera) { return byId.get('silver-school')?.fishAt(t, camera) ?? null; },
+    fishAt(t, camera, id = 'silver-school') { return byId.get(id)?.fishAt(t, camera) ?? null; },
     jellyPose(i, t) { return byId.get('jellyfish')?.poseOf(i, t) ?? null; },
     /** A viewing spot for each creature: behind and level with it at time t. */
     viewpoint(id, t, distance = 40) {
