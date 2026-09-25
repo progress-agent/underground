@@ -149,3 +149,28 @@ test('a view that cannot afford shadows does not flicker them at the looser prob
  assert.equal(h.controller.get().level,1);
  assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
 });
+// Step 0 of sprint 25Sep26f (verifier gap, 24Sep26h): the looser probe line
+// applied only from level 1. A camera that arrives at a CPU-bound ~56 fps view
+// several rungs down (a GPU-heavy street moment, then the river at Greenwich)
+// sat inside the band at 92% or 85% resolution without shadows for good, since
+// its noisy 17.1 to 17.9ms windows rarely cleared the 1.03 line four in a row.
+test('arriving several rungs down at a CPU-bound ~56 fps view climbs all the way back to shadows',()=>{
+ for(const base of [17.1,17.4,17.7]){
+  // GPU-heavy moment: resolution helps, so it descends past level 1.
+  const h=harness();h.sim(model({cpu:6,gpu:24,shadowMs:2}),8000);
+  const arrived=h.controller.get().level;assert.ok(arrived>=2,`base ${base}: arrived at ${arrived}`);
+  // River: CPU-bound (resolution does nothing), shadows cost ~0.8ms, noisy windows.
+  h.sim((q,k)=>(q.shadows?base+0.8:base)+0.4*Math.sin(k*0.05),60000);
+  assert.equal(h.controller.get().level,0,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-6))}`);
+ }
+});
+// Step 0 measurement, 25Sep26f (M5 as lived): with the looser line, river
+// bounced 2<->3 every ~3.5s. The probe passed its first window on noise, then
+// drifted over budget two windows later; that drop escaped the probe backoff.
+test('a probe that passes its first window but drifts over soon after still backs off',()=>{
+ // Level 2 (92%) averages ~18.5ms, level 3 (85%) ~17.6ms; noise lets level 2 pass one window.
+ const h=harness();const cost=(q,k)=>(q.scale>=0.92?18.5:17.6)+0.9*Math.sin(k*0.09);
+ h.sim(q=>q.scale>=0.85?25*q.scale:10,6000);
+ h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,90000);
+ assert.ok(h.changes.length-settle<=8,`changes in 90s: ${h.changes.length-settle} ${JSON.stringify(h.controller.state().history.slice(-8).map(e=>[Math.round(e.at),e.from,e.to,e.why]))}`);
+});

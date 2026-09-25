@@ -28,11 +28,17 @@
 //   noisy windows tripped the rung and shadows were lost there, which the
 //   previous controller never did. A probe back up to shadows is judged
 //   against the same 19ms line, so a ~56 fps view is allowed to keep them.
-//   Coming back is symmetric: from level 1 the probe up to shadows starts at
-//   or below 1.05 x target (17.5ms, the old controller's probe line), not
-//   1.03 (17.2ms). River without shadows runs at about 17.1 to 17.2ms, so at
-//   1.03 a camera arriving there without shadows (from street, say) never
-//   probed back and stayed without them in 2 of 3 measured runs.
+//   Coming back (sprint 25Sep26f, Step 0): every rung probes up when the mean
+//   of its recent in-band windows (the last 3s) is at or below 1.07 x target
+//   (17.8ms, ~56 fps). The first fix loosened only level 1's line, and each
+//   window had to clear it on its own, four in a row. A camera arriving at a
+//   CPU-bound river view several rungs down (from a GPU-heavy street) wanders
+//   17.1 to 17.9ms per window, so it held at 92% or 85% without shadows for
+//   good. A probe that costs more than the view can afford fails against the
+//   rung's own drop line (18.3ms, or 19ms for shadows) and backs off. So does
+//   one that passes its first window on noise and drifts back over within 6s:
+//   measured on the M5 as lived, that late drop escaped the backoff and the
+//   river bounced 2<->3 every ~3.5s.
 // - Probes back off per level and only retry early when the scene has become
 //   clearly lighter, which stops the 2<->3 bounce every 4 to 5s.
 export const QUALITY_LEVELS = [
@@ -59,8 +65,7 @@ export const ADAPTIVE_TUNING = {
   shadowsOverBudget: 1.14, // but leave level 0 (shadows on) only above 19ms (~52.6 fps)
   severe: 1.8,          // one window is enough above this (~33 fps)
   doubleStep: 2.5,      // and two rungs at once above this (~24 fps)
-  underBudget: 1.03,    // probe up only at or below 1.03 x target (~58 fps)
-  shadowsUnderBudget: 1.05, // except from level 1 back to shadows: 17.5ms (~57 fps)
+  underBudget: 1.07,    // probe up when the recent stable mean is at or below 17.8ms (~56 fps)
   ample: 0.8,           // clear headroom (fast display, light view)
   windowMs: 750, minSamples: 8, cooldownMs: 650,
   stableMs: 3000, ampleStableMs: 700,
@@ -68,6 +73,7 @@ export const ADAPTIVE_TUNING = {
   judgeWork: 0.65,      // ...by the time it has shed 35% of the pixel work
   holdMs: 15000, holdMaxMs: 60000, heavierRetry: 1.3,
   backoffMs: 8000, backoffMaxMs: 64000, lighterRetry: 0.75,
+  probeGraceMs: 6000,   // a drop back within 6s of a probe counts as that probe failing
 };
 
 export function createAdaptiveQuality({ apply, tuning = {} }) {
@@ -76,9 +82,11 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   let level = 0;
   let windowStart = null, cooldownUntil = 0, samples = [], longFrames = 0;
   let overWindows = 0, stableMs = 0;
+  let stable = [];          // recent in-band windows [mean, span], judged together
   let pendingDrop = null;   // { from, exempt }
   let descent = null;       // { level, mean }: where the current descent is anchored
   let pendingProbe = null;  // { from, to, before }
+  let lastProbe = null;     // { to, before, at }: the most recent probe that passed its first window
   let hold = null;          // { level, until, mean, streak }
   let holdStreak = 0;
   const backoff = new Map(); // target level -> { until, mean, count }
@@ -94,6 +102,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function change(next, now, why) {
     const from = level;
+    stable = [];
     level = Math.max(0, Math.min(MAX, next));
     apply(QUALITY_LEVELS[level]);
     cooldownUntil = now + K.cooldownMs; // exclude target reallocation and shader warm-up
@@ -105,8 +114,8 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   function reset(now = null) {
     windowStart = now;
     cooldownUntil = now === null ? 0 : now + 1000;
-    samples = []; longFrames = 0; overWindows = 0; stableMs = 0;
-    pendingDrop = null; pendingProbe = null; hold = null; holdStreak = 0; descent = null;
+    samples = []; longFrames = 0; overWindows = 0; stableMs = 0; stable = [];
+    pendingDrop = null; pendingProbe = null; lastProbe = null; hold = null; holdStreak = 0; descent = null;
     backoff.clear();
   }
 
@@ -141,20 +150,26 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     if (pendingProbe) {
       const p = pendingProbe; pendingProbe = null;
       if (mean > overAt(p.to)) {
-        const b = backoff.get(p.to), count = (b?.count ?? 0) + 1;
-        backoff.set(p.to, { until: now + Math.min(K.backoffMaxMs, K.backoffMs * 2 ** (count - 1)), mean: p.before, count });
+        backOff(p.to, p.before, now);
         overWindows = 0; stableMs = 0;
         change(p.from, now, 'probe failed');
         return;
       }
-      backoff.delete(p.to);
+      lastProbe = { to: p.to, before: p.before, at: now };
     }
 
+    // A probe that has held through its grace period succeeded: clear its backoff.
+    if (lastProbe && now - lastProbe.at >= K.probeGraceMs) { backoff.delete(lastProbe.to); lastProbe = null; }
+
     if (mean > overAt(level)) {
-      stableMs = 0; overWindows++;
+      stableMs = 0; stable = []; overWindows++;
       const severe = mean > K.targetMs * K.severe;
       if (level >= MAX || (overWindows < 2 && !severe && !continuing)) return;
       if (hold && level <= hold.level && now < hold.until && mean < hold.mean * K.heavierRetry) return;
+      // Drifting back over budget soon after a probe is that probe failing
+      // late (it passed its first window on noise): back off as if it had.
+      if (lastProbe && lastProbe.to === level && now - lastProbe.at < K.probeGraceMs) backOff(level, lastProbe.before, now);
+      lastProbe = null;
       const step = mean > K.targetMs * K.doubleStep && level >= 1 ? 2 : 1;
       const next = Math.min(MAX, level + step);
       const exempt = level === 0 && next === 1;
@@ -166,20 +181,38 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     }
 
     overWindows = 0; descent = null;
-    if (mean <= K.targetMs * (level === 1 ? K.shadowsUnderBudget : K.underBudget)) {
+    if (level === 0) return;
+    // Judge the probe on the mean of the recent in-band windows, not window by
+    // window: a CPU-bound view wanders 17.1 to 17.9ms, and requiring four
+    // consecutive windows under the line kept it off shadows indefinitely.
+    stable.push([mean, span]);
+    if (stable.length > 8) stable.shift();
+    if (mean <= K.targetMs * K.ample) {
       stableMs += span;
-      if (level === 0) return;
-      const ample = mean <= K.targetMs * K.ample;
-      if (stableMs < (ample ? K.ampleStableMs : K.stableMs)) return;
-      const to = level - 1, b = backoff.get(to);
-      if (b && now < b.until && mean > b.mean * K.lighterRetry) return;
-      pendingProbe = { from: level, to, before: mean };
-      // A successful probe keeps its verification window toward the next one.
-      stableMs = ample ? K.ampleStableMs : 0;
-      change(to, now, 'probe');
-    } else {
-      stableMs = 0; // inside the band: hold still
+      if (stableMs < K.ampleStableMs) return;
+      return probe(level - 1, mean, now, K.ampleStableMs);
     }
+    let ms = 0, sum = 0;
+    for (let i = stable.length - 1; i >= 0 && ms < K.stableMs; i--) { ms += stable[i][1]; sum += stable[i][0] * stable[i][1]; }
+    stableMs = ms;
+    if (ms < K.stableMs) return;
+    const recent = sum / ms;
+    if (recent > K.targetMs * K.underBudget) return; // inside the band: hold still
+    probe(level - 1, recent, now, 0);
+  }
+
+  function backOff(to, before, now) {
+    const b = backoff.get(to), count = (b?.count ?? 0) + 1;
+    backoff.set(to, { until: now + Math.min(K.backoffMaxMs, K.backoffMs * 2 ** (count - 1)), mean: before, count });
+  }
+
+  function probe(to, before, now, keep) {
+    const b = backoff.get(to);
+    if (b && now < b.until && before > b.mean * K.lighterRetry) return;
+    pendingProbe = { from: level, to, before };
+    change(to, now, 'probe');
+    // A successful probe keeps its verification window toward the next one.
+    stableMs = keep;
   }
 
   function update(frameMs, now) {
@@ -189,7 +222,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     // Three consecutive long frames are real overload and must still adapt.
     if (frameMs > 1000) { reset(now); return; }
     longFrames = frameMs > 80 ? longFrames + 1 : 0;
-    if (frameMs > 80 && longFrames < 3) { clearWindow(now); stableMs = 0; return; }
+    if (frameMs > 80 && longFrames < 3) { clearWindow(now); stableMs = 0; stable = []; return; }
     if (now < cooldownUntil) { windowStart = now; return; }
     samples.push(frameMs);
     const span = now - windowStart;
