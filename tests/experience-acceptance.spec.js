@@ -115,7 +115,19 @@ test('actual keyboard boundary matrix and complete label/shader integration', as
   const held = await record('bed-early-release', ['KeyQ'], 330);
   expect.soft(held.some(s => s.kind === 'hold')).toBe(true);
   expect.soft(held.at(-1).substrate).toBe('WATER');
-  const released = await page.evaluate(() => ({ state: window.__ug.materialResistance.state, p: window.__ug.camera.position.toArray() }));
+  // The resistance state is read at once. The position is read after the frame
+  // that hands the camera back from fps to OrbitControls: that frame's
+  // controls.update() rebuilds the position from spherical coordinates and can
+  // move it by one unit in the last place. Reading before that frame made the
+  // exact-equality check below race the render loop (reproduced at 743555e, 1 in
+  // 10 runs; sprint 25Sep26f Lane S fix 2). Equality stays exact, so any real
+  // drift after release still fails.
+  const released = await page.evaluate(() => new Promise(resolve => {
+    const u = window.__ug, state = u.materialResistance.state;
+    const settle = () => u.fpsControls.active ? requestAnimationFrame(settle)
+      : requestAnimationFrame(() => requestAnimationFrame(() => resolve({ state, p: u.camera.position.toArray() })));
+    settle();
+  }));
   expect.soft(released.state).toBe(null);
   await page.waitForTimeout(780);
   expect.soft(await page.evaluate(() => window.__ug.camera.position.toArray())).toEqual(released.p);

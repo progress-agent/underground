@@ -7,6 +7,13 @@
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
+import { tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
+
+// D-039 (s25:S): the tunnel bores are built things, so their cross-sections
+// stay round at true size for every Master. The centreline follows the
+// stretched depth; each ring is unscaled about it in the shader ('axis' mode).
+// Shafts are not patched: their height IS the stretched depth they reach.
+const trueBore = (mat) => patchTrueProportionMaterial(mat, { mode: 'axis' });
 
 // Infra haze band (see infra-materials.js). Wider than Crossrail's — Tideway
 // and Lee are shorter features that never formed a horizon band; the haze is
@@ -49,13 +56,13 @@ const SECTION_DISPLAY_NAMES = {
 // old 0.5-alpha navy washed out at every underground distance.
 
 function makeTidewayTunnelMaterial() {
-  return injectInfraHaze(
-    createTunnelMaterial({ color: 0x1d4ed8, opacity: 0.6 }), HAZE_BAND);
+  return trueBore(injectInfraHaze(
+    createTunnelMaterial({ color: 0x1d4ed8, opacity: 0.6 }), HAZE_BAND));
 }
 
 function makeTidewayGlowMaterial() {
-  return injectInfraHaze(
-    createGlowMaterial({ color: 0x3b82f6, opacity: 0.15 }), HAZE_BAND);
+  return trueBore(injectInfraHaze(
+    createGlowMaterial({ color: 0x3b82f6, opacity: 0.15 }), HAZE_BAND));
 }
 
 // Shafts: NO transmission — MeshPhysicalMaterial transmission is fresnel
@@ -84,19 +91,19 @@ function makeLeeShaftMaterial() {
 }
 
 function makeLeeTunnelMaterial() {
-  return injectInfraHaze(
-    createTunnelMaterial({ color: 0x6b4423, opacity: 0.6 }), HAZE_BAND);
+  return trueBore(injectInfraHaze(
+    createTunnelMaterial({ color: 0x6b4423, opacity: 0.6 }), HAZE_BAND));
 }
 
 function makeLeeGlowMaterial() {
-  return injectInfraHaze(
-    createGlowMaterial({ color: 0x8b6914, opacity: 0.15 }), HAZE_BAND);
+  return trueBore(injectInfraHaze(
+    createGlowMaterial({ color: 0x8b6914, opacity: 0.15 }), HAZE_BAND));
 }
 
 function makeSpurMaterial() {
-  return injectInfraHaze(
+  return trueBore(injectInfraHaze(
     createTunnelMaterial({ color: 0x1d4ed8, opacity: 0.5, roughness: 0.5, metalness: 0.1 }),
-    HAZE_BAND);
+    HAZE_BAND));
 }
 
 // ---------- CSV Parsers ----------
@@ -211,8 +218,8 @@ function buildTunnelSection(points, llToXZ, VE, radius, segments = 200) {
   const segsPerPoint = Math.max(20, Math.round(segments / Math.max(1, points.length - 1)));
   const totalSegs = segsPerPoint * (points.length - 1);
 
-  const tubeGeo = new THREE.TubeGeometry(curve, totalSegs, radius, 12, false);
-  const glowGeo = new THREE.TubeGeometry(curve, Math.round(totalSegs * 0.6), radius + 0.5, 12, false);
+  const tubeGeo = tubeAxisAttribute(new THREE.TubeGeometry(curve, totalSegs, radius, 12, false));
+  const glowGeo = tubeAxisAttribute(new THREE.TubeGeometry(curve, Math.round(totalSegs * 0.6), radius + 0.5, 12, false));
 
   return { tubeGeo, glowGeo, curve };
 }

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { RENDER_ORDER } from './render-layers.js';
 import { createTunnelMaterial, createGlowMaterial, injectInfraHaze } from './infra-materials.js';
+import { tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
 
 // Infra haze band (see infra-materials.js) — coherence with Crossrail/Tideway.
 const HAZE_BAND = { near: 2500, far: 9000 };
@@ -100,19 +101,21 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     // Victorian sewers are ~4m diameter
     const radius = 2.0;
     
-    const tubeGeometry = new THREE.TubeGeometry(curve, 100, radius, 10, false);
+    // D-039 (s25:S): a built bore, so its cross-section stays round at true
+    // size for every Master; the centreline follows the stretched depth.
+    const tubeGeometry = tubeAxisAttribute(new THREE.TubeGeometry(curve, 100, radius, 10, false));
     
     // Angle-stable factory material (infra-materials.js). emissiveIntensity
     // 0.25 is the contrast floor against the dark terrain underside, where the
     // old unlit 0.55-alpha brown vanished broadside (judge via AgX screenshots,
     // not hex — diag sewer2-A vs sewer2-C).
-    const tunnelMaterial = injectInfraHaze(createTunnelMaterial({
+    const tunnelMaterial = patchTrueProportionMaterial(injectInfraHaze(createTunnelMaterial({
       color: colorScheme.base,
       opacity: 0.6,
       emissiveIntensity: 0.25,
       roughness: 0.5,
       metalness: 0.1,
-    }), HAZE_BAND);
+    }), HAZE_BAND), { mode: 'axis' });
 
 
     const tunnelMesh = new THREE.Mesh(tubeGeometry, tunnelMaterial);
@@ -132,9 +135,9 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
     group.add(tunnelMesh);
     
     // Glow effect for visibility
-    const glowGeometry = new THREE.TubeGeometry(curve, 80, radius * 1.3, 10, false);
-    const glowMaterial = injectInfraHaze(
-      createGlowMaterial({ color: colorScheme.glow, opacity: 0.12 }), HAZE_BAND);
+    const glowGeometry = tubeAxisAttribute(new THREE.TubeGeometry(curve, 80, radius * 1.3, 10, false));
+    const glowMaterial = patchTrueProportionMaterial(injectInfraHaze(
+      createGlowMaterial({ color: colorScheme.glow, opacity: 0.12 }), HAZE_BAND), { mode: 'axis' });
     const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
     glowMesh.renderOrder = RENDER_ORDER.SEWER;
     group.add(glowMesh);
@@ -146,14 +149,14 @@ export function createSewerTunnels(data, latLonToXZ, verticalScale = 5.0) {
         const y = -(p.depth * verticalScale);
         
         const markerGeometry = new THREE.SphereGeometry(0.8, 10, 10);
-        const markerMaterial = new THREE.MeshBasicMaterial({
+        const markerMaterial = patchTrueProportionMaterial(new THREE.MeshBasicMaterial({
           color: colorScheme.glow,
           transparent: true,
           opacity: 0.5,
           // Markers sit ON the tunnel wall — depth-writing 0.5-alpha spheres
           // punch angle-dependent holes in the tube behind them.
           depthWrite: false,
-        });
+        })); // s25:S round at every Master (sphere centred on its origin)
         const marker = new THREE.Mesh(markerGeometry, markerMaterial);
         marker.position.set(xz.x, y, xz.z);
         marker.renderOrder = RENDER_ORDER.SEWER;

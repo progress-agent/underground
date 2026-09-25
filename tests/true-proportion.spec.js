@@ -18,6 +18,13 @@ async function ready(page, query = '') {
       && u.landmarkGroup?.children.length && u.bridgeRegistry?.size === 41 && u.motorwayGroup && u.airportsGroup
       && u.trainSystem?.allTrains.length > 50 && u.lineBranchCenterPts?.get('dlr')?.length;
   }, null, { timeout: 240000 });
+  // The bores are built asynchronously per line; the checks below read the
+  // Northern and Victoria bores, so wait for both (a race seen 1 in 8 runs).
+  await page.waitForFunction(() => {
+    const seen = new Set();
+    window.__ug.scene.traverse(o => { if (o.isMesh && o.userData.type === 'tube-line' && o.geometry.type === 'TubeGeometry') seen.add(o.userData.lineId); });
+    return seen.has('northern') && seen.has('victoria');
+  }, null, { timeout: 120000 });
 }
 
 // Sets Master through the real HUD input and lands every structure morph.
@@ -262,4 +269,59 @@ test('M25 vehicles and Overground cars keep true proportions on grades at every 
     expect(r.og.stretch, `Overground stretch at Master ${r.m}`).toBeLessThan(1e-3);
   }
   expect(rows.some(r => r.graded > 0), 'some near vehicles are on a grade').toBe(true);
+});
+
+// Fix round 2: a census, not a sample. Every TubeGeometry in the scene (tube
+// and DLR/Elizabeth bores, the Thames Tideway, the Lee Tunnel, the Bazalgette
+// sewers and their glow shells, bridge cables and arches) must show a round
+// cross-section on screen at any Master. Each ring is taken through its
+// material's true-proportion patch, the mesh's world matrix and the display
+// ratio, exactly as the GPU draws it. Before the fix the Tideway, Lee and
+// sewer rings read min/max radius 0.22 at Master 1.1.
+test('every tube cross-section in the scene is round on screen at Master 1.1 and 10', async ({ page }) => {
+  test.setTimeout(300000);
+  await ready(page);
+  await page.waitForFunction(() => {
+    const s = window.__ug.scene;
+    return s.getObjectByName('tideway-system') && s.getObjectByName('sewer-tunnels') && s.getObjectByName('lee-tunnel');
+  }, null, { timeout: 60000 });
+  const rows = await page.evaluate(async ({ setMasterSrc }) => {
+    const u = window.__ug, T = window.__ugTHREE, setMaster = eval(setMasterSrc);
+    const meshes = [];
+    u.scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && o.geometry?.type === 'TubeGeometry' && !Array.isArray(o.material)) meshes.push(o); });
+    const out = [];
+    for (const m of [1.1, 10]) {
+      setMaster(m);
+      const ratio = u.masterHeight.ratio, k = u.trueProportion.trueProportionUniform.value;
+      let worst = { roundness: 1, name: '' };
+      const named = {};
+      for (const mesh of meshes) {
+        mesh.updateWorldMatrix(true, false);
+        const g = mesh.geometry, p = g.attributes.position, ax = g.attributes.trueAxisY;
+        const mode = mesh.material.userData.trueProportion, ring = g.parameters.radialSegments + 1, rings = p.count / ring;
+        let meshWorst = 1;
+        for (const r of [0, Math.floor(rings / 3), Math.floor((2 * rings) / 3), rings - 1]) {
+          const pts = [];
+          for (let j = 0; j < ring - 1; j++) {
+            const i = r * ring + j; let y = p.getY(i);
+            if (mode === 'axis') y = ax.getX(i) + (y - ax.getX(i)) * k; else if (mode === 'local') y *= k;
+            const w = new T.Vector3(p.getX(i), y, p.getZ(i)).applyMatrix4(mesh.matrixWorld); w.y *= ratio; pts.push(w);
+          }
+          const c = pts.reduce((s, q) => s.add(q), new T.Vector3()).multiplyScalar(1 / pts.length);
+          const radii = pts.map(q => q.distanceTo(c));
+          meshWorst = Math.min(meshWorst, Math.min(...radii) / Math.max(...radii));
+        }
+        const key = mesh.name.startsWith('tideway-') ? 'tideway' : mesh.name.startsWith('lee-') ? 'lee' : mesh.userData.type === 'sewer' ? 'sewer' : null;
+        if (key) named[key] = Math.min(named[key] ?? 1, meshWorst);
+        if (meshWorst < worst.roundness) worst = { roundness: meshWorst, name: mesh.name || mesh.userData.type || mesh.parent?.name };
+      }
+      out.push({ m, count: meshes.length, worst, named });
+    }
+    return out;
+  }, { setMasterSrc });
+  for (const r of rows) {
+    expect(r.count).toBeGreaterThan(50);
+    for (const key of ['tideway', 'lee', 'sewer']) expect(r.named[key], `${key} present and round at Master ${r.m}`).toBeGreaterThan(0.99);
+    expect(r.worst.roundness, `roundest-worst tube ${r.worst.name} at Master ${r.m}`).toBeGreaterThan(0.99);
+  }
 });
