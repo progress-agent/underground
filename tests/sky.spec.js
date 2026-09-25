@@ -9,10 +9,11 @@
 //   2. Sky and disc are never drawn underground or underwater.
 //   3. The sky responds to the Dawn-to-Dusk slider, and the GPU matches the
 //      CPU mirror (sky.js skyRadianceAt) that the fog coupling relies on.
-//   4. ?sky=<name> selects a look without skipping the opening; the hidden
-//      Sky row switches looks live.
-//   5. The air fog equals the sky's own colour on the horizon (default look).
-//   6. With bloom, no look at any sun position produces a NaN or black frame.
+//   4. Clear is the only sky (25Sep26f, D-039): ?sky= is ignored and does not
+//      skip the opening, and there is no Sky row.
+//   5. The air fog equals the sky's own colour on the horizon.
+//   6. With bloom, no sun position produces a NaN or black frame.
+// Sun glare, the painted aureole and the blue line: tests/sun-glare.spec.js.
 //
 // Deliberately NOT measured: frame times (the GPU is shared during the sprint).
 
@@ -42,9 +43,16 @@ async function setSun(page, t) {
   await frames(page, 3);
 }
 
+// Disc pixels are those brighter than this (linear luminance). The sky and its
+// painted aureole stay under GLOW_CEILING (0.86); the disc adds at least
+// 2.4 x 0.6 (horizon dimming) x 0.55 (limb) = 0.79 on top. Until 25Sep26f the
+// disc was about 38x the sun colour and this cut was 2; Lane L (D-039) brought
+// the disc down to a modest level just over the bloom threshold.
+const DISC_PIXEL_LUMA = 1.2;
+
 // Render the live scene (no post-processing) into a float target through a
 // narrow camera aimed along the light direction; return disc statistics.
-const measureDisc = (page, { fovDeg = 2, size = 256 } = {}) => page.evaluate(({ fovDeg, size }) => {
+const measureDisc = (page, { fovDeg = 2, size = 256 } = {}) => page.evaluate(({ fovDeg, size, DISC_PIXEL_LUMA }) => {
   const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
   const sunLight = u.scene.getObjectByName('sunLight');
   const light = sunLight.position.clone().sub(sunLight.target.position).normalize();
@@ -69,7 +77,7 @@ const measureDisc = (page, { fovDeg = 2, size = 256 } = {}) => page.evaluate(({ 
   for (let i = 0; i < size * size; i++) {
     const l = lum(i);
     if (!Number.isFinite(l)) { nan++; continue; }
-    if (l > 2) { n++; sx += i % size + 0.5; sy += Math.floor(i / size) + 0.5; }
+    if (l > DISC_PIXEL_LUMA) { n++; sx += i % size + 0.5; sy += Math.floor(i / size) + 0.5; }
   }
   const focal = (size / 2) / Math.tan(fovDeg / 2 * Math.PI / 180);
   // Sky outside the disc and its one-pixel anti-aliased rim stays under bloom.
@@ -86,7 +94,7 @@ const measureDisc = (page, { fovDeg = 2, size = 256 } = {}) => page.evaluate(({ 
     lightVsUniformDeg: light.angleTo(uni.uSunDir.value) * 180 / Math.PI,
     visible: window.__ugSky.mesh.visible,
   };
-}, { fovDeg, size });
+}, { fovDeg, size, DISC_PIXEL_LUMA });
 
 test('the disc sits on the light direction at 0.53 degrees, at any Master height', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -166,7 +174,9 @@ const skySamples = page => page.evaluate(() => {
     r.setRenderTarget(null); rt.dispose();
     // Direction of the centre of pixel (4,4) of an 8x8 target.
     const ndc = new T.Vector3((4.5 / 8) * 2 - 1, (4.5 / 8) * 2 - 1, 0.5).unproject(cam).sub(cam.position).normalize();
-    out.push({ gpu: [px[0], px[1], px[2]], cpu: K.sample(ndc).toArray() });
+    // sampleDisplayed: the sky as painted, with the aureole the shader adds
+    // round the sun since 25Sep26f (Lane L); sample() is the fog's sky without it.
+    out.push({ gpu: [px[0], px[1], px[2]], cpu: K.sampleDisplayed(ndc).toArray() });
   }
   return out;
 });
@@ -190,31 +200,34 @@ test('the sky follows the slider and the GPU matches the CPU mirror', async ({ p
   expect(differs(at.dawn, at.dusk)).toBe(true);
 });
 
-test('?sky= selects a look, keeps the opening, and the hidden row switches looks', async ({ page }) => {
-  test.setTimeout(240000); // three page loads
+test('Clear is the only sky: ?sky= is ignored, keeps the opening, and there is no Sky row', async ({ page }) => {
+  test.setTimeout(240000); // two page loads
   await page.goto('/?buildings=baked&sky=steel');
   await page.waitForFunction(() => !!(window.__ug?.camera && window.__ugSky), null, { timeout: 60000 });
-  // D-028: a render setting must not skip the opening's high start.
+  // D-028: a stale render setting must not skip the opening's high start.
   expect(await page.evaluate(() => window.__ug.intro.isRunning())).toBe(true);
-  expect(await page.evaluate(() => window.__ugSky.look)).toBe('steel');
+  const api = await page.evaluate(() => ({
+    look: window.__ugSky.look, looks: window.__ugSky.looks,
+    setLook: typeof window.__ugSky.setLook, mount: typeof window.__ugSky.mountControls,
+  }));
+  expect(api).toEqual({ look: 'clear', looks: ['clear'], setLook: 'undefined', mount: 'undefined' });
   await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
-  await expect(page.locator('#skyLookRow')).toBeVisible();
-  await page.selectOption('#skyLook', 'haze');
-  expect(await page.evaluate(() => window.__ugSky.look)).toBe('haze');
-  expect(new URL(page.url()).searchParams.get('sky')).toBe('haze');
-
-  // Without ?sky= the row is hidden and the default look applies; a
-  // double-click on the Sun label reveals it.
-  await boot(page);
-  const def = await page.evaluate(() => window.__ugSky.look);
-  expect(['clear', 'haze', 'steel']).toContain(def);
-  await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
-  await expect(page.locator('#skyLookRow')).toBeHidden();
+  expect(await page.locator('#skyLookRow, #skyLook').count()).toBe(0);
+  // Double-clicking "Sun:" used to reveal the row; it reveals nothing now.
   await page.dblclick('label[for="sunTime"]');
-  await expect(page.locator('#skyLookRow')).toBeVisible();
-  await page.goto('/?fast=1&buildings=baked&sky=nonsense');
-  await page.waitForFunction(() => !!window.__ugSky, null, { timeout: 60000 });
-  expect(await page.evaluate(() => window.__ugSky.look)).toBe(def);
+  expect(await page.locator('#skyLookRow, #skyLook').count()).toBe(0);
+  // The picture with ?sky= is the picture without it.
+  const uniforms = () => page.evaluate(() => {
+    const u = window.__ugSky.mesh.material.uniforms;
+    return [u.uTauM.value, u.uMieG.value, u.uExposure.value, u.uKeyMix.value, u.uSaturation.value, u.uHorizonGlow.value];
+  });
+  await page.goto('/?fast=1&buildings=baked&sky=flat');
+  await page.waitForFunction(() => !!window.__ugSky && window.__ugSky.status.updates > 3, null, { timeout: 60000 });
+  const withParam = await uniforms();
+  expect(await page.evaluate(() => window.__ugSky.look)).toBe('clear');
+  await boot(page);
+  await page.waitForFunction(() => window.__ugSky.status.updates > 3, null, { timeout: 60000 });
+  expect(await uniforms()).toEqual(withParam);
 });
 
 test('the air fog is the sky colour on the horizon ahead', async ({ page }) => {
@@ -238,7 +251,7 @@ test('the air fog is the sky colour on the horizon ahead', async ({ page }) => {
   }
 });
 
-test('no look at any sun position gives a NaN or black frame through bloom', async ({ page }) => {
+test('no sun position gives a NaN or black frame through bloom', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 600 });
   await boot(page);
   await page.evaluate(() => window.__ug.setRenderQualityMode('manual'));
@@ -254,8 +267,7 @@ test('no look at any sun position gives a NaN or black frame through bloom', asy
     }
     return { mean: sum / (w * h), blackFraction: black / (w * h) };
   });
-  for (const look of ['clear', 'haze', 'steel', 'flat']) {
-    await page.evaluate(l => window.__ugSky.setLook(l, { syncUrl: false }), look);
+  for (const look of ['clear']) {
     for (const t of [0, null, 0.5, 1]) {
       await setSun(page, t);
       // Low over the Pool of London, facing the sun.
@@ -280,7 +292,7 @@ test('no look at any sun position gives a NaN or black frame through bloom', asy
 // of the scene hidden the same disc is drawn whole.
 test('the low sun sinks behind the land in front of it', async ({ page }) => {
   await boot(page);
-  const count = skyOnly => page.evaluate(skyOnly => {
+  const count = skyOnly => page.evaluate(({ skyOnly, DISC_PIXEL_LUMA }) => {
     const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, cam = u.camera;
     const sl = u.scene.getObjectByName('sunLight');
     const light = sl.position.clone().sub(sl.target.position).normalize();
@@ -297,9 +309,9 @@ test('the low sun sinks behind the land in front of it', async ({ page }) => {
     cam.fov = saved.fov; cam.aspect = saved.aspect; cam.updateProjectionMatrix();
     cam.quaternion.copy(saved.quat); cam.updateMatrixWorld(true);
     let n = 0;
-    for (let i = 0; i < S * S; i++) if (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2] > 2) n++;
+    for (let i = 0; i < S * S; i++) if (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2] > DISC_PIXEL_LUMA) n++;
     return n;
-  }, skyOnly);
+  }, { skyOnly, DISC_PIXEL_LUMA });
   await setSun(page, 0);
   for (const mh of [1.1, 5]) {
     await page.evaluate(v => window.__ug.camera.userData.masterHeightController.setValue(v), mh);

@@ -43,11 +43,31 @@
 // screen (the angle between the displayed ray and the displayed light
 // direction): an apparent size is a property of the picture, so the disc stays
 // round and 0.53 degrees across at every Master height. Coloured by the
-// Dawn-to-Dusk slider's sun colour. It is written as HDR light far above the bloom
-// threshold, so the existing UnrealBloom pass paints its halo; nothing extra is
-// rendered for it. Because the scene draws over the sky, hills, towers and the
-// map's own edge hide the disc when they stand in front of it, and the
-// below-horizon abyss hides everything under 0 degrees.
+// Dawn-to-Dusk slider's sun colour. Because the scene draws over the sky,
+// hills, towers and the map's own edge hide the disc when they stand in front
+// of it, and the below-horizon abyss hides everything under 0 degrees.
+//
+// SUN GLARE (sprint 25Sep26f, Lane L, D-039). Until this lane the disc was
+// written at about 38x the sun colour and the bloom pass painted its halo.
+// UnrealBloom's blur of so hot a point is a large soft SQUARE, and at a low sun
+// that square spread over the ground and the horizon in front of the sun. Now:
+//   - the disc has a fixed, modest luminance (CLEAR_SKY.discLuminance, 2.4,
+//     dimming to 60% at the horizon), just over the bloom threshold, so bloom
+//     adds only a small round flare;
+//   - the glow round the sun, the aureole, is painted here: two exponential
+//     falloffs in on-screen angle, so it is round, and on the sky only (it is
+//     drawn in the sky pass, so anything standing in front hides it);
+//   - the aureole rolls off under GLOW_CEILING, below the bloom threshold, so
+//     it never feeds the bloom's square either.
+//
+// THE BLUE LINE (25Sep26f note 12). The horizon glow's azimuth term was
+// pow(0.5 + 0.5 * az, n), with az the cosine between a ray's and the sun's
+// compass directions. At the anti-solar azimuth az rounds a hair below -1, the
+// base goes negative, and GLSL's pow() of a negative base is undefined (NaN on
+// Apple's Metal): a one-pixel dotted column of dark pixels standing on the
+// horizon exactly opposite the sun. Jordan saw it looking north-west over
+// Finchley (morning sun, south-east) and north over Wood Green (near-noon sun).
+// az is now clamped to [-1, 1] in both the shader and its CPU mirror.
 //
 // AIR ONLY. The sky's weight is sun.js's air weight, exactly 0 for any camera
 // below the local surface or in the river. At weight 0 the mesh is not drawn at
@@ -70,7 +90,7 @@
 // operations per pixel. Nothing is allocated per frame.
 
 import * as THREE from 'three';
-import { SKY_LOOKS, DEFAULT_SKY_LOOK, FLAT_SKY, resolveSkyLookName, skyLookNames } from './sky-looks.js';
+import { CLEAR_SKY, DEFAULT_SKY_LOOK } from './sky-looks.js';
 
 const DEG = Math.PI / 180;
 
@@ -100,6 +120,13 @@ export const MIE_PHASE_CAP = 5;
 // bloom's own; a glowing sky would otherwise bloom into a white sheet.
 export const SKY_KNEE = 0.5;
 export const SKY_CEILING = 0.8;
+// The painted aureole may lift the sky above SKY_CEILING, but rolls off
+// towards GLOW_CEILING, still under the bloom threshold (0.88): the sky's glow
+// is the shader's, never the bloom's.
+export const GLOW_CEILING = 0.86;
+export const BLOOM_THRESHOLD = 0.88;
+// The disc dims towards the horizon to this fraction of its luminance.
+export const DISC_HORIZON_FRACTION = 0.6;
 
 const LUMA = [0.2126, 0.7152, 0.0722];
 
@@ -165,6 +192,11 @@ export function createSkyParams() {
     keySky: new THREE.Color(), keyMix: 0,
     discColor: new THREE.Color(),
     discRadius: SUN_ANGULAR_RADIUS,
+    // Painted aureole (Lane L, 25Sep26f): colour of the sunlight in the air,
+    // and the two falloffs (weight, e-folding angle in radians, on screen).
+    aureoleColor: new THREE.Color(),
+    aureoleCore: 0, aureoleCoreRad: 1 * DEG,
+    aureoleSkirt: 0, aureoleSkirtRad: 6 * DEG,
     // Master height ratio of the viewing camera (display y = canonical y x
     // ratio) and the light direction as that camera displays it: only the
     // disc's on-screen size uses them.
@@ -180,16 +212,20 @@ export function createSkyParams() {
   };
 }
 
+function lumaOf(c) { return c.r * LUMA[0] + c.g * LUMA[1] + c.b * LUMA[2]; }
+
 function smooth01(x) { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); }
 
 /**
- * Fill `out` for a look and a sun.js sunState. `direction` is the light's
- * direction towards the sun (defaults to the state's). Pure.
+ * Fill `out` for a sun.js sunState. `direction` is the light's direction
+ * towards the sun (defaults to the state's). Pure.
+ *
+ * The first argument is the retired look name (25Sep26f: Clear is the only
+ * sky). It is accepted and ignored so existing callers keep working.
  */
-export function computeSkyParams(lookName, state, { direction = null, out = createSkyParams() } = {}) {
-  const name = resolveSkyLookName(lookName);
-  const look = SKY_LOOKS[name] ?? SKY_LOOKS[DEFAULT_SKY_LOOK];
-  out.look = name;
+export function computeSkyParams(_lookName, state, { direction = null, out = createSkyParams() } = {}) {
+  const look = CLEAR_SKY;
+  out.look = DEFAULT_SKY_LOOK;
   out.sunDir.copy(direction ?? state.direction).normalize();
   const sinE = Math.max(out.sunDir.y, 0);
   const elevDeg = Math.asin(Math.min(1, sinE)) / DEG;
@@ -229,10 +265,18 @@ export function computeSkyParams(lookName, state, { direction = null, out = crea
   out.fogCoupling = look.fogCoupling;
   out.fogGain = look.fogGain;
   out.fogMaxLum = look.fogMaxLum;
-  // Disc: the slider's sun colour, dimmer as it nears the horizon.
-  const discScale = look.discIntensity * (0.35 + 0.65 * smooth01(elevDeg / 20));
-  out.discColor.copy(state.sunColor).multiplyScalar(discScale);
+  // Disc: the slider's sun colour at a fixed luminance, dimmer near the horizon.
+  const discLum = look.discLuminance * (DISC_HORIZON_FRACTION + (1 - DISC_HORIZON_FRACTION) * smooth01(elevDeg / 20));
+  const sunLum = Math.max(lumaOf(state.sunColor), 1e-6);
+  out.discColor.copy(state.sunColor).multiplyScalar(discLum / sunLum);
   out.discRadius = SUN_ANGULAR_RADIUS;
+  // Aureole: the sunlight in the air (warm when the sun is low), unit luminance.
+  const illumLum = Math.max(lumaOf(out.illum), 1e-6);
+  out.aureoleColor.copy(out.illum).multiplyScalar(1 / illumLum);
+  out.aureoleCore = look.aureoleCore;
+  out.aureoleCoreRad = look.aureoleCoreDeg * DEG;
+  out.aureoleSkirt = look.aureoleSkirt;
+  out.aureoleSkirtRad = look.aureoleSkirtDeg * DEG;
   return out;
 }
 
@@ -248,6 +292,12 @@ export function displaySunDirection(p, ratio = 1, out = p.sunDirDisplay) {
  * skyRadiance() in the fragment shader: keep the two in lockstep.
  */
 export function skyRadianceAt(dir, p, out = new THREE.Color()) {
+  skyCoreAt(dir, p, out);
+  return abyssOver(dir, out);
+}
+
+// The sky before the below-horizon abyss (skyRadiance() in the shader).
+function skyCoreAt(dir, p, out) {
   const el = Math.max(dir.y, 0);
   const mu = dir.x * p.sunDir.x + dir.y * p.sunDir.y + dir.z * p.sunDir.z;
   const m = 1 / (el + p.airmassK);
@@ -256,7 +306,8 @@ export function skyRadianceAt(dir, p, out = new THREE.Color()) {
   const phaseM = Math.min((1 - g * g) / (denom * Math.sqrt(denom)), MIE_PHASE_CAP);
   const phaseR = 0.75 * (1 + mu * mu);
   const lh = Math.hypot(dir.x, dir.z), ls = Math.hypot(p.sunDir.x, p.sunDir.z);
-  const az = lh > 1e-5 && ls > 1e-5 ? (dir.x * p.sunDir.x + dir.z * p.sunDir.z) / (lh * ls) : 0;
+  // Clamped: a hair outside [-1, 1] makes the GLSL pow() below NaN (the blue line).
+  const az = lh > 1e-5 && ls > 1e-5 ? Math.min(1, Math.max(-1, (dir.x * p.sunDir.x + dir.z * p.sunDir.z) / (lh * ls))) : 0;
   const glow = p.horizonGlow * Math.pow(0.5 + 0.5 * az, p.horizonGlowPow) * Math.exp(-el * HORIZON_BAND);
   const tau = [p.tauR.x, p.tauR.y, p.tauR.z];
   const illum = [p.illum.r, p.illum.g, p.illum.b];
@@ -277,7 +328,11 @@ export function skyRadianceAt(dir, p, out = new THREE.Color()) {
   }
   const l2 = c[0] * LUMA[0] + c[1] * LUMA[1] + c[2] * LUMA[2];
   const k = softCeiling(l2) / Math.max(l2, 1e-6);
-  out.setRGB(c[0] * k, c[1] * k, c[2] * k);
+  return out.setRGB(c[0] * k, c[1] * k, c[2] * k);
+}
+
+// The abyss over the sky below its opaque line (as in the shader, without the haze).
+function abyssOver(dir, out) {
   if (dir.y < 0) {
     const below = Math.asin(Math.min(1, -dir.y / Math.hypot(dir.x, dir.y, dir.z))) / DEG;
     const w = abyssWeight(below);
@@ -292,6 +347,46 @@ export function softCeiling(l) {
   if (l <= SKY_KNEE) return l;
   const span = SKY_CEILING - SKY_KNEE;
   return SKY_KNEE + span * (1 - Math.exp(-(l - SKY_KNEE) / span));
+}
+
+/** Roll-off of the sky plus aureole: identity to SKY_CEILING, then to GLOW_CEILING. */
+export function glowCeiling(l) {
+  if (l <= SKY_CEILING) return l;
+  const span = GLOW_CEILING - SKY_CEILING;
+  return SKY_CEILING + span * (1 - Math.exp(-(l - SKY_CEILING) / span));
+}
+
+/** Aureole luminance weight at an on-screen angle (radians) from the sun. */
+export function aureoleWeight(angle, p) {
+  return p.aureoleCore * Math.exp(-angle / p.aureoleCoreRad) + p.aureoleSkirt * Math.exp(-angle / p.aureoleSkirtRad);
+}
+
+/**
+ * On-screen angle (radians) between a canonical ray and the sun, as the
+ * viewing camera displays both (p.masterRatio, p.sunDirDisplay).
+ */
+const _dd = new THREE.Vector3(), _cr = new THREE.Vector3();
+export function displayedSunAngle(dir, p) {
+  _dd.set(dir.x, dir.y * p.masterRatio, dir.z).normalize();
+  return Math.atan2(_cr.crossVectors(_dd, p.sunDirDisplay).length(), _dd.dot(p.sunDirDisplay));
+}
+
+/**
+ * The sky as the shader paints it, disc excluded: the sky, plus the aureole
+ * (within 60 degrees of the sun, weighted by the disc weight) rolled off under
+ * GLOW_CEILING, then the abyss below its line. `angle` defaults to the ray's
+ * displayed angle to the sun. CPU mirror of the fragment shader for tests.
+ */
+export function skyWithAureoleAt(dir, p, out = new THREE.Color(), angle = displayedSunAngle(dir, p)) {
+  skyCoreAt(dir, p, out);
+  const dw = Math.min(1, Math.max(0, p.discWeight));
+  if (dw > 0 && Math.cos(angle) > 0.5) {
+    const w = aureoleWeight(angle, p) * dw;
+    out.r += p.aureoleColor.r * w; out.g += p.aureoleColor.g * w; out.b += p.aureoleColor.b * w;
+    const l = lumaOf(out);
+    if (l > SKY_CEILING) out.multiplyScalar(glowCeiling(l) / l);
+  }
+  return abyssOver(dir, out);
 }
 
 /**
@@ -345,6 +440,8 @@ uniform vec3 uKeySky;
 uniform float uKeyMix;
 uniform vec3 uDiscColor;
 uniform float uDiscRadius;
+uniform vec3 uAureoleColor;
+uniform vec4 uAureole;
 uniform float uMasterRatio;
 uniform vec3 uSunDirDisplay;
 uniform float uWeight;
@@ -367,7 +464,8 @@ vec3 skyRadiance( vec3 d ) {
   float phaseM = min( ( 1.0 - g * g ) / ( denom * sqrt( denom ) ), ${f(MIE_PHASE_CAP)} );
   float phaseR = 0.75 * ( 1.0 + mu * mu );
   float lh = length( d.xz ), ls = length( uSunDir.xz );
-  float az = ( lh > 1e-5 && ls > 1e-5 ) ? dot( d.xz, uSunDir.xz ) / ( lh * ls ) : 0.0;
+  // Clamped: pow() of a negative base is NaN (the blue line, 25Sep26f).
+  float az = ( lh > 1e-5 && ls > 1e-5 ) ? clamp( dot( d.xz, uSunDir.xz ) / ( lh * ls ), -1.0, 1.0 ) : 0.0;
   float glow = uHorizonGlow * pow( 0.5 + 0.5 * az, uHorizonGlowPow ) * exp( -el * ${f(HORIZON_BAND)} );
   vec3 tauE = uTauR + vec3( uTauM );
   vec3 inscatter = 1.0 - exp( -tauE * m );
@@ -401,6 +499,19 @@ void main() {
   // Angular size of this pixel on screen (radians), in uniform control flow.
   float aa = max( 0.5 * length( fwidth( dd ) ), 1e-7 );
   vec3 sky = highCloud( skyRadiance( d ), d );
+  // Painted aureole (Lane L, 25Sep26f): round on screen, sky only, rolled off
+  // under the bloom threshold. Mirror of skyWithAureoleAt() in sky.js.
+  float sunCos = dot( dd, uSunDirDisplay );
+  if ( uDiscWeight > 0.0 && sunCos > 0.5 ) {
+    float ang = atan( length( cross( dd, uSunDirDisplay ) ), sunCos );
+    float w = uAureole.x * exp( -ang / uAureole.y ) + uAureole.z * exp( -ang / uAureole.w );
+    sky += uAureoleColor * ( w * uDiscWeight );
+    float lg = dot( sky, vec3( ${LUMA.map(f).join(', ')} ) );
+    if ( lg > ${f(SKY_CEILING)} ) {
+      float rolled = ${f(SKY_CEILING)} + ${f(GLOW_CEILING - SKY_CEILING)} * ( 1.0 - exp( -( lg - ${f(SKY_CEILING)} ) / ${f(GLOW_CEILING - SKY_CEILING)} ) );
+      sky *= rolled / lg;
+    }
+  }
   if ( d.y < 0.0 ) {
     float below = degrees( asin( min( -d.y, 1.0 ) ) );
     vec3 abyssHazed = mix( abyss( below ), uHaze, abyssHaze( d, uHazeNear, uHazeFar ) * uHazeWeight );
@@ -412,7 +523,7 @@ void main() {
   // where the canonical light direction lands: exact for tiny angles, where
   // 1 - dot() would lose most of its float precision. Only pixels near the
   // sun pay for it.
-  if ( uDiscWeight > 0.0 && dot( dd, uSunDirDisplay ) > 0.99 ) {
+  if ( uDiscWeight > 0.0 && sunCos > 0.99 ) {
     float s = length( cross( dd, uSunDirDisplay ) );
     float cover = 1.0 - smoothstep( uDiscRadius - aa, uDiscRadius + aa, s );
     float r = clamp( s / uDiscRadius, 0.0, 1.0 );
@@ -447,6 +558,8 @@ function createSkyMesh() {
     uKeyMix: { value: 0 },
     uDiscColor: { value: new THREE.Color() },
     uDiscRadius: { value: SUN_ANGULAR_RADIUS },
+    uAureoleColor: { value: new THREE.Color() },
+    uAureole: { value: new THREE.Vector4() },
     uMasterRatio: { value: 1 },
     uSunDirDisplay: { value: new THREE.Vector3(0, 1, 0) },
     uWeight: { value: 0 },
@@ -492,6 +605,8 @@ function writeUniforms(u, p) {
   u.uKeyMix.value = p.keyMix;
   u.uDiscColor.value.copy(p.discColor);
   u.uDiscRadius.value = p.discRadius;
+  u.uAureoleColor.value.copy(p.aureoleColor);
+  u.uAureole.value.set(p.aureoleCore, p.aureoleCoreRad, p.aureoleSkirt, p.aureoleSkirtRad);
   u.uMasterRatio.value = p.masterRatio;
   u.uSunDirDisplay.value.copy(p.sunDirDisplay);
   u.uWeight.value = p.weight;
@@ -503,42 +618,25 @@ function writeUniforms(u, p) {
   u.uHazeWeight.value = p.hazeWeight;
 }
 
-// ── URL ─────────────────────────────────────────────────────────────────────
-
-/** Look requested by ?sky=<name>; null when the parameter is absent. */
-export function readSkyLookFromUrl(search = typeof location !== 'undefined' ? location.search : '') {
-  const sp = new URLSearchParams(search);
-  return sp.has('sky') ? resolveSkyLookName(sp.get('sky')) : null;
-}
-
 // ── System ──────────────────────────────────────────────────────────────────
 
 /**
  * Add the sky to the scene. environment.js drives it each frame through
- * attachSky(); main.js only creates it and mounts the hidden control.
+ * attachSky(); main.js only creates it.
+ *
+ * Interface change (25Sep26f, Lane L): Clear is the only sky, so the system
+ * no longer has setLook(), onChange() or mountControls(), and ignores ?sky=.
+ * `look` (always 'clear'), `looks`, `params`, `status`, `update`, `setClear`,
+ * `setHaze`, `sample` and getSkyParams() are unchanged; `sampleDisplayed` is new
+ * (the sky with its painted aureole, as the shader draws it).
  */
-export function createSkySystem({ scene, look = null } = {}) {
+export function createSkySystem({ scene } = {}) {
   const mesh = createSkyMesh();
   const params = createSkyParams();
-  let lookName = resolveSkyLookName(look ?? readSkyLookFromUrl() ?? DEFAULT_SKY_LOOK);
-  const listeners = new Set();
+  const lookName = DEFAULT_SKY_LOOK;
   const status = { weight: 0, discWeight: 0, visible: false, look: lookName, updates: 0 };
   const forward = new THREE.Vector3();
   if (scene) scene.add(mesh);
-
-  function setLook(name, { syncUrl = true } = {}) {
-    lookName = resolveSkyLookName(name);
-    status.look = lookName;
-    if (syncUrl && typeof history !== 'undefined' && typeof location !== 'undefined') {
-      try {
-        const url = new URL(location.href);
-        url.searchParams.set('sky', lookName);
-        history.replaceState(history.state, '', url.toString());
-      } catch { /* a sandboxed frame may refuse; the look still changes */ }
-    }
-    for (const fn of listeners) fn(api);
-    return lookName;
-  }
 
   /**
    * Per frame, from updateEnvironment. `state` is sun.js's sunState (null when
@@ -554,16 +652,14 @@ export function createSkySystem({ scene, look = null } = {}) {
       mesh.visible = false;
       return 0;
     }
-    const flat = lookName === FLAT_SKY;
-    computeSkyParams(flat ? DEFAULT_SKY_LOOK : lookName, state, { direction, out: params });
-    params.look = lookName;
+    computeSkyParams(lookName, state, { direction, out: params });
     displaySunDirection(params, camera?.userData?.masterHeightController?.ratio ?? 1);
-    params.weight = flat ? 0 : THREE.MathUtils.clamp(weight, 0, 1);
+    params.weight = THREE.MathUtils.clamp(weight, 0, 1);
     params.discWeight = THREE.MathUtils.clamp(discWeight, 0, 1);
     status.weight = params.weight;
     status.discWeight = params.discWeight;
     status.visible = mesh.visible = true;
-    if (flat || !fogOut || !camera) return 0;
+    if (!fogOut || !camera) return 0;
     camera.getWorldDirection(forward);
     horizonColorToward(forward, params, fogOut);
     return params.fogCoupling;
@@ -586,11 +682,12 @@ export function createSkySystem({ scene, look = null } = {}) {
   const api = {
     mesh, params, status,
     get look() { return lookName; },
-    looks: [...skyLookNames()],
-    setLook, update, setClear, setHaze,
+    looks: [lookName],
+    update, setClear, setHaze,
+    // The sky the fog is coupled to (no aureole; unchanged since 24Sep26h).
     sample: (dir, out) => skyRadianceAt(dir, params, out),
-    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    mountControls: anchor => mountSkyControls(api, anchor),
+    // The sky as painted on screen, aureole included (25Sep26f, Lane L).
+    sampleDisplayed: (dir, out) => skyWithAureoleAt(dir, params, out),
   };
   if (import.meta.env?.DEV && typeof window !== 'undefined') window.__ugSky = api;
   return api;
@@ -598,31 +695,3 @@ export function createSkySystem({ scene, look = null } = {}) {
 
 /** Colours a cloud layer needs to sit in this sky (cloud scope). Read-only. */
 export function getSkyParams(system) { return system?.params ?? null; }
-
-// ── Hidden settings row ─────────────────────────────────────────────────────
-
-/**
- * A "Sky" look picker placed after `anchor` (the sun's rows) in the settings
- * HUD. Hidden unless the URL carries ?sky=, or until the "Sun:" label is
- * double-clicked: it exists for review, not for everyday use.
- */
-export function mountSkyControls(system, anchor) {
-  if (typeof document === 'undefined') return null;
-  const parent = anchor?.parentNode ?? document.getElementById('hudDetails');
-  if (!parent) return null;
-  const row = document.createElement('p');
-  row.className = 'small';
-  row.id = 'skyLookRow';
-  const options = [...system.looks.map(n => [n, SKY_LOOKS[n].label]), [FLAT_SKY, 'Flat (before)']]
-    .map(([n, label]) => `<option value="${n}">${label}${n === DEFAULT_SKY_LOOK ? ' (default)' : ''}</option>`).join('');
-  row.innerHTML = `<label for="skyLook">Sky:</label> <select id="skyLook">${options}</select>`;
-  row.hidden = readSkyLookFromUrl() === null;
-  parent.insertBefore(row, anchor?.nextSibling ?? null);
-  const select = row.querySelector('#skyLook');
-  const render = () => { select.value = system.look; };
-  select.addEventListener('change', () => system.setLook(select.value));
-  document.querySelector('label[for="sunTime"]')?.addEventListener('dblclick', () => { row.hidden = !row.hidden; });
-  system.onChange(render);
-  render();
-  return { row, select };
-}
