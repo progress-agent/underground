@@ -44,6 +44,8 @@ export function createBalloonMode(ctx) {
     groundY: (x, z) => c.collision?.groundHeightAt?.(x, z) ?? c.getTerrainY?.(x, z) ?? null,
     collision: c.collision,
     waterSurfaceY: (x, z) => c.waterSurfaceAt?.(x, z) ?? null,
+    // s25:C: thermal lift under cumulus, on the world clock the clouds use.
+    updraft: (x, z, altM) => c.clouds?.updraftAt?.(x, z, altM, c.time) ?? 0,
   });
 
   function setWarp(on) {

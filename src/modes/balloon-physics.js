@@ -76,7 +76,8 @@ export function createBalloonState({ x = 0, y = 0, z = 0, windTime = 0 } = {}) {
  * Advance the balloon by `dt` REAL seconds; `warp` multiplies simulated time.
  * input: { burner: bool, vent: bool, warp: number (1 = real time) }
  * world: { VE, wind(altM, t) -> {dirRad, speedMps}, groundY(x, z),
- *          collision?: { moveAndSlide, standHeightAt }, waterSurfaceY?(x, z) }
+ *          collision?: { moveAndSlide, standHeightAt }, waterSurfaceY?(x, z),
+ *          updraft?(x, z, altM) -> real m/s (thermals under cumulus, s25:C) }
  */
 export function stepBalloon(state, input, dt, params = BALLOON_DEFAULTS, world = {}) {
   if (!(dt > 0)) return state;
@@ -105,8 +106,11 @@ function substep(s, dt, P, world) {
   s.dT += (P.heat * s.heat - s.dT / P.cool - (s.vent ? P.vent : 0)) * dt;
   s.dT = Math.min(MAX_DT_K, Math.max(0, s.dT));
 
-  // 2. Vertical: buoyancy against weight, linear drag.
-  s.vy += (P.lift * (s.dT - EQUILIBRIUM_DT) - P.damping * s.vy) * dt;
+  // 2. Vertical: buoyancy against weight, linear drag relative to the air.
+  // s25:C: under a cumulus the air itself rises (a thermal), so the drag pulls
+  // towards the updraft; world.updraft is optional and 0 elsewhere.
+  const up = world.updraft ? (world.updraft(s.pos.x, s.pos.z, s.altitude) || 0) : 0;
+  s.vy += (P.lift * (s.dT - EQUILIBRIUM_DT) - P.damping * (s.vy - up)) * dt;
 
   // 3. Horizontal: relax onto the wind at this altitude (above the terrain).
   const ground = world.groundY?.(s.pos.x, s.pos.z);

@@ -35,6 +35,11 @@ import { createSunSystem } from './sun.js';
 import { createSkySystem } from './sky.js';
 import { attachSky } from './environment.js';
 // ── /s24:S ──
+// ── s25:C ──
+// Importing clouds.js patches the lit shader chunks for cloud shadows; it must
+// precede any compile, as every import does.
+import { createCloudSystem } from './clouds.js';
+// ── /s25:C ──
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -1106,6 +1111,11 @@ const skySystem = createSkySystem({ scene });
 attachSky(skySystem);
 skySystem.mountControls(document.getElementById('sunShadows')?.closest('p') ?? null);
 // ── /s24:S ──
+// ── s25:C ──
+// Fair-weather cumulus and city-wide cloud shadows (D-039). Lit by the sun and
+// sky each frame; hidden underground and underwater. ?clouds=0 turns them off.
+const cloudSystem = createCloudSystem({ scene, sunSystem, skySystem });
+// ── /s25:C ──
 
 // Keep rim light for tube highlighting
 const rim = new THREE.DirectionalLight(0x9bd6ff, 0.65);
@@ -3961,6 +3971,10 @@ function tick(frameTime) {
   // Update lighting based on camera position
   updateLighting(camera, atmosphereLights,
     { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend });
+  // ── s25:C ── after the sun, sky and fog: clouds drift on the world clock
+  cloudSystem.update({ camera, time: modeSystem?.ctx.time ?? 0,
+    quality: renderQualityMode === 'auto' ? adaptiveQuality.get() : null });
+  // ── /s25:C ──
 
   // Inside-chalk clarity: release the chalk sheet (opacity + depthWrite) so
   // the network above is visible looking up. 0-gated above the chalk surface.
@@ -4023,6 +4037,9 @@ modeSystem.ctx.tubeNetwork = {
   // The rendered tunnels are twin bores this far either side of the centreline.
   get halfSpacing() { return twinTunnelsEnabled ? tunnelOffsetM : 0; },
 };
+// ── s25:C ── Balloon reads the thermal under each cumulus from here.
+modeSystem.ctx.clouds = cloudSystem;
+// ── /s25:C ──
 // ── /sprint:A2 ──
 
 requestAnimationFrame(tick);
