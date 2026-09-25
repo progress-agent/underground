@@ -3912,7 +3912,7 @@ function tick(frameTime) {
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
   // ── /sprint:C ──
   // ── s25:W ──
-  updateTidewayWhirlpools(surfaceSimulationDt);
+  updateTidewayWhirlpools(surfaceSimulationDt, camera);
   // ── /s25:W ──
   // ── sprint:F ──
   flightsGroup?.userData.update(surfaceSimulationDt, camera);

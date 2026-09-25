@@ -226,11 +226,11 @@ export function clampSewersUnderRiverBed() {
     t.path = path;
     if (!clamped && !t.wasClamped) continue;
     t.wasClamped = clamped > 0;
-    const segs = Math.min(1200, points.length * 2);
+    const segs = Math.min(500, points.length);
     t.tunnelMesh.geometry.dispose();
     t.tunnelMesh.geometry = new THREE.TubeGeometry(path, clamped ? segs : 100, t.radius, 10, false);
     t.glowMesh.geometry.dispose();
-    t.glowMesh.geometry = new THREE.TubeGeometry(path, clamped ? Math.round(segs * 0.8) : 80, t.radius * 1.3, 10, false);
+    t.glowMesh.geometry = new THREE.TubeGeometry(path, clamped ? Math.round(segs * 0.6) : 80, t.radius * 1.3, 10, false);
     for (const m of t.markers) {
       const cap = bedCapAt(m.position.x, m.position.z, t.radius);
       m.position.y = Math.min(m.userData.sourceY, cap);

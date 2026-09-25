@@ -538,10 +538,18 @@ export function snapTidewayShaftsToTerrain(getStructuralFallback) {
   }
 }
 
+// Beyond this range a whirlpool is sub-pixel (and under dark water): skip its
+// draws. Visibility is a pure function of camera position.
+export const WHIRLPOOL_DRAW_RANGE = 3000;
 /** Advance the whirlpools' animation by simulation time (pause-aware). */
-export function updateTidewayWhirlpools(dt) {
+export function updateTidewayWhirlpools(dt, camera = null) {
   if (Number.isFinite(dt) && dt > 0) whirlpoolTime += dt;
   if (whirlpoolMaterial) whirlpoolMaterial.userData.whirlpoolUniforms.uTime.value = whirlpoolTime;
+  const c = camera?.position;
+  if (c && whirlpoolGroup) for (const w of whirlpoolGroup.children) {
+    const k = w.userData.centre;
+    w.visible = Math.hypot(k.x - c.x, k.z - c.z, (w.geometry.boundingSphere?.center.y ?? 0) - c.y) < WHIRLPOOL_DRAW_RANGE;
+  }
 }
 export function setTidewayWhirlpoolTime(t) { whirlpoolTime = Math.max(0, +t || 0); updateTidewayWhirlpools(0); }
 export function getTidewayWhirlpools() { return whirlpoolGroup; }
