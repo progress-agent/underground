@@ -16,6 +16,14 @@ import {
   createRibbonMaterial,
   ELIZABETH_LINE_COLOUR,
 } from './crown-ribbon.js';
+import { BORE_DIAMETER_M, tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
+
+// D-039 (sprint 25Sep26f, Lane S): the bore is drawn at its true 6.2m internal
+// diameter and stays round at every Master height (true-proportion.js 'axis'
+// mode); Master only sets how deep it sits. The Shenfield surface branch keeps
+// its historical 7:9 thinner reading.
+const ELIZABETH_BORE_RADIUS_M = BORE_DIAMETER_M.elizabeth / 2;
+const SHENFIELD_RADIUS_M = ELIZABETH_BORE_RADIUS_M * 7 / 9;
 
 let crossrailData = null;
 
@@ -83,11 +91,11 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   const buildTube = (pts, radius, segments, opacity, branchName) => {
     if (pts.length < 2) return;
     const curve = new THREE.CatmullRomCurve3(pts.map(toVec3));
-    const geo = new THREE.TubeGeometry(curve, segments, radius, 12, false);
+    const geo = tubeAxisAttribute(new THREE.TubeGeometry(curve, segments, radius, 12, false));
     // Fresh factory material per tube (no clone — Material.clone() would drop
     // the onBeforeCompile haze injection anyway). Angle-stable: FrontSide +
     // depthWrite:true, emissive lift for readability at depth.
-    const mat = createTunnelMaterial({ color: 0xffd300, opacity });
+    const mat = patchTrueProportionMaterial(createTunnelMaterial({ color: 0xffd300, opacity }), { mode: 'axis' });
     injectInfraHaze(mat, HAZE_BAND);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
@@ -102,8 +110,8 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
     // Glow for deep sections
     if (opacity >= 0.7) {
-      const glowGeo = new THREE.TubeGeometry(curve, Math.floor(segments * 0.7), radius + 1, 12, false);
-      const glowMat = createGlowMaterial({ color: 0xffe066, opacity: 0.2 });
+      const glowGeo = tubeAxisAttribute(new THREE.TubeGeometry(curve, Math.floor(segments * 0.7), radius + 1, 12, false));
+      const glowMat = patchTrueProportionMaterial(createGlowMaterial({ color: 0xffe066, opacity: 0.2 }), { mode: 'axis' });
       injectInfraHaze(glowMat, HAZE_BAND);
       const glowMesh = new THREE.Mesh(glowGeo, glowMat);
       glowMesh.renderOrder = RENDER_ORDER.INFRA_TUNNEL;
@@ -143,7 +151,7 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Main trunk: Heathrow to Whitechapel (full diameter tunnel)
   if (mainPts.length >= 2) {
-    buildTube(mainPts, 9.0, 150, 0.72, 'Crossrail — Main Tunnel');
+    buildTube(mainPts, ELIZABETH_BORE_RADIUS_M, 150, 0.72, 'Crossrail — Main Tunnel');
   }
 
   // Get Whitechapel (last main trunk point) as branch junction
@@ -151,12 +159,12 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
 
   // Abbey Wood branch: prepend junction point for visual continuity
   if (abbeyWoodPts.length >= 1 && junction) {
-    buildTube([junction, ...abbeyWoodPts], 9.0, 60, 0.72, 'Crossrail — Abbey Wood Branch');
+    buildTube([junction, ...abbeyWoodPts], ELIZABETH_BORE_RADIUS_M, 60, 0.72, 'Crossrail — Abbey Wood Branch');
   }
 
   // Shenfield branch: surface railway, slightly thinner & more transparent
   if (shenfieldPts.length >= 1 && junction) {
-    buildTube([junction, ...shenfieldPts], 7.0, 100, 0.5, 'Crossrail — Shenfield Branch');
+    buildTube([junction, ...shenfieldPts], SHENFIELD_RADIUS_M, 100, 0.5, 'Crossrail — Shenfield Branch');
   }
 
   // Station markers at deep points (depth >= 25m)
@@ -164,11 +172,11 @@ export function createCrossrailTunnel(data, latLonToXZ, verticalScale = 3.0) {
   for (const p of deepStations) {
     const pos = toVec3(p);
     const markerGeo = new THREE.SphereGeometry(2, 12, 12);
-    const markerMat = new THREE.MeshBasicMaterial({
+    const markerMat = patchTrueProportionMaterial(new THREE.MeshBasicMaterial({
       color: 0xffd300,
       transparent: true,
       opacity: 0.7
-    });
+    })); // s25:S round at every Master
     const marker = new THREE.Mesh(markerGeo, markerMat);
     marker.position.copy(pos);
     marker.renderOrder = RENDER_ORDER.INFRA_TUNNEL;

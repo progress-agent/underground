@@ -22,10 +22,12 @@ test('eleven complete sites have finite geometry grounded independently, and sca
   });
   expect(before.sites.map(s=>s.id)).toEqual(LANDMARKS.map(s=>s.id));
   for(const s of before.sites){expect(s.meshes).toBeGreaterThan(0);expect(s.finite).toBe(true);expect(s.grounded).toBe(true);}
-  await page.locator('#buildingHeight').fill('1');
-  await page.locator('#buildingHeight').dispatchEvent('input');
+  // D-039 (sprint 25Sep26f): the Structure slider is gone. Landmarks follow
+  // Master instead, at true proportions: anchor scale.y = VE / Master, so at
+  // Master 5 (the old "Structure 1") every anchor is 1 and its base is unmoved.
+  await page.evaluate(()=>{const el=document.getElementById('masterHeight');el.value='5';el.dispatchEvent(new Event('input',{bubbles:true}));window.__ug.structureMorph.flush();});
   const after=await page.evaluate(()=>({bases:window.__ug.landmarkGroup.children.flatMap(s=>s.children.map(a=>a.position.y)),scales:window.__ug.landmarkGroup.children.flatMap(s=>s.children.map(a=>a.scale.y))}));
-  expect(after.bases).toEqual(before.bases);expect(after.scales.every(s=>s===1)).toBe(true);
+  expect(after.bases).toEqual(before.bases);expect(after.scales.every(s=>Math.abs(s-1)<1e-12)).toBe(true);
   const details=await page.evaluate(()=>{
     const u=window.__ug,T=window.__ugTHREE;
     const proxies=u.landmarkGroup.getObjectByName('landmark-site-westminster').children.filter(c=>c.userData.sourceHeight===96);

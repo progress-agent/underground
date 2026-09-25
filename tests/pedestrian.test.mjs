@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createScaleEase, REAL_MASTER, REAL_STRUCTURE } from '../src/modes/pedestrian-scale.js';
+import { createScaleEase, REAL_MASTER } from '../src/modes/pedestrian-scale.js';
+import { boreRadiusM } from '../src/true-proportion.js';
 import { PEDESTRIAN_TUNABLES, BODY, createBody, stepBody } from '../src/modes/pedestrian-body.js';
 import { createCollisionService } from '../src/modes/collision.js';
 import { readFileSync } from 'node:fs';
@@ -17,56 +18,59 @@ const P = Object.fromEntries(PEDESTRIAN_TUNABLES.map(d => [d.key, d.default]));
 
 // ── scale ease ───────────────────────────────────────────────────────────────
 
-function fakeSliders(master = 1.1, structure = 2) {
+function fakeSliders(master = 1.1) {
   // Quantise like the HUD <input type=range step=0.1> does, and count writes.
-  const s = { master, structure, writes: { master: 0, structure: 0 } };
+  // Since D-039 (sprint 25Sep26f) there is no Structure slider: structures keep
+  // true proportions at every Master, so the ease has only Master to move.
+  const s = { master, writes: { master: 0 } };
   const q = (v, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v * 10) / 10));
   return Object.assign(s, {
-    getMaster: () => s.master, getStructure: () => s.structure,
+    getMaster: () => s.master,
     setMaster: (v) => { s.writes.master++; s.master = q(v, 1, 10); return s.master; },
-    setStructure: (v) => { s.writes.structure++; s.structure = q(v, 1, 5); return s.structure; },
   });
 }
 
-test('entering eases the sliders to real scale over the ease time, then restores on leaving', () => {
-  const sl = fakeSliders(3.4, 2);
+test('entering eases Master to real scale over the ease time, then restores on leaving', () => {
+  const sl = fakeSliders(3.4);
   const ease = createScaleEase({ sliders: sl });
-  assert.deepEqual(ease.begin(), { master: 3.4, structure: 2 });
+  assert.deepEqual(ease.begin(), { master: 3.4 });
   const trace = [];
-  for (let i = 0; i < 30; i++) { ease.update(1 / 60, 1); trace.push([sl.master, sl.structure]); }
+  for (let i = 0; i < 30; i++) { ease.update(1 / 60, 1); trace.push(sl.master); }
   // Half way through (0.5s) it is in between, not snapped.
   const mid = trace[29];
-  assert.ok(mid[0] < 3.4 && mid[0] > REAL_MASTER, `master mid ${mid[0]}`);
-  assert.ok(mid[1] > 2 && mid[1] < REAL_STRUCTURE, `structure mid ${mid[1]}`);
+  assert.ok(mid < 3.4 && mid > REAL_MASTER, `master mid ${mid}`);
   for (let i = 0; i < 40; i++) ease.update(1 / 60, 1);
   assert.equal(sl.master, REAL_MASTER);
-  assert.equal(sl.structure, REAL_STRUCTURE);
   assert.equal(ease.running, false);
   // Monotonic: never overshoots or goes backwards.
-  for (let i = 1; i < trace.length; i++) {
-    assert.ok(trace[i][0] <= trace[i - 1][0] + 1e-9);
-    assert.ok(trace[i][1] >= trace[i - 1][1] - 1e-9);
-  }
-  // Structure writes are throttled (it resnaps the DLR): far fewer than frames.
-  assert.ok(sl.writes.structure <= 14, `structure writes ${sl.writes.structure}`);
-  assert.deepEqual(ease.restore(), { master: 3.4, structure: 2 });
+  for (let i = 1; i < trace.length; i++) assert.ok(trace[i] <= trace[i - 1] + 1e-9);
+  // Quantised to the slider's 0.1 step: at most one write per step (3.4 -> 1.0).
+  assert.ok(sl.writes.master <= 24, `master writes ${sl.writes.master}`);
+  assert.deepEqual(ease.restore(), { master: 3.4 });
   assert.equal(sl.master, 3.4);
+});
+
+test('the ease no longer owns a Structure channel (D-039)', () => {
+  // A legacy caller still offering Structure accessors is ignored entirely.
+  const sl = Object.assign(fakeSliders(2), { structure: 2, getStructure() { return this.structure; }, setStructure(v) { this.structure = v; return v; } });
+  const ease = createScaleEase({ sliders: sl });
+  assert.deepEqual(ease.begin(), { master: 2 });
+  for (let i = 0; i < 80; i++) ease.update(1 / 60, 1);
   assert.equal(sl.structure, 2);
+  assert.deepEqual(Object.keys(ease.held), ['master']);
 });
 
 test('a slider the viewer moves during the ease is left alone; restore still returns the prior value', () => {
-  const sl = fakeSliders(1.1, 2);
+  const sl = fakeSliders(3);
   const ease = createScaleEase({ sliders: sl });
   ease.begin();
   for (let i = 0; i < 10; i++) ease.update(1 / 60, 1);
-  sl.structure = 3.7; // the viewer drags Structure
+  sl.master = 4.2; // the viewer drags Master
   for (let i = 0; i < 80; i++) ease.update(1 / 60, 1);
-  assert.equal(sl.structure, 3.7);
-  assert.equal(sl.master, 1);
-  assert.equal(ease.held.structure, true);
+  assert.equal(sl.master, 4.2);
+  assert.equal(ease.held.master, true);
   ease.restore();
-  assert.equal(sl.structure, 2);
-  assert.equal(sl.master, 1.1);
+  assert.equal(sl.master, 3);
 });
 
 // ── body physics against the real collision service ─────────────────────────
@@ -300,7 +304,7 @@ test('shallow and elevated stations have no platform to descend to', () => {
 
 // ── twin bores: the walker is inside a RENDERED tunnel, not between them ─────
 //
-// main.js draws each branch as two tubes (radius 4.5m) either side of the
+// main.js draws each branch as two tubes (true bore radius) either side of the
 // shared centreline. main.js is not importable in node, so the real
 // buildOffsetCurvesFromCenterline is lifted from its source text: if the
 // mirror in pedestrian-tunnels.js ever drifts from it, these fail.
@@ -316,7 +320,10 @@ const mainOffsetFn = (() => {
   const src = MAIN_SRC.slice(start, i + 1);
   return new Function('THREE', `${src}; return buildOffsetCurvesFromCenterline;`)(THREE);
 })();
-const TUBE_RADIUS = Number(/const radius = ([\d.]+);/.exec(MAIN_SRC)[1]);
+// D-039 (sprint 25Sep26f): bores are drawn at their true per-line size
+// (true-proportion.js boreRadiusM), no longer a fixed 4.5m.
+assert.ok(/const radius = boreRadiusM\(lineId\);/.test(MAIN_SRC), 'main.js sizes bores with boreRadiusM(lineId)');
+const TUBE_RADIUS = boreRadiusM('jubilee');
 const HALF = Number(/const TUNNEL_OFFSET_METRES = ([\d.]+);/.exec(MAIN_SRC)[1]);
 
 function distToCurve(curve, p, samples = 4000) {
@@ -349,7 +356,7 @@ function twinNetwork(halfSpacing = HALF) {
 
 test('boreVertices is main.js buildOffsetCurvesFromCenterline, vertex for vertex', () => {
   const { net, rendered } = twinNetwork();
-  assert.equal(TUBE_RADIUS, 4.5);
+  assert.equal(TUBE_RADIUS, 4.35 / 2);
   assert.equal(HALF, 6);
   net.paths.forEach((path, i) => {
     const mine = boreVertices(THREE, path.vertices, HALF);
@@ -380,7 +387,7 @@ test('below ground the walker is inside a rendered bore, never in the rock betwe
           p.z - pointAt(net.paths[pos.path], pos.s).z));
       }
     }
-    // On the bore's own axis (well inside the 4.5m radius), and never on the
+    // On the bore's own axis (well inside its true radius), and never on the
     // shared centreline, which lies 6m from both bores.
     assert.ok(worst < 0.5, `side ${side}: ${worst.toFixed(3)}m off the rendered bore axis`);
     assert.ok(minCentre > HALF - 1, `side ${side}: came within ${minCentre.toFixed(2)}m of the centreline`);

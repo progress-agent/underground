@@ -7,8 +7,8 @@
 // swimming levels, though with first-person pov."
 //
 // PHASES
-//   enter   ~1s: the HUD sliders ease to real scale (Master 1 / Structure 5,
-//           pedestrian-scale.js) while the camera settles from wherever Deity
+//   enter   ~1s: the HUD Master slider eases to real scale (Master 1; structures
+//           are always true since D-039, pedestrian-scale.js) while the camera settles from wherever Deity
 //           left it onto the ground (or a roof, or the river) below.
 //   body    on the surface: ground / air (jump, jetpack) / swim
 //           (pedestrian-body.js), colliding with building footprints through

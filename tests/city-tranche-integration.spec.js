@@ -76,7 +76,10 @@ test('integrated master preference keeps the opening and reset restores both hei
   // simulation settings, so the key itself comes back).
   const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('ug:prefs:v2')||'{}'));
   expect(saved.masterHeight).toBeUndefined();expect(saved.buildingHeight).toBeUndefined();
-  expect(await page.locator('#buildingHeight').inputValue()).toBe('2');
+  // D-039 (sprint 25Sep26f, plan Lane S): the Structure slider is removed;
+  // structures are always at true proportions (height factor 1 / Master).
+  expect(await page.locator('#buildingHeight').count()).toBe(0);
+  expect(await page.evaluate(()=>window.__ug.getBuildingHeightScale()*window.__ug.masterHeight.value)).toBeCloseTo(1,9);
 });
 
 test('integrated master preserves canonical positions, datums and form-focused navigation',async({page})=>{
@@ -148,8 +151,10 @@ test('integrated DLR keeps modelled platforms, genuine tunnels and train state a
     const branches=u.lineBranchCenterPts.get('dlr'),trains=branches.flatMap(b=>b._trains);
     const initial=trains.map(t=>({id:t.uuid,t:t.userData.t}));
     const stations=u.lineShaftLayers.get('dlr').stationsLayer.stations;
-    const setStructure=value=>{const el=document.getElementById('buildingHeight');el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));};
-    setStructure('1');setStructure('5');
+    // D-039: no Structure slider; Master now drives every structure (true
+    // proportions), so the DLR resnap is exercised through Master instead.
+    const setMaster=value=>{const el=document.getElementById('masterHeight');el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));u.structureMorph.flush();};
+    setMaster('10');setMaster('1');
     const alignment=stations.map(s=>s.pos.distanceTo(u.dlrProfile.station({id:s.id,nodeIndex:s.dlrProfile.nodeIndex,structureScale:1})));
     const stopCounts=branches.map(b=>[b._stationIndices.length,b._trains[0].userData.stationUs.length]);
     const classifications=stations.map(s=>s.dlrProfile.classification);
@@ -171,16 +176,22 @@ test('integrated motorway replaces only overlapping bridges and respects pause a
     const u=window.__ug;u.sim.paused=true;
     const stats=u.motorwayGroup.userData.stats;
     const set=(id,value)=>{const el=document.getElementById(id);el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));};
-    set('masterHeight','1');set('buildingHeight','1');
+    // D-039 (sprint 25Sep26f): the Structure slider is gone and the 87m tower
+    // stands at its true 87m for every Master (it read 87 x Master x Structure/5
+    // under D-023, 17.4m at Master 1 / Structure 1).
+    const tower=()=>{let lo=Infinity,hi=-Infinity;
+      for(const mesh of u.airportsGroup.userData.pickables) for(const f of mesh.userData.features||[]) if(f.heightM===87) {
+        const p=mesh.geometry.attributes.position;for(let i=f.start;i<f.end;i++){lo=Math.min(lo,p.getY(i));hi=Math.max(hi,p.getY(i));}
+      }
+      return (hi-lo)*u.masterHeight.ratio;};
+    const heights={};
+    for(const m of ['1','3','10']){set('masterHeight',m);u.structureMorph.flush();heights[m]=tower();}
     const hint=document.getElementById('heightExplanation').textContent;
-    let lo=Infinity,hi=-Infinity;
-    for(const mesh of u.airportsGroup.userData.pickables) for(const f of mesh.userData.features||[]) if(f.heightM===87) {
-      const p=mesh.geometry.attributes.position;for(let i=f.start;i<f.end;i++){lo=Math.min(lo,p.getY(i));hi=Math.max(hi,p.getY(i));}
-    }
-    return {stats,hint,effectiveTowerHeight:(hi-lo)*u.masterHeight.ratio,qe2:u.bridgeRegistry.get('qe2').group.visible,runnymede:u.bridgeRegistry.get('runnymede').group.visible,otherVisible:[...u.bridgeRegistry].filter(([id])=>!['qe2','runnymede'].includes(id)).some(([,b])=>b.group.visible),elapsed:u.motorwayGroup.userData.getElapsed()};
+    return {stats,hint,heights,qe2:u.bridgeRegistry.get('qe2').group.visible,runnymede:u.bridgeRegistry.get('runnymede').group.visible,otherVisible:[...u.bridgeRegistry].filter(([id])=>!['qe2','runnymede'].includes(id)).some(([,b])=>b.group.visible),elapsed:u.motorwayGroup.userData.getElapsed()};
   });
   expect(result.stats.vehicles).toBeGreaterThan(10000);expect(result.qe2).toBe(false);expect(result.runnymede).toBe(false);expect(result.otherVisible).toBe(true);
-  expect(result.hint).toContain('0.2×');expect(result.effectiveTowerHeight).toBeCloseTo(87*.2,1);
+  expect(result.hint).toContain('true proportions');
+  for(const h of Object.values(result.heights))expect(Math.abs(h-87)).toBeLessThan(.25);
   await page.waitForTimeout(250);expect(await page.evaluate(()=>window.__ug.motorwayGroup.userData.getElapsed())).toBe(result.elapsed);
 });
 
@@ -238,7 +249,9 @@ test('integrated City dock water uses exact wet polygons and published reference
   const u=window.__ug,p={x:12600,z:-250},info=u.getAirportDockInfo(p),ground=u.getTerrainMeshSurfaceY(p);
   u.camera.position.set(p.x,info.referenceLevelM*5+50,p.z);u.controls.target.set(p.x,info.referenceLevelM*5,p.z-100);u.camera.lookAt(u.controls.target);u.camera.updateMatrixWorld(true);
   const water=u.airportDockGroup,mesh=water.userData.pickables[0],before=Array.from(mesh.geometry.attributes.position.array);
-  const input=document.getElementById('buildingHeight');input.value='1';input.dispatchEvent(new Event('input',{bubbles:true}));
+  // D-039: no Structure slider; a Master change (which now also re-scales every
+  // structure) must leave the dock water and the ground untouched.
+  const input=document.getElementById('masterHeight');input.value='3';input.dispatchEvent(new Event('input',{bubbles:true}));u.structureMorph.flush();
   const top=u.scene.children.find(m=>m.material?.userData?.airportDockMask)?.material;
   return {name:info.name,level:info.referenceLevelM,hover:u.formatInfraTooltip(mesh),groundBefore:ground,groundAfter:u.getTerrainMeshSurfaceY(p),mask:Boolean(top),waterUnchanged:before.every((n,i)=>n===mesh.geometry.attributes.position.array[i]),outside:u.getAirportDockInfo({x:0,z:0}),submerged:u.isSubmergedAt(p.x,info.referenceLevelM*5-2,p.z)};
  });

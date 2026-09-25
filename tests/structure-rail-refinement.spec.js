@@ -7,8 +7,10 @@ async function ready(page){
 test('all bridge decks scale from water, retain XZ and restore their full geometry',async({page})=>{
  await ready(page);
  const result=await page.evaluate(()=>{
-  const u=window.__ug,T=window.__ugTHREE,slider=document.getElementById('buildingHeight');
-  const set=n=>{slider.value=String(n);slider.dispatchEvent(new Event('input'));};set(5);
+  // D-039 (sprint 25Sep26f): no Structure slider. Structure n is now what
+  // Master 5/n gives (height factor 1 / Master): Master 1 = old 5, Master 5 = old 1.
+  const u=window.__ug,T=window.__ugTHREE,slider=document.getElementById('masterHeight');
+  const set=n=>{slider.value=String(5/n);slider.dispatchEvent(new Event('input'));u.structureMorph.flush();};set(5);
   const snapshots=[...u.bridgeRegistry].map(([id,r])=>({id,r,deck:r.deckY,arrays:r.group.children.map(m=>m.geometry.attributes.position.array.slice()),height:new T.Box3().setFromObject(r.group).max.y}));
   set(1);
   const rows=snapshots.map(({id,r,deck,arrays,height})=>{
@@ -26,10 +28,11 @@ test('all bridge decks scale from water, retain XZ and restore their full geomet
 test('rail grades are bounded by their mapped class at both heights; tunnels keep their depth',async({page})=>{
  await ready(page);
  const result=await page.evaluate(()=>{
-  const u=window.__ug,slider=document.getElementById('buildingHeight'),limits={surface:1,cutting:1,embankment:4,viaduct:9};
+  // D-039: Structure n is now Master 5/n (see above).
+  const u=window.__ug,slider=document.getElementById('masterHeight'),limits={surface:1,cutting:1,embankment:4,viaduct:9};
   const tunnels=u.overground.userData.paths.flat().filter(p=>p.cls==='tunnel'&&p.liftM<0).map(p=>({p,y:p.y}));
   const rows=[];
-  for(const scale of [1,5]){slider.value=String(scale);slider.dispatchEvent(new Event('input'));let error=0,gap=0,count=0,approachError=0;
+  for(const scale of [1,5]){slider.value=String(5/scale);slider.dispatchEvent(new Event('input'));u.structureMorph.flush();let error=0,gap=0,count=0,approachError=0;
    for(const path of u.overground.userData.paths)for(let i=0;i<path.length;i++){const p=path[i];if(i)gap=Math.max(gap,Math.hypot(p.x-path[i-1].x,p.z-path[i-1].z));if(p.cls==='tunnel')continue;if(i&&path[i-1].cls!=='tunnel'){const prev=path[i-1];approachError=Math.max(approachError,Math.abs(p.liftM-prev.liftM)-.04*Math.hypot(p.x-prev.x,p.z-prev.z));}const h=p.y-u.getTerrainMeshSurfaceY(p);error=Math.max(error,scale-h,h-limits[p.cls]*scale);count++;}
    rows.push({scale,error,gap,count,approachError,tunnelError:Math.max(...tunnels.map(({p,y})=>Math.abs(p.y-y)))});
   }return rows;
@@ -78,11 +81,16 @@ test('pitched train bodies keep roofs and windows attached in carriage coordinat
  const result=await page.evaluate(()=>{
   const u=window.__ug,T=window.__ugTHREE;let alignment=1,pitched=0,cars=0;
   for(const f of u.overground.userData.fleets){
+   // D-039 (Lane S, 25Sep26f): multiplier 5 is the canonical factor that
+   // shows real metres at Master 1, so the viewer sees canonical y x 1/5. Pitch
+   // and attachment are measured as displayed; in canonical space a true-
+   // proportion car's up column is steepened x5 and hides its pitch.
+   const ratio=1/5,shown=v=>{v.y*=ratio;return v.normalize();};
    f.userData.update(0,null,5);const [body,roof,windows]=f.userData.meshes;
    for(let i=0;i<body.count;i++){
-    const b=new T.Matrix4();body.getMatrixAt(i,b);const up=new T.Vector3().setFromMatrixColumn(b,1).normalize(),centre=new T.Vector3().setFromMatrixPosition(b);
+    const b=new T.Matrix4();body.getMatrixAt(i,b);const up=shown(new T.Vector3().setFromMatrixColumn(b,1)),centre=new T.Vector3().setFromMatrixPosition(b);
     if(Math.abs(up.y)<.9999)pitched++;
-    for(const part of [roof,windows]){const m=new T.Matrix4();part.getMatrixAt(i,m);const offset=new T.Vector3().setFromMatrixPosition(m).sub(centre).normalize();alignment=Math.min(alignment,offset.dot(up));}cars++;
+    for(const part of [roof,windows]){const m=new T.Matrix4();part.getMatrixAt(i,m);const offset=shown(new T.Vector3().setFromMatrixPosition(m).sub(centre));alignment=Math.min(alignment,offset.dot(up));}cars++;
    }
   }return {alignment,pitched,cars};
  });

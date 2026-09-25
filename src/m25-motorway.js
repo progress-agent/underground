@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import source from './m25-motorway-data.json' with { type: 'json' };
 import { WATER_LIFT } from './render-layers.js';
+import { trueHeadingBasis } from './true-proportion.js'; // s25:S
 import { VEHICLE_TYPES, VEHICLE_COLOURS, TRAFFIC_SPEED_MPS, buildTrafficLayout, vehicleChainage, laneFor, buildVehicleGeometry } from './m25-traffic.js';
 
 export const MOTORWAY_DATA=source;
@@ -137,7 +138,8 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  // anticlockwise count shared by its two Dartford-bore circuits (unchanged).
  // Placement, class and speed variation come from m25-traffic.js: a hashed,
  // deterministic renewal process per carriageway, so no platoons, no overlaps.
- const localUp=new THREE.Vector3(),up=new THREE.Vector3(0,1,0),forward=new THREE.Vector3(),sideVector=new THREE.Vector3(),carriers=[];
+ const localUp=new THREE.Vector3(),forward=new THREE.Vector3(),sideVector=new THREE.Vector3(),carriers=[];
+ const heading=new THREE.Vector3(),basis={side:sideVector,up:localUp,forward}; // s25:S
  materials.traffic=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.55,metalness:.1,fog:true});
  VEHICLE_COLOURS.forEach(c=>{
   // Unlit far silhouettes read a little brighter than the lit bodies; dim them.
@@ -332,9 +334,14 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
      writeMatrix(mesh,farCounts[colour]++,p.id,p.x,p.y+.88*verticalScale,p.z,ax*T.width,ay*T.width,az*T.width,bx*T.length,by*T.length,bz*T.length,ay*bz-az*by,az*bx-ax*bz,ax*by-ay*bx);
     }else{
      trafficStats.near++;
-     forward.set(p.dx,p.dy,p.dz).normalize();sideVector.crossVectors(up,forward).normalize();localUp.crossVectors(forward,sideVector).normalize();
+     // ── s25:S ── True proportions (D-039): aim along the DISPLAYED road and
+     // unscale vertically in world axes after that rotation, so a car on a
+     // grade is its real shape pitched to the grade, never a leaning, stretched
+     // parallelogram (true-proportion.js trueHeadingBasis).
+     trueHeadingBasis(heading.set(p.dx,p.dy,p.dz),verticalScale,basis);
      const slot=type*VEHICLE_COLOURS.length+colour,mesh=nearMeshes[slot];
-     writeMatrix(mesh,nearCounts[slot]++,p.id,p.x,p.y+.88*verticalScale,p.z,sideVector.x,sideVector.y,sideVector.z,localUp.x*verticalScale,localUp.y*verticalScale,localUp.z*verticalScale,forward.x,forward.y,forward.z);
+     writeMatrix(mesh,nearCounts[slot]++,p.id,p.x,p.y+.88*verticalScale,p.z,sideVector.x,sideVector.y,sideVector.z,localUp.x,localUp.y,localUp.z,forward.x,forward.y,forward.z);
+     // ── /s25:S ──
     }
    }
   }

@@ -94,12 +94,11 @@ test('building height multiplier scales about the footprint, not the centre', as
   expect(geo.minY).toBeCloseTo(0, 5);
   expect(geo.maxY).toBeCloseTo(1, 5);
 
-  const slider = await page.evaluate(() => {
-    const el = document.getElementById('buildingHeight');
-    return el ? { min: +el.min, max: +el.max, value: +el.value } : null;
-  });
-  expect(slider, 'building height slider missing from HUD').not.toBeNull();
-  expect(slider.value).toBe(5);   // defaults to the historical VE-matched look
+  // D-039 (sprint 25Sep26f, plan Lane S) removed the Structure slider: the
+  // multiplier now follows Master (1 / Master, true proportions) and is no
+  // longer a HUD control.
+  expect(await page.locator('#buildingHeight').count()).toBe(0);
+  expect(await page.evaluate(() => window.__ug.getBuildingHeightScale() * window.__ug.masterHeight.value)).toBeCloseTo(1, 9);
 
   const clamped = await page.evaluate(() => {
     const ug = window.__ug;

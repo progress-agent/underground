@@ -21,10 +21,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RENDER_ORDER } from './render-layers.js';
+import { setAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
 
-// Cross-section is CONSTANT for all lines including Crossrail's radius-9 tube
+// Cross-section is CONSTANT for all lines including the Elizabeth line's bore
 // (only baseRadius changes per host tube) — the ribbon is a map device, not
 // physical infrastructure.
+//
+// D-039 (sprint 25Sep26f, Lane S): bores are drawn at their true size and
+// stay round at every Master height, so the ribbon rides each host bore's own
+// crown (callers pass baseRadius = bore radius - 0.1) and its box section is
+// unscaled about the centreline in the vertex shader like the bore itself
+// (true-proportion.js 'axis' mode). RIBBON_BASE_RADIUS remains the fallback.
 export const RIBBON_WIDTH = 3.2;        // scene units, full stripe width
 export const RIBBON_THICKNESS = 0.7;    // vertical box depth (edge-on read)
 export const RIBBON_BASE_RADIUS = 4.4;  // 0.1 embedded into the 4.5 glass crown (no gap seam)
@@ -72,6 +79,7 @@ export function createCrownRibbonGeometry(curve, {
 } = {}) {
   const halfW = width / 2;
   const rings = []; // per ring: [bl, br, tl, tr]
+  const axisYs = []; // per ring: centreline height (s25:S true-proportion axis)
   const prevSide = new THREE.Vector3(1, 0, 0);
   const side = new THREE.Vector3();
   const up = new THREE.Vector3();
@@ -93,6 +101,7 @@ export function createCrownRibbonGeometry(curve, {
     const tl = bl.clone().addScaledVector(up, thickness);
     const tr = br.clone().addScaledVector(up, thickness);
     rings.push([bl, br, tl, tr]);
+    axisYs.push(P.y);
   }
 
   // Each face is a quad strip between ring corners A and B, wound so the
@@ -100,12 +109,14 @@ export function createCrownRibbonGeometry(curve, {
   // left (bl,tl)->-side, right (tr,br)->+side. Ring corner order: 0=bl 1=br 2=tl 3=tr.
   const FACES = [[2, 3], [1, 0], [0, 2], [3, 1]];
   const positions = [];
+  const axis = [];
   const indices = [];
   for (const [a, b] of FACES) {
     const base = positions.length / 3;
     for (let i = 0; i <= segments; i++) {
       const r = rings[i];
       positions.push(r[a].x, r[a].y, r[a].z, r[b].x, r[b].y, r[b].z);
+      axis.push(axisYs[i], axisYs[i]);
     }
     for (let i = 0; i < segments; i++) {
       const o = base + i * 2;
@@ -117,6 +128,7 @@ export function createCrownRibbonGeometry(curve, {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  setAxisAttribute(geo, axis);
   return geo;
 }
 
@@ -139,25 +151,25 @@ export function createCasingGeometries(curve, {
 // casing carries legibility. Opaque + depth-tested (defaults) so terrain
 // occludes it correctly from above ground.
 export function createRibbonMaterial(hex) {
-  return new THREE.MeshStandardMaterial({
+  return patchTrueProportionMaterial(new THREE.MeshStandardMaterial({
     color: hex,
     emissive: hex,
     emissiveIntensity: 0.22,
     roughness: 0.55,
     metalness: 0.0,
     fog: true, // clay fog dims at distance; inside-chalk clarity reveals (Item B)
-  });
+  }), { mode: 'axis' });
 }
 
 export function createCasingMaterial() {
-  return new THREE.MeshStandardMaterial({
+  return patchTrueProportionMaterial(new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xffffff,
     emissiveIntensity: 0.15,
     roughness: 0.55,
     metalness: 0.0,
     fog: true,
-  });
+  }), { mode: 'axis' });
 }
 
 // Build the merged per-line ribbon meshes for a set of tunnel curves

@@ -28,8 +28,9 @@
 //   sfx                                 createModeSfx (mode-sfx.js)
 //   look                                createLookInput; the registry sets its mode from mode.look
 //   wind                                { getWindAt, getSurfaceWind } from ../wind.js
-//   sliders                             { getMaster(), setMaster(v), getStructure(), setStructure(v) }: moves
-//                                       the real HUD sliders so every dependent (landmarks, bridges, prefs) follows
+//   sliders                             { getMaster(), setMaster(v) }: moves the real HUD Master slider so every
+//                                       dependent (structure morphs, prefs) follows. No Structure slider since
+//                                       D-039: structures keep true proportions at every Master (true-proportion.js)
 //   getTerrainY(x, z)                   canonical terrain Y or null (carved bed under the river)
 //   getStructuralY(x, z)                stable pre-refinement structural surface Y or null
 //   isSubmergedAt(x, y, z)              shared inside-water predicate
@@ -120,7 +121,6 @@ export function installModes({
     isSubmerged: (x, y, z) => isSubmergedAt(x, y, z),
   });
   const master = sliderAccess(document, 'masterHeight');
-  const structure = sliderAccess(document, 'buildingHeight');
 
   let hud = null;
   const ctx = {
@@ -128,7 +128,6 @@ export function installModes({
     collision, physics, sfx, look: null, wind: Object.freeze({ getWindAt, getSurfaceWind }),
     sliders: Object.freeze({
       getMaster: master.get, setMaster: master.set,
-      getStructure: structure.get, setStructure: structure.set,
     }),
     getTerrainY, getStructuralY, isSubmergedAt, waterSurfaceAt,
     setHint: (text) => hud?.setHint(text),
