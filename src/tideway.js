@@ -472,6 +472,43 @@ function whirlpoolRadii(ud) {
   const inner = ud.diameter / 2;
   return { inner, outer: Math.max(WHIRLPOOL.minOuterM, inner * WHIRLPOOL.outerFactor) };
 }
+// A land shaft's whole footprint, not just its centre: the wall at radius r
+// (plus a little) and a ring half way in, 32 samples each, and the centre.
+const FOOTPRINT_SAMPLES = 32;
+function footprintPoints(x, z, r) {
+  const pts = [{ x, z }];
+  for (const rr of [r + 0.5, r * 0.5]) for (let k = 0; k < FOOTPRINT_SAMPLES; k++) {
+    const a = (k / FOOTPRINT_SAMPLES) * Math.PI * 2;
+    pts.push({ x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr });
+  }
+  return pts;
+}
+// Any part of the footprint in the river: the corridor, or clearly bed.
+function footprintTouchesWater(x, z, r, fallback) {
+  for (const p of footprintPoints(x, z, r)) {
+    const f = floorAt(p.x, p.z, fallback);
+    if (isInThames(p.x, p.z) || (f !== null && f < WATER_TOP_Y - WET_DEPTH_Y)) return true;
+  }
+  return false;
+}
+function footprintDry(x, z, r, fallback) {
+  for (const p of footprintPoints(x, z, r)) {
+    const f = floorAt(p.x, p.z, fallback);
+    // Low banks sit a little under the water top (Greenwich is 2.2 m OD), so
+    // dry means out of the corridor and not down at bed level, as isWetAt.
+    if (f === null || f < WATER_TOP_Y - WET_DEPTH_Y || isInThames(p.x, p.z)) return false;
+  }
+  return true;
+}
+// Lowest floor (ground, foreshore or bed) anywhere under the footprint.
+function footprintLowestFloor(x, z, r, fallback) {
+  let low = null;
+  for (const p of footprintPoints(x, z, r)) {
+    const f = floorAt(p.x, p.z, fallback);
+    if (f !== null) low = low === null ? f : Math.min(low, f);
+  }
+  return low;
+}
 function ringWet(x, z, outer, fallback) {
   if (!isWetAt(x, z, fallback)) return false;
   for (let k = 0; k < 12; k++) {
@@ -492,15 +529,13 @@ export function snapTidewayShaftsToTerrain(getStructuralFallback) {
     const tunnelY = -(ud.depth * moduleVE);
     const { inner, outer } = whirlpoolRadii(ud);
     let river = false, at = { x: src.x, z: src.z, moved: 0 };
-    if (ud.foreshore || isWetAt(src.x, src.z, getStructuralFallback)) {
-      const wet = ud.foreshore ? findNearest((x, z) => ringWet(x, z, outer, getStructuralFallback), src.x, src.z, MAX_FORESHORE_MOVE_M, 6) : null;
-      if (wet) { river = true; at = wet; }
-      else {
-        // A land site mapped into the water: the nearest dry ground.
-        const dry = findNearest((x, z) => { const f = floorAt(x, z, getStructuralFallback); return f !== null && f >= WATER_TOP_Y && !isInThames(x, z); },
-          src.x, src.z, MAX_SITE_MOVE_M);
-        if (dry) at = dry;
-      }
+    const wet = ud.foreshore ? findNearest((x, z) => ringWet(x, z, outer, getStructuralFallback), src.x, src.z, MAX_FORESHORE_MOVE_M, 6) : null;
+    if (wet) { river = true; at = wet; }
+    else if (footprintTouchesWater(src.x, src.z, inner, getStructuralFallback)) {
+      // A land site whose shaft wall (not only its centre) reaches into the
+      // river: the nearest ground where the whole footprint is dry.
+      const dry = findNearest((x, z) => footprintDry(x, z, inner, getStructuralFallback), src.x, src.z, MAX_SITE_MOVE_M, 2);
+      if (dry) at = dry;
     }
     const surfaceY = floorAt(at.x, at.z, getStructuralFallback);
     if (surfaceY === null) continue;
@@ -526,7 +561,10 @@ export function snapTidewayShaftsToTerrain(getStructuralFallback) {
         whirlpool: true, centre: { x: at.x, z: at.z } };
       whirlpoolGroup?.add(whirl);
     } else {
-      topY = surfaceY - LAND_TOP_BELOW_M * moduleVE;
+      // Under the lowest floor across the whole footprint, so no part of the
+      // open top rises above sloping ground, a bank or a river bed.
+      const low = footprintLowestFloor(at.x, at.z, inner, getStructuralFallback) ?? surfaceY;
+      topY = Math.min(surfaceY, low) - LAND_TOP_BELOW_M * moduleVE;
     }
     ud.xz = { x: at.x, z: at.z };
     ud.inRiver = river;

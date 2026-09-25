@@ -252,6 +252,22 @@ test.describe('sea life: module contracts (node)', () => {
     });
   }
 
+  // Each fish bobs on its own hashed phase. Over a short interval the shell
+  // (u, rr) is fixed, so a fish's height relative to the school centre changes
+  // only by its bob; in lockstep every free fish would change by the same amount.
+  test('schools: every fish bobs on its own phase, not in lockstep', () => {
+    const api = build();
+    for (const id of SCHOOL_IDS) {
+      const t1 = 500, t2 = 502.2;
+      const a = api.fishAt(t1, null, id), b = api.fishAt(t2, null, id);
+      const dc = b.centre.y / b.scaleY - a.centre.y / a.scaleY;
+      const d = a.fish.map((f, i) => Math.round((b.fish[i].y - f.y - dc) * 1e4));
+      const distinct = new Set(d).size;
+      expect(distinct, `${id}: distinct bob changes`).toBeGreaterThan(a.fish.length / 2);
+    }
+    api.dispose();
+  });
+
   test('true proportions: Master does not stretch creatures (D-039)', () => {
     const api = build();
     for (const master of [1, 1.1, 2.5, 5]) {

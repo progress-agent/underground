@@ -604,7 +604,8 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     for (let i = 0; i < spec.count; i++) {
       const id = `${spec.id === 'silver-school' ? 'fish' : spec.id}-${i}`;
       C1[i] = hash01(id, 1) * 2 - 1; C2[i] = hash01(id, 2) * Math.PI * 2; C3[i] = 0.6 + 0.4 * hash01(id, 3);
-      C4[i] = R * Math.cbrt(0.05 + 0.95 * hash01(id, 4)); // filled to near the core, so a camera inside meets fish C5[i] = hash01(id, 5) * 6.28;
+      C4[i] = R * Math.cbrt(0.05 + 0.95 * hash01(id, 4)); // filled to near the core, so a camera inside meets fish
+      C5[i] = hash01(id, 5) * 6.28; // per-fish bob phase, so a school never bobs in lockstep
     }
     // Fish positions (holder units: displayed metres): school centre on its
     // loop, each fish on a hashed shell slowly wheeling around it, then pushed

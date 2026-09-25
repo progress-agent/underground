@@ -85,7 +85,21 @@ test.describe('lane W: in the running app', () => {
         const g = u.scene.getObjectByName(name);
         for (const m of g.children) {
           const top = m.position.y + m.scale.y / 2, x = m.position.x, z = m.position.z;
-          shafts.push({ id: m.userData.shaftId, top, floor: u.getTerrainMeshSurfaceY({ x, z }), wet: nav.containsXZ(x, z),
+          // The whole footprint, not the centre alone: the wall at its radius
+          // and a ring half way in (Greenwich's wall reached into the channel
+          // while its centre was dry).
+          const r = m.userData.diameter / 2;
+          let worst = -Infinity, wetRim = 0, worstWet = -Infinity;
+          const pts = [[x, z]];
+          for (const rr of [r, r * 0.5]) for (let k = 0; k < 32; k++) {
+            const a = (k / 32) * Math.PI * 2; pts.push([x + Math.cos(a) * rr, z + Math.sin(a) * rr]);
+          }
+          for (const [px, pz] of pts) {
+            const f = u.getTerrainMeshSurfaceY({ x: px, z: pz });
+            worst = Math.max(worst, top - f);
+            if (nav.containsXZ(px, pz)) { wetRim++; worstWet = Math.max(worstWet, top - f); }
+          }
+          shafts.push({ id: m.userData.shaftId, top, worst, wetRim, worstWet,
             inRiver: !!m.userData.inRiver, open: m.geometry.parameters.openEnded });
         }
       }
@@ -103,8 +117,10 @@ test.describe('lane W: in the running app', () => {
     expect(r.shafts.length).toBe(21 + 5);      // 21 Tideway shaft sites (Acton..Abbey Mills) + 5 Lee Tunnel shafts
     for (const s of r.shafts) {
       expect(s.open, s.id).toBe(true);                                   // no cap anywhere
-      expect(s.top, `${s.id} top below its ground or bed`).toBeLessThan(s.floor);
-      if (s.wet || s.inRiver) expect(s.top, `${s.id} under the water top`).toBeLessThan(r.TOP);
+      expect(s.worst, `${s.id} top below its ground or bed across the whole footprint`).toBeLessThan(0);
+      if (s.wetRim || s.inRiver) expect(s.top, `${s.id} under the water top`).toBeLessThan(r.TOP);
+      // A land shaft's wall stays out of the modelled river altogether.
+      if (!s.inRiver) expect(s.wetRim, `${s.id} land shaft footprint in the river`).toBe(0);
     }
     // Every foreshore site is a whirlpool in the modelled river; nothing else is.
     expect(r.whirl.map(w => w.id).sort()).toEqual(['albert', 'blackfriars', 'chambers', 'chelsea', 'heathwall', 'kemp', 'putney', 'victoria']);
