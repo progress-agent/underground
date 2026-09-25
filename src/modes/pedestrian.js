@@ -34,6 +34,14 @@
 //
 // DETERMINISM: every motion is integrated from the frame dt the registry
 // passes; nothing here is random.
+//
+// UNDERGROUND VIEW (sprint 25Sep26f, Lane P, Jordan's note 10): in the shaft
+// passage and the tunnel the walker sees the inside of their bore
+// (ctx.tubeInterior, src/tube-interior.js: a lining, faint rings, the line's
+// colour along the crown), the crown ribbons, station markers and shafts that
+// would hang inside the bore are hidden, and the camera's near plane drops to
+// UNDERGROUND_NEAR (below ground only) so the walls of a 3.56 m bore are not
+// cut. Leaving the tunnel, or the mode, restores all of it.
 
 import { PEDESTRIAN_TUNABLES, BODY, createBody, stepBody } from './pedestrian-body.js';
 import { createScaleEase } from './pedestrian-scale.js';
@@ -49,6 +57,7 @@ const ALIGN_S = 0.35;                  // shaft: slide onto the shaft axis befor
 const PASSAGE_S = 0.6;                 // shaft foot <-> bore: the cross passage at platform level
 const PITCH_LIMIT = 1.45;              // display pitch clamp (about 83 degrees)
 const NETWORK_RETRY_S = 2;
+export const UNDERGROUND_NEAR = 0.1;   // camera near plane while below ground (m)
 
 const HINT = 'WASD run · Space jump, hold to jetpack · E at a station goes down';
 
@@ -82,6 +91,8 @@ export function createPedestrianMode(ctx) {
   let jumpLatch = false, useLatch = false;
   let lastEvents = [];
   let tunnelSpeed = 0;
+  let savedNear = null;                   // the camera's near plane before we changed it
+  let lastBore = null;                    // { path, s, dir, side } of the last tunnel frame
 
   // Edge-triggered keys are latched from keydown, so a tap shorter than a
   // frame is never lost. Held state comes from the shared ctx.keys set.
@@ -131,6 +142,40 @@ export function createPedestrianMode(ctx) {
     ctx.camera.position.set(x, y, z);
     cameraQuaternion(ctx.camera.quaternion);
     ctx.camera.updateMatrixWorld(true);
+  }
+
+  function setNear(value) {
+    const cam = ctx.camera;
+    if (cam.near === value) return;
+    cam.near = value;
+    cam.updateProjectionMatrix();
+  }
+
+  /**
+   * Which bore the walker is in or entering, or null when above ground: the
+   * tunnel itself, and the cross passage at platform level either way.
+   */
+  function currentBore() {
+    if (phase === 'tunnel' && tunnel) return { path: tunnel.path, s: tunnel.s, dir: tunnel.dir, side: tunnel.side };
+    if (phase === 'shaft' && shaft && shaft.passage && !shaft.passage.done) {
+      if (shaft.dir === 'down') return { path: shaft.stop.path, s: shaft.stop.s, dir: shaft.tunnelDir || 1, side: shaft.side || 0 };
+      if (lastBore && lastBore.path === shaft.stop.path) return { ...lastBore, s: shaft.stop.s };
+    }
+    return null;
+  }
+
+  /** The underground view: interior, ribbons and near plane follow the phase. */
+  function syncUndergroundView() {
+    const bore = currentBore();
+    const below = phase === 'tunnel' || (phase === 'shaft' && shaft
+      && ctx.camera.position.y < (shaft.stop?.surfaceY ?? shaft.groundY ?? Infinity));
+    if (bore && net) {
+      if (phase === 'tunnel') lastBore = bore;
+      ctx.tubeInterior?.show(net, bore);
+    } else {
+      ctx.tubeInterior?.hide();
+    }
+    setNear(below ? UNDERGROUND_NEAR : savedNear);
   }
 
   /** Put the body on whatever is under (x, z): water, a roof or the ground. */
@@ -350,6 +395,8 @@ export function createPedestrianMode(ctx) {
       active = true;
       jumpLatch = useLatch = false;
       lastHint = undefined;
+      savedNear = ctx.camera.near;
+      lastBore = null;
       ctx.collision.sync();
       ease.begin();
       const cam = ctx.camera;
@@ -371,6 +418,9 @@ export function createPedestrianMode(ctx) {
     deactivate(c) {
       active = false;
       phase = 'off';
+      ctx.tubeInterior?.hide();
+      if (savedNear !== null) setNear(savedNear);
+      savedNear = null;
       ease.restore();
       body.jet = false;
       jumpLatch = useLatch = false;
@@ -393,6 +443,7 @@ export function createPedestrianMode(ctx) {
       else if (phase === 'body') updateBody(dt, use, jump);
       else if (phase === 'shaft') updateShaft(dt);
       else if (phase === 'tunnel') updateTunnel(dt, use);
+      syncUndergroundView();
       return true;
     },
 
@@ -410,6 +461,8 @@ export function createPedestrianMode(ctx) {
           stop: { name: shaft.stop.name, lineId: shaft.stop.lineId, platformY: shaft.stop.platformY,
             surfaceY: shaft.stop.surfaceY, depthM: shaft.stop.depthM } } : null,
         network: n ? n.stats : null,
+        near: ctx.camera.near, savedNear,
+        interior: ctx.tubeInterior?.debug() ?? null,
       };
     },
     /** Place the body on the surface at (x, z), skipping the entry ease (tests). */
