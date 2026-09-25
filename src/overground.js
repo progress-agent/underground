@@ -22,8 +22,12 @@ import { createOvergroundFleet } from './overground-trains.js';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import proj4 from 'proj4';
-import { VERTICAL_EXAGGERATION } from './terrain.js';
+import { VERTICAL_EXAGGERATION, getTerrainMeshSurfaceY as renderedFloorY } from './terrain.js';
 import { RENDER_ORDER } from './render-layers.js';
+// s25:E Thames Tunnel depth (sourced; see rail-truth.js)
+import { WATER_LEVEL_M } from './thames.js';
+import { isInThames } from './thames-mask.js';
+import { THAMES_TUNNEL } from './rail-truth.js';
 
 const VE = VERTICAL_EXAGGERATION;
 
@@ -104,7 +108,15 @@ function buildPath(branch, getTerrainMeshSurfaceY) {
       const t=j/steps,x=a.x+(b.x-a.x)*t,z=a.z+(b.z-a.z)*t;
       const terrainY=getTerrainMeshSurfaceY({x,z});if(!Number.isFinite(terrainY))continue;
       const cls=CLASS_LIFT_M[classes[i]]===undefined?'surface':classes[i];
-      path.push({x,z,terrainY,cls,y:terrainY+BASE_LIFT+CLASS_LIFT_M[cls]*VE});
+      // s25:E: a tunnel sample under the river (inside the river mask, rendered
+      // bed below the water line) is the Thames
+      // Tunnel; its centre sits 5.2 m below the bed, not 20 m under the ground.
+      // Measured from the RENDERED bed (refined river floor), which is what
+      // the viewer sees; the structural sampler passed in sits above it.
+      const floorY=cls==='tunnel'&&isInThames(x,z)?renderedFloorY({x,z}):null;
+      const underRiver=Number.isFinite(floorY)&&floorY<WATER_LEVEL_M*VE;
+      const bedY=underRiver?floorY:terrainY;
+      path.push({x,z,terrainY,cls,underRiver,bedY,y:underRiver?bedY-THAMES_TUNNEL.centreBelowBedM*VE:terrainY+BASE_LIFT+CLASS_LIFT_M[cls]*VE});
     }
   }
   // Distance-based approaches taper a viaduct/embankment down to adjoining
@@ -123,6 +135,9 @@ function buildPath(branch, getTerrainMeshSurfaceY) {
   for(let pass=0;pass<SMOOTH_PASSES;pass++)for(let i=1;i<path.length-1;i++){
     if(path[i].cls==='tunnel')path[i].y=(path[i-1].y+2*path[i].y+path[i+1].y)/4;
   }
+  // s25:E: smoothing may only deepen the river crossing, never lift its bore
+  // towards the bed.
+  for(const p of path)if(p.underRiver)p.y=Math.min(p.y,p.bedY-THAMES_TUNNEL.centreBelowBedM*VE);
   return path;
 }
 
