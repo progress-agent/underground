@@ -3,23 +3,30 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const out = process.env.UG_ACCEPTANCE_OUT || new URL('../test-results/experience-acceptance/', import.meta.url).pathname;
 
 test('saved deliberate height choices survive, URL wins, and Reset restores the new defaults', async ({ page }) => {
+  // D-039 (sprint 25Sep26f, plan Lane S) supersedes D-036's Structure 2 default:
+  // the Structure slider is gone, a saved buildingHeight and the bh= parameter
+  // are ignored, and every structure is at true proportions, i.e. the building
+  // height factor is 1 / Master so Master x factor (the on-screen structure
+  // exaggeration) is exactly 1 whatever Master is. Master itself still
+  // persists, the URL still wins, and Reset still restores Master 1.1.
   await page.addInitScript(() => {
     if (!sessionStorage.getItem('acceptance-pref-seeded')) {
       localStorage.setItem('ug:prefs:v2', JSON.stringify({ masterHeight: 3.2, buildingHeight: 4.7, renderMode: 'manual', renderScale: .5, edgeSamples: 0 }));
       sessionStorage.setItem('acceptance-pref-seeded', 'yes');
     }
   });
-  const read = () => page.evaluate(() => ({ master: window.__ug.masterHeight.value, structure: window.__ug.getBuildingHeightScale() * 5 }));
+  const read = () => page.evaluate(() => ({ master: window.__ug.masterHeight.value, structure: +(window.__ug.getBuildingHeightScale() * window.__ug.masterHeight.value).toFixed(9) }));
   await page.goto('/?fast=1&buildings=baked');
   await page.waitForFunction(() => window.__ug?.masterHeight);
-  expect(await read()).toEqual({ master: 3.2, structure: 4.7 });
+  expect(await read()).toEqual({ master: 3.2, structure: 1 });
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('ug:prefs:v2')).buildingHeight)).toBeUndefined();
   await page.goto('/?fast=1&buildings=baked&mh=1.1&bh=2');
   await page.waitForFunction(() => window.__ug?.masterHeight);
-  expect(await read()).toEqual({ master: 1.1, structure: 2 });
+  expect(await read()).toEqual({ master: 1.1, structure: 1 });
   await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
   await Promise.all([page.waitForNavigation(), page.locator('#resetPrefs').click()]);
   await page.waitForFunction(() => window.__ug?.masterHeight);
-  expect(await read()).toEqual({ master: 1.1, structure: 2 });
+  expect(await read()).toEqual({ master: 1.1, structure: 1 });
   expect(new URL(page.url()).searchParams.has('mh')).toBe(false);
   expect(new URL(page.url()).searchParams.has('bh')).toBe(false);
 });

@@ -6,7 +6,7 @@
 //
 //   const collision = createCollisionService({
 //     getBuildingMeshes,   // () => iterable of building InstancedMeshes (live or baked)
-//     getHeightScale,      // () => D-023 building height uniform (Structure / VE)
+//     getHeightScale,      // () => building height uniform (1 / Master since D-039: true height)
 //     getGroundY,          // (x, z) => canonical terrain Y, or null off the mesh
 //     getWaterSurfaceY,    // (x, z) => canonical water-top Y where there is water, else null
 //     isSubmerged,         // (x, y, z) => boolean, the shared inside-water predicate
@@ -43,9 +43,10 @@
 //   Everything is canonical scene space (vertical-scale.js contract): X/Z are
 //   real metres, Y is VE5 scene units (5 per real metre). Master rescales only
 //   the camera display, never this data, so collision is correct at every
-//   Master value. Roof heights honour the Structure slider through
+//   Master value. Roof heights follow the building height uniform through
 //   getHeightScale() (roofY = baseY + authoredHeight * scale, exactly what the
-//   building shader draws).
+//   building shader draws); since D-039 that uniform is 1 / Master, so every
+//   roof stands at its true height above the stretched ground.
 //
 // ─── DATA ───────────────────────────────────────────────────────────────────
 //

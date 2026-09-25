@@ -565,21 +565,27 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
       morphs.push({rec,mesh,original,feet,oldDeck,water,endGround});
     }
   }
+  // ── s25:S ── D-039: `ratio` is now always 1 / Master, so the span stands
+  // at its true clearance and proportions above the (stretched) water datum.
+  // The approach ramps take each deck end to its bank in BOTH directions: up
+  // onto a bank the Master stretch has raised above the deck, and down onto a
+  // bank lower than the true clearance (before, a deck only ever ramped up, so
+  // at true height it hung several metres over low embankments). Pier feet stay
+  // on the terrain; a pier never inverts when a ramp dips towards its foot.
   group.userData.setHeightScale=(ratio)=>{
     for(const {rec,mesh,original,feet,oldDeck,water,endGround} of morphs) {
       const attr=mesh.geometry.attributes.position,newDeck=water+(oldDeck-water)*ratio;
       const span=rec.deckSpan,rampLength=Math.min(85,span.length*.22);
+      const landingA=endGround.a+2*ratio-newDeck, landingB=endGround.b+2*ratio-newDeck;
       for(let i=0;i<attr.count;i++) {
         const x=original[i*3],y=original[i*3+1];
-        if(ratio===1){attr.setY(i,y);continue;}
         const blendA=1-THREE.MathUtils.smoothstep(x-span.aX,0,rampLength);
         const blendB=1-THREE.MathUtils.smoothstep(span.bX-x,0,rampLength);
-        const landingA=Math.max(0,Math.min(oldDeck,endGround.a+2*ratio)-newDeck);
-        const landingB=Math.max(0,Math.min(oldDeck,endGround.b+2*ratio)-newDeck);
-        const deck=newDeck+Math.max(blendA*landingA,blendB*landingB);
+        const deck=newDeck+(blendA>=blendB?blendA*landingA:blendB*landingB);
         // Above the deck, scale the architecture. Below it, preserve the feet.
+        const below=Math.max(0,deck-feet[i])/(oldDeck-feet[i]);
         const target=y>=oldDeck ? deck+(y-oldDeck)*ratio :
-          feet[i]+(y-feet[i])*(deck-feet[i])/(oldDeck-feet[i]);
+          feet[i]+(y-feet[i])*below;
         attr.setY(i,target);
       }
       attr.needsUpdate=true;mesh.geometry.computeVertexNormals();
@@ -587,6 +593,7 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
       rec.deckY=newDeck;
     }
   };
+  // ── /s25:S ──
   group.userData.setHeightScale(heightScale);
 
   console.log(`Created ${registry.size} Thames bridges`);

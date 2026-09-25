@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { createRenderQuality } from './render-quality.js';
 import { createAdaptiveQuality } from './adaptive-quality.js';
 import { createVerticalScaleController } from './vertical-scale.js';
+// ── s25:S ──
+import { bindMasterController, onMasterChange, structureHeightScale, boreRadiusM, tubeAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
+import * as TrueProportion from './true-proportion.js';
+// ── /s25:S ──
 import { createMiniMap } from './mini-map.js';
 import { createAirports, isAirportBuilding, getAirportHoverInfo, AIRPORT_DATA } from './airports.js';
 import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSurfaceY, getAirportDockInfo } from './airport-docks.js';
@@ -269,6 +273,13 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 // All city data and camera poses remain canonical VE5. One paired view-matrix
 // transform changes the display of every current and late-loaded scene layer.
 const masterHeight = createVerticalScaleController({ camera, value: 1.1 });
+// ── s25:S ── D-039: Master stretches the landscape only; every structure hears
+// Master through true-proportion.js and keeps its true proportions.
+bindMasterController(masterHeight);
+// Filled in by the HUD block: flush() runs any pending structure morph now
+// (tests and tools); morphs counts completed CPU morph passes.
+const structureMorph = { flush: () => {}, morphs: 0, pending: false };
+// ── /s25:S ──
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -994,42 +1005,55 @@ function deleteUrlParam(key) {
     });
   }
 
-  // ── Building height slider (D-023) ──
-  // Shared above-ground structure exaggeration: 5.0x is the historical
-  // look (global VE),1.0x uses real structure heights. Each structure keeps
-  // its ground or water datum; terrain, Tube depths, chalk and water stay fixed.
-  const bhEl = document.getElementById('buildingHeight');
-  const bhOut = document.getElementById('buildingHeightValue');
-  const initialBh = getUrlNumberParam('bh') ?? prefs.buildingHeight ?? 2;
-  if (bhEl) {
-    const apply = (mult) => {
-      setBuildingHeightScale(mult / VERTICAL_EXAGGERATION);
-      landmarkGroup?.userData.setHeightScale(getBuildingHeightScale());
-      bridgesGroup?.userData.setHeightScale(getBuildingHeightScale());
-      overgroundGroup?.userData.setHeightScale(getBuildingHeightScale());
-      airportsGroup?.userData.setHeightScale(getBuildingHeightScale());
-      motorwayGroup?.userData.setHeightScale(getBuildingHeightScale());
-      if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
-      refreshOvergroundStationMarkers();
-      syncHeightExplanation();
-      if (bhOut) bhOut.textContent = `${mult.toFixed(1)}\u00d7`;
-    };
-    bhEl.value = String(initialBh);
-    apply(initialBh);
-
-    bhEl.addEventListener('input', () => {
-      const mult = Number(bhEl.value) || 2;
-      apply(mult);
-      prefs.buildingHeight = mult;
-      savePrefs(prefs);
-    });
-
-    bhEl.addEventListener('change', () => {
-      const mult = Number(bhEl.value) || 2;
-      if (mult === 2) deleteUrlParam('bh');
-      else setUrlParam('bh', mult);
-    });
-  }
+  // ── s25:S ── Structures at true proportions (D-039, supersedes the D-023
+  // Structure slider and the D-036 Structure 2 default). There is no Structure
+  // control any more and the old bh= parameter is ignored: every structure's
+  // height factor follows Master (1 / Master for VE5-authored geometry), so the
+  // camera's Master / 5 display stretch cancels it and buildings, landmarks,
+  // bridges, rail earthworks, airports and the M25 stand at real proportions
+  // while the landscape under them is stretched. The shader uniforms (buildings,
+  // tube bores, markers) follow at once; the CPU morphs (bridges, airports,
+  // M25, rail, DLR resnap) are rate-limited as below.
+  if (prefs.buildingHeight !== undefined) { delete prefs.buildingHeight; savePrefs(prefs); }
+  // CPU morph cost measured on the M5 (25Sep26f): motorway ~145ms, airports
+  // ~29ms, Overground ~21ms, bridges ~10ms, plus the DLR resnap. So during a
+  // Master drag or the Pedestrian ease they run at most every MORPH_GAP_MS
+  // (leading and trailing edge; the trailing pass always lands the final
+  // value), while buildings, landmarks, bores, trains and markers follow Master
+  // every frame for free.
+  const MORPH_GAP_MS = 200;
+  let lastMorphAt = -Infinity, morphTimer = null;
+  const morphStructures = () => {
+    if (morphTimer !== null) { clearTimeout(morphTimer); morphTimer = null; }
+    structureMorph.pending = false;
+    lastMorphAt = performance.now();
+    const value = getBuildingHeightScale();
+    landmarkGroup?.userData.setHeightScale(value);
+    bridgesGroup?.userData.setHeightScale(value);
+    overgroundGroup?.userData.setHeightScale(value);
+    airportsGroup?.userData.setHeightScale(value);
+    motorwayGroup?.userData.setHeightScale(value);
+    if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
+    refreshOvergroundStationMarkers();
+    structureMorph.morphs++;
+  };
+  const scheduleMorph = () => {
+    if (structureMorph.pending) return;
+    structureMorph.pending = true;
+    const wait = Math.max(0, lastMorphAt + MORPH_GAP_MS - performance.now());
+    morphTimer = setTimeout(() => { morphTimer = null; requestAnimationFrame(() => { if (structureMorph.pending) morphStructures(); }); }, wait);
+  };
+  const applyStructureScale = ({ immediate = false } = {}) => {
+    setBuildingHeightScale(structureHeightScale());
+    // Landmarks are a group scale: free, so they never lag the terrain.
+    landmarkGroup?.userData.setHeightScale(getBuildingHeightScale());
+    syncHeightExplanation();
+    if (immediate) morphStructures(); else scheduleMorph();
+  };
+  structureMorph.flush = () => { if (structureMorph.pending) morphStructures(); };
+  applyStructureScale({ immediate: true });
+  onMasterChange(() => applyStructureScale());
+  // ── /s25:S ──
 
   const mhEl = document.getElementById('masterHeight');
   const mhOut = document.getElementById('masterHeightValue');
@@ -1638,10 +1662,10 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
 
       const segs = lineSegmentCount(lineId, centerPts);
-      const radius = 4.5;
+      const radius = boreRadiusM(lineId); // s25:S true bore, drawn round at every Master
 
-      const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
-      const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+      const leftMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+      const rightMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
       leftMesh.userData.lineId = lineId;
       rightMesh.userData.lineId = lineId;
       leftMesh.userData.type = 'tube-line';
@@ -1652,7 +1676,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       newMeshes.push(leftMesh, rightMesh);
       linePickables.push(leftMesh, rightMesh);
       group.add(leftMesh, rightMesh);
-      ribbonCurves.push({ curve: leftCurve, segments: segs }, { curve: rightCurve, segments: segs });
+      ribbonCurves.push({ curve: leftCurve, segments: segs, baseRadius: radius - 0.1 }, { curve: rightCurve, segments: segs, baseRadius: radius - 0.1 }); // s25:S
 
       // Recreate trains on new curves (density scales with track length)
       if (lineId === 'dlr' && centerPts._trains) {
@@ -2014,7 +2038,7 @@ function brightenIfTooDark(hex, { minLuma = 0.08, floor = 0x2a2a2a } = {}) {
 // because they are inert without transmission, not because the look changed.
 function frostedTubeMaterial(hex) {
   const { base, emissive } = brightenIfTooDark(hex);
-  return new THREE.MeshPhysicalMaterial({
+  return patchTrueProportionMaterial(new THREE.MeshPhysicalMaterial({ // s25:S round bore at every Master
     color: base,
     transparent: true,
     opacity: 0.42,
@@ -2027,7 +2051,7 @@ function frostedTubeMaterial(hex) {
     emissiveIntensity: 0.0,
     fog: true,
     depthWrite: true,
-  });
+  }), { mode: 'axis' });
 }
 
 // Geo projection: lon/lat -> x/z in *metres* (local tangent plane-ish), centred on London.
@@ -2147,7 +2171,9 @@ function dlrLocationLabel(profile) {
 
 function syncHeightExplanation() {
   const element=document.getElementById('heightExplanation');
-  if(element)element.textContent=`Master scales the entire scene. Structures currently appear ${(masterHeight.value*getBuildingHeightScale()).toFixed(1)}× their real height.`;
+  // ── s25:S ──
+  if(element)element.textContent=`Master stretches the landscape ${masterHeight.value.toFixed(1)}× (terrain, river bed, geology and depths). Buildings and every structure stay at their true proportions.`;
+  // ── /s25:S ──
 }
 
 // Extract inbound branch sequences from TfL route data, deduplicating stops.
@@ -2254,10 +2280,10 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
 
     const segs = lineSegmentCount(lineId, centerPts);
-    const radius = 4.5;
+    const radius = boreRadiusM(lineId); // s25:S true bore, drawn round at every Master
 
-    const leftMesh = new THREE.Mesh(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
-    const rightMesh = new THREE.Mesh(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false), frostedTubeMaterial(colour));
+    const leftMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+    const rightMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
     leftMesh.userData.lineId = lineId;
     rightMesh.userData.lineId = lineId;
     leftMesh.userData.type = 'tube-line';
@@ -2268,7 +2294,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
     allMeshes.push(leftMesh, rightMesh);
     linePickables.push(leftMesh, rightMesh);
     group.add(leftMesh, rightMesh);
-    ribbonCurves.push({ curve: leftCurve, segments: segs }, { curve: rightCurve, segments: segs });
+    ribbonCurves.push({ curve: leftCurve, segments: segs, baseRadius: radius - 0.1 }, { curve: rightCurve, segments: segs, baseRadius: radius - 0.1 }); // s25:S
 
     // Trains per branch (density scales with track length)
     const branchTrains = createTrains({ system: trainSystem, leftCurve, rightCurve, stationUs, lineId, colour, group });
@@ -3683,7 +3709,7 @@ function getShareUrl(base = location.href) {
   url.searchParams.set('buildings', buildingsPath);
   url.searchParams.set('fl', String(lensSystem.getFocalLength()));
   url.searchParams.set('mh', String(masterHeight.value));
-  url.searchParams.set('bh', String(getBuildingHeightScale()*VERTICAL_EXAGGERATION));
+  url.searchParams.delete('bh'); // s25:S: structures are always true; bh= is ignored
   const direction=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
   const target=camera.position.clone().addScaledVector(direction,1000);
   url.searchParams.set('view',[...camera.position.toArray(),...target.toArray()].map(n=>n.toFixed(3)).join(','));
@@ -4040,6 +4066,9 @@ if (import.meta.env.DEV) {
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, getStructuralSurfaceY, VERTICAL_EXAGGERATION,
     masterHeight, miniMap, llToXZ, sim, getShareUrl, dlrProfile,
     setBuildingHeightScale, getBuildingHeightScale,
+    // ── s25:S ──
+    structureMorph, trueProportion: TrueProportion,
+    // ── /s25:S ──
     // Buildings render path (06Sep26u): 'live' | 'baked'
     setBuildingsPath,
     get buildingsPath() { return buildingsPath; },

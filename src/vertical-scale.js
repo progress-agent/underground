@@ -3,6 +3,10 @@ import * as THREE from 'three';
 export const MASTER_HEIGHT_BASE = 5;
 
 /**
+ * D-039 (25Sep26f): Master stretches the LANDSCAPE only. Structures counter this
+ * transform about their own pivots and keep true proportions; see
+ * true-proportion.js, which listens through onChange().
+ *
  * One display transform for canonical VE5 geometry, including objects added later.
  * Coordinates, terrain/depth queries, camera pose and structure height stay in
  * canonical space. Paired camera matrices make projection AND raycasting agree.
@@ -25,6 +29,7 @@ export function createVerticalScaleController({ camera, value = MASTER_HEIGHT_BA
   const zero = new THREE.Vector3(), displayRotation = new THREE.Matrix4();
   const scale = new THREE.Matrix4(), translation = new THREE.Matrix4();
   let current = base, disposed = false;
+  const listeners = new Set();
 
   function restoreCanonicalMatrices() {
     camera.matrixWorld.copy(canonicalWorld);
@@ -64,9 +69,18 @@ export function createVerticalScaleController({ camera, value = MASTER_HEIGHT_BA
     setValue(next) {
       if (disposed) throw new Error('Master-height controller is disposed');
       if (!Number.isFinite(next)) throw new TypeError('Master height must be finite');
+      const previous = current;
       current = THREE.MathUtils.clamp(next, min, max);
       camera.updateWorldMatrix(true, false);
+      if (current !== previous) for (const fn of listeners) fn(current, previous);
       return current;
+    },
+    // D-039: structures keep true proportions, so they must hear every Master
+    // change (true-proportion.js binds here). Returns an unsubscribe function.
+    onChange(fn) {
+      if (typeof fn !== 'function') throw new TypeError('onChange needs a function');
+      listeners.add(fn);
+      return () => listeners.delete(fn);
     },
     // Explicit conversions for external display-space consumers. Existing
     // physical samplers and ray hits already use canonical coordinates.
@@ -78,6 +92,7 @@ export function createVerticalScaleController({ camera, value = MASTER_HEIGHT_BA
       camera.updateMatrixWorld = updateMatrixWorld;
       camera.updateWorldMatrix = updateWorldMatrix;
       delete camera.userData.masterHeightController;
+      listeners.clear();
       disposed = true;
       camera.updateWorldMatrix(true, false);
     },

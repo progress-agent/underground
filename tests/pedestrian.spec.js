@@ -35,7 +35,9 @@ const setSlider = (page, id, v) => page.evaluate(([id, v]) => {
 }, [id, v]);
 const sliders = (page) => page.evaluate(() => ({
   master: Number(document.getElementById('masterHeight').value),
-  structure: Number(document.getElementById('buildingHeight').value),
+  // D-039 (sprint 25Sep26f): no Structure slider. What the viewer sees of a
+  // structure is Master x height factor, which is now always 1 (true).
+  structure: +(window.__ug.getBuildingHeightScale() * window.__ug.masterHeight.value).toFixed(6),
   masterRatio: window.__ug.masterHeight.ratio,
 }));
 const dbg = (page) => page.evaluate(() => window.__ug.modes.registry.get('pedestrian').debug());
@@ -54,7 +56,6 @@ test.describe('Pedestrian mode', () => {
   test('entering eases to real scale, leaving restores the prior sliders, sliders stay adjustable', async ({ page }) => {
     await boot(page);
     await setSlider(page, 'masterHeight', 3);
-    await setSlider(page, 'buildingHeight', 2);
     // Record the Master slider every frame through the ease.
     await page.evaluate(() => {
       window.__masterTrace = [];
@@ -75,7 +76,7 @@ test.describe('Pedestrian mode', () => {
     expect(trace.some(v => v < 2.95 && v > 1.05)).toBe(true);
     const at = await sliders(page);
     expect(at.master).toBe(1);
-    expect(at.structure).toBe(5);
+    expect(at.structure).toBe(1);
     expect(at.masterRatio).toBeCloseTo(0.2, 6);
 
     // Standing at a 1.7m eye height on whatever is below.
@@ -87,11 +88,10 @@ test.describe('Pedestrian mode', () => {
 
     // Sliders stay adjustable while walking: the mode does not fight them.
     await setSlider(page, 'masterHeight', 2.5);
-    await setSlider(page, 'buildingHeight', 3.5);
     await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
     await frames(page, 20);
     await page.evaluate(() => window.__ug.fpsControls.keys.delete('w'));
-    expect(await sliders(page)).toMatchObject({ master: 2.5, structure: 3.5 });
+    expect(await sliders(page)).toMatchObject({ master: 2.5, structure: 1 });
     // Physics is canonical: the eye height is unchanged by the Master slider.
     const d2 = await dbg(page);
     expect((d2.eyeY - d2.y) / VE).toBeCloseTo(1.7, 3);
@@ -99,7 +99,7 @@ test.describe('Pedestrian mode', () => {
     // Leaving restores what the sliders were before entry.
     await page.keyboard.press('1');
     expect(await page.evaluate(() => window.__ug.modes.activeId)).toBe('deity');
-    expect(await sliders(page)).toMatchObject({ master: 3, structure: 2 });
+    expect(await sliders(page)).toMatchObject({ master: 3, structure: 1 });
   });
 
   test('a pedestrian cannot walk through a real building; it slides along the facade', async ({ page }) => {
@@ -300,12 +300,13 @@ test.describe('Pedestrian mode', () => {
       const sprint = m.debug().tunnel.speed;
       const sprintMoved = ug.camera.position.distanceTo(start);
       ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
-      return { tubes: tubes.length, trace, own, moved, sprintMoved, sprint, phase: m.debug().phase };
+      return { tubes: tubes.length, trace, own, moved, sprintMoved, sprint, phase: m.debug().phase, boreRadius: ug.trueProportion.boreRadiusM(lineId) };
     }, st.lineId);
     expect(walk.tubes).toBeGreaterThanOrEqual(2);
     for (const f of walk.trace) {
-      expect(f.radius).toBe(4.5);
-      // On the bore's axis: far inside its 4.5m wall (the verifier measured
+      // D-039: bores are drawn at their true per-line size, not a fixed 4.5m.
+      expect(f.radius).toBeCloseTo(walk.boreRadius, 9);
+      // On the bore's axis: far inside its wall (the verifier measured
       // 6.0 to 6.9m here when the walker was on the shared centreline).
       expect(f.best).toBeLessThan(0.5);
     }

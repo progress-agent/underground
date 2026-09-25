@@ -7,6 +7,9 @@
  * lights needed.
  */
 import * as THREE from 'three';
+// ── s25:S ──
+import { boreRadiusM, masterRatio, composeTrueProportionMatrix } from './true-proportion.js';
+// ── /s25:S ──
 
 // ─── Per-line frequency config (5pm weekday peak, tph per direction) ─
 const LINE_CONFIG = {
@@ -33,6 +36,23 @@ const STRIP_LENGTH = 93;          // window zone (inset from hemispherical caps)
 const STRIP_HEIGHT = 2.0;         // window band height
 const STRIP_Y = 0.4;              // above capsule centre (where windows sit)
 const STRIP_X = 4.0;              // outside capsule surface at STRIP_Y
+
+// ── s25:S ── True proportions (D-039). Bores are now drawn at their real size
+// (true-proportion.js BORE_DIAMETER_M), so a train is scaled across its section
+// to keep the historical fill of the bore (3.8 of 4.5, about the real stock's
+// 2.9m in a 3.56m tube), its length unchanged. Its matrix is
+// T . S_y(5 / Master) . R . S: the vertical unscale acts in world axes after
+// the rotation, so the body is its true shape at every Master height, and R is
+// aimed along the DISPLAYED track (a canonical rise shown x the Master ratio).
+const TRAIN_BORE_FILL = CAPSULE_RADIUS / 4.5;
+export function trainSectionScale(lineId) { return TRAIN_BORE_FILL * boreRadiusM(lineId) / CAPSULE_RADIUS; }
+const _trainScale = new THREE.Vector3();
+function trueTrainMatrix() {
+  const k = this.userData.sectionScale ?? 1;
+  composeTrueProportionMatrix(this.matrix, this.position, this.quaternion, _trainScale.set(k, k, 1));
+  this.matrixWorldNeedsUpdate = true;
+}
+// ── /s25:S ──
 
 // ─── Shared GPU resources (created once, reused by all trains) ──────
 let _capsuleGeo = null;
@@ -224,6 +244,10 @@ export function createTrain({ system, curve, stationUs, lineId, colour, dir, pha
   };
 
   train.position.copy(curve.getPointAt(train.userData.t));
+  // ── s25:S ──
+  train.userData.sectionScale = trainSectionScale(lineId);
+  train.updateMatrix = trueTrainMatrix;
+  // ── /s25:S ──
   group.add(train);
   system.allTrains.push(train);
   addToBatch(group, train, lineId, colour); // s24:R
@@ -411,7 +435,7 @@ function pose(train) {
   const ud = train.userData;
   ud.curve.getPointAt(ud.t, train.position);
   orient(train);
-  ud._poseT = ud.t; ud._poseDir = ud.dir; ud._posT = ud.t;
+  ud._poseT = ud.t; ud._poseDir = ud.dir; ud._posT = ud.t; ud._poseRatio = masterRatio(); // s25:S
   trainPoseStats.posed++;
 }
 // A hidden line's trains still move: spatial audio (audio.js reassignPool and
@@ -439,7 +463,7 @@ export function updateTrains(system, sim, camera, dt) {
       // ── s24:R ──
       if (reuse) {
         if (!lineShown(train)) { placeHidden(train); continue; }
-        if (ud._poseT === ud.t && ud._poseDir === ud.dir) { trainPoseStats.reused++; continue; }
+        if (ud._poseT === ud.t && ud._poseDir === ud.dir && ud._poseRatio === masterRatio()) { trainPoseStats.reused++; continue; } // s25:S Master re-aims
         pose(train);
         continue;
       }
@@ -499,6 +523,8 @@ function orient(train) {
   const ud = train.userData;
   const uAhead = Math.min(ud.t + 0.001, 0.999);
   ud.curve.getPointAt(uAhead, _lookTarget); // s24:R: same point, no per-frame allocation
+  // s25:S aim along the displayed track: a canonical rise is shown x the Master ratio.
+  _lookTarget.sub(train.position); _lookTarget.y *= masterRatio(); _lookTarget.add(train.position);
   train.lookAt(_lookTarget);
 
   if (ud.dir === -1) train.rotateY(Math.PI);

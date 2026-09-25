@@ -33,16 +33,18 @@ test('wheel plane and pitches agree with independently mapped grid bearings',asy
 test('London Eye hover reports real dimensions at both scales, then disappears with the model',async({page})=>{
  await ready(page);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ // D-039 (sprint 25Sep26f): no Structure slider; the two scales are now two
+ // Master heights, and the Eye stands at its true 135m under both.
  for(const scale of [1,5]){
   const point=await page.evaluate(scale=>{
    const u=window.__ug,T=window.__ugTHREE;
    u.controls.enabled=false;u.controls.enableDamping=false;
-   const input=document.getElementById('buildingHeight');input.value=String(scale);input.dispatchEvent(new Event('input'));
+   const input=document.getElementById('masterHeight');input.value=String(scale);input.dispatchEvent(new Event('input'));u.structureMorph.flush();
    const anchor=u.landmarkGroup.getObjectByName('landmark-site-london-eye').children.find(a=>a.userData.primary);
    anchor.updateWorldMatrix(true,true);
    const point=anchor.localToWorld(new T.Vector3(0,75,0));
    const normal=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),anchor.rotation.y);
-   u.camera.position.copy(point).addScaledVector(normal,400*scale);u.controls.target.copy(point);u.camera.lookAt(point);u.camera.updateMatrixWorld(true);
+   u.camera.position.copy(point).addScaledVector(normal,400);u.controls.target.copy(point);u.camera.lookAt(point);u.camera.updateMatrixWorld(true);
    const screen=point.project(u.camera);return {x:(screen.x+1)*innerWidth/2,y:(1-screen.y)*innerHeight/2};
   },scale);
   await page.mouse.move(point.x-2,point.y);await page.mouse.move(point.x,point.y);

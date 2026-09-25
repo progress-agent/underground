@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchTrueProportionMaterial } from './true-proportion.js';
 import { RENDER_ORDER } from './render-layers.js';
 
 // Track which station names already have a label to avoid duplicates
@@ -211,13 +212,15 @@ export function createStationMarkers({
 }) {
   // ---- 3D markers (fast): InstancedMesh spheres ----
   const geo = new THREE.SphereGeometry(size, 10, 10);
-  const mat = new THREE.MeshStandardMaterial({
+  // s25:S (D-039): markers stay round at every Master height; instance
+  // matrices are translation-only, so a local vertical unscale is exact.
+  const mat = patchTrueProportionMaterial(new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 0.35,
     metalness: 0.0,
     emissive: new THREE.Color(colour),
     emissiveIntensity: 0.2,
-  });
+  }));
 
   const mesh = new THREE.InstancedMesh(geo, mat, stations.length);
   mesh.frustumCulled = true;
