@@ -48,6 +48,11 @@ import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThames
 import { createGeologyExterior } from './geology-exterior.js';
 // ── sprint:B ──
 import { getMapEdgePointsBNG, getMapEdgeRing, trimRibbonVolumeToRing, isOffMapEdge } from './m25-edge.js';
+// ── s25:E ──
+import { clipWaterToMapEdge, clipLineSegmentsToMapEdge, SCENE_XZ } from './map-edge-clip.js';
+import { findBridgeCrossings, tubeOnDeckY } from './rail-truth.js';
+import { WATER_LIFT as S25E_WATER_LIFT } from './render-layers.js';
+// ── /s25:E ──
 // Buildings between the outer barrier and the bake's support ring would stand
 // over the void now the ground ends at the barrier; suppress them alongside
 // any existing suppression (airports).
@@ -1186,6 +1191,14 @@ const thamesDataPromise = loadThamesData();
       terrain = result;
       scene.add(result.mesh);
       if (result.undersideMesh) scene.add(result.undersideMesh);
+      // ── s25:E ──
+      // Contours are marched over the whole terrain grid, which runs past the
+      // map edge; drop the segments beyond the cliff (sprint 25Sep26f).
+      if (result.contourLines) {
+        const lp = result.contourLines.position;
+        window.__ugContourClip = clipLineSegmentsToMapEdge(result.contourLines.geometry, lp.x, lp.z, isOffMapEdge);
+      }
+      // ── /s25:E ──
       if (result.contourLines) scene.add(result.contourLines);
       createParkLabels({getSurfaceY:getTerrainMeshSurfaceY}).then(group=>{
         parkLabelsGroup=group;
@@ -1295,7 +1308,11 @@ const thamesDataPromise = loadThamesData();
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
       reservoirDataPromise.then(data => {
         if (data) {
-          reservoirsMesh = createReservoirs(data, llToXZ, getTerrainMeshSurfaceY);
+          // ── s25:E ── clip reservoirs and lakes to the map edge at load
+          const clipped = clipWaterToMapEdge(data, llToXZ, getMapEdgeRing(), { kind: 'polygon' });
+          (window.__ugWaterClip ||= {}).reservoirs = clipped.report;
+          reservoirsMesh = createReservoirs(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
+          // ── /s25:E ──
           if (reservoirsMesh) {
             scene.add(reservoirsMesh);
             addReservoirsToLegend();
@@ -1307,7 +1324,12 @@ const thamesDataPromise = loadThamesData();
       // Canals — data fetch started at module scope, create now that terrain is ready
       canalDataPromise.then(data => {
         if (data) {
-          canalsMesh = createCanals(data, llToXZ, getTerrainMeshSurfaceY);
+          // ── s25:E ── clip canals to the map edge at load; cut ends pulled
+          // back past the ribbon's 5 m half-width so no corner overhangs.
+          const clipped = clipWaterToMapEdge(data, llToXZ, getMapEdgeRing(), { kind: 'polyline', endInsetM: 6 });
+          (window.__ugWaterClip ||= {}).canals = clipped.report;
+          canalsMesh = createCanals(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
+          // ── /s25:E ──
           if (canalsMesh) {
             if(airportDockGroup?.parent && airportDockGroup.visible) {
               // The old centreline dataset includes two dock ribbons. Clip
@@ -1522,6 +1544,42 @@ function snapAllShaftsToTerrain() {
   }
 }
 
+// ── s25:E ──
+// Tube lines that cross the Thames on a sourced railway bridge (rail-truth.js)
+// get two deck points spliced in once, and every snap puts them on the deck:
+// the live bridge registry's deckY when bridges have built, otherwise the same
+// formula bridges.js uses (water level + clearance, scaled like the bridges).
+const S25E_TUBE_RADIUS = 4.5; // matches the TubeGeometry radius used for lines
+function placeTubeOnRailBridges(lineId, branchPts) {
+  if (!branchPts.some(p => p._bridge)) {
+    const hits = findBridgeCrossings(lineId, branchPts, { e: BNG_REF_E, n: BNG_REF_N });
+    for (const hit of hits.sort((p, q) => q.index - p.index)) {
+      const pa = new THREE.Vector3(hit.ends.a.x, 0, hit.ends.a.z);
+      const pb = new THREE.Vector3(hit.ends.b.x, 0, hit.ends.b.z);
+      pa._bridge = pb._bridge = hit.crossing;
+      branchPts.splice(hit.index + 1, 0, pa, pb);
+    }
+  }
+  // Deck points are not stations: keep trains from dwelling on the bridge.
+  // (_stationIndices is the DLR's existing hook in stationUsFromPolyline;
+  // set only on branches that carry a bridge, so no other line changes.)
+  // A getter, because later passes still splice river-bed points in.
+  if (branchPts.some(p => p._bridge) && !Object.getOwnPropertyDescriptor(branchPts, '_stationIndices')) {
+    Object.defineProperty(branchPts, '_stationIndices', { configurable: true,
+      get() { return this.map((p, i) => (p._bridge ? -1 : i)).filter(i => i >= 0); } });
+  }
+  const ratio = getBuildingHeightScale();
+  for (const pt of branchPts) {
+    if (!pt._bridge) continue;
+    const c = pt._bridge;
+    const live = bridgesGroup?.userData?.registry?.get(c.bridge)?.deckY;
+    const water = WATER_LEVEL_M * VERTICAL_EXAGGERATION + S25E_WATER_LIFT;
+    const deckY = Number.isFinite(live) ? live : water + c.clearanceM * VERTICAL_EXAGGERATION * ratio;
+    pt.y = tubeOnDeckY(deckY, VERTICAL_EXAGGERATION * ratio, S25E_TUBE_RADIUS);
+  }
+}
+// ── /s25:E ──
+
 // Snap all tube centerPts, geometry, stations, and shaft platformY to terrain surface.
 // Called once after terrain loads so that depth is terrain-relative, not sea-level-relative.
 function snapAllTubesToTerrain({ onlyLine = null } = {}) {
@@ -1544,6 +1602,10 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
           pt.y = surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
         }
       }
+      // ── s25:E ── sourced railway-bridge crossings (District at Putney and
+      // Kew): the line rides the bridge deck instead of diving under the bed.
+      placeTubeOnRailBridges(lineId, branchPts);
+      // ── /s25:E ──
     }
   }
 
@@ -1572,6 +1634,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
     if (lineId === 'dlr' || (onlyLine && lineId !== onlyLine)) continue;
     for (const branchPts of branches) {
       for (const pt of branchPts) {
+        if (pt._bridge) continue; // s25:E: deck points stay on the deck
         if (isRiverCorridorPoint(pt.x, pt.z)) {
           const clearance = riverClearanceY(pt.x, pt.z);
           pt.y = Math.min(pt.y, clearance.y);
@@ -1587,6 +1650,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       for (let i = branchPts.length - 2; i >= 0; i--) {
         const a = branchPts[i];
         const b = branchPts[i + 1];
+        if (a._bridge || b._bridge) continue; // s25:E: bridge approaches and deck
         const dx = b.x - a.x;
         const dz = b.z - a.z;
         const horizontalLen = Math.sqrt(dx * dx + dz * dz);
