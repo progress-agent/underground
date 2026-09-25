@@ -206,6 +206,91 @@ test('the near clip is 0.1 only below ground: back on the street it is restored'
   expect(await page.evaluate(() => window.__ug.camera.near)).toBe(1);
 });
 
+// Fix round 1 (adversarial verifier): at interchanges other lines' frosted
+// exterior tubes crossed the walker's bore (the Central washing Bank's Northern
+// platform red, the Victoria washing Green Park blue, the Metropolitan a maroon
+// disc at Baker Street). The picture inside must be the lining alone: a frame
+// with every other drawable in the scene hidden must match the frame as drawn.
+const INTERCHANGES = [
+  ['Bank', 'northern'], ['Green Park', 'piccadilly'], ['Baker Street', 'bakerloo'],
+  ['Euston', 'victoria'], ['Bank', 'central'],
+];
+const FOREIGN_PCT = 0.5; // % of pixels; the verifier measured 21 to 99% at these five
+
+/** Frame as drawn, and the frame with nothing but the lining; `pct` differs. */
+const liningOnlyDiff = () => page.evaluate(() => {
+  const ug = window.__ug;
+  window.__freeze = true;
+  const drawn = window.__grab();
+  const lining = ug.modes.ctx.tubeInterior.mesh, was = [];
+  ug.scene.traverse(o => {
+    if (o === lining || !(o.isMesh || o.isLine || o.isPoints || o.isSprite) || !o.visible) return;
+    was.push(o); o.visible = false;
+  });
+  const r = ug.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+  ug.composer.render(0); r.setRenderTarget(null);   // no tick: nothing re-shows what we hid
+  const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b);
+  for (const o of was) o.visible = true;
+  const d = window.__diff(drawn, { b, W, H });
+  window.__thaw();
+  return { ...d, hidden: was.length };
+});
+
+/** Brightest linear value the scene pass writes (half-float target, before tone mapping). */
+const sceneMax = () => page.evaluate(() => {
+  const ug = window.__ug;
+  window.__freeze = true; window.__step(4);
+  const r = ug.composer.renderer, rt = ug.composer.renderTarget1, W = rt.width, H = rt.height;
+  r.setRenderTarget(rt); r.clear(); r.render(ug.scene, ug.camera); r.setRenderTarget(null);
+  const buf = new Uint16Array(4 * W * H);
+  r.readRenderTargetPixels(rt, 0, 0, W, H, buf);
+  const h2f = h => { const e = (h >> 10) & 0x1f, f = h & 0x3ff, s = (h & 0x8000) ? -1 : 1;
+    return e === 0 ? s * 2 ** -14 * (f / 1024) : e === 31 ? (f ? NaN : s * Infinity) : s * 2 ** (e - 15) * (1 + f / 1024); };
+  let mx = 0, bad = 0;
+  for (let i = 0; i < buf.length; i++) { if (i % 4 === 3) continue; const v = h2f(buf[i]); if (!Number.isFinite(v)) bad++; else if (v > mx) mx = v; }
+  window.__thaw();
+  return { max: mx, nonFinite: bad, type: rt.texture.type };
+});
+
+test('at interchanges nothing but the walker\'s own lining is drawn inside the bore', async () => {
+  // Control: with the view NOT isolated (the defect as found), the test sees
+  // the Central's exterior tube inside Bank's Northern bore.
+  await descend('Bank', 'northern');
+  const control = await (async () => {
+    await page.evaluate(() => {
+      const ti = window.__ug.modes.ctx.tubeInterior;
+      ti.__show = ti.show; ti.show = (net, pos) => ti.__show(net, pos, { isolate: false });
+    });
+    await page.waitForTimeout(200);
+    const d = await liningOnlyDiff();
+    await page.evaluate(() => { const ti = window.__ug.modes.ctx.tubeInterior; ti.show = ti.__show; delete ti.__show; });
+    return d;
+  })();
+  expect(control.pct, `control must detect foreign geometry: ${JSON.stringify(control)}`).toBeGreaterThan(5);
+  await page.keyboard.press('1');
+  await page.waitForTimeout(300);
+
+  for (const [name, lineId] of INTERCHANGES) {
+    await descend(name, lineId);
+    await page.waitForTimeout(300);
+    const d = await dbg();
+    expect(d.interior.lineId, name).toBe(lineId);
+    expect(d.interior.isolated, name).toBe(true);
+    const r = await liningOnlyDiff();
+    expect(r.hidden, name).toBeGreaterThan(100);
+    expect(r.pct, `${name}, ${lineId}: ${JSON.stringify(r)}`).toBeLessThanOrEqual(FOREIGN_PCT);
+    // The lining stays under the bloom threshold everywhere: a straight bore
+    // once put 16376 at the vanishing point (a blooming white square at Baker Street).
+    const hdr = await sceneMax();
+    expect(hdr.nonFinite, name).toBe(0);
+    expect(hdr.max, `${name}: ${JSON.stringify(hdr)}`).toBeLessThanOrEqual(1.0);
+    await page.keyboard.press('1');
+    await page.waitForTimeout(300);
+    // Leaving restores the camera's layers: Deity draws the whole scene again.
+    expect(await page.evaluate(() => window.__ug.camera.layers.mask), name).toBe(1);
+  }
+});
+
 test('Deity pixels at a reference underground pose are unchanged by a Pedestrian trip down a tunnel', async () => {
   await page.evaluate(async (pose) => { await window.__place(pose); }, LANDING);
   const r1 = await page.evaluate(() => {

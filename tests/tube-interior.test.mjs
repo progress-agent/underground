@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { buildTunnelNetwork, pointAt } from '../src/modes/pedestrian-tunnels.js';
 import { boreRadiusM } from '../src/true-proportion.js';
-import { INTERIOR, sampleBoreWindow, buildInteriorGeometry, createTubeInterior } from '../src/tube-interior.js';
+import { INTERIOR, INTERIOR_LAYER, sampleBoreWindow, buildInteriorGeometry, createTubeInterior } from '../src/tube-interior.js';
 
 const VE = 5;
 const v = (x, depthM, z) => ({ x, y: -depthM * VE, z });
@@ -184,6 +184,41 @@ test('controller: shows around the walker, hides every map device, restores exac
   // A bad position hides rather than throwing.
   assert.equal(interior.show(net, { path: 99, s: 0 }), false);
   assert.equal(interior.visible, false);
+});
+
+test('inside, the camera draws the lining alone (no foreign bore can cross it); its layers come back exactly', () => {
+  // Fix round 1: at interchanges other lines' frosted exterior tubes cross the
+  // walker's bore. The camera sees only the lining's layer while inside.
+  const net = network();
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera();
+  camera.layers.enable(3); // some prior layer state: must be restored bit for bit
+  const mask0 = camera.layers.mask;
+  const foreign = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+  scene.add(foreign);
+  const interior = createTubeInterior({ scene, camera: () => camera });
+  assert.ok(interior.mesh.layers.test(new THREE.Layers()), 'the lining stays on layer 0 too');
+  interior.show(net, { path: 0, s: 900, dir: 1, side: 1 });
+  assert.equal(camera.layers.mask, 1 << INTERIOR_LAYER);
+  assert.ok(interior.mesh.layers.test(camera.layers), 'the camera sees the lining');
+  assert.ok(!foreign.layers.test(camera.layers), 'the camera does not see anything else');
+  assert.equal(interior.debug().isolated, true);
+  // Repeated shows keep the ORIGINAL mask to restore, not the isolated one.
+  interior.show(net, { path: 0, s: 910, dir: 1, side: 1 });
+  // In the cross passage (camera maybe outside the lining) the view is whole again.
+  interior.show(net, { path: 0, s: 910, dir: 1, side: 1 }, { isolate: false });
+  assert.equal(camera.layers.mask, mask0);
+  interior.show(net, { path: 0, s: 910, dir: 1, side: 1 });
+  assert.equal(camera.layers.mask, 1 << INTERIOR_LAYER);
+  interior.hide();
+  assert.equal(camera.layers.mask, mask0);
+  assert.equal(interior.debug().isolated, false);
+  interior.hide(); // idempotent
+  assert.equal(camera.layers.mask, mask0);
+  // A bad position hides, and restores the view with it.
+  interior.show(net, { path: 0, s: 900, dir: 1, side: 1 });
+  interior.show(net, { path: 99, s: 0 });
+  assert.equal(camera.layers.mask, mask0);
 });
 
 test('the window is deterministic: the same position gives identical geometry', () => {

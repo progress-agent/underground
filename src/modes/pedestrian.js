@@ -171,7 +171,9 @@ export function createPedestrianMode(ctx) {
       && ctx.camera.position.y < (shaft.stop?.surfaceY ?? shaft.groundY ?? Infinity));
     if (bore && net) {
       if (phase === 'tunnel') lastBore = bore;
-      ctx.tubeInterior?.show(net, bore);
+      // Only in the tunnel is the camera surely inside the lining; in the cross
+      // passage it is partly outside, where drawing the lining alone would blank the view.
+      ctx.tubeInterior?.show(net, bore, { isolate: phase === 'tunnel' });
     } else {
       ctx.tubeInterior?.hide();
     }
