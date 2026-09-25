@@ -116,7 +116,8 @@ float ugCloudSunFactor( vec3 viewPos ) {
 	vec2 p = w.xz + sunDir.xz * ( ( planeY - w.y ) / max( sunDir.y, 0.05 ) );
 	vec2 uvC = ( p - ugCloudA[ 0 ].xy - ugCloudA[ 0 ].zw ) / ugCloudA[ 1 ].x;
 	vec2 uvE = ( p - ugCloudA[ 1 ].yz ) / ugCloudA[ 1 ].w;
-	float cover = texture2D( ugCloudCover, uvC ).r;
+	// Sharpened so the shaded area follows the cloud footprint (cover 0.5).
+	float cover = smoothstep( 0.2, 0.8, texture2D( ugCloudCover, uvC ).r );
 	float edge = texture2D( ugCloudEdge, uvE ).r;
 	return 1.0 - strength * cover * edge;
 }

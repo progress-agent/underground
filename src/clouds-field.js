@@ -373,7 +373,8 @@ export function cloudSunFactor(layout, x, y, z, { drift, sunDir, strength, plane
   if (y >= planeY) return 1;
   const k = (planeY - y) / Math.max(sunDir.y, 0.05);
   const px = x + sunDir.x * k, pz = z + sunDir.z * k;
-  const cover = sampleCover(layout, px, pz, drift);
+  // Sharpened as in the shader: the shaded area follows the footprint.
+  const cover = smoothstep(0.2, 0.8, sampleCover(layout, px, pz, drift));
   return 1 - strength * cover * sampleEdgeFade(layout, px, pz);
 }
 
