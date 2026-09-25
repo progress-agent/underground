@@ -145,27 +145,164 @@ export function createTrains({ system, leftCurve, rightCurve, stationUs, lineId,
 
   const trains = [];
   const spacing = 1 / Math.max(1, count);
+  // s25:H: every draw is seeded by the train's id, so two loads build the same fleet.
+  const key = branchKey(lineId, leftCurve, stationUs);
 
   // Forward direction — evenly spaced with proportional jitter
   for (let i = 0; i < count; i++) {
-    const phase = (i * spacing) + (Math.random() - 0.5) * spacing * 0.15;
-    trains.push(createTrain({ system, curve: leftCurve, stationUs, lineId, colour, dir: +1, phase, group }));
+    const id = `${key}:fwd:${i}`;
+    const phase = (i * spacing) + (seededRandom(`${id}:phase`)() - 0.5) * spacing * 0.15;
+    trains.push(createTrain({ system, curve: leftCurve, stationUs, lineId, colour, dir: +1, phase, group, id }));
   }
 
   // Reverse direction — same even spacing, independent offset
-  const reverseOffset = Math.random() * spacing; // shift whole fleet by up to one gap
+  const reverseOffset = seededRandom(`${key}:rev:offset`)() * spacing; // shift whole fleet by up to one gap
   for (let i = 0; i < count; i++) {
-    const phase = (i * spacing) + reverseOffset + (Math.random() - 0.5) * spacing * 0.15;
-    trains.push(createTrain({ system, curve: rightCurve, stationUs, lineId, colour, dir: -1, phase, group }));
+    const id = `${key}:rev:${i}`;
+    const phase = (i * spacing) + reverseOffset + (seededRandom(`${id}:phase`)() - 0.5) * spacing * 0.15;
+    trains.push(createTrain({ system, curve: rightCurve, stationUs, lineId, colour, dir: -1, phase, group, id }));
   }
 
   return trains;
 }
 
+// ── s25:H ── Seeded, time-pure tube trains (sprint 25Sep26f, D-039, Lane H).
+// Phases and dwell used Math.random, so every page load ran a different
+// timetable, and the simulation stepped frame by frame and dropped the part of
+// a frame left over at each station arrival, so where a train stood depended
+// on the frame rate. Now each train has an id (line, a fingerprint of its
+// branch, direction, index), its phase and dwell come from a PRNG seeded by
+// that id, and its position is a pure function of the train system's
+// simulation clock: a periodic timetable (cruise between stations, dwell at
+// each, wrap at the end of the curve) anchored at clock zero. Two loads at the
+// same simulation time show the same trains in the same places, and a train
+// rebuilt on a resnapped curve rejoins the same timetable.
+
+/** FNV-1a 32-bit hash of a string. */
+function hashString(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+/** Mulberry32 PRNG seeded from a string; returns a function giving [0, 1). */
+export function seededRandom(seed) {
+  let a = hashString(String(seed));
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** A branch's identity from its plan-view ends and station count. The ends are
+ * rounded to 10 m: the terrain resnap moves tunnels vertically, never in plan,
+ * so the rebuilt branch keeps its key and its trains keep their timetable. */
+function branchKey(lineId, curve, stationUs) {
+  const a = curve.getPointAt(0), b = curve.getPointAt(1), r = v => Math.round(v / 10);
+  return `${lineId}@${r(a.x)},${r(a.z)}>${r(b.x)},${r(b.z)}#${stationUs.length}`;
+}
+
+// The timetable's pace uses the branch's plan-view (x, z) length, not its 3-D
+// arc length: the terrain resnap and the Master slider move tunnels only
+// vertically, so a rebuilt curve keeps the same plan length, the same period
+// and every train its place on the timetable, however long the session has
+// run. (With the 3-D length, a resnap an hour into a session at 8x would shift
+// trains by minutes of timetable.) Motion stays linear in the curve parameter u.
+const PLAN_SAMPLES = 256;
+const _planLengths = new WeakMap(); // curve -> { L3d, plan }
+function planLength(curve) {
+  const L3d = curve.getLength();
+  const c = _planLengths.get(curve);
+  if (c && c.L3d === L3d) return c.plan;
+  const p = new THREE.Vector3(), q = new THREE.Vector3();
+  let plan = 0;
+  const N = Math.max(PLAN_SAMPLES, 16 * (curve.points?.length ?? 0)); // chords fine enough to follow each bend
+  curve.getPoint(0, q);
+  for (let j = 1; j <= N; j++) {
+    curve.getPoint(j / N, p);
+    plan += Math.hypot(p.x - q.x, p.z - q.z);
+    q.copy(p);
+  }
+  // A branch drawn straight down (no plan extent) still needs a pace.
+  if (!(plan > 1e-6)) plan = L3d;
+  _planLengths.set(curve, { L3d, plan });
+  return plan;
+}
+
+// Timetable in the direction of travel: w = u going forward, 1 - u in reverse,
+// so a train always runs w from 0 towards 1 and wraps back to 0.
+function timetable(ud) {
+  // Fast path: the app replaces curves rather than editing them, so the same curve
+  // object (not flagged needsUpdate) keeps its plan length.
+  const c = ud._timetable;
+  if (c && c.curve === ud.curve && !ud.curve.needsUpdate && c.S === ud.stationUs && c.v === ud.cruiseMps && c.d === ud.dwellSec && c.dir === ud.dir) return c;
+  const plan = planLength(ud.curve);
+  const S = ud.stationUs, d = ud.dwellSec, dir = ud.dir;
+  const stops = S.map((u, index) => ({ w: dir > 0 ? u : 1 - u, u, index })).sort((x, y) => x.w - y.w);
+  const T1 = plan / Math.max(1e-6, ud.cruiseMps); // one pass of the branch, moving
+  const arr = stops.map((s, i) => s.w * T1 + d * i); // arrival time at each stop
+  const next = { curve: ud.curve, plan, S, v: ud.cruiseMps, d, dir, stops, T1, arr, P: T1 + stops.length * d };
+  ud._timetable = next;
+  return next;
+}
+/** Timetable time at which a moving train is at w (stops strictly behind it already served). */
+function tauMoving(tt, w) {
+  let k = 0;
+  while (k < tt.stops.length && tt.stops[k].w < w) k++;
+  return w * tt.T1 + tt.d * k;
+}
+/** Where a train's timetable is anchored. A train made by createTrain is
+ * anchored at clock 0, moving at its seeded phase. A train object built by
+ * hand (tests) is anchored at the clock it is first seen, from its own
+ * (t, _pausedLeft): it holds for _pausedLeft seconds, then departs. */
+function anchorOf(ud, clock) {
+  if (!ud.anchor) ud.anchor = { u: ud.t, hold: Math.max(0, ud._pausedLeft || 0), clock };
+  return ud.anchor;
+}
+
+/** Pure state of a train at simulation time simT: { t, pausedLeft, nextStationIndex }. */
+export function trainStateAt(ud, simT) {
+  const tt = timetable(ud), an = anchorOf(ud, simT), n = tt.stops.length;
+  const w0 = ud.dir > 0 ? an.u : 1 - an.u;
+  const elapsed = simT - an.clock;
+  if (elapsed < an.hold) {
+    // Hand-built train still holding where it was placed.
+    const nx = tt.stops.find(s => s.w > w0) ?? tt.stops[0];
+    return { t: an.u, pausedLeft: an.hold - elapsed, nextStationIndex: nx?.index ?? 0 };
+  }
+  if (!(tt.P > 0) || !Number.isFinite(tt.P)) return { t: ud.t, pausedLeft: 0, nextStationIndex: 0 };
+  // Timetable time at the anchor: departing w0 (after its hold, if it was held at a stop).
+  // Cached per (timetable, anchor): a resnap or a new anchor recomputes it.
+  let tau0;
+  if (ud._tau0 && ud._tau0.tt === tt && ud._tau0.an === an) tau0 = ud._tau0.v;
+  else {
+    tau0 = tauMoving(tt, w0);
+    if (an.hold > 0) {
+      const k = tt.stops.findIndex(s => s.u === an.u);
+      if (k >= 0) tau0 = tt.arr[k] + tt.d;
+    }
+    ud._tau0 = { tt, an, v: tau0 };
+  }
+  let tau = (tau0 + (elapsed - an.hold)) % tt.P;
+  if (tau < 0) tau += tt.P;
+  // Last stop reached at or before tau.
+  let lo = 0, hi = n - 1, i = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (tt.arr[m] <= tau) { i = m; lo = m + 1; } else hi = m - 1; }
+  if (i >= 0 && tau < tt.arr[i] + tt.d) {
+    return { t: tt.stops[i].u, pausedLeft: tt.arr[i] + tt.d - tau, nextStationIndex: tt.stops[(i + 1) % n].index };
+  }
+  const w = Math.min(Math.max((tau - tt.d * (i + 1)) / Math.max(1e-9, tt.T1), 0), 1);
+  let u = ud.dir > 0 ? w : 1 - w;
+  u = ((u % 1) + 1) % 1;
+  return { t: u, pausedLeft: 0, nextStationIndex: n ? tt.stops[(i + 1) % n].index : 0 };
+}
+// ── /s25:H ──
+
 /**
  * Create a single train and add it to the system.
  */
-export function createTrain({ system, curve, stationUs, lineId, colour, dir, phase, group }) {
+export function createTrain({ system, curve, stationUs, lineId, colour, dir, phase, group, id = null }) {
   ensureSharedResources();
 
   const train = new THREE.Group();
@@ -205,9 +342,13 @@ export function createTrain({ system, curve, stationUs, lineId, colour, dir, pha
   // ── Simulation userData ──
   const cfg = LINE_CONFIG[lineId] || LINE_CONFIG_DEFAULT;
   const cruiseMps = lineId === 'victoria' ? 14.5 : 12.0;
-  const dwellSec = Math.max(15, cfg.dwellSec + (Math.random() - 0.5) * 8); // ±4s variance, min 15
+  const trainId = id ?? `${lineId}:${dir > 0 ? 'fwd' : 'rev'}:${phase}`; // s25:H
+  const dwellSec = Math.max(15, cfg.dwellSec + (seededRandom(`${trainId}:dwell`)() - 0.5) * 8); // ±4s variance, min 15 (s25:H: seeded)
+  const t0 = ((phase % 1) + 1) % 1;
   train.userData = {
-    t: ((phase % 1) + 1) % 1,
+    id: trainId,
+    anchor: { u: t0, hold: 0, clock: 0 }, // s25:H: moving at its phase at simulation time 0
+    t: t0,
     curve, dir,
     curveLengthM: curve.getLength(),
     stationUs,
@@ -429,13 +570,20 @@ function placeHidden(train) {
 export function updateTrains(system, sim, camera, dt) {
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
   const reuse = trainEconomies.reusePose;
+  // s25:H: one simulation clock for the whole fleet; every train's state is a
+  // pure function of it (trainStateAt), never of the frame sequence.
+  const clock0 = system.simTime ?? 0;
+  for (const train of system.allTrains) anchorOf(train.userData, clock0);
+  system.simTime = clock0 + simDt;
 
   for (const train of system.allTrains) {
     const ud = train.userData;
+    const prevT = ud.t;
+    const st = trainStateAt(ud, system.simTime);
+    ud.t = st.t; ud._pausedLeft = st.pausedLeft; ud.nextStationIndex = st.nextStationIndex;
 
     // Dwell at stations
     if (ud._pausedLeft > 0) {
-      ud._pausedLeft = Math.max(0, ud._pausedLeft - simDt);
       // ── s24:R ──
       if (reuse) {
         if (!lineShown(train)) { placeHidden(train); continue; }
@@ -444,41 +592,11 @@ export function updateTrains(system, sim, camera, dt) {
         continue;
       }
       // ── /s24:R ──
+      if (ud.t !== prevT) train.position.copy(ud.curve.getPointAt(ud.t)); // s25:H: arrived this frame
       orient(train);
       continue;
     }
 
-    // Advance along curve
-    const du = (ud.cruiseMps * simDt) / Math.max(1e-6, ud.curveLengthM);
-    let u = ud.t + ud.dir * du;
-
-    // A delayed frame can cover several complete circuits, especially on
-    // short DLR branches at accelerated simulation speed. Keep the curve
-    // parameter valid in either direction without dropping elapsed time.
-    u = ((u % 1) + 1) % 1;
-
-    // Station arrival detection
-    const stations = ud.stationUs;
-    if (stations.length > 0) {
-      const idx = ud.nextStationIndex;
-      const targetU = stations[idx];
-      const prevU = ud.t;
-      // A complete circuit crosses the next station regardless of where the
-      // wrapped endpoint falls. Retain the existing arrival/dwell policy.
-      const crossed = du >= 1 || (ud.dir === 1
-        ? (prevU <= targetU && u >= targetU) || (prevU > u && (u >= targetU || prevU <= targetU))
-        : (prevU >= targetU && u <= targetU) || (prevU < u && (u <= targetU || prevU >= targetU)));
-
-      if (crossed) {
-        u = targetU;
-        ud._pausedLeft = ud.dwellSec;
-        ud.nextStationIndex = ud.dir === 1
-          ? (idx + 1) % stations.length
-          : (idx - 1 + stations.length) % stations.length;
-      }
-    }
-
-    ud.t = u;
     // ── s24:R ──
     if (reuse) {
       if (!lineShown(train)) { placeHidden(train); continue; }
@@ -486,7 +604,7 @@ export function updateTrains(system, sim, camera, dt) {
       continue;
     }
     // ── /s24:R ──
-    train.position.copy(ud.curve.getPointAt(u));
+    train.position.copy(ud.curve.getPointAt(ud.t));
     orient(train);
   }
   syncBatches(camera); // s24:R
