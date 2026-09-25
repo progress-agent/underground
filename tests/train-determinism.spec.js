@@ -26,7 +26,9 @@ async function trainsAt(browser, simT) {
   }, null, { timeout: 120000, polling: 250 });
   await page.evaluate(() => window.__ug.snapAllTubesToTerrain());
   const out = await page.evaluate(async simT => {
-    const mod = await import('/src/trains.js');
+    // Import the exact URL the app loaded (after an HMR update Vite adds ?t=...).
+    const loaded = performance.getEntriesByType('resource').map(e => e.name).filter(n => /\/src\/trains\.js(\?|$)/.test(n)).pop();
+    const mod = await import(loaded ?? '/src/trains.js');
     const u = window.__ug, sys = u.trainSystem;
     // Same module instance as the app's (the batch stats object is shared).
     const sameModule = mod.trainBatchStats === u.trainBatchStats;

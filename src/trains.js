@@ -233,8 +233,11 @@ function planLength(curve) {
 // Timetable in the direction of travel: w = u going forward, 1 - u in reverse,
 // so a train always runs w from 0 towards 1 and wraps back to 0.
 function timetable(ud) {
-  const c = ud._timetable, plan = planLength(ud.curve);
-  if (c && c.curve === ud.curve && c.plan === plan && c.S === ud.stationUs && c.v === ud.cruiseMps && c.d === ud.dwellSec && c.dir === ud.dir) return c;
+  // Fast path: the app replaces curves rather than editing them, so the same curve
+  // object (not flagged needsUpdate) keeps its plan length.
+  const c = ud._timetable;
+  if (c && c.curve === ud.curve && !ud.curve.needsUpdate && c.S === ud.stationUs && c.v === ud.cruiseMps && c.d === ud.dwellSec && c.dir === ud.dir) return c;
+  const plan = planLength(ud.curve);
   const S = ud.stationUs, d = ud.dwellSec, dir = ud.dir;
   const stops = S.map((u, index) => ({ w: dir > 0 ? u : 1 - u, u, index })).sort((x, y) => x.w - y.w);
   const T1 = plan / Math.max(1e-6, ud.cruiseMps); // one pass of the branch, moving
