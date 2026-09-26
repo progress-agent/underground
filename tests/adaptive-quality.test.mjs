@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createAdaptiveQuality,QUALITY_LEVELS} from '../src/adaptive-quality.js';
+import {createAdaptiveQuality,QUALITY_LEVELS,FIRST_UNSHADOWED} from '../src/adaptive-quality.js';
 
 // Sprint 24Sep26h (D-038, Lane R). The 11Sep26f tests drove the controller
 // with constant frame times, i.e. a machine on which lowering resolution never
@@ -24,6 +24,9 @@ function harness(){
   pause(ms){now+=ms;controller.update(ms,now)}};
 }
 const pixels=q=>q.scale*q.scale;
+const levelOf=(scale,samples)=>QUALITY_LEVELS.findIndex(q=>q.scale===scale&&q.samples===samples&&!q.shadows);
+// D-040: thinned clouds save a little frame time in these models too.
+const CLOUDS_THIN_SAVES=0.8;
 
 test('sustained whole-city overload lowers quality, bounded at the floor',()=>{
  // GPU-bound: 200ms at full quality, only the 35% floor fits the budget.
@@ -42,9 +45,9 @@ test('consistently very slow hardware is not mistaken for isolated stalls',()=>{
  const h=harness();h.sim(model({cpu:6,gpu:180}),60000);assert.ok(h.controller.get().level>=QUALITY_LEVELS.length-2,`level ${h.controller.get().level}`);
 });
 test('a failed upward probe restores the sustainable level and backs off',()=>{
- // Budget fits at 85%/2x (level 4) but not at 85%/4x (level 3).
+ // Budget fits at 85%/2x but not at 85%/4x.
  const h=harness();const cost=model({cpu:6,gpu:27});
- h.sim(cost,20000);const low=h.controller.get().level;assert.equal(low,4);
+ h.sim(cost,20000);const low=h.controller.get().level;assert.equal(low,levelOf(0.85,2));
  const probes=h.controller.state().history.filter(e=>e.why==='probe').length;
  assert.ok(probes>=1,'it probed');
  assert.ok(h.controller.state().history.some(e=>e.why==='probe failed'),'the probe failed and was undone');
@@ -54,11 +57,30 @@ test('a failed upward probe restores the sustainable level and backs off',()=>{
  assert.ok(h.changes.length-before<=6,`changes in 60s: ${h.changes.length-before}`);
 });
 
-test('shadows are the first thing to go, and no lower rung brings them back',()=>{
+test('clouds thin first, then shadows go, and no lower rung brings either back',()=>{
  const h=harness();h.sim(model({cpu:6,gpu:30}),6000);
- assert.deepEqual({scale:h.changes[1].scale,samples:h.changes[1].samples,shadows:h.changes[1].shadows},{scale:1,samples:4,shadows:false});
- assert.equal(QUALITY_LEVELS[0].shadows,true);
- for(const q of QUALITY_LEVELS.slice(1))assert.equal(q.shadows,false);
+ const pick=c=>({scale:c.scale,samples:c.samples,shadows:c.shadows,clouds:c.clouds});
+ assert.deepEqual(pick(h.changes[1]),{scale:1,samples:4,shadows:true,clouds:'thin'});
+ assert.deepEqual(pick(h.changes[2]),{scale:1,samples:4,shadows:false,clouds:'thin'});
+ assert.deepEqual(QUALITY_LEVELS[0],{scale:1,samples:4,shadows:true,clouds:'full'});
+ assert.equal(FIRST_UNSHADOWED,2);
+ for(const q of QUALITY_LEVELS.slice(1))assert.equal(q.clouds,'thin');
+ for(const q of QUALITY_LEVELS.slice(FIRST_UNSHADOWED))assert.equal(q.shadows,false);
+});
+test('a view that fits with thin clouds keeps its shadows, and does not bounce',()=>{
+ // Full clouds push the frame to 19.7ms (past the 19ms shadow line); thinned
+ // clouds bring it to 18.2ms, inside it. Shadows stay; the clouds stay thin.
+ const h=harness();const cost=(q,k)=>17+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05);
+ h.sim(cost,20000);assert.deepEqual(h.controller.get(),{level:1,...QUALITY_LEVELS[1]});
+ const settle=h.changes.length;h.sim(cost,90000);
+ assert.equal(h.controller.get().level,1);
+ assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
+});
+test('full clouds come back once the view is light again',()=>{
+ const h=harness();h.sim((q,k)=>17+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),20000);
+ assert.equal(h.controller.get().level,1);
+ h.sim((q,k)=>13+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),30000);
+ assert.equal(h.controller.get().level,0);
 });
 test('rungs are fine: no step removes more than a quarter of the pixels',()=>{
  for(let i=1;i<QUALITY_LEVELS.length;i++){
@@ -71,12 +93,12 @@ test('rungs are fine: no step removes more than a quarter of the pixels',()=>{
 test('CPU-bound: dropping that does not help is undone and held, not followed to the floor',()=>{
  // Constant 25ms whatever the resolution (the street/river case in the profile).
  const h=harness();const levels=h.sim(()=>25,120000);
- assert.equal(h.controller.get().level,1,'shadows off, full resolution');
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED,'shadows off, full resolution');
  assert.ok(h.controller.state().history.some(e=>e.why==='revert: dropping did not help'));
- const lowTime=levels.filter(([,l])=>l>1).reduce((s,[ms])=>s+ms,0);
- assert.ok(lowTime<0.2*120000,`time below level 1: ${lowTime}ms`);
+ const lowTime=levels.filter(([,l])=>l>FIRST_UNSHADOWED).reduce((s,[ms])=>s+ms,0);
+ assert.ok(lowTime<0.2*120000,`time below the no-shadow rung: ${lowTime}ms`);
  const deepest=Math.max(...levels.map(([,l])=>l));
- assert.ok(deepest<=5&&QUALITY_LEVELS[deepest].scale>=0.8,`never deeper than a trial descent: ${deepest}`);
+ assert.ok(deepest<=FIRST_UNSHADOWED+4&&QUALITY_LEVELS[deepest].scale>=0.8,`never deeper than a trial descent: ${deepest}`);
 });
 test('noisy GPU-bound view: fine rungs that each help only a little still descend to the budget',()=>{
  // Each fine rung helps less than frame noise, but together they do help.
@@ -114,6 +136,7 @@ test('uncapped fast display with ample headroom does not bounce between rungs',(
 // 17.7 to 18ms with shadows on the M5, and its window means wander above the
 // 1.10 band (18.3ms). The e367efd controller (p75 over 19ms) kept shadows
 // there in every run; the shadows rung must be at least as tolerant.
+// Clouds were not in the view these tests model; the thin rung saves nothing here.
 const riverLike=(base)=>(q,k)=>(q.shadows?base:base-1.5)+0.7*Math.sin(k*0.02);
 test('a ~56 fps view with shadows (river at Greenwich) keeps them',()=>{
  for(const base of [17.7,17.9,18.1]){
@@ -124,29 +147,30 @@ test('a ~56 fps view with shadows (river at Greenwich) keeps them',()=>{
 });
 test('a probe back up to shadows at ~56 fps holds',()=>{
  // Pushed off shadows by a heavy moment, then back at the river view.
- const h=harness();h.sim(()=>24,4000);assert.ok(h.controller.get().level>=1);
+ const h=harness();h.sim(()=>24,6000);assert.ok(h.controller.get().level>=FIRST_UNSHADOWED);
  h.sim(riverLike(17.9),90000);
- assert.equal(h.controller.get().level,0,JSON.stringify(h.controller.state().history.slice(-6)));
+ assert.equal(h.controller.get().shadows,true,JSON.stringify(h.controller.state().history.slice(-6)));
 });
-test('shadows still go first once a view is clearly below ~52 fps',()=>{
+test('shadows go straight after the clouds once a view is clearly below ~52 fps',()=>{
  const h=harness();h.sim((q,k)=>(q.shadows?20.5:17)+0.3*Math.sin(k*0.02),10000);
- assert.equal(h.changes[1].shadows,false);assert.equal(h.controller.get().level,1);
+ assert.equal(h.changes[1].clouds,'thin');assert.equal(h.changes[2].shadows,false);
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
 });
 test('arriving at a ~56 fps view without shadows probes back up to them',()=>{
  // River without shadows runs at about 17.1 to 17.3ms: above the 1.03 probe
  // line (17.17ms), below the old controller's 17.5ms. Shadows cost ~0.8ms more.
  for(const base of [17.1,17.3]){
-  // A heavy moment with shadows on (21ms) pushes it to level 1 and no further.
-  const h=harness();h.sim(q=>q.shadows?21:base,4000);assert.equal(h.controller.get().level,1);
-  h.sim((q,k)=>(q.shadows?base+0.8:base)+0.1*Math.sin(k*0.02),30000);
-  assert.equal(h.controller.get().level,0,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-4))}`);
+  // A heavy moment with shadows on (21ms) pushes it off shadows and no further.
+  const h=harness();h.sim(q=>q.shadows?21:base,6000);assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
+  h.sim((q,k)=>(q.shadows?base+0.8:base)+(q.clouds==='full'?CLOUDS_THIN_SAVES:0)+0.1*Math.sin(k*0.02),40000);
+  assert.equal(h.controller.get().shadows,true,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-4))}`);
  }
 });
 test('a view that cannot afford shadows does not flicker them at the looser probe line',()=>{
- // Level 1 at 17.4ms (inside the 17.5ms probe line), shadows push it to 19.6ms.
+ // Without shadows 17.4ms (inside the probe line), shadows push it to 19.6ms.
  const h=harness();const cost=(q,k)=>(q.shadows?19.6:17.4)+0.1*Math.sin(k*0.02);
  h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,90000);
- assert.equal(h.controller.get().level,1);
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
  assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
 });
 // Step 0 of sprint 25Sep26f (verifier gap, 24Sep26h): the looser probe line
@@ -156,19 +180,19 @@ test('a view that cannot afford shadows does not flicker them at the looser prob
 // its noisy 17.1 to 17.9ms windows rarely cleared the 1.03 line four in a row.
 test('arriving several rungs down at a CPU-bound ~56 fps view climbs all the way back to shadows',()=>{
  for(const base of [17.1,17.4,17.7]){
-  // GPU-heavy moment: resolution helps, so it descends past level 1.
+  // GPU-heavy moment: resolution helps, so it descends past the no-shadow rung.
   const h=harness();h.sim(model({cpu:6,gpu:24,shadowMs:2}),8000);
-  const arrived=h.controller.get().level;assert.ok(arrived>=2,`base ${base}: arrived at ${arrived}`);
+  const arrived=h.controller.get().level;assert.ok(arrived>FIRST_UNSHADOWED,`base ${base}: arrived at ${arrived}`);
   // River: CPU-bound (resolution does nothing), shadows cost ~0.8ms, noisy windows.
   h.sim((q,k)=>(q.shadows?base+0.8:base)+0.4*Math.sin(k*0.05),60000);
-  assert.equal(h.controller.get().level,0,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-6))}`);
+  assert.equal(h.controller.get().shadows,true,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-6))}`);
  }
 });
 // Step 0 measurement, 25Sep26f (M5 as lived): with the looser line, river
 // bounced 2<->3 every ~3.5s. The probe passed its first window on noise, then
 // drifted over budget two windows later; that drop escaped the probe backoff.
 test('a probe that passes its first window but drifts over soon after still backs off',()=>{
- // Level 2 (92%) averages ~18.5ms, level 3 (85%) ~17.6ms; noise lets level 2 pass one window.
+ // 92% averages ~18.5ms, 85% ~17.6ms; noise lets 92% pass one window.
  const h=harness();const cost=(q,k)=>(q.scale>=0.92?18.5:17.6)+0.9*Math.sin(k*0.09);
  h.sim(q=>q.scale>=0.85?25*q.scale:10,6000);
  h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,90000);

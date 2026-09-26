@@ -13,7 +13,8 @@
 // VIEWS: the five standard views (overview, streetBank, riverGreenwich,
 // m25Edge, heathrow) plus 'arrival': Automatic pushed to level 3 or deeper at
 // street by synthetic GPU-bound frames on a held render loop, then flown to
-// the river at Greenwich (does it climb back to shadows?).
+// the river at Greenwich (does it climb back to shadows?). Since D-040 the
+// trace also records whether Automatic has thinned the clouds (6th column).
 //
 // Per view it records: the settled rung (most frequent level over the last 8s),
 // fps over a 2.5s live window after the settle, rung changes in the last 8s,
@@ -84,7 +85,7 @@ export function summariseTrace(trace, tailSamples = 32) {
   const tail = trace.slice(-tailSamples);
   const counts = {}, levels = {};
   for (const r of tail) {
-    const k = `${r[2]}/${r[3]}x/${r[4] ? 'shadows' : 'noshadows'}`;
+    const k = `${r[2]}/${r[3]}x/${r[4] ? 'shadows' : 'noshadows'}${r[5] ? '/thinclouds' : ''}`;
     counts[k] = (counts[k] || 0) + 1; levels[r[1]] = (levels[r[1]] || 0) + 1;
   }
   const settled = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
@@ -179,11 +180,12 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
           u.camera.position.fromArray(street.p); u.controls.target.fromArray(street.t); u.controls.update();
           await sleep(1500);
           // Hold the render loop; feed Automatic GPU-bound frames whose cost follows
-          // resolution (as the node tests' model({cpu:6,gpu:24})) until level 3 or deeper,
+          // resolution (as the node tests' model({cpu:6,gpu:24})) until 85% or deeper (level 4
+          // since D-040 added the thinned-clouds rung; level 3 before),
           // then realign the controller's clock to real time and fly to the river.
           window.__paused = true; await sleep(100);
           const E = { 4: 1, 2: 0.8, 0: 0.62 }; let t = performance.now();
-          for (let i = 0; i < 4000 && u.adaptiveQuality.get().level < 3; i++) {
+          for (let i = 0; i < 4000 && u.adaptiveQuality.get().scale > 0.85; i++) {
             const q = u.adaptiveQuality.get(); const ms = Math.max(6, 24 * q.scale * q.scale * E[q.samples] + (q.shadows ? 2 : 0));
             t += ms; u.adaptiveQuality.update(ms, t);
           }
@@ -192,7 +194,7 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
         }
         u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update();
         const trace = [];
-        for (let i = 0; i < ticks; i++) { await sleep(250); const q = u.adaptiveQuality.get(); trace.push([i * 250, q.level, q.scale, q.samples, q.shadows ? 1 : 0]); }
+        for (let i = 0; i < ticks; i++) { await sleep(250); const q = u.adaptiveQuality.get(); trace.push([i * 250, q.level, q.scale, q.samples, q.shadows ? 1 : 0, q.clouds === 'thin' ? 1 : 0]); }
         window.__ts.length = 0; await sleep(2500);
         const rows = window.__ts.slice(1), iv = [];
         for (let i = 1; i < rows.length; i++) iv.push(rows[i][0] - rows[i - 1][0]);

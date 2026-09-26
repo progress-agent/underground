@@ -115,6 +115,7 @@ import { getAirportDockBedY } from './airport-docks.js';
 // ── /s25:W ──
 // ── s24:R ──
 import { createEconomies, isShown } from './render-economies.js';
+import { createUndergroundCull, isAboveGroundView } from './underground-cull.js';
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
 import { setTrainEconomies, trainBatchStats } from './trains.js';
@@ -364,6 +365,9 @@ const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
 // Render economies (sprint 24Sep26h, D-038): savings that leave the picture
 // unchanged, each switchable (?econ=0 restores the e367efd path for ABBA).
 const economies = createEconomies();
+// D-040: nothing underground is drawn from an above-ground camera (trade-offs 7 and 8).
+const undergroundCull = createUndergroundCull({ scene });
+let _aboveGroundView = false;
 const doubleSideSplit = installDoubleSideSplit({ renderer, scene, enabled: economies.on('dsplit') });
 let shadowCache = null;
 let _s24LayerEconomyVersion = 0;
@@ -3932,6 +3936,7 @@ function tick(frameTime) {
   // white-out and slowdown are gated by insideness so they only happen within
   // the disc — outside, there is no chalk stratum to cloud or slow through.
   const insideness = sampleM25Insideness(camera.position.x, camera.position.z);
+  _aboveGroundView = isAboveGroundView({ belowSurface, submerged, insideness });
   const chalkBlend = (1 - THREE.MathUtils.smoothstep(
     camera.position.y, chalkSurfaceY - 30, chalkSurfaceY + 30
   )) * insideness;
@@ -4120,7 +4125,7 @@ function tick(frameTime) {
   // this frame: write any skipped chunk that could now show (fix round 1).
   if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
   // ── /s24:R ──
-  composer.render(dt);
+  undergroundCull.render(_aboveGroundView && economies.on('underAbove'), () => composer.render(dt));
   sampleCushion();
   requestAnimationFrame(tick);
 }
@@ -4185,6 +4190,7 @@ if (import.meta.env.DEV) {
   // describes only the composer's final fullscreen pass and cannot.
   window.__ugTHREE = THREE;
   window.__ug = {
+    undergroundCull, get aboveGroundView() { return _aboveGroundView; },
     getTerrainRiverBed,
     materialResistance, classifySubstrateAt, underwaterSurface,
     get parkLabelsGroup() { return parkLabelsGroup; },

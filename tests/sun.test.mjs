@@ -190,15 +190,18 @@ test('shadow policy: buildings, landmarks and bridges cast; terrain receives; un
   assert.deepEqual([lm.castShadow, lm.receiveShadow], [true, true]);
 });
 
-test('Automatic ladder drops shadows first, before any resolution or smoothing', () => {
-  assert.equal(QUALITY_LEVELS[0].shadows, true);
-  assert.deepEqual(QUALITY_LEVELS[1], { scale: 1, samples: 4, shadows: false });
-  assert.ok(QUALITY_LEVELS.slice(1).every(l => l.shadows === false), 'no lower rung restores shadows');
-  // Moderate overload (25ms frames): the first change is shadows only.
+test('Automatic ladder thins the clouds, then drops shadows, before any resolution or smoothing', () => {
+  // D-040 (Jordan's answer (c), 26Sep26s): clouds thin before shadows go.
+  assert.deepEqual(QUALITY_LEVELS[0], { scale: 1, samples: 4, shadows: true, clouds: 'full' });
+  assert.deepEqual(QUALITY_LEVELS[1], { scale: 1, samples: 4, shadows: true, clouds: 'thin' });
+  assert.deepEqual(QUALITY_LEVELS[2], { scale: 1, samples: 4, shadows: false, clouds: 'thin' });
+  assert.ok(QUALITY_LEVELS.slice(2).every(l => l.shadows === false), 'no lower rung restores shadows');
+  // Moderate overload (25ms frames): clouds thin, then shadows go, resolution untouched.
   let now = 0; const changes = [];
   const c = createAdaptiveQuality({ apply: q => changes.push({ ...q }) });
   c.start(now);
-  while (changes.length < 2) { now += 25; c.update(25, now); }
-  assert.deepEqual(changes[1], { scale: 1, samples: 4, shadows: false });
-  assert.equal(c.get().level, 1);
+  while (changes.length < 3) { now += 25; c.update(25, now); }
+  assert.deepEqual(changes[1], { scale: 1, samples: 4, shadows: true, clouds: 'thin' });
+  assert.deepEqual(changes[2], { scale: 1, samples: 4, shadows: false, clouds: 'thin' });
+  assert.equal(c.get().level, 2);
 });

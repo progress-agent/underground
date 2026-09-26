@@ -146,12 +146,13 @@ test('Automatic quality drops shadows first, before resolution', async ({ page }
   expect(await page.evaluate(() => window.__ug.adaptiveQuality.get().shadows)).toBe(true);
   expect(await page.evaluate(() => window.__ugSun.status.active)).toBe(true);
   await page.evaluate(() => { window.__slowFrameProbe = true; });
-  // First observation at or below level 1: resolution is still full.
+  // First observation without shadows (level 2; level 1 only thins the
+  // clouds, D-040): resolution is still full.
   const first = await (await page.waitForFunction(() => {
     const u = window.__ug, a = u.adaptiveQuality.get();
-    return a.level >= 1 ? { level: a.level, shadows: a.shadows, scale: u.renderQuality.get().scale, samples: u.renderQuality.get().samples } : false;
+    return a.shadows === false ? { level: a.level, shadows: a.shadows, clouds: a.clouds, scale: u.renderQuality.get().scale, samples: u.renderQuality.get().samples } : false;
   }, null, { timeout: 20000, polling: 'raf' })).jsonValue();
-  expect(first).toEqual({ level: 1, shadows: false, scale: 1, samples: 4 });
+  expect(first).toEqual({ level: 2, shadows: false, clouds: 'thin', scale: 1, samples: 4 });
   await page.waitForFunction(() => window.__ugSun.status.adaptiveShadows === false && window.__ugSun.status.active === false);
   // The user's toggle is untouched: Automatic only suspends shadows.
   expect(await page.evaluate(() => window.__ugSun.shadowsEnabled)).toBe(true);

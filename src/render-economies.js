@@ -8,7 +8,9 @@
 //   ?econ=dsplit,m25Cull only the named ones
 //
 // Visible trade-offs are deliberately NOT here; they are listed for Jordan in
-// the economies report and never ship on by default.
+// the economies report and never ship on by default. The one exception is
+// underAbove: trade-offs 7 and 8 of the sprint 25Sep26f report, which Jordan
+// approved on 26Sep26s (D-040), ribbons and all (underground-cull.js).
 
 export const ECONOMIES = {
   dsplit: 'Double-sided transparent objects drawn as explicit back/front passes (no program churn)',
@@ -22,6 +24,7 @@ export const ECONOMIES = {
   labelViewport: 'Station labels read the canvas size once per frame',
   trainPose: 'Tube trains reuse their pose while dwelling and when their line is hidden',
   trainBatch: 'Tube trains drawn as one instanced body mesh and one instanced window mesh per line (per-line colour, no per-instance colour)',
+  underAbove: 'Underground layers (lines, ribbons, trains, shafts, tunnels, geology, terrain underside) are not drawn from an above-ground camera (D-040: approved trade-offs 7 and 8)',
 };
 
 export function parseEconomies(search = '') {

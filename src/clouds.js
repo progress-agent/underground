@@ -61,6 +61,13 @@ export const CLOUD_CONFIG = {
   // visible effect from above is about a third of the unthinned layer's.
   thinAlpha: 0.12,
   thinKeep: 0.35,
+  // Automatic's thinned clouds (D-040, level 1 and below): distant clouds fade
+  // into the haze sooner and keep only their largest puffs from nearer, while
+  // near clouds are unchanged. Measured on the M5 as lived (26Sep26s, render
+  // bench, seven interleaved rounds): recovers about 60% of the clouds' cost
+  // at street level near Bank, 45% at the river at Greenwich. Eased over
+  // easeS seconds of real time so a quality change never pops the sky.
+  thinQuality: { lodM: [2000, 7000], fadeM: [7000, 12000], easeS: 0.8 },
 };
 
 // ── Puff atlas ──────────────────────────────────────────────────────────────
@@ -349,7 +356,25 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   const status = {
     enabled: on, visible: false, opacity: 0, time: 0, drift, clouds: layout.clouds.length,
     visibleClouds: 0, instances: 0, sorts: 0, shadowStrength: 0, shadowsPatched: shadowsOk,
-    preset: P.id, ratio: 1.1 / VE, keep: 1, planeY: 0,
+    preset: P.id, ratio: 1.1 / VE, keep: 1, thin: 0, planeY: 0,
+  };
+  // Automatic's cloud thinning, eased on the real clock (the world clock can pause).
+  const TQ = CLOUD_CONFIG.thinQuality;
+  let thinT = 0, lastEaseAt = null;
+  const easeThin = (target) => {
+    const now = typeof performance === 'undefined' ? Date.now() : performance.now();
+    const dt = lastEaseAt === null ? 0 : Math.min(0.25, (now - lastEaseAt) / 1000);
+    lastEaseAt = now;
+    const step = dt / TQ.easeS;
+    thinT = target > thinT ? Math.min(target, thinT + step) : Math.max(target, thinT - step);
+    status.thin = thinT;
+    const k = thinT * thinT * (3 - 2 * thinT);
+    uniforms.uLod.value.set(
+      CLOUD_CONFIG.lodM[0] + (TQ.lodM[0] - CLOUD_CONFIG.lodM[0]) * k,
+      CLOUD_CONFIG.lodM[1] + (TQ.lodM[1] - CLOUD_CONFIG.lodM[1]) * k);
+    uniforms.uFade.value.set(
+      CLOUD_CONFIG.fadeM[0] + (TQ.fadeM[0] - CLOUD_CONFIG.fadeM[0]) * k,
+      CLOUD_CONFIG.fadeM[1] + (TQ.fadeM[1] - CLOUD_CONFIG.fadeM[1]) * k);
   };
 
   function resort(camera, ratio) {
@@ -410,7 +435,7 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   /**
    * Per frame, after the sun, sky and environment updates. `time` is the
    * shared world clock (the mode registry's, which the wind consumers read).
-   * `quality` is Automatic's current level ({ samples }), or null in Manual.
+   * `quality` is Automatic's current level ({ samples, clouds }), or null in Manual.
    */
   function update({ camera, time: t = 0, airWeight = null, quality = null } = {}) {
     time = timeOverride ?? (Number.isFinite(t) ? t : 0);
@@ -430,6 +455,9 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
     status.planeY = planeY;
     if (camera) camera.updateMatrixWorld();
     updateCloudShadow({ drift, sunDir, strength, planeY, skyShare: P.shadowSkyShare ?? 0, camera });
+
+    // Eased even while hidden, so surfacing from underground shows no transition.
+    easeThin(quality?.clouds === 'thin' ? 1 : 0);
 
     mesh.visible = opacity > 0;
     status.visible = mesh.visible;

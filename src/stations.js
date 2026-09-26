@@ -226,6 +226,7 @@ export function createStationMarkers({
   mesh.frustumCulled = true;
   mesh.renderOrder = RENDER_ORDER.STATION;
   mesh.userData.kind = 'station-markers';
+  mesh.userData.surfaceOnly = surfaceOnly; // Overground markers: drawn from above ground (underground-cull.js)
   mesh.userData.stations = stations; // Store for raycasting lookup
 
   const dummy = new THREE.Object3D();
