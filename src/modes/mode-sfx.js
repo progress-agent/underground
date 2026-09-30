@@ -15,6 +15,8 @@
 //     sfx.jetpack(thrust)           0..1 roar
 //     sfx.droneWhine(speedMps)      rotor whine; idle hum at 0, pitch rises with speed
 //     sfx.burner(on)                balloon burner roar, boolean (or 0..1)
+//     sfx.tunnelTrain(rush, rumble) a train passing through the Pedestrian walker in a tube bore
+//                                   (s30:P, D-041 item 3): 0..1 air rush and 0..1 rumble
 //   One-shots: call on the event.
 //     sfx.splash(intensity = 1)     entering water
 //     sfx.strokes(intensity = 1)    one muffled swim stroke
@@ -87,8 +89,22 @@ export function createModeSfx({ getMasterBus = () => null } = {}) {
     const flutterDepth = ctx.createGain(); flutterDepth.gain.value = 0;
     flutter.connect(flutterDepth).connect(burnGain.gain); flutter.start();
 
+    // ── s30:P ── Tunnel train: the air it pushes ahead (band-passed noise that
+    // opens up as it arrives) and its rumble (low-passed noise over a sub tone).
+    const rushGain = ctx.createGain(); rushGain.gain.value = 0;
+    const rushBP = ctx.createBiquadFilter(); rushBP.type = 'bandpass'; rushBP.frequency.value = 500; rushBP.Q.value = 0.55;
+    loopNoise(1.12).connect(rushBP).connect(rushGain).connect(out);
+    const rumbleGain = ctx.createGain(); rumbleGain.gain.value = 0;
+    const rumbleLP = ctx.createBiquadFilter(); rumbleLP.type = 'lowpass'; rumbleLP.frequency.value = 150; rumbleLP.Q.value = 0.9;
+    loopNoise(0.55).connect(rumbleLP).connect(rumbleGain).connect(out);
+    const rumbleSub = ctx.createOscillator(); rumbleSub.type = 'sine'; rumbleSub.frequency.value = 38;
+    const rumbleSubGain = ctx.createGain(); rumbleSubGain.gain.value = 0;
+    rumbleSub.connect(rumbleSubGain).connect(out); rumbleSub.start();
+    // ── /s30:P ──
+
     g = { ctx, out, noise, jetGain, jetLP, jetSubGain, droneGain, droneBP, rotorA, rotorB, hissGain,
-      burnGain, flutterDepth, nextStep: 0, stepFoot: 0, shot: 0 };
+      burnGain, flutterDepth, nextStep: 0, stepFoot: 0, shot: 0,
+      rushGain, rushBP, rumbleGain, rumbleLP, rumbleSub, rumbleSubGain }; // s30:P
     return g;
   }
 
@@ -178,6 +194,21 @@ export function createModeSfx({ getMasterBus = () => null } = {}) {
       glide(graph.flutterDepth.gain, 0.08 * k, graph);
     },
 
+    // ── s30:P ──
+    tunnelTrain(rush = 0, rumble = 0) {
+      const graph = build();
+      if (!graph) return;
+      const r = Math.min(1, Math.max(0, Number(rush) || 0));
+      const m = Math.min(1, Math.max(0, Number(rumble) || 0));
+      glide(graph.rushGain.gain, 0.62 * Math.pow(r, 1.4), graph);
+      glide(graph.rushBP.frequency, 380 + 2200 * r, graph);
+      glide(graph.rumbleGain.gain, 0.5 * m, graph);
+      glide(graph.rumbleLP.frequency, 110 + 160 * m, graph);
+      glide(graph.rumbleSubGain.gain, 0.2 * m, graph);
+      glide(graph.rumbleSub.frequency, 34 + 14 * m, graph);
+    },
+    // ── /s30:P ──
+
     splash(intensity = 1) {
       const graph = build();
       if (!graph) return;
@@ -198,14 +229,15 @@ export function createModeSfx({ getMasterBus = () => null } = {}) {
     silence() {
       if (!g) return;
       for (const p of [g.jetGain.gain, g.jetSubGain.gain, g.droneGain.gain, g.hissGain.gain,
-        g.burnGain.gain, g.flutterDepth.gain]) glide(p, 0, g);
+        g.burnGain.gain, g.flutterDepth.gain, g.rushGain.gain, g.rumbleGain.gain, g.rumbleSubGain.gain]) glide(p, 0, g); // s30:P train voices
       g.nextStep = 0;
     },
 
     // Test hook: current continuous-voice targets (0 when the graph is absent).
     levels() {
       if (!g) return null;
-      return { jetpack: g.jetGain.gain.value, drone: g.droneGain.gain.value, burner: g.burnGain.gain.value };
+      return { jetpack: g.jetGain.gain.value, drone: g.droneGain.gain.value, burner: g.burnGain.gain.value,
+        trainRush: g.rushGain.gain.value, trainRumble: g.rumbleGain.gain.value }; // s30:P
     },
   };
 }

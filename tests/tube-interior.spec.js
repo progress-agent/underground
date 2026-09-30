@@ -11,6 +11,14 @@
 //   * another mode's picture is unchanged: a frozen Deity frame at a reference
 //     underground pose is pixel-identical before and after a Pedestrian trip
 //     down a tunnel and back.
+//
+// Sprint 30Sep26w (D-041 item 4, Lane P): at a platform the bore opens into
+// the lit platform tunnel (platform-tunnel.js), so a walker standing there is
+// enclosed by the platform tunnel rather than the running-tunnel lining, and
+// the walker's own line's trains are drawn inside the bore (D-041 item 3).
+// The enclosure checks accept either surface; the interchange check still
+// proves no OTHER line's geometry shows (everything the interior draws is on
+// INTERIOR_LAYER; foreign geometry is not).
 // Geometry details (window, winding, caps, determinism) are pinned in
 // tests/tube-interior.test.mjs.
 
@@ -94,6 +102,20 @@ async function descend(name, lineId) {
   expect(ok).toBe(true);
   await page.waitForTimeout(200);
   await page.keyboard.press('e');
+  // s30:P E opens the platform chooser: pick this line's platform whose trains
+  // run the way the walker faces (+1 along the path), as the facing pick did.
+  await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'shaft',
+    null, { timeout: 30000 });
+  const picked = await page.evaluate(([name, lineId]) => {
+    const m = window.__ug.modes.registry.get('pedestrian');
+    const rows = m.debug().chooser.detail;
+    const net = m.network, e = net.entrances.find(en => en.name === name && en.stops.some(s => s.lineId === lineId));
+    const stop = e.stops.find(s => s.lineId === lineId);
+    let i = rows.findIndex(r => r.lineId === lineId && r.path === stop.path && r.dir === 1);
+    if (i < 0) i = rows.findIndex(r => r.lineId === lineId);
+    return m.chooseRow(i) ? i : -1;
+  }, [name, lineId]);
+  expect(picked).toBeGreaterThanOrEqual(0);
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'tunnel',
     null, { timeout: 30000 });
 }
@@ -106,6 +128,13 @@ function expectEnclosed(r, boreRadius, label) {
   expect(r.hits.length).toBe(24 * 3);
   for (const h of r.hits) {
     expect(h.distance, `${label}: ${h.kind} ray at ${(h.th * 180 / Math.PI).toFixed(0)} degrees escapes`).not.toBeNull();
+    // s30:P along a platform the lining is cut away and the ray meets the
+    // platform tunnel (6.46 m across, sourced in platform-tunnel.js; wider for
+    // the larger bores), which still encloses the walker.
+    if (h.surface === 'platform') {
+      expect(h.distance, `${label}: ${h.kind} ray at ${h.th.toFixed(2)} to the platform tunnel`).toBeLessThan(9);
+      continue;
+    }
     // Radial rays meet the wall at the bore radius; 45-degree rays at radius x sqrt 2
     // (the bore curves a little over that distance, hence the looser bound).
     const expected = h.kind === 'radial' ? r.radius : r.radius * Math.SQRT2;
@@ -158,7 +187,11 @@ test('in a tunnel the walker is enclosed by the lining, ribbons hidden, near cli
   expect(state.anyMarker).toBe(false);
   expect(state.shafts).toBe(false);
   expect(state.master).toBe(1);
-  expectEnclosed(await probe(), state.boreRadius, 'at the platform');
+  const atPlatform = await probe();
+  expectEnclosed(atPlatform, state.boreRadius, 'at the platform');
+  // s30:P the walker stands in the platform tunnel: its radial rays meet it.
+  expect(atPlatform.platformZone).toBe(true);
+  expect(atPlatform.hits.filter(h => h.kind === 'radial' && h.surface === 'platform').length).toBeGreaterThan(12);
 
   // Walk and sprint well past the window: still enclosed every time we look.
   await page.evaluate(() => { const k = window.__ug.fpsControls.keys; k.add('w'); k.add('shift'); });
@@ -194,8 +227,11 @@ test('in a tunnel the walker is enclosed by the lining, ribbons hidden, near cli
 test('the near clip is 0.1 only below ground: back on the street it is restored', async () => {
   await descend('Goodge Street', 'northern');
   expect((await dbg()).near).toBeCloseTo(0.1, 9);
-  // E at the platform: back up the shaft to the street.
+  // E at the platform: the card (s30:P), then "Up to the street", back up the shaft.
   await page.keyboard.press('e');
+  await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'arrival',
+    null, { timeout: 30000 });
+  await page.keyboard.press('1');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body',
     null, { timeout: 30000 });
   const d = await dbg();
@@ -217,14 +253,18 @@ const INTERCHANGES = [
 ];
 const FOREIGN_PCT = 0.5; // % of pixels; the verifier measured 21 to 99% at these five
 
-/** Frame as drawn, and the frame with nothing but the lining; `pct` differs. */
+/** Frame as drawn, and the frame with nothing but the interior's own drawing; `pct` differs.
+ * s30:P the interior's own drawing is everything on INTERIOR_LAYER (the lining, the
+ * platform tunnel and its roundels, and the walker's own line's trains and lamps). */
 const liningOnlyDiff = () => page.evaluate(() => {
   const ug = window.__ug;
   window.__freeze = true;
   const drawn = window.__grab();
   const lining = ug.modes.ctx.tubeInterior.mesh, was = [];
+  const INTERIOR = 1 << 7;
   ug.scene.traverse(o => {
     if (o === lining || !(o.isMesh || o.isLine || o.isPoints || o.isSprite) || !o.visible) return;
+    if (o.layers.mask & INTERIOR) return;
     was.push(o); o.visible = false;
   });
   const r = ug.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;

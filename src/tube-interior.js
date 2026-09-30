@@ -31,9 +31,23 @@
 //
 // DETERMINISM: the geometry is a pure function of the walker's position on the
 // tunnel network; the shading is a pure function of position and view.
+//
+// PLATFORMS AND PORTALS (sprint 30Sep26w, D-041, Lane P): every platform the
+// window reaches is drawn as the lit, true-size platform tunnel of
+// platform-tunnel.js (its walls, platform edge and roundel boards), and the
+// lining is cut away along it so the bore visibly opens into the station. A
+// window that ends at a portal (pedestrian-tunnels.js markOpenSections) is
+// left open there, with no cap, and while the window reaches a portal the
+// camera is not isolated to the lining: the tunnel mouth looks out on the
+// real world beyond it. All of it is on INTERIOR_LAYER only.
 
 import * as THREE from 'three';
 import { pointAt, advance, headingAt } from './modes/pedestrian-tunnels.js';
+// ── s30:P ──
+import { PLATFORM, slicePolyline, buildPlatformGeometry, buildRoundelGeometry, createPlatformMaterial,
+  createRoundelMaterial, roundelTexture } from './platform-tunnel.js';
+import { cleanStationName } from './modes/tube-routes.js';
+// ── /s30:P ──
 import { setAxisAttribute, patchTrueProportionMaterial, boreRadiusM, trueProportionUniform, masterRatio } from './true-proportion.js';
 import { CASING_LINES } from './crown-ribbon.js';
 
@@ -68,30 +82,78 @@ export function sampleBoreWindow(net, pos, { aheadM = INTERIOR.aheadM, behindM =
   const VE = net.VE || 5;
   const side = pos.side || 0;
   const start = pointAt(path0, pos.s, {}, side);
+  // s30:P the platforms the window reaches ({ stop, s: signed arc, path, side }) and portal ends.
+  const stops = [];
+  for (const { s: ss, stop } of path0.stops || []) if (Math.abs(ss - pos.s) < 1e-6) stops.push({ stop, s: 0, path: pos.path, side });
   const walk = (dir, limit) => {
     const out = [];
     const p = { path: pos.path, s: pos.s, dir, side };
-    let prev = start, arc = 0, ended = false, guard = 0;
+    const sign = dir === (pos.dir || 1) ? 1 : -1;
+    let prev = start, arc = 0, ended = false, portal = false, guard = 0;
     while (arc < limit - 1e-6 && guard++ < 4000) {
       const want = headingAt(net.paths[p.path], p.s, p.dir);
       const before = `${p.path}:${p.s}`;
       const r = advance(net, p, Math.min(stepM, limit - arc), want);
+      for (const c of r.crossed || []) stops.push({ stop: c.stop, s: sign * (arc + c.at), path: c.stop.path, side: p.side || 0 });
+      if (r.portal) portal = true;
       const q = pointAt(net.paths[p.path], p.s, {}, p.side || 0);
       const d = Math.hypot(q.x - prev.x, (q.y - prev.y) / VE, q.z - prev.z);
       if (`${p.path}:${p.s}` === before || d < 1e-6) { ended = true; break; }
       arc += d;
-      out.push({ x: q.x, y: q.y, z: q.z, s: dir === (pos.dir || 1) ? arc : -arc });
+      out.push({ x: q.x, y: q.y, z: q.z, s: sign * arc });
       prev = q;
       if (r.stopped) { ended = true; break; }
     }
-    return { out, ended };
+    return { out, ended, portal };
   };
   const dir = pos.dir || 1;
   const fwd = walk(dir, aheadM);
   const back = walk(-dir, behindM);
   const points = [...back.out.reverse(), { x: start.x, y: start.y, z: start.z, s: 0 }, ...fwd.out];
-  return { points, endAhead: fwd.ended, endBehind: back.ended };
+  return { points, endAhead: fwd.ended, endBehind: back.ended, portalAhead: fwd.portal, portalBehind: back.portal, stops };
 }
+
+// ── s30:P ──
+/**
+ * The platform zones along a bore window: each platform the window reaches,
+ * as [a0, a1] in the window's signed arc, PLATFORM.lengthM long and centred on
+ * the stop (a terminus platform runs back from the line's end). A zone the
+ * window only partly reaches is left out until the walker is nearer, so a
+ * platform is never drawn cut short. `sigma`: which hand the platform is on.
+ */
+export function platformZones(net, win, { lengthM = PLATFORM.lengthM } = {}) {
+  const pts = win?.points || [];
+  if (pts.length < 2) return [];
+  const lo = pts[0].s, hi = pts[pts.length - 1].s;
+  const zones = [];
+  const seen = new Set();
+  for (const w of win.stops || []) {
+    const key = `${w.stop.lineId}:${w.stop.name}:${Math.round(w.s)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let a0 = w.s - lengthM / 2, a1 = w.s + lengthM / 2;
+    if (a1 > hi && win.endAhead && !win.portalAhead) { a1 = hi; a0 = hi - lengthM; }
+    if (a0 < lo && win.endBehind && !win.portalBehind) { a0 = lo; a1 = lo + lengthM; }
+    if (a0 < lo - 1e-6 || a1 > hi + 1e-6) continue;
+    // The platform is on the side of the bore toward the line's centreline
+    // (where the cross passage from the shaft arrives).
+    const path = net.paths[w.path];
+    let sigma = 1;
+    if (path && w.side) {
+      const c = pointAt(path, w.stop.s, {}, 0), b = pointAt(path, w.stop.s, {}, w.side);
+      // The window's own frame at the stop: side = UP x t.
+      let i = 0;
+      while (i < pts.length - 2 && pts[i + 1].s < w.s) i++;
+      const tx = pts[i + 1].x - pts[i].x, tz = pts[i + 1].z - pts[i].z;
+      const sx = tz, sz = -tx;   // UP x t = (t.z, 0, -t.x)
+      const d = (c.x - b.x) * sx + (c.z - b.z) * sz;
+      if (Math.abs(d) > 1e-6) sigma = Math.sign(d);
+    }
+    zones.push({ stop: w.stop, name: cleanStationName(w.stop.name), lineId: w.stop.lineId, s: w.s, a0, a1, sigma });
+  }
+  return zones.sort((a, b) => a.a0 - b.a0);
+}
+// ── /s30:P ──
 
 /**
  * Inward-facing lining around a canonical polyline. Each ring is built in REAL
@@ -139,7 +201,9 @@ export function buildInteriorGeometry(points, { radius, radialSegments = INTERIO
   }
   if (caps) {
     // End caps face back into the bore: a fan about the axis point.
-    for (const [i, facing] of [[0, 1], [n - 1, -1]]) {
+    // (s30:P `caps` may be { start, end } to leave a portal end open.)
+    const ends = [[0, 1], [n - 1, -1]].filter(([i]) => caps === true || (i === 0 ? caps.start !== false : caps.end !== false));
+    for (const [i, facing] of ends) {
       const P = points[i], f = frames[i];
       const centre = pos.length / 3;
       pos.push(P.x, P.y, P.z); nrm.push(f.t.x * facing, f.t.y * facing, f.t.z * facing); axis.push(P.y); uv.push(P.s, -1);
@@ -183,6 +247,9 @@ export function createInteriorMaterial() {
     uCasing: { value: 0 },
     uRadius: { value: 1.78 },
     uFalloff: { value: INTERIOR.falloffM },
+    // ── s30:P ── platform zones: the lining is cut away along them
+    uCut: { value: [new THREE.Vector2(1, 0), new THREE.Vector2(1, 0), new THREE.Vector2(1, 0), new THREE.Vector2(1, 0)] },
+    // ── /s30:P ──
   };
   const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.FrontSide, fog: false, toneMapped: true });
   mat.name = 'tube-interior';
@@ -200,12 +267,17 @@ uniform vec3 uLining;
 uniform float uCasing;
 uniform float uRadius;
 uniform float uFalloff;
+uniform vec2 uCut[ 4 ];
 varying vec2 vIntUV;
 varying float vIntDist;
 float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( halfWidth, halfWidth + aa, d ); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 {
   float along = vIntUV.x;
+  // s30:P the bore opens into the platform tunnel here (caps are never cut).
+  if ( vIntUV.y > -0.5 ) {
+    for ( int k = 0; k < 4; k++ ) { if ( along > uCut[ k ].x && along < uCut[ k ].y ) discard; }
+  }
   float ang = vIntUV.y * 6.2831853;                 // 0 at the invert, PI at the crown
   float fromInvert = min( ang, 6.2831853 - ang );   // 0 floor .. PI crown, both walls
   float arcM = fromInvert * uRadius;                // metres round the wall from the invert
@@ -261,7 +333,7 @@ float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( ha
   diffuseColor.rgb = clamp( col, 0.0, 1.0 );
 }`);
   };
-  mat.customProgramCacheKey = () => 'tube-interior-v2';
+  mat.customProgramCacheKey = () => 'tube-interior-v3'; // s30:P cut zones and portal caps
   mat.userData.interiorUniforms = uniforms;
   return patchTrueProportionMaterial(mat, { mode: 'axis' });
 }
@@ -307,6 +379,63 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
   const hidden = new Map();        // map device -> its visibility before we hid it
   let built = null;                // { net, path, side, s, lineId, radius, points }
   let builds = 0;
+  // ── s30:P ── the platform tunnels in the window (drawn only while the lining is)
+  const platformGroup = new THREE.Group();
+  platformGroup.name = 'tube-interior-platforms';
+  platformGroup.visible = false;
+  platformGroup.matrixAutoUpdate = false;
+  scene?.add(platformGroup);
+  const platformMaterial = createPlatformMaterial();
+  const roundelMaterials = new Map();   // station name -> material
+  let zones = [];
+  function clearPlatforms() {
+    for (const m of [...platformGroup.children]) { platformGroup.remove(m); m.geometry.dispose(); }
+  }
+  function roundelMaterial(name) {
+    let m = roundelMaterials.get(name);
+    if (!m) {
+      m = createRoundelMaterial(roundelTexture(name));
+      roundelMaterials.set(name, m);
+      if (roundelMaterials.size > 24) {
+        const [k, old] = roundelMaterials.entries().next().value;
+        if (old !== m) { old.dispose(); roundelMaterials.delete(k); }
+      }
+    }
+    return m;
+  }
+  // Like the lining: on the default layer too (the camera is not isolated in a
+  // cross passage or near a portal) and on INTERIOR_LAYER; hidden outside the bore.
+  function layerOnly(o) {
+    o.layers.enable(INTERIOR_LAYER);
+    o.frustumCulled = false;
+    o.castShadow = false;
+    o.receiveShadow = false;
+    o.matrixAutoUpdate = false;
+    return o;
+  }
+  function buildPlatforms(net, w, lineId, radius) {
+    clearPlatforms();
+    zones = platformZones(net, w);
+    const u = material.userData.interiorUniforms;
+    for (let k = 0; k < 4; k++) {
+      const z = zones[k];
+      // Cut a hair inside the zone: the end walls close the gap at the eye.
+      u.uCut.value[k].set(z ? z.a0 + 0.02 : 1, z ? z.a1 - 0.02 : 0);
+    }
+    platformMaterial.userData.platformUniforms.uLineColour.value.set(lineColour(lineId) ?? 0xffffff);
+    for (const z of zones.slice(0, 4)) {
+      const slice = slicePolyline(w.points, z.a0, z.a1);
+      if (slice.length < 2) continue;
+      const opts = { sigma: z.sigma, liningRadius: radius, VE: net.VE || 5 };
+      const tunnel = layerOnly(new THREE.Mesh(buildPlatformGeometry(slice, opts), platformMaterial));
+      tunnel.name = `platform-tunnel:${z.name}`;
+      tunnel.userData.platform = { name: z.name, lineId: z.lineId, a0: z.a0, a1: z.a1, sigma: z.sigma };
+      const boards = layerOnly(new THREE.Mesh(buildRoundelGeometry(slice, opts), roundelMaterial(z.name)));
+      boards.name = `platform-roundels:${z.name}`;
+      platformGroup.add(tunnel, boards);
+    }
+  }
+  // ── /s30:P ──
 
   function hideMapDevices() {
     // Every crown ribbon, station marker and station shaft, not just this
@@ -345,7 +474,9 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
   function rebuild(net, pos, lineId) {
     const radius = Math.max(0.5, boreRadiusM(lineId) - INTERIOR.insetM);
     const w = sampleBoreWindow(net, pos);
-    const geometry = buildInteriorGeometry(w.points, { radius, VE: net.VE || 5 });
+    // s30:P a portal end is left open (no cap): the mouth of the tunnel.
+    const geometry = buildInteriorGeometry(w.points, { radius, VE: net.VE || 5,
+      caps: { start: !w.portalBehind, end: !w.portalAhead } });
     mesh.geometry.dispose();
     mesh.geometry = geometry;
     const u = material.userData.interiorUniforms;
@@ -354,8 +485,11 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
     u.uLining.value.copy(PALETTE.lining).lerp(c, 0.04);
     u.uCasing.value = CASING_LINES.has(lineId) ? 1 : 0;
     u.uRadius.value = radius;
-    built = { net, path: pos.path, side: pos.side || 0, s: pos.s, lineId, radius, points: w.points,
-      endAhead: w.endAhead, endBehind: w.endBehind };
+    // ── s30:P ──
+    buildPlatforms(net, w, lineId, radius);
+    // ── /s30:P ──
+    built = { net, path: pos.path, side: pos.side || 0, s: pos.s, dir: pos.dir || 1, lineId, radius, points: w.points,
+      endAhead: w.endAhead, endBehind: w.endBehind, portalAhead: !!w.portalAhead, portalBehind: !!w.portalBehind };
     builds++;
   }
 
@@ -375,12 +509,16 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
         || Math.abs(pos.s - built.s) > INTERIOR.rebuildM;
       if (stale) rebuild(net, pos, lineId);
       mesh.visible = true;
+      platformGroup.visible = true; // s30:P
       hideMapDevices();
-      if (isolate) isolateView(); else restoreView();
+      // s30:P a window that reaches a portal looks out through the mouth onto the real world.
+      const mouth = !!(built?.portalAhead || built?.portalBehind);
+      if (isolate && !mouth) isolateView(); else restoreView();
       return true;
     },
     hide() {
       mesh.visible = false;
+      platformGroup.visible = false; // s30:P
       restoreMapDevices();
       restoreView();
     },
@@ -392,8 +530,23 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
         visible: mesh.visible, builds, lineId: built?.lineId ?? null, radius: built?.radius ?? null,
         path: built?.path ?? null, side: built?.side ?? null, points: built?.points.length ?? 0,
         hiddenDevices: hidden.size, isolated: !!isolated, endAhead: built?.endAhead ?? null, endBehind: built?.endBehind ?? null,
+        // ── s30:P ──
+        portalAhead: built?.portalAhead ?? null, portalBehind: built?.portalBehind ?? null,
+        platforms: zones.map(z => ({ name: z.name, lineId: z.lineId, s: z.s, a0: z.a0, a1: z.a1, sigma: z.sigma })),
+        platformMeshes: platformGroup.children.length, platformsVisible: platformGroup.visible,
+        // ── /s30:P ──
       };
     },
+    // ── s30:P ──
+    /** The walker's bore window as built: canonical points with signed arc s (0 at the build point). */
+    get windowPoints() { return built?.points ?? null; },
+    /** Arc of the build point relative to the walker now (the window is rebuilt every INTERIOR.rebuildM). */
+    walkerArc(pos) {
+      if (!built || !pos || pos.path !== built.path) return null;
+      return (pos.s - built.s) * (built.dir || 1);
+    },
+    platformGroup,
+    // ── /s30:P ──
     /**
      * Cast `count` rays from the camera in DISPLAY space (what is drawn:
      * true-proportion unscale applied, then the camera's Master transform),
@@ -401,23 +554,30 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
      * ahead and behind. Returns each hit distance in display metres (null if
      * a ray escapes). Test surface: proves the walker is enclosed.
      */
-    probe(camera, { count = 24, oblique = true } = {}) {
+    probe(camera, { count = 24, oblique = true, platforms = true } = {}) {
       if (!built || !mesh.visible) return null;
       const ratio = masterRatio();                  // display y = canonical y x ratio
       const trueY = trueProportionUniform.value;    // the 'axis' patch's section factor
-      const src = mesh.geometry;
-      const p = src.attributes.position, ax = src.attributes.trueAxisY;
-      const disp = new Float32Array(p.count * 3);
-      for (let i = 0; i < p.count; i++) {
-        const a = ax.getX(i);
-        disp[i * 3] = p.getX(i);
-        disp[i * 3 + 1] = (a + (p.getY(i) - a) * trueY) * ratio;
-        disp[i * 3 + 2] = p.getZ(i);
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(disp, 3));
-      g.setIndex(src.index);
-      const probeMesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ side: THREE.FrontSide }));
+      const displayed = (src, side) => {
+        const p = src.attributes.position, ax = src.attributes.trueAxisY;
+        const disp = new Float32Array(p.count * 3);
+        for (let i = 0; i < p.count; i++) {
+          const a = ax.getX(i);
+          disp[i * 3] = p.getX(i);
+          disp[i * 3 + 1] = (a + (p.getY(i) - a) * trueY) * ratio;
+          disp[i * 3 + 2] = p.getZ(i);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(disp, 3));
+        g.setIndex(src.index);
+        return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ side }));
+      };
+      // s30:P the lining is not drawn along a platform zone (its shader cuts it
+      // away), so a ray there must meet the platform tunnel instead.
+      const cutAt = (arc) => zones.some(z => arc > z.a0 + 0.02 && arc < z.a1 - 0.02);
+      const probeMesh = displayed(mesh.geometry, THREE.FrontSide);
+      const tunnels = platforms ? platformGroup.children.filter(m => m.name.startsWith('platform-tunnel:')).map(m => displayed(m.geometry, THREE.DoubleSide)) : [];
+      const g = probeMesh.geometry;
       const origin = new THREE.Vector3(camera.position.x, camera.position.y * ratio, camera.position.z);
       // Local display-space frame of the bore at the walker.
       const pts = built.points, i0 = pts.findIndex(q => q.s === 0);
@@ -438,19 +598,35 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
           dirs.push({ kind: 'behind', th, d: d.clone().sub(t).normalize() });
         }
       }
+      const uv = mesh.geometry.attributes.interiorUV;
       for (const { kind, th, d } of dirs) {
         rc.set(origin, d.normalize());
-        const h = rc.intersectObject(probeMesh, false)[0];
-        hits.push({ kind, th, distance: h ? h.distance : null });
+        // The first lining hit that is actually drawn (not in a cut zone; caps always are).
+        const lining = rc.intersectObject(probeMesh, false).find(h => {
+          const a = uv.getX(h.face.a), cap = uv.getY(h.face.a) < -0.5;
+          return cap || !cutAt(a);
+        });
+        const plat = tunnels.length ? rc.intersectObjects(tunnels, false)[0] : null;
+        const h = [lining, plat].filter(Boolean).sort((x, y) => x.distance - y.distance)[0];
+        hits.push({ kind, th, distance: h ? h.distance : null, surface: h ? (h === plat ? 'platform' : 'lining') : null });
       }
       g.dispose(); probeMesh.material.dispose();
-      return { hits, radius: built.radius };
+      for (const t of tunnels) { t.geometry.dispose(); t.material.dispose(); }
+      // Where the camera is along the window (nearest window point in plan).
+      let arc = 0, bd = Infinity;
+      for (const q of built.points) { const d = Math.hypot(q.x - camera.position.x, q.z - camera.position.z); if (d < bd) { bd = d; arc = q.s; } }
+      return { hits, radius: built.radius, platformZone: cutAt(arc) };
     },
     dispose() {
       this.hide();
       scene?.remove(mesh);
       mesh.geometry.dispose();
       material.dispose();
+      // ── s30:P ──
+      clearPlatforms(); scene?.remove(platformGroup); platformMaterial.dispose();
+      for (const m of roundelMaterials.values()) m.dispose();
+      roundelMaterials.clear();
+      // ── /s30:P ──
     },
   };
 }

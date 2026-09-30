@@ -41,8 +41,19 @@
 //   travelDir(path, s, want, prevDir)      -> +1 / -1 along the path for a desired direction
 //   advance(net, pos, dist, want)          -> moves pos {path, s, dir, side?} dist metres toward `want`
 //                                             (unit {x,z}), choosing at junctions (the bore side carries
-//                                             over by travel sense); returns { stopped }
+//                                             over by travel sense); returns { stopped, crossed, portal }
 //   nearestStopOnPath(net, path, s, maxD)  -> stop within maxD metres of arc, or null
+//
+// Sprint 30Sep26w (D-041, Lane P):
+//   path.stations    [{ s, id, name }] every station on the path (platform or not), for "towards X"
+//   crossed          advance() reports each platform it passes as [{ stop, at }] (`at` = metres into
+//                    the move). Arrival is the CROSSING of a platform's position along s, found inside
+//                    the move itself, so no speed can step over it (a 30 m radius check at 200 m/s and
+//                    a 50 ms frame is 10 m a frame; at 60 m/s it was a one-second window).
+//   path.open        [[s0, s1], ...] arc intervals where the bore is in the open (markOpenSections):
+//                    advance() stops at the first one it would enter and reports it as `portal`.
+//   nextStation(path, s, dir)             -> the next station along the path from s, or null
+//   markOpenSections(net, { groundY, isWater, VE }) -> finds each Tube line's portals geometrically
 
 export const SAMPLE_STEP_M = 10;
 export const MIN_PLATFORM_DEPTH_M = 3;   // shallower "stations" (elevated DLR, surface Met) have no shaft
@@ -124,6 +135,8 @@ function samplePath(THREE, lineId, pts, VE, id, sampleStep, halfSpacing) {
     vertices: V,
     junctions: [],   // sorted arc positions of junction vertices
     stops: [],       // [{ s, stop }]
+    stations: [],    // [{ s, id, name }] every station vertex (s30:P), platform or not
+    open: [],        // [[s0, s1]] in-the-open arc intervals (s30:P, markOpenSections)
   };
 }
 
@@ -173,6 +186,10 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
         for (let i = 0; i < p.vertices.length; i++) {
           const v = p.vertices[i];
           if (Math.hypot(v.x - pos.x, v.z - pos.z) > STATION_SNAP_M) continue;
+          // s30:P every station on the path, platform or not (the chooser's next station).
+          if (!p.stations.some(x => Math.abs(x.s - p.vertexS[i]) < 1e-6)) {
+            p.stations.push({ s: p.vertexS[i], id: st.id ?? null, name: st.name ?? st.id ?? '' });
+          }
           const platformY = v.y;
           const surfaceY = Number.isFinite(st.surfaceY) ? st.surfaceY : null;
           const depthM = surfaceY !== null ? (surfaceY - platformY) / VE
@@ -187,7 +204,7 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
       }
     }
   }
-  for (const p of paths) p.stops.sort((a, b) => a.s - b.s);
+  for (const p of paths) { p.stops.sort((a, b) => a.s - b.s); p.stations.sort((a, b) => a.s - b.s); }
 
   const entrances = [];
   for (const stop of stops) {
@@ -287,26 +304,81 @@ export function chooseAt(net, pathId, s, dir, want) {
 }
 
 /**
+ * Platforms on `p` passed when moving from `from` to `to` (s30:P): the half-open
+ * interval that excludes the start and includes the end, so a walker standing
+ * on a platform does not "arrive" as it leaves, and a platform at a junction
+ * vertex is counted once, at the end of the move that reaches it.
+ */
+function crossedOn(p, from, to, travelled, out) {
+  if (to === from || !p.stops.length) return;
+  const lo = Math.min(from, to), hi = Math.max(from, to), up = to > from;
+  for (const { s, stop } of p.stops) {
+    if (up ? (s > lo + 1e-9 && s <= hi + 1e-9) : (s >= lo - 1e-9 && s < hi - 1e-9)) {
+      out.push({ stop, at: travelled + Math.abs(s - from) });
+    }
+  }
+  if (!up) out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * The first in-the-open interval boundary met moving from `from` toward
+ * `limit` in direction `dir` (s30:P portals), or null. A walker already
+ * inside an open interval is not held (it can always walk back out).
+ */
+function portalAhead(p, from, dir, limit) {
+  const O = p.open;
+  if (!O || !O.length) return null;
+  for (const [a, b] of O) if (from > a + 1e-6 && from < b - 1e-6) return null;
+  let best = null;
+  for (const [a, b] of O) {
+    const edge = dir > 0 ? a : b;
+    if (dir > 0 ? (edge >= from - 1e-9 && edge <= limit) : (edge <= from + 1e-9 && edge >= limit)) {
+      if (best === null || (dir > 0 ? edge < best : edge > best)) best = edge;
+    }
+  }
+  return best;
+}
+
+/**
  * Move `pos` ({ path, s, dir }) `dist` metres toward the desired horizontal
- * direction `want`. Mutates pos. Returns { stopped } (true at a line end).
+ * direction `want`. Mutates pos. Returns { stopped, crossed, portal }:
+ * stopped at a line end or a portal; crossed = platforms passed [{ stop, at }];
+ * portal = { path, s } when the move ended at the mouth of a tunnel.
  */
 export function advance(net, pos, dist, want) {
   let remaining = Math.max(0, dist);
   let stopped = false;
   let guard = 0;
+  let travelled = 0;
+  let portal = null;
+  const crossed = [];
   const path0 = net.paths[pos.path];
   pos.dir = travelDir(path0, pos.s, want, pos.dir);
   while (remaining > 1e-9 && guard++ < 64) {
     const p = net.paths[pos.path];
     const target = pos.s + pos.dir * remaining;
     const j = nextJunction(p, pos.s, pos.dir, target);
+    const reach = j === null ? Math.min(p.length, Math.max(0, target)) : j;
+    const mouth = portalAhead(p, pos.s, pos.dir, reach);
+    if (mouth !== null) {
+      crossedOn(p, pos.s, mouth, travelled, crossed);
+      travelled += Math.abs(mouth - pos.s);
+      pos.s = mouth;
+      stopped = true;
+      portal = { path: pos.path, s: mouth };
+      break;
+    }
     if (j === null) {
-      const clamped = Math.min(p.length, Math.max(0, target));
+      const clamped = reach;
       if (clamped !== target) stopped = true;
+      crossedOn(p, pos.s, clamped, travelled, crossed);
+      travelled += Math.abs(clamped - pos.s);
       pos.s = clamped;
       remaining = 0;
       break;
     }
+    crossedOn(p, pos.s, j, travelled, crossed);
+    travelled += Math.abs(j - pos.s);
     remaining -= Math.abs(j - pos.s);
     pos.s = j;
     const next = chooseAt(net, pos.path, j, pos.dir, want);
@@ -316,7 +388,93 @@ export function advance(net, pos, dist, want) {
     if (pos.side && next.path !== pos.path) pos.side = pos.side * pos.dir * next.dir;
     pos.path = next.path; pos.s = next.s; pos.dir = next.dir;
   }
-  return { stopped };
+  return { stopped, crossed, portal };
+}
+
+/** The next station along `path` from `s` in direction `dir` (s30:P), or null. */
+export function nextStation(path, s, dir) {
+  const S = path?.stations || [];
+  if (dir > 0) { for (const st of S) if (st.s > s + 1e-6) return st; }
+  else { for (let i = S.length - 1; i >= 0; i--) if (S[i].s < s - 1e-6) return S[i]; }
+  return null;
+}
+
+export const OPEN_CLEARANCE_M = 0.5;  // the track is "in the open" within this of the surface (or above it)
+export const OPEN_MIN_RUN_M = 60;     // shorter surfacings are noise in the depth model, not portals
+export const OPEN_GROUND_SMOOTH_M = 120; // ground averaged over +/- this along the line (the terrain grid is ~137 x 98 m a cell)
+
+/**
+ * Portals, found geometrically (s30:P). Tube lines carry no open-air classes,
+ * so a path is "in the open" wherever its centreline (the track, at the depth
+ * the network draws it) comes within OPEN_CLEARANCE_M of the ground or rises
+ * above it; each run at least OPEN_MIN_RUN_M long becomes an interval in
+ * path.open, whose ends are the portals where the line leaves its tunnel.
+ * The ground is averaged along the line over +/- OPEN_GROUND_SMOOTH_M, so a
+ * dip narrower than a terrain cell or two (a buried valley in the City, a
+ * dock) does not open a tunnel that is only near it. Over water the track is
+ * in the open only when it is above the water (a bridge); under it (the
+ * tubes' bed clearance puts the crown near the carved bed) it is not.
+ * `groundY(x, z)` is canonical ground Y (or null where unknown, which counts
+ * as underground); `waterY(x, z)` the water top where there is water, else
+ * null. Returns the number of portals, or -1 when the ground is not available
+ * yet (nothing is marked).
+ */
+export function markOpenSections(net, { groundY, isWater = null, waterY = null, VE = net?.VE || 5,
+  clearanceM = OPEN_CLEARANCE_M, minRunM = OPEN_MIN_RUN_M, smoothM = OPEN_GROUND_SMOOTH_M } = {}) {
+  if (!net || typeof groundY !== 'function') return -1;
+  // The ground must exist somewhere on the network before anything is marked.
+  let known = 0;
+  for (const p of net.paths) {
+    for (let j = 0; j < p.n && known < 8; j += Math.max(1, Math.floor(p.n / 4))) if (Number.isFinite(groundY(p.x[j], p.z[j]))) known++;
+  }
+  if (!known) return -1;
+  let portals = 0;
+  for (const p of net.paths) {
+    const open = [];
+    let start = null;
+    const raw = new Float64Array(p.n), known = new Uint8Array(p.n);
+    for (let j = 0; j < p.n; j++) { const g = groundY(p.x[j], p.z[j]); if (Number.isFinite(g)) { raw[j] = g; known[j] = 1; } }
+    // Box average over +/- smoothM of arc (two pointers).
+    const ground = new Float64Array(p.n);
+    let lo = 0, hi = -1, sum = 0, cnt = 0;
+    for (let j = 0; j < p.n; j++) {
+      while (hi + 1 < p.n && p.s[hi + 1] <= p.s[j] + smoothM) { hi++; if (known[hi]) { sum += raw[hi]; cnt++; } }
+      while (p.s[lo] < p.s[j] - smoothM) { if (known[lo]) { sum -= raw[lo]; cnt--; } lo++; }
+      ground[j] = known[j] && cnt ? sum / cnt : NaN;
+    }
+    const isOpen = (j) => {
+      const g = ground[j];
+      if (!Number.isFinite(g)) return false;
+      const w = waterY ? waterY(p.x[j], p.z[j]) : (isWater && isWater(p.x[j], p.z[j]) ? Infinity : null);
+      if (w !== null && w !== undefined) return p.y[j] >= w;   // on a bridge, or under the water
+      return p.y[j] >= g - clearanceM * VE;
+    };
+    const flags = new Array(p.n);
+    for (let j = 0; j < p.n; j++) flags[j] = isOpen(j);
+    // Platforms are underground by definition: never inside an open run.
+    for (const { s } of p.stops) {
+      let j = 0;
+      while (j < p.n - 1 && p.s[j + 1] <= s) j++;
+      flags[j] = false; if (j + 1 < p.n && Math.abs(p.s[j + 1] - s) < 1e-6) flags[j + 1] = false;
+    }
+    for (let j = 0; j <= p.n; j++) {
+      const f = j < p.n && flags[j];
+      if (f && start === null) start = j;
+      if (!f && start !== null) {
+        const end = j - 1;
+        // Boundaries half-way between an underground sample and an open one.
+        const s0 = start > 0 ? (p.s[start - 1] + p.s[start]) / 2 : 0;
+        const s1 = end < p.n - 1 ? (p.s[end] + p.s[end + 1]) / 2 : p.length;
+        if (s1 - s0 >= minRunM) open.push([s0, s1]);
+        start = null;
+      }
+    }
+    p.open = open;
+    for (const [a, b] of open) portals += (a > 1e-6 ? 1 : 0) + (b < p.length - 1e-6 ? 1 : 0);
+  }
+  net.openMarked = true;
+  net.stats.portals = portals;
+  return portals;
 }
 
 export function nearestEntrance(net, x, z, maxR) {

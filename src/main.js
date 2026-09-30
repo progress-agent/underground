@@ -28,6 +28,9 @@ import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import proj4 from 'proj4';
 import { fetchRouteSequence, fetchBundledRouteSequenceIndex, fetchTubeLines } from './tfl.js';
+// ── s30:P ──
+import { tflStats } from './tfl.js';
+// ── /s30:P ──
 import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthInterpolator } from './depth.js';
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, applyParkUndersideTexture, getTerrainRiverBed } from './terrain.js';
 import { createParkLabels } from './park-labels.js';
@@ -2089,6 +2092,12 @@ const lineCenterPoints = new Map();
 const lineBranchCenterPts = new Map(); // lineId -> [[branchPts], ...]
 // Line colour cache (hex) for tube rebuild after terrain snap.
 const lineColoursById = new Map();     // lineId -> hex colour
+// ── s30:P ──
+// TfL's ordered routes per line (the source of "towards X" on the Pedestrian
+// platform chooser, D-041). The route loader used to keep only the stop
+// sequences and discard these. lineId -> { lineName, orderedLineRoutes, names }
+const s30pTubeRoutes = new Map();
+// ── /s30:P ──
 // Pickable meshes for raycast selection (click-to-focus).
 const linePickables = [];
 // Track meshes by lineId for hover highlight.
@@ -2664,6 +2673,13 @@ async function buildNetworkMvp() {
 
         const sequences = seq.stopPointSequences || [];
         const { branches, allStops } = extractBranches(sequences);
+        // ── s30:P ── keep the ordered routes (towards X) and every stop's name
+        {
+          const names = new Map();
+          for (const sq of sequences) for (const sp of sq.stopPoint || []) if (sp?.id && !names.has(sp.id)) names.set(sp.id, sp.name);
+          s30pTubeRoutes.set(id, { lineName: seq.lineName || id, orderedLineRoutes: seq.orderedLineRoutes || [], names });
+        }
+        // ── /s30:P ──
 
         const sps = allStops;
 
@@ -4159,6 +4175,14 @@ modeSystem.ctx.tubeNetwork = {
 modeSystem.ctx.clouds = cloudSystem;
 // ── /s25:C ──
 // ── /sprint:A2 ──
+// ── s30:P ──
+// Pedestrian tunnel (D-041): the trains (their batches are drawn inside the
+// walker's bore), TfL's ordered routes (the chooser's "towards X", pinned to
+// the bundled data) and each line's colour.
+modeSystem.ctx.trainSystem = trainSystem;
+modeSystem.ctx.tubeRoutes = s30pTubeRoutes;
+modeSystem.ctx.lineColour = (lineId) => lineColoursById.get(lineId);
+// ── /s30:P ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map
@@ -4320,6 +4344,9 @@ if (import.meta.env.DEV) {
   window.__ug.getSewerRoutes = getSewerRoutes;
   window.__ug.getAirportDockBedY = getAirportDockBedY;
   // ── /s25:W ──
+  // ── s30:P ──
+  window.__ug.tflStats = tflStats;
+  // ── /s30:P ──
   // ── s24:R ──
   window.__ug.economies = economies;
   window.__ug.trainBatchStats = trainBatchStats;

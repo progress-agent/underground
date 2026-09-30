@@ -1,9 +1,15 @@
 // Minimal TfL fetch helpers (public endpoints, no auth)
 //
-// Robustness strategy:
+// SOURCE (sprint 30Sep26w, D-041, Lane P): the app is PINNED to the bundled
+// route data in /public/data/tfl by default, so the network, its stations and
+// every train timetable built from it are the same on every load and machine
+// (a live response can change between loads, and its localStorage copy lingers
+// for a day). `?tfl=live` restores the live path below, kept for a refresh
+// check against TfL:
 // 1) Try live fetch
 // 2) Fall back to localStorage cache (TTL)
 // 3) Fall back to bundled on-disk cache in /public/data/tfl (so the demo works offline)
+// The bundled path reads only the shipped JSON: no network, no localStorage.
 
 const CACHE_PREFIX = 'ug:tfl:';
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
@@ -107,8 +113,26 @@ export async function fetchJson(url, {
   }
 }
 
+/** 'live' only with ?tfl=live; otherwise 'bundled' (the default, D-041). */
+export function tflSource(search = globalThis.location?.search ?? '') {
+  try { return new URLSearchParams(search).get('tfl') === 'live' ? 'live' : 'bundled'; } catch { return 'bundled'; }
+}
+
+/** What each TfL request was served from, for specs and the console. */
+export const tflStats = { live: 0, bundled: 0, urls: [] };
+
+async function fetchTfl(url, opts = {}) {
+  const source = opts.source ?? tflSource();
+  tflStats.urls.push({ url, source });
+  if (source === 'live') { tflStats.live++; return fetchJson(url, opts); }
+  tflStats.bundled++;
+  const bundled = await fetchBundledJsonFor(url);
+  if (!bundled) throw new Error(`No bundled TfL data for ${url}`);
+  return bundled;
+}
+
 export async function fetchTubeLines(opts) {
-  return fetchJson('https://api.tfl.gov.uk/Line/Mode/tube', opts);
+  return fetchTfl('https://api.tfl.gov.uk/Line/Mode/tube', opts);
 }
 
 export async function fetchBundledRouteSequenceIndex() {
@@ -119,5 +143,5 @@ export async function fetchBundledRouteSequenceIndex() {
 }
 
 export async function fetchRouteSequence(lineId, opts) {
-  return fetchJson(`https://api.tfl.gov.uk/Line/${encodeURIComponent(lineId)}/Route/Sequence/all`, opts);
+  return fetchTfl(`https://api.tfl.gov.uk/Line/${encodeURIComponent(lineId)}/Route/Sequence/all`, opts);
 }
