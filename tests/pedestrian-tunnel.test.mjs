@@ -7,7 +7,9 @@
 //   * the chooser's capture-phase digit keys (they pick rows while it is open,
 //     and pass through to the mode keys while it is closed);
 //   * the train passing state (inside a train, closing speed, the other bore
-//     ignored), the platform section's sourced clearances, and the route
+//     ignored; a standing train round a walker at rest passes nothing, and
+//     the shake is brief whatever the speeds: fix round 2), the platform
+//     section's sourced clearances, and the route
 //     source pinned to the bundled data unless ?tfl=live.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +20,7 @@ import {
 } from '../src/modes/pedestrian-tunnels.js';
 import { towards, platformRows, routeDestination, joinOr, cleanStationName } from '../src/modes/tube-routes.js';
 import { createPlatformChooser } from '../src/modes/platform-chooser.js';
-import { passingState, projectOnPolyline, TRAIN_HALF_LENGTH_M } from '../src/tunnel-trains.js';
+import { passingState, projectOnPolyline, stepShake, TRAIN_HALF_LENGTH_M, SHAKE, MAX_PASS_MPS, SPEED_WINDOW_S } from '../src/tunnel-trains.js';
 import { platformSection, PLATFORM, ROUNDEL, buildPlatformGeometry, slicePolyline } from '../src/platform-tunnel.js';
 import { PEDESTRIAN_TUNABLES } from '../src/modes/pedestrian-body.js';
 import { tflSource, fetchRouteSequence, tflStats } from '../src/tfl.js';
@@ -343,6 +345,105 @@ test('passing: inside a train, its closing speed, and the other bore ignored', (
   assert.equal(st.rumble, 1);
   const hit = projectOnPolyline(window, { x: 12, y: -100, z: 1 });
   assert.ok(Math.abs(hit.s - 12) < 1e-9 && Math.abs(hit.lateral - 1) < 1e-9);
+});
+
+// Fix round 2 (verifier): the rush, the rumble and the shake follow the MOTION
+// of the pass. A walker at rest inside a train dwelling at a platform (the
+// arrival card open, 15 to 30 s of dwell) saw the view shake at full and heard
+// the rumble at full for the whole dwell. Jordan (D-041 item 3): "a brief shake".
+const passWindow = () => Array.from({ length: 101 }, (_, i) => ({ x: -250 + i * 5, y: -100, z: 0, s: -250 + i * 5 }));
+/** Run passingState + stepShake frame by frame: trainX(t), walkerX(t) in metres along the bore. */
+function runPass({ seconds, trainX, walkerX = () => 0, dt = 1 / 60 }) {
+  const window = passWindow(), prev = new Map(), train = { position: { x: 0, y: -100, z: 0 }, userData: { id: 'T' } };
+  let sh = { shake: 0, passT: null };
+  const frames = [];
+  for (let i = 1; i <= Math.round(seconds / dt); i++) {
+    const t = i * dt;
+    train.position.x = trainX(t);
+    const st = passingState([train], window, { x: walkerX(t), y: -100, z: 0 }, prev, dt);
+    sh = stepShake(sh, st, dt);
+    frames.push({ t, inside: st.inside, speed: st.insideSpeed, rush: st.rush, rumble: st.rumble, shake: sh.shake, passT: sh.passT });
+  }
+  return frames;
+}
+/** Longest run of consecutive frames satisfying f, in seconds. */
+const longestRun = (frames, f, dt = 1 / 60) => { let best = 0, run = 0; for (const x of frames) { run = f(x) ? run + 1 : 0; best = Math.max(best, run); } return best * dt; };
+
+test('passing: a train dwelling round a walker at rest passes nothing: no rush, no rumble, no shake, for the whole dwell', () => {
+  const frames = runPass({ seconds: 30, trainX: () => 10 });   // the walker 10 m from the centre of a standing train: inside it
+  assert.ok(frames.every(f => f.inside), 'the walker is inside the train throughout');
+  assert.ok(frames.every(f => f.rush === 0 && f.rumble === 0), 'no air rush and no rumble from a train standing still');
+  assert.equal(Math.max(...frames.map(f => f.shake)), 0, 'the view never shakes');
+  // Coming to rest there just after a pass: the shake it left dies away within two seconds.
+  let sh = { shake: SHAKE.rad, passT: 0.4 };
+  const still = { inside: true, insideSpeed: 0, rush: 0, rumble: 0 };
+  for (let i = 0; i < 120; i++) sh = stepShake(sh, still, 1 / 60);
+  assert.equal(sh.shake, 0);
+  // Deterministic: the same frames give the same numbers.
+  assert.deepEqual(runPass({ seconds: 2, trainX: () => 10 }), frames.slice(0, 120));
+});
+
+test('passing: a running train through a walker at rest rumbles all the way, but the shake is brief', () => {
+  // Victoria cruise, 14.5 m/s: its 103.6 m pass the walker in about 7 s.
+  const frames = runPass({ seconds: 26, trainX: t => -190 + 14.5 * t });
+  const inside = frames.filter(f => f.inside);
+  assert.ok(inside.length * (1 / 60) > 6.9, `inside ${inside.length} frames`);
+  assert.ok(inside.slice(1).every(f => Math.abs(f.speed - 14.5) < 1e-6 && f.rumble === 1), 'full rumble while it runs through');
+  assert.ok(Math.abs(Math.max(...frames.map(f => f.shake)) - SHAKE.rad) < 1e-12, 'a full shake as it arrives');
+  // At most SHAKE.holdS of it, dying away with SHAKE.decayS: above a third of the
+  // peak for no longer than holdS + decayS * ln 3, though the pass lasts 7 s.
+  const strong = longestRun(frames, f => f.shake > SHAKE.rad / 3);
+  assert.ok(strong > SHAKE.holdS - 0.05 && strong <= SHAKE.holdS + SHAKE.decayS * Math.log(3) + 0.02, `strong shake ${strong} s`);
+  assert.ok(inside.filter(f => f.passT > 3).every(f => f.shake === 0), 'the view is still for the rest of the pass');
+});
+
+test('passing: the walker at 60 m/s through a standing train shakes and rumbles; the train pulling away is a new, brief pass', () => {
+  // Walking through a train dwelling at a platform.
+  const walk = runPass({ seconds: 5, trainX: () => 0, walkerX: t => -150 + 60 * t });
+  const inWalk = walk.filter(f => f.inside);
+  assert.ok(inWalk.length > 0 && inWalk.slice(1).every(f => Math.abs(f.speed - 60) < 1e-6 && f.rumble === 1));
+  assert.ok(Math.abs(Math.max(...inWalk.map(f => f.shake)) - SHAKE.rad) < 1e-12);
+  assert.ok(Math.max(...inWalk.map(f => f.rush)) > 0.9, 'a strong air rush');
+  // At rest inside a dwelling train for 5 s, then it departs at 12 m/s (trains.js
+  // cruise): still, then a full but brief shake as it pulls away round the walker.
+  const dep = runPass({ seconds: 14, trainX: t => (t < 5 ? 0 : 12 * (t - 5)) });
+  const before = dep.filter(f => f.t < 5);
+  assert.ok(before.every(f => f.shake === 0 && f.rumble === 0 && f.rush === 0));
+  // The speed is read over SPEED_WINDOW_S, so by then the pass is at its full 12 m/s.
+  const moving = dep.filter(f => f.t > 5 + SPEED_WINDOW_S + 0.02 && f.t < 5.4);
+  assert.ok(moving.length > 0 && moving.every(f => f.inside && Math.abs(f.speed - 12) < 1e-6
+    && Math.abs(f.shake - SHAKE.rad) < 1e-9 && Math.abs(f.rumble - 1) < 1e-9), JSON.stringify(moving[0]));
+  assert.ok(longestRun(dep, f => f.shake > SHAKE.rad / 3) <= SHAKE.holdS + SHAKE.decayS * Math.log(3) + 0.02);
+  // A jump no train or walker can make (the window moved: a change of bore) is
+  // not a pass at 4000 m/s; the last speed holds for that frame.
+  const window = passWindow(), prev = new Map(), t1 = { position: { x: 30, y: -100, z: 0 }, userData: {} };
+  passingState([t1], window, { x: 0, y: -100, z: 0 }, prev, 0.05);
+  t1.position.x = 29.3;
+  assert.ok(Math.abs(passingState([t1], window, { x: 0, y: -100, z: 0 }, prev, 0.05).insideSpeed - 14) < 1e-6);
+  t1.position.x = -50.7;                          // 80 m in 0.02 s, still inside it
+  assert.ok(Math.abs(passingState([t1], window, { x: 0, y: -100, z: 0 }, prev, 0.02).insideSpeed - 14) < 1e-6);
+  assert.ok(MAX_PASS_MPS > 2 * (400 + 14.5 * 30), 'the Shift maximum meeting a Victoria train at the 30x time scale is still a pass, even on an uneven frame');
+});
+
+test('passing: the speed of a pass survives uneven frames (the mode runs before the trains in a tick)', () => {
+  // Frames alternate 10 ms and 30 ms; each frame the walker (at rest) sees the
+  // step the train took in the frame BEFORE, as main.js's tick orders them.
+  const window = passWindow(), prev = new Map(), train = { position: { x: -240, y: -100, z: 0 }, userData: { id: 'T' } };
+  const walker = { x: 0, y: -100, z: 0 };
+  let lastDt = 0, single = [], est = [];
+  let lastAxial = null;
+  for (let i = 0; i < 400; i++) {
+    const dt = i % 2 ? 0.03 : 0.01;
+    train.position.x += 14.5 * lastDt;         // updateTrains ran after the mode last frame
+    const st = passingState([train], window, walker, prev, dt);
+    const ax = st.nearest?.axial;
+    if (lastAxial !== null && ax !== undefined && i > 20) { single.push(Math.abs(ax - lastAxial) / dt); est.push(st.nearest.speed); }
+    lastAxial = ax ?? null;
+    lastDt = dt;
+  }
+  assert.ok(est.length > 300);
+  assert.ok(Math.max(...single) > 14.5 * 2.5 && Math.min(...single) < 14.5 / 2.5, 'one frame alone reads 3x out');
+  assert.ok(est.every(v => Math.abs(v - 14.5) / 14.5 < 0.15), `windowed ${Math.min(...est)} to ${Math.max(...est)}`);
 });
 
 // ── the platform tunnel ──────────────────────────────────────────────────────

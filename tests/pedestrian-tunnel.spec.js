@@ -10,7 +10,9 @@
 //     bundled data (Oxford Circus, checked against the file independently);
 //   * arrival fires when the walker crosses a platform at 60 m/s and at 200 m/s,
 //     the name shows on screen and the bore opens into the platform tunnel;
-//   * a train passing through never blocks or slows the walker;
+//   * a train passing through never blocks or slows the walker, and its shake
+//     is brief; a train dwelling round a walker at rest neither shakes the
+//     view nor rumbles (fix round 2);
 //   * digit keys pick rows while the card is open, and switch modes when it is
 //     closed; opening the card releases pointer lock;
 //   * a portal ends the walk and offers the street;
@@ -308,7 +310,7 @@ test.describe('in the tunnel', () => {
         const d = m.debug();
         const lv = ug.modes.sfx.levels();
         if (d.phase !== 'tunnel') break;
-        log.push({ speed: d.tunnel.speed, inside: d.trains.inside, s: d.tunnel.s, path: d.tunnel.path, card: !!d.card });
+        log.push({ speed: d.tunnel.speed, inside: d.trains.inside, s: d.tunnel.s, path: d.tunnel.path, card: !!d.card, shake: d.shake, passT: d.passT });
         if (d.trains.inside) { maxShake = Math.max(maxShake, d.shake); maxRush = Math.max(maxRush, lv?.trainRush ?? 0); maxRumble = Math.max(maxRumble, lv?.trainRumble ?? 0); }
         if (d.trains.passes > passesAtStart && !d.trains.inside && log.filter(x => x.inside).length > 3) break;
       }
@@ -318,14 +320,93 @@ test.describe('in the tunnel', () => {
     expect(r.passes).toBeGreaterThanOrEqual(1);
     const inside = r.log.filter(x => x.inside);
     expect(inside.length).toBeGreaterThan(0);
-    // Every frame inside a train: still at the full walking speed, still moving.
-    for (const f of inside) expect(f.speed).toBe(r.walk);
+    // Every frame inside a train: never slower than the frame before, and at the
+    // full walking speed once the walk has reached it. (The walk starts from rest
+    // at Warren Street: when a train happens to be dwelling there, the first
+    // frames inside it are the half-second ramp up from rest, not a slowing;
+    // seen when this test runs alone, fix round 2.)
+    const reached = r.log.findIndex(f => f.speed === r.walk);
+    expect(reached).toBeGreaterThanOrEqual(0);
+    r.log.forEach((f, k) => {
+      if (!f.inside) return;
+      if (k > 0) expect(f.speed).toBeGreaterThanOrEqual(r.log[k - 1].speed);
+      if (k >= reached) expect(f.speed).toBe(r.walk);
+    });
+    expect(inside.filter((f, k) => f.speed === r.walk).length).toBeGreaterThan(0);
     for (let k = 1; k < r.log.length; k++) {
       const a = r.log[k - 1], b = r.log[k];
       if (a.path === b.path && a.speed === r.walk && b.speed === r.walk) expect(Math.abs(b.s - a.s)).toBeGreaterThan(0);
     }
     expect(r.maxShake).toBeGreaterThan(0.005);
     expect(r.maxRumble).toBeGreaterThan(0.05);
+    // Brief (fix round 2): 1.8 s into a pass the shake has all but gone (held
+    // at most SHAKE.holdS = 1 s, then dying away with 0.25 s), however long the pass.
+    for (const f of r.log) if (f.passT !== null && f.passT > 1.8) expect(f.shake).toBeLessThan(0.001);
+  });
+
+  test('a train dwelling round a walker at rest: no shake, no rumble, no rush, the view still (fix round 2)', async () => {
+    // The verifier's case: arrive, come to rest on the platform, and a train of
+    // that bore is standing there (about a quarter of the time): before this fix
+    // the view shook at 0.012 rad and the rumble sat at its maximum for the whole
+    // dwell (25 to 30 s of timetable) while the arrival card was open.
+    await page.mouse.click(5, 300); // a user gesture: the mode voices have a bus
+    const r = await page.evaluate(async () => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const { pointAt } = await import('/src/modes/pedestrian-tunnels.js');
+      const { trainStateAt } = await import('/src/trains.js');
+      const frame = () => new Promise(res => requestAnimationFrame(res));
+      const net = m.rebuildNetwork();
+      // At the default 8x a dwell lasts about 3 s of real time; at 1x (the
+      // slider's other end) it is the full 20 to 30 s, the verifier's case.
+      const ts0 = ug.sim.timeScale;
+      ug.sim.timeScale = 1;
+      // A deep-tube train standing at a platform with at least 8 s of its dwell left.
+      let best = null;
+      for (const t of ug.trainSystem.allTrains) {
+        const left = trainStateAt(t.userData, ug.trainSystem.simTime).pausedLeft;
+        if (!(left > 8)) continue;
+        for (const p of net.paths) {
+          if (p.lineId !== t.userData.lineId) continue;
+          for (const { s } of p.stops) for (const side of [1, -1]) {
+            const q = pointAt(p, s, {}, side);
+            const d = Math.hypot(q.x - t.position.x, q.z - t.position.z);
+            if (d < 60 && (!best || d < best.d)) best = { d, path: p.id, s, side, train: t, left, lineId: p.lineId };
+          }
+        }
+      }
+      if (!best) { ug.sim.timeScale = ts0; return { error: 'no train dwelling at a platform' }; }
+      m.placeInTunnel({ path: best.path, s: best.s, dir: 1, side: best.side });
+      const p0 = best.train.position.clone();
+      const log = [];
+      let q0 = null;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 3000) {
+        await frame();
+        const d = m.debug(), lv = ug.modes.sfx.levels();
+        const q = ug.camera.quaternion.clone();
+        log.push({ ms: performance.now() - t0, inside: d.trains.inside, shake: d.shake, rush: d.trains.rush, rumble: d.trains.rumble,
+          lvRush: lv?.trainRush ?? null, lvRumble: lv?.trainRumble ?? null, speed: d.tunnel?.speed ?? null, phase: d.phase,
+          moved: best.train.position.distanceTo(p0), turn: q0 ? q.angleTo(q0) : 0 });
+        q0 = q;
+      }
+      ug.sim.timeScale = ts0;
+      return { lineId: best.lineId, left: best.left, d: best.d, log };
+    });
+    expect(r.error).toBeUndefined();
+    const still = r.log.filter(f => f.moved < 1e-6);
+    // Inside it from the frame the bore's window is rebuilt round the new place on.
+    const settled = still.slice(Math.max(0, still.findIndex(f => f.inside)));
+    expect(settled.length).toBeGreaterThan(60);
+    expect(settled.at(-1).ms).toBeGreaterThan(2500);     // the train stood round the walker throughout
+    expect(settled.every(f => f.inside && f.phase === 'tunnel' && f.speed === 0)).toBe(true);
+    // Not a flicker of it, from the first frame on; the sound once the voices' glide (0.06 s) has settled.
+    for (const f of still) {
+      expect(f.shake).toBe(0);
+      expect(f.rush).toBe(0);
+      expect(f.rumble).toBe(0);
+      expect(f.turn).toBeLessThan(1e-6);
+      if (f.ms > 500 && f.lvRumble !== null) { expect(f.lvRumble).toBeLessThan(0.005); expect(f.lvRush).toBeLessThan(0.005); }
+    }
   });
 
   test('a portal: where the line leaves its tunnel the walk ends and the card offers the street', async () => {

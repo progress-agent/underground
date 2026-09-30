@@ -60,7 +60,9 @@
 //     interchange, a change of line without surfacing.
 //   * The walker's own line's trains pass THROUGH the walker (tunnel-trains.js):
 //     lit windows streaming past, an air rush and rumble (mode-sfx.js) and a
-//     short shake of the view. Nothing about a train touches the walk.
+//     brief shake of the view, all driven by the MOTION of the pass (a train
+//     standing round a walker at rest passes nothing; fix round 2). Nothing
+//     about a train touches the walk.
 //   * Where a line leaves its tunnel (a portal, found geometrically), the walk
 //     ends and the card offers the street.
 
@@ -73,7 +75,7 @@ import {
 // ── s30:P ──
 import { platformRows, cleanStationName } from './tube-routes.js';
 import { createPlatformChooser } from './platform-chooser.js';
-import { createTunnelTrains } from '../tunnel-trains.js';
+import { createTunnelTrains, stepShake } from '../tunnel-trains.js';
 import { INTERIOR_LAYER } from '../tube-interior.js';
 import { PLATFORM } from '../platform-tunnel.js';
 // ── /s30:P ──
@@ -95,8 +97,6 @@ export const PLATFORM_ZONE_M = PLATFORM.lengthM / 2 + 10;  // on the platform: i
 export const ARRIVAL_HOLD_M = 250;
 const REST_MPS = 0.5;                  // at rest on a platform, the arrival card opens
 const TRANSFER_S = 1.2;                // a change of line: through the cross passage to the other platform
-const SHAKE_RAD = 0.012;               // peak view shake while a train passes through (about 0.7 degrees)
-const SHAKE_DECAY_S = 0.25;
 const PORTAL_STAND_M = 20;             // the walk ends this far inside a tunnel mouth (the lining runs on to it)
 const PORTAL_CLEAR_M = 25;             // walk this far back from there before the portal can offer the street again
 // ── /s30:P ──
@@ -143,7 +143,7 @@ export function createPedestrianMode(ctx) {
   let portalAt = null;                    // { path, s, x, z, lineId, dismissed } the portal the walk ended at
   let transfer = null;                    // { from, to, t, row, bore }
   const arrivals = [];                    // test log: { name, lineId, speed, at }
-  let shake = 0, lastPass = null;
+  let shake = 0, passT = null, lastPass = null;  // the view shake of a pass (tunnel-trains.js stepShake)
   let trackYaw = null;                    // the track's heading last frame, while moving (the view turns with the tunnel)
   // ── /s30:P ──
 
@@ -490,9 +490,9 @@ export function createPedestrianMode(ctx) {
     // s30:P trains passing through the walker: sound and a short shake, never a stop.
     const pass = trains.update(ctx.tubeInterior?.windowPoints ?? null, p, dt, { VE });
     lastPass = pass;
-    const k = Math.exp(-dt / SHAKE_DECAY_S);
-    const goal = pass.inside ? SHAKE_RAD : SHAKE_RAD * 0.5 * Math.max(0, pass.rush - 0.35);
-    shake = Math.max(goal, shake * k);
+    // Brief whatever the speeds, and none at all from a train standing round a
+    // walker at rest (fix round 2: it shook for the whole dwell).
+    ({ shake, passT } = stepShake({ shake, passT }, pass, dt));
     placeCamera(p.x, p.y, p.z);
     lastEvents = [];
     sound(tunnelSpeed, pass);
@@ -698,7 +698,7 @@ export function createPedestrianMode(ctx) {
       savedNear = ctx.camera.near;
       lastBore = null;
       // s30:P
-      card = null; chooser.close(); arrived = null; portalAt = null; transfer = null; shake = 0; lastPass = null;
+      card = null; chooser.close(); arrived = null; portalAt = null; transfer = null; shake = 0; passT = null; lastPass = null;
       ctx.collision.sync();
       ease.begin();
       const cam = ctx.camera;
@@ -723,7 +723,7 @@ export function createPedestrianMode(ctx) {
       ctx.tubeInterior?.hide();
       // s30:P the card, the banner and the trains' interior layer go with the mode.
       card = null; chooser.close(); chooser.hideBanner(); trains.hide();
-      arrived = null; portalAt = null; transfer = null; shake = 0;
+      arrived = null; portalAt = null; transfer = null; shake = 0; passT = null;
       if (savedNear !== null) setNear(savedNear);
       savedNear = null;
       ease.restore();
@@ -744,6 +744,8 @@ export function createPedestrianMode(ctx) {
       ease.update(dt, P.easeTime);
       const jump = jumpLatch, use = useLatch;
       jumpLatch = useLatch = false;
+      // s30:P out of the bore (a transfer, the shaft, the street) a shake only dies away.
+      if (phase !== 'tunnel' && shake > 0) ({ shake, passT } = stepShake({ shake, passT }, null, dt));
       if (phase === 'enter') updateEnter(dt);
       else if (phase === 'body') updateBody(dt, use, jump);
       else if (phase === 'shaft') updateShaft(dt);
@@ -780,7 +782,7 @@ export function createPedestrianMode(ctx) {
         portal: portalAt ? { ...portalAt } : null,
         transfer: transfer ? { t: transfer.t, lineId: transfer.row.lineId, label: transfer.row.label } : null,
         trains: trains.debug(),
-        shake,
+        shake, passT,
         // ── /s30:P ──
       };
     },
@@ -803,6 +805,7 @@ export function createPedestrianMode(ctx) {
       if (!active || !n?.paths[path]) return false;
       enter = null; shaft = null; transfer = null;
       card = null; chooser.close(); arrived = null; portalAt = null;
+      shake = 0; passT = null;   // at rest, and no pass carried over from where the walker was
       const sd = side ?? (n.halfSpacing > 0 ? dir : 0);
       tunnel = { path, s, dir, side: sd };
       tunnelSpeed = 0;
