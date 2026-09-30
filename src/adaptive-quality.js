@@ -41,7 +41,10 @@
 //   river bounced 2<->3 every ~3.5s.
 // - Clouds thin before shadows go (D-040, Jordan's answer (c), 26Sep26s). The
 //   sprint 25Sep26f clouds cost 1.4 to 2ms at street and river, which tipped
-//   the M5 as lived past the 19ms shadow line. Level 1 keeps shadows with the
+//   the M5 as lived past the 19ms shadow line. (D-041 halved the cover and
+//   relit the clouds; on an M2 Max their sprites cost about two thirds of the
+//   old ones', provisional until re-measured on the M5: clouds.js
+//   CLOUD_CONFIG.) Level 1 keeps shadows with the
 //   clouds thinned (distant clouds fade into the haze sooner, near ones are
 //   unchanged; clouds.js eases between the two); level 2 then drops shadows.
 //   Both shadow rungs use the tolerant 19ms line, and both first steps are

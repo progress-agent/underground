@@ -1,19 +1,24 @@
-// clouds.test.mjs: Lane C (sprint 25Sep26f, D-039). The pure cloud model.
+// clouds.test.mjs: Lane C (sprint 25Sep26f, D-039; sprint 30Sep26w, D-041).
+// The pure cloud model.
 //
 // Pinned here:
 //   1. Cloud positions are a deterministic function of time (no randomness,
 //      no frame history), and they move with the shared wind.
-//   2. Coverage is 2 to 3 oktas (Jordan's fair-weather default).
-//   3. Clouds and their shadows fade out towards the M25 edge.
-//   4. Shadows exist above ground, and there are none without air (the air
+//   2. Coverage is 1.25 oktas (D-041 item 6, Jordan 27Sep26u: "reduce the
+//      cloud cover by 50%"; superseded D-039's "2 to 3 oktas", built at 2.5).
+//   3. The clouds kept at 1.25 oktas are the first clouds of the 2.5-okta sky
+//      of c820ea9, in the same places and at the same sizes.
+//   4. Each cloud is fewer, larger, overlapping puffs (D-041, the cotton-wool fix).
+//   5. Clouds and their shadows fade out towards the M25 edge.
+//   6. Shadows exist above ground, and there are none without air (the air
 //      weight is 0 underground and underwater) or with the sun on the horizon.
-//   5. Presets are data with a default; the balloon updraft sits under cumulus.
+//   7. Presets are data with a default; the balloon updraft sits under cumulus.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CLOUD_FIELD, buildCloudLayout, cloudDrift, cloudPositionsAt, coverageFraction,
   sampleEdgeFade, coarseEdgeRing, cloudSunFactor, shadowStrengthFor, shadowPlaneY,
-  updraftAt, fractionToOktas, sampleCover,
+  updraftAt, fractionToOktas, sampleCover, cloudPosition,
 } from '../src/clouds-field.js';
 import { CLOUD_PRESETS, DEFAULT_CLOUD_PRESET, resolveCloudPreset } from '../src/clouds-presets.js';
 import { getWindAt } from '../src/wind.js';
@@ -62,10 +67,75 @@ test('drift is the integral of the shared wind at the cloud layer', () => {
   assert.ok(Math.hypot(b.x - a.x - w[0], b.z - a.z - w[1]) < 0.05);
 });
 
-test('coverage is 2 to 3 oktas, over the field and inside the map', () => {
+test('coverage is 1.25 oktas, over the field and inside the map (D-041)', () => {
+  // Jordan, 27Sep26u: "Let's reduce the cloud cover by 50%" (Reader item
+  // 01M3FX4EVNFFKK6K5Z9SXTNGRN), ruled as 2.5 -> 1.25 oktas in D-041 item 6,
+  // superseding D-039's "2 to 3 oktas" (this test's bound until c820ea9).
+  // The generator stops at the target on the raw footprints; the shadow blur
+  // then moves the whole field to 1.20 and the map's interior to 1.25.
+  assert.equal(P.oktas, 1.25);
   const all = fractionToOktas(coverageFraction(L));
   const inner = fractionToOktas(coverageFraction(L, { minEdge: 0.95 }));
-  for (const o of [all, inner]) assert.ok(o >= 2 && o <= 3, `oktas ${o.toFixed(2)}`);
+  for (const o of [all, inner]) assert.ok(Math.abs(o - 1.25) <= 0.08, `oktas ${o.toFixed(3)}`);
+});
+
+// The first clouds of c820ea9's 2.5-okta sky (clouds-field.js there, preset
+// fairCumulus), millimetre-rounded: [index, cx, cz, base, width, height, depth].
+// Taken on 30Sep26w from c820ea9 before any change in this lane.
+const C820_SAMPLE = [
+  [0, 14158.071, 1510.009, 1006.633, 1823.092, 1134.482, 1272.364],
+  [1, -4216.546, 34770.964, 952.657, 1770.757, 1047.915, 1524.363],
+  [2, -22759.507, -5519.861, 784.1, 1202.156, 687.93, 952.233],
+  [500, -17647.407, 3467.482, 1005.297, 1519.191, 1130.552, 1231.537],
+  [999, -9426.419, 23474.754, 794.974, 1056.801, 760.737, 962.707],
+  [1500, -16632.604, 28939.553, 965.161, 1518.683, 986.854, 960.045],
+  [1953, -4834.459, -23466.236, 1002.163, 1965.071, 1272.812, 1820.537],
+];
+// FNV-1a over the same rounded identities of its first 1,954 clouds (the
+// number c820ea9's generator keeps at 1.25 oktas).
+const C820_FIRST_1954_FNV = 'bb575d2';
+const r3 = v => Math.round(v * 1000) / 1000;
+const ident = c => [c.cx, c.cz, c.base, c.width, c.height, c.depth].map(r3);
+
+test('the kept clouds are the first clouds of the 2.5-okta sky, unmoved (D-041)', () => {
+  // About half as many clouds: the new puffs' footprints need a handful more
+  // (7 today) to reach the same cover, all of them the old sky's next clouds.
+  assert.ok(L.clouds.length >= 1954 && L.clouds.length <= 2010, `clouds ${L.clouds.length}`);
+  for (const [i, ...want] of C820_SAMPLE) assert.deepEqual(ident(L.clouds[i]), want, `cloud ${i}`);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < 1954; i++) {
+    for (const ch of ident(L.clouds[i]).join(',') + ';') { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  }
+  assert.equal(h.toString(16), C820_FIRST_1954_FNV);
+  // And at any time: every kept cloud drifts from its old place on the one wind.
+  const p = cloudPositionsAt(L, 1800), d = cloudDrift(1800, P), q = { x: 0, z: 0 };
+  for (const [i, cx, cz] of C820_SAMPLE) {
+    cloudPosition({ cx, cz }, d, q);
+    assert.ok(Math.abs(p[2 * i] - q.x) < 0.01 && Math.abs(p[2 * i + 1] - q.z) < 0.01, `cloud ${i} at 1800 s`);
+  }
+});
+
+test('each cloud is a few large, overlapping puffs (D-041)', () => {
+  // c820ea9 drew 5 to 11 puffs a cloud (7.6 on average) of 0.15 to 0.3 of its
+  // width, each lit as its own ball; now 3 to 7, a quarter to a third wide.
+  let puffs = 0, relR = 0;
+  for (const c of L.clouds) {
+    assert.ok(c.puffs.length >= 3 && c.puffs.length <= 7, `puffs ${c.puffs.length}`);
+    puffs += c.puffs.length;
+    for (const p of c.puffs) {
+      relR += p.r / c.width;
+      assert.ok(p.r >= 0.22 * c.width - 1e-6 && p.r <= 0.36 * c.width + 1e-6);
+      // Every puff overlaps another by at least a third of the smaller radius.
+      const overlaps = c.puffs.some(q => q !== p
+        && Math.hypot(p.dx - q.dx, p.dy - q.dy, p.dz - q.dz) < p.r + q.r - Math.min(p.r, q.r) / 3);
+      assert.ok(overlaps, 'an isolated puff');
+    }
+  }
+  assert.ok(puffs / L.clouds.length < 5.5, `mean puffs ${puffs / L.clouds.length}`);
+  assert.ok(relR / puffs > 0.27, `mean radius ${relR / puffs} of the width`);
+  // Deterministic: the puffs come from each cloud's own seeded stream.
+  const again = buildCloudLayout({ ...P, id: 'fairCumulus-puffs' });
+  assert.deepEqual(again.clouds[1234].puffs, L.clouds[1234].puffs);
 });
 
 test('clouds fade out towards the M25 edge and are gone beyond it', () => {
@@ -96,8 +166,11 @@ test('shadows: present above ground, none without air or with the sun on the hor
   }
   assert.ok(min < 1 - 0.6 * P.shadowStrength, `deepest shade ${min}`);
   assert.equal(max, 1);
+  // Recalibrated for 1.25 oktas (D-041): the mean shade over central London
+  // is 0.10 to 0.12 across the first two hours (0.20 to 0.23 at 2.5 oktas,
+  // when this band was 0.05 to 0.4): about the cover times the strength.
   const shaded = 1 - sum / n;
-  assert.ok(shaded > 0.05 && shaded < 0.4, `mean shade ${shaded}`);
+  assert.ok(shaded > 0.07 && shaded < 0.17, `mean shade ${shaded}`);
   // Underground or underwater the air weight is 0; so is the switch.
   assert.equal(shadowStrengthFor(P, { airWeight: 0, elevationDeg: 28 }), 0);
   assert.equal(shadowStrengthFor(P, { airWeight: 1, elevationDeg: 28, enabled: false }), 0);
