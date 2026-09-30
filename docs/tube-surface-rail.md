@@ -60,7 +60,8 @@ Filter on `!minor` for the mouths of real tunnels: for example the Bakerloo at Q
 
 - One top-level group per line, `surface-rail-<line>` (never `line:`; D-040's cull hides `line:*` from above-ground cameras). Victoria and Waterloo & City have none (wholly in tunnel).
 - Tunnels are skipped; the open runs either side stop at the portal.
-- Meshes per line: `stripe`, `ballast`, `masonry` (viaduct deck and piers), `earth` (embankment skirts), `cutShadow`, and `band` (this line's colour on another line's track, 0.4 above the stripe with a polygon offset). `userData.type` is `surface-rail`; the hover picker includes them.
+- Meshes per line, three draws at most: `stripe` (the line's own material, exactly the Overground's stripe), `dressing` (ballast, viaduct deck and piers, embankment skirts and cutting bands in one mesh, the Overground's four colours baked into the vertices), and `band` (this line's colour on another line's track, 0.4 above the stripe with a polygon offset). `userData.type` is `surface-rail`; the hover picker includes them.
+- Cost, measured on the Mac Studio with other lanes on the GPU (indicative): 35 extra draw calls at the standard overview (644 before, +5.4%), 31 to 32 at street and river, 9 to 12 at the M25 edge and Heathrow; triangles +1 to 2%. Building takes about 200 ms of main thread at load, yielded line by line (longest task about 86 ms); a Master change morphs it in about 55 ms, rate-limited with the other structures. `scripts/capture-surface-rail.mjs` reproduces the lane's before and after frames and the Overground pixel check.
 - Station markers: one `surfaceOnly` layer per line with open-air stops, registered as `surface:<line>` beside the line layers; one marker per station across lines.
 - No per-instance colour (D-015): each line has its own materials; markers are uniform instances.
 

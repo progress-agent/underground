@@ -50,7 +50,13 @@ export const SURFACE_RAIL_PREFIX = 'surface-rail-';
 export const SURFACE_RAIL_TYPE = 'surface-rail';
 /** Band above the stripe it overlays (scene units), plus a polygon offset. */
 export const BAND_LIFT = 0.4;
-const PARTS = ['stripe', 'ballast', 'masonry', 'earth', 'cutShadow'];
+const DRESSING_PARTS = ['ballast', 'masonry', 'earth', 'cutShadow'];
+// The four dressing archetypes share one draw per line: their colours (the
+// Overground's MATS colours, exactly) are baked into the vertices, so a line
+// costs three draws (dressing, stripe, bands) instead of six. Baked vertex
+// colour is not per-instance colour (D-015). Roughness and metalness are the
+// ballast's; the Overground's four materials differ by at most 0.1 in each.
+const DRESSING_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.9, metalness: 0.05, fog: true, side: THREE.DoubleSide });
 
 // DLR: the v2 class of a surface-rail sample -> the profile track kinds that
 // may carry it (nearest first), and the profile kind -> the archetype drawn.
@@ -128,10 +134,10 @@ export function bandGeometries(path, i0, i1, lines, yFn) {
   return out;
 }
 
-/** Position + normal, non-indexed: the attribute set every strip geometry has. */
+/** Position + normal (and a baked colour), non-indexed: the attribute set every strip geometry has. */
 export function normaliseForMerge(g) {
   const out = g.index ? g.toNonIndexed() : g;
-  for (const name of Object.keys(out.attributes)) if (name !== 'position' && name !== 'normal') out.deleteAttribute(name);
+  for (const name of Object.keys(out.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') out.deleteAttribute(name);
   if (!out.attributes.normal) out.computeVertexNormals();
   if (out !== g) g.dispose();
   return out;
@@ -158,6 +164,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
 
   const getY = getTerrainMeshSurfaceY;
   const morph = createRailMorph(getY);
+  // About 200 ms of building on the M2 Max (0.8 s at the weak setup's 4x CPU
+  // throttle), during the opening: yield between lines so no frame carries it.
+  const breathe = () => new Promise(r => setTimeout(r, 0));
   const groups = new Map(), lineInfo = new Map(), grids = new Map(), stationLayers = new Map();
   const names = new Map(data.lines.map(l => [l.id, l.id === 'dlr' ? 'DLR' : `${l.name} line`]));
   for (const [id, r] of overground?.userData.registry ?? []) names.set(id, `${r.name} line`);
@@ -187,6 +196,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     });
     ownerPaths.set(line.id, byBranch);
     info.paths = byBranch.filter(Boolean);
+    await breathe();
   }
 
   // ── Shared-track bands: on Tube owners, then on Overground owners ────────────
@@ -217,8 +227,10 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   }
 
   // ── Build meshes ─────────────────────────────────────────────────────────────
-  const addMerged = (info, geos, mat, part, { morphed = true } = {}) => {
+  const addMerged = (info, geos, mat, part, { morphed = true, colours = null } = {}) => {
     if (!geos.length) return null;
+    if (colours) geos = geos.map((g, k) => { const n = normaliseForMerge(g), c = colours[k], a = new Float32Array(n.attributes.position.count * 3);
+      for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); return n; });
     // The viaduct piers are indexed BoxGeometry with uv; the deck strips are
     // not. mergeGeometries refuses the mix and returns null, which silently
     // drops the whole masonry mesh (deck and piers): that is why the
@@ -226,7 +238,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // same way; left as it is, since the Overground must stay pixel-identical;
     // reported for a ruling). Here every piece is made position + normal,
     // non-indexed, so the Tube and DLR viaducts stand on their piers.
-    const merged = mergeGeometries(geos.map(normaliseForMerge), false);
+    const merged = mergeGeometries(colours ? geos : geos.map(normaliseForMerge), false);
     for (const g of geos) g.dispose();
     if (!merged) { console.warn(`surface rail: ${info.line.id} ${part} did not merge`); return null; }
     const mesh = new THREE.Mesh(merged, mat);
@@ -240,9 +252,12 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   const buildOwn = (info) => {
     const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
     for (const path of info.paths) buildCorridor(path, out, { skipTunnel: true });
-    for (const part of PARTS) addMerged(info, out[part], part === 'stripe' ? info.stripeMat : MATS[part], part, { morphed: !info.isDlr });
+    addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr });
+    const geos = DRESSING_PARTS.flatMap(part => out[part]), colours = DRESSING_PARTS.flatMap(part => out[part].map(() => MATS[part].color));
+    addMerged(info, geos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours });
   };
   for (const info of lineInfo.values()) {
+    await breathe();
     buildOwn(info);
     addMerged(info, bandOut.get(info.line.id) || [], info.bandMat, 'band');
     // Hover grid: own track, lines on it where a band says so.
@@ -260,6 +275,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   }
 
   // ── Surface station markers (surfaceOnly) ───────────────────────────────────
+  await breathe();
   const markerStations = new Map(); // lineId -> stations
   const seen = new Set();
   for (const line of data.lines) {
@@ -300,11 +316,11 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   };
 
   // ── Master (true proportions) ────────────────────────────────────────────────
-  function setHeightScale(ratio) {
+  function setHeightScale(ratio, { rebuildDlr = true } = {}) {
     structureScale = ratio;
     morph.apply(ratio);
     const dlr = lineInfo.get('dlr');
-    if (dlr && dlrProfile) {
+    if (rebuildDlr && dlr && dlrProfile) {
       // Rebuild the DLR's own meshes from the profile at this scale.
       for (const m of [...dlr.meshes]) if (m.userData.part !== 'band') { dlr.group.remove(m); m.geometry.dispose(); dlr.meshes.splice(dlr.meshes.indexOf(m), 1); }
       const byBranch = dlr.line.branches.map(b => { const p = buildDlrPath(b, getY, dlrProfile, ratio); return p.length >= 2 ? p : null; });
@@ -345,7 +361,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     /** Built paths per line (canonical for Tube lines, current scale for the DLR): Lane T lays trains on these. */
     paths: ownerPaths,
   };
-  setHeightScale(heightScale);
+  // The DLR was just built from the profile at this scale; the Tube corridors
+  // and markers take it now.
+  setHeightScale(heightScale, { rebuildDlr: false });
   // Lines wholly in tunnel (Victoria, Waterloo & City) have nothing to draw.
   for (const g of groups.values()) if (g.children.length) scene.add(g);
   return api;

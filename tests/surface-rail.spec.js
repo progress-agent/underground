@@ -106,9 +106,12 @@ test('the surface railway draws nothing below the ground: no tunnel, and D-024 h
     const u = window.__ug, VE = u.VERTICAL_EXAGGERATION;
     let total = 0, buried = 0, grazing = 0;
     for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
-      if (!o.isMesh || !['stripe', 'band', 'ballast', 'masonry'].includes(o.userData.part)) return;
+      // The track surface: every stripe and band vertex (the bed sits 0.8
+      // under its stripe; the dressing mesh also holds embankment skirt feet
+      // and pier bases, which the Overground's archetypes set into the ground).
+      if (!o.isMesh || !['stripe', 'band'].includes(o.userData.part)) return;
       const pos = o.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i += 3) {
+      for (let i = 0; i < pos.count; i++) {
         const t = u.getTerrainMeshSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
         if (!Number.isFinite(t)) continue;
         const above = (pos.getY(i) - t) / VE; total++;
@@ -120,10 +123,10 @@ test('the surface railway draws nothing below the ground: no tunnel, and D-024 h
   console.log(`surface rail census: ${r.total} vertices, buried ${(100 * r.buried / r.total).toFixed(3)}%, grazing ${(100 * r.grazing / r.total).toFixed(3)}%`);
   expect(r.total).toBeGreaterThan(20000);
   // The Overground allows 9% buried (its tunnels are drawn 20 m down); the Tube
-  // and DLR draw no tunnel at all, so beyond a sliver where a 5 m pier or a
-  // viaduct edge meets a steep terrain cell, nothing is below ground.
-  expect(r.buried / r.total).toBeLessThan(0.002);
-  expect(r.grazing / r.total).toBeLessThan(0.02);
+  // and DLR draw no tunnel at all. Measured 30Sep26w: 0.013% buried (a stripe
+  // edge over a steep terrain cell), 0.039% grazing; bounds with headroom.
+  expect(r.buried / r.total).toBeLessThan(0.001);
+  expect(r.grazing / r.total).toBeLessThan(0.005);
 });
 
 test('the Overground builds exactly what c820ea9 built, and draws the same pixels with the Tube railway beside it', async () => {
@@ -161,7 +164,7 @@ test('the Overground builds exactly what c820ea9 built, and draws the same pixel
 test('shared track is drawn once, with each line\'s colour side by side', async () => {
   const r = await page.evaluate(() => {
     const u = window.__ug, T = window.__ugTHREE, ray = new T.Raycaster();
-    const beds = ['ballast', 'masonry'];
+    const beds = ['ballast', 'masonry', 'dressing']; // the Overground's beds; the Tube's dressing mesh
     const railMeshes = []; for (const g of u.surfaceRail.groups.values()) g.traverse(o => { if (o.isMesh) railMeshes.push(o); });
     const ogMeshes = []; u.overground.traverse(o => { if (o.isMesh && !o.isInstancedMesh) ogMeshes.push(o); });
     const all = [...railMeshes, ...ogMeshes];
@@ -234,7 +237,7 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
         if (p.deck && (p.deck.surveyed !== (s === 'lidar'))) surveyedOk = false;
       }
       // The drawn deck against the profile: raycast every 25th viaduct sample.
-      const masonry = u.surfaceRail.groups.get('dlr').children.filter(m => m.userData.part === 'masonry');
+      const masonry = u.surfaceRail.groups.get('dlr').children.filter(m => m.userData.part === 'dressing');
       // Where two branches run side by side their 21 m decks overlap and the
       // ray can meet the neighbour's first (seen near Canning Town, Custom
       // House and Poplar), so the drawn deck is looked for among the hits.
@@ -268,18 +271,28 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
   }
 });
 
-test('no per-instance colour anywhere in the scene (D-015)', async () => {
+test('no per-instance colour anywhere in the scene (D-015); colour on the railway is per line or baked', async () => {
   const r = await page.evaluate(() => {
-    const u = window.__ug; let instanced = 0, coloured = 0, railVertexColours = 0;
+    const u = window.__ug; let instanced = 0, coloured = 0, railInstanced = 0, otherVertexColours = 0, baked = 0;
     u.scene.traverse(o => { if (o.isInstancedMesh) { instanced++; if (o.instanceColor) coloured++; } });
-    for (const g of u.surfaceRail.groups.values()) g.traverse(o => { if (o.isMesh && (o.material.vertexColors || o.geometry.attributes.color)) railVertexColours++; });
+    for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
+      if (!o.isMesh) return;
+      if (o.isInstancedMesh) railInstanced++;
+      if (o.userData.part === 'dressing') { if (o.material.vertexColors && o.geometry.attributes.color) baked++; }
+      else if (o.material.vertexColors || o.geometry.attributes.color) otherVertexColours++;
+    });
     const markers = [...u.surfaceRail.stationLayers.values()].filter(l => l.stationsLayer.mesh.instanceColor).length;
-    return { instanced, coloured, railVertexColours, markers };
+    return { instanced, coloured, railInstanced, otherVertexColours, baked, markers };
   });
   expect(r.instanced).toBeGreaterThan(10);
   expect(r.coloured).toBe(0);
   expect(r.markers).toBe(0);
-  expect(r.railVertexColours).toBe(0);
+  expect(r.railInstanced).toBe(0);
+  // The four dressing archetypes are one mesh per line with their colours
+  // baked into the vertices (allowed: variants are separate meshes or baked
+  // vertex colour); the stripes and bands are per-line materials.
+  expect(r.baked).toBe(10);
+  expect(r.otherVertexColours).toBe(0);
 });
 
 test('hover over the surface railway names its lines', async () => {
@@ -291,7 +304,7 @@ test('hover over the surface railway names its lines', async () => {
     const jub = rail.data.lines.find(l => l.id === 'jubilee'), bi = jub.branches.findIndex(b => b.bands?.some(x => x.lines.includes('metropolitan')));
     const bnd = jub.branches[bi].bands.find(x => x.lines.includes('metropolitan'));
     const path = rail.paths.get('jubilee')[bi], p = path.find(q => q.src >= bnd.j0 + 2 && q.src < bnd.j1);
-    const dlrDeck = rail.groups.get('dlr').children.find(m => m.userData.part === 'masonry');
+    const dlrDeck = rail.groups.get('dlr').children.find(m => m.userData.part === 'dressing');
     const v = rail.paths.get('dlr').filter(Boolean).flat().find(q => q.cls === 'viaduct' && q.deck?.source === 'lidar');
     return { band: u.formatInfraTooltip(band, { x: p.x, y: p.y, z: p.z }), dlr: u.formatInfraTooltip(dlrDeck, { x: v.x, y: v.y, z: v.z }) };
   });
