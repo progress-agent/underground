@@ -12,11 +12,43 @@ import bundledDeck from './dlr-deck-heights.json' with { type: 'json' };
 
 // Canonical VE5 geometry. Structure affects positive modelled clearance only;
 // the master controller is deliberately absent from this module.
+//
+// s30:R fix round 1: heights in true metres. Below ground the profile is a
+// depth, which is landscape (stored at VE5 and stretched by Master), so
+// (y - ground) / ve is the real depth. Above ground the track is a structure
+// drawn at true size (D-039): a clearance of h metres is laid at
+// ve x h x structureScale (structureScale = 1 / Master in the app), the WHOLE
+// clearance including the 1 m minimum, so the deck is its real height at every
+// Master (before, the minimum was not scaled and floored every deck at
+// Master metres: all of them at Master 10). `groundRelativeM` is the height
+// DRAWN, read back in true metres; `deckM` the deck the point stands on
+// (measured, interpolated or the class estimate). Where the 8% grade limit,
+// a portal approach or the 1 m minimum moves the drawn deck off it, the two
+// differ, and dlrHeightLabel says so.
 export const DECK_BASIS = {
   lidar: 'Environment Agency LiDAR 1m: last-return DSM deck minus DTM ground, measured',
   interpolated: 'Environment Agency LiDAR 1m, interpolated under a roof between measured deck',
   fallback: 'Illustrative class estimate; the LiDAR could not resolve the deck',
 };
+
+/**
+ * Hover text for a DLR profile point (dlrProfile.sample / station / point
+ * `_dlrProfile`): the height above (or depth below) ground in true metres, and
+ * its basis. Where the point stands on a deck, the height IS that deck (LiDAR,
+ * or the class estimate), whatever the Master; where the drawn deck departs
+ * from it at the printed precision, the text says how high it is drawn there.
+ * Without a deck (surface, cutting, tunnel), the height drawn.
+ */
+export function dlrHeightLabel(profile) {
+  const drawn = profile?.groundRelativeM;
+  if (!Number.isFinite(drawn)) return null;
+  const m = Number.isFinite(profile.deckM) ? profile.deckM : drawn;
+  const fmt = v => `~${Math.abs(v).toFixed(1)}m`;
+  const side = v => (v < 0 ? 'below' : 'above');
+  const basis = profile.surveyed ? 'LiDAR' : 'modelled';
+  const same = fmt(m) === fmt(drawn) && side(m) === side(drawn);
+  return `${fmt(m)} ${side(m)} ground (${basis}${same ? '' : `; drawn ${fmt(drawn)} ${side(drawn)} the terrain here`})`;
+}
 export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=5, data=bundled, deckHeights=bundledDeck}={}) {
   if(typeof project!=='function'||typeof sampleSurfaceY!=='function')throw new TypeError('DLR requires projection and canonical terrain sampler');
   if(data?.version!==1||!data.nodes?.length||!data.edges?.length||!data.stations||!data.links)throw new Error('Missing verified DLR profile data');
@@ -56,7 +88,8 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
   function refresh({structureScale=currentScale}={}){
     if(!Number.isFinite(structureScale)||structureScale<=0)throw new RangeError('DLR structure scale must be positive');currentScale=structureScale;terrainPending=false;
     for(const n of graph){const ground=sampleSurfaceY({x:n.x,z:n.z});n.pending=!Number.isFinite(ground);terrainPending ||= n.pending;n.groundY=n.pending?0:ground;
-      n.y=n.groundY+ve*(n.offset<0?n.offset:n.portal?0:Math.max(model.surfaceM,n.offset*structureScale));
+      // s30:R fix round 1: the whole clearance is a structure at true size (D-039), the 1 m minimum included.
+      n.y=n.groundY+ve*(n.offset<0?n.offset:n.portal?0:Math.max(model.surfaceM,n.offset)*structureScale);
     }
     // Minimal majorant of aboveground rail altitudes at an illustrative 8%
     // physical grade. No isolated DSM roof creates a one-segment spike.
@@ -66,7 +99,10 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
     for(let i=0;i<graph.length;i++){const n=graph[i];if(!n.underground&&!n.portal)n.y=Math.min(n.y,n.groundY+portalDistance[i]*model.portalGrade*ve);}
     return {terrainPending,structureScale:currentScale};
   }
-  function info(n,y=n.y,groundY=n.groundY){const relative=(y-groundY)/ve;return {classification:n.kind,groundRelativeM:relative,depthM:Math.max(0,-relative),heightM:Math.max(0,relative),surveyed:n.deckSource==='lidar',heightBasis:n.deckSource?DECK_BASIS[n.deckSource]:'Illustrative rail profile relative to rendered terrain',deckSource:n.deckSource??null,deckM:n.deckSource?n.offset:null,terrainPending:n.pending,sourceWayIds:[...n.ways],needsShaft:n.kind==='tunnel'&&relative<-.5,structureScale:currentScale};}
+  // s30:R fix round 1: `groundRelativeM` in true metres (a depth below ground,
+  // a structure's height above it: canonical / structureScale), `deckM` the
+  // deck under the point (interpolated along an edge between two decks).
+  function info(n,y=n.y,groundY=n.groundY,deckM=n.deckSource?n.offset:null){const canonical=(y-groundY)/ve,relative=canonical>0?canonical/currentScale:canonical;return {classification:n.kind,groundRelativeM:relative,depthM:Math.max(0,-relative),heightM:Math.max(0,relative),surveyed:n.deckSource==='lidar',heightBasis:n.deckSource?DECK_BASIS[n.deckSource]:'Illustrative rail profile relative to rendered terrain',deckSource:n.deckSource??null,deckM:n.deckSource?deckM:null,terrainPending:n.pending,sourceWayIds:[...n.ways],needsShaft:n.kind==='tunnel'&&relative<-.5,structureScale:currentScale};}
   function point(index,stationId=null){const n=graph[index],p=new THREE.Vector3(n.x,n.y,n.z);p._dlrProfile={...info(n),nodeIndex:index,stationId};p._depthM=-p._dlrProfile.groundRelativeM;if(stationId){p.stationId=stationId;p.id=stationId;}return p;}
   function station({id,structureScale=currentScale,nodeIndex}={}){if(structureScale!==currentScale)refresh({structureScale});const s=data.stations[id];if(!s)throw Error(`Unmapped DLR station ${id}`);const index=nodeIndex??s.node;if(!s.candidates.some(c=>c.node===index))throw Error(`Wrong DLR platform for ${id}`);const p=point(index,id);p._dlrProfile.sourceStation={lat:s.lat,lon:s.lon,name:s.name,anchorApproximate:s.anchorApproximate,mapOffsetM:s.mapOffsetM};return p;}
   function buildBranch({points:stops,structureScale=currentScale}={}){
@@ -97,7 +133,11 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
     let best=null;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(const s of buckets.get(`${Math.floor(x/100)+dx},${Math.floor(z/100)+dz}`)||[]){if(accept&&!accept.has(s.kind))continue;const a=graph[s.a],b=graph[s.b],vx=b.x-a.x,vz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*vx+(z-a.z)*vz)/(vx*vx+vz*vz||1))),distance=Math.hypot(x-a.x-vx*t,z-a.z-vz*t);if(!best||distance<best.distance)best={s,a,b,t,distance};}
     if(!best||best.distance>Math.min(200,maxDistance))return null;const {a,b,t,s}=best,y=a.y+(b.y-a.y)*t,ground=a.groundY+(b.groundY-a.groundY)*t,p=new THREE.Vector3(x,y,z);
     const near=t<.5?a:b,far=near===a?b:a,basis=(s.kind==='elevated'||s.kind==='embankment')?[near,far].find(n=>n.deckSource)??near:near;
-    p._dlrProfile={...info({...basis,kind:s.kind},y,ground),sourceWayIds:[s.way],trackDistanceM:best.distance};p._depthM=-p._dlrProfile.groundRelativeM;return p;
+    // s30:R fix round 1: only a raised segment stands on a deck (a surface
+    // segment ending at a viaduct's last node no longer borrows its deck).
+    const raisedSeg=s.kind==='elevated'||s.kind==='embankment',deckSource=raisedSeg?basis.deckSource:null;
+    const deckM=deckSource&&a.deckSource&&b.deckSource?a.offset+(b.offset-a.offset)*t:basis.offset;
+    p._dlrProfile={...info({...basis,kind:s.kind,deckSource},y,ground,deckM),sourceWayIds:[s.way],trackDistanceM:best.distance};p._depthM=-p._dlrProfile.groundRelativeM;return p;
   }
   function resnap(points,{structureScale=currentScale,refreshTerrain=true}={}){if(refreshTerrain||structureScale!==currentScale)refresh({structureScale});for(const p of points){const id=p.stationId??p._dlrProfile?.stationId,index=p._dlrProfile?.nodeIndex;const next=id?station({id,nodeIndex:index}):sample({x:p.x,z:p.z,nodeIndex:index});if(!next)throw Error('DLR point outside sourced profile');p.copy(next);p._depthM=next._depthM;p._dlrProfile=next._dlrProfile;}return points;}
   refresh();

@@ -118,6 +118,7 @@ import { createEconomies, isShown } from './render-economies.js';
 import { createUndergroundCull, isAboveGroundView } from './underground-cull.js';
 // ── s30:R ──
 import { createTubeSurfaceRail, SURFACE_RAIL_TYPE } from './tube-surface-rail.js';
+import { dlrHeightLabel } from './dlr-profile.js';
 // ── /s30:R ──
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
@@ -2308,8 +2309,8 @@ function dlrLocationLabel(profile) {
   const names={elevated:'Elevated railway',embankment:'Railway embankment',surface:'Surface railway',tunnel:'Underground railway',cutting:'Railway cutting',portal:'Tunnel portal'};
   const name=names[profile.classification]||'DLR';
   if(profile.classification==='portal')return name;
-  const relative=profile.groundRelativeM;
-  return Number.isFinite(relative)?`${name} · ~${Math.abs(relative).toFixed(1)}m ${relative<0?'below':'above'} ground (${profile.surveyed?'LiDAR':'modelled'})`:name; // s30:R: measured decks say so
+  const height=dlrHeightLabel(profile); // s30:R: true metres; a deck reads as its deck (LiDAR or estimate), and says where it is drawn otherwise
+  return height?`${name} · ${height}`:name;
 }
 
 function syncHeightExplanation() {

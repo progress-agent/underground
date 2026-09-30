@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { overgroundFingerprint } from './helpers/overground-fingerprint.js';
+// s30:R fix round 1: the DLR's measured decks and their OSM nodes, to read the hover against.
+import dlrDecks from '../src/dlr-deck-heights.json' with { type: 'json' };
+import dlrProfileData from '../src/dlr-profile-data.json' with { type: 'json' };
 
 // Open-air Tube and DLR drawn as surface railway (sprint 30Sep26w, D-041
 // item 2, Lane R). Jordan, 27Sep26u: "yes to the dlr, much of which is
@@ -312,7 +315,7 @@ test('hover over the surface railway names its lines', async () => {
   expect(f.band).toMatch(/Jubilee line/);
   expect(f.band).toMatch(/Shared track/);
   expect(f.dlr).toMatch(/DLR/);
-  expect(f.dlr).toMatch(/above ground \(LiDAR\)/);
+  expect(f.dlr).toMatch(/above ground \(LiDAR[;)]/); // the value is pinned at every measured node in the next test
   // A real pointer over the District's open-air track towards Upminster.
   const at = await trackPose({ track: 'district', lat: 51.5580, lon: 0.2300, side: -120, back: 160, up: 40, ahead: 120 });
   await page.evaluate(() => window.__thaw());
@@ -331,4 +334,57 @@ test('hover over the surface railway names its lines', async () => {
   }
   expect(text).toMatch(/District line/);
   expect(text).toMatch(/surface railway|Shared track/); // the surface railway's own tooltip, not the bore's
+});
+
+test('the DLR hover reads the measured deck in true metres at every Master, and says where the drawn deck departs from it', async () => {
+  // Fix round 1 (verifier, 30Sep26w): the hover printed (y - ground) / VE,
+  // which is the deck x structureScale (1 / Master), so a LiDAR deck of
+  // 7.92 m, drawn at 7.92 m, read "~7.2m above ground (LiDAR)" at Master 1.1
+  // and "~2.6m" at Master 3, while the specs matched only the basis string.
+  // Every measured (LiDAR) elevated node of the DLR, at four Masters: the
+  // height printed is its measured deck; where the drawn deck (the profile the
+  // railway is built on, above the terrain, in true metres) differs at the
+  // printed precision the hover gives the drawn height too, and otherwise the
+  // two agree. The verifier's four decks read exactly.
+  const nodes = dlrProfileData.nodes.flatMap((n, i) => { const d = dlrDecks.nodes[n.id]; return d?.source === 'lidar' && d.kind === 'elevated' ? [{ i, id: String(n.id), lat: n.lat, lon: n.lon, m: d.m }] : []; });
+  const verifier = { 1752319982: 7.92, 1752475286: 9.14, 1752783321: 6.73, 1752475204: 6.56 };
+  const r = await page.evaluate(({ nodes, verifier }) => {
+    const u = window.__ug, dressing = u.surfaceRail.groups.get('dlr').children.find(m => m.userData.part === 'dressing');
+    const setMaster = v => { const el = document.getElementById('masterHeight'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush(); };
+    // The title names every line on the track (the DLR shares a few metres with the Jubilee at Stratford).
+    const RE = /^<b>DLR(?: · [^<]+)?<\/b><div class="sub">(Elevated railway|Railway embankment) · ~(\d+\.\d)m above ground \((LiDAR|modelled)(?:; drawn ~(\d+\.\d)m above the terrain here)?\)<\/div>$/;
+    const out = [];
+    for (const master of ['1.1', '3', '10', '1.1']) {
+      setMaster(master);
+      const scale = u.getBuildingHeightScale(), s = { master, scale, checked: 0, drawnElsewhere: 0, offTrack: 0, portal: 0, bad: [], verifier: {} };
+      for (const n of nodes) {
+        const c = u.llToXZ(n.lat, n.lon), html = u.formatInfraTooltip(dressing, { x: c.x, y: 0, z: c.z }), k = html.match(RE);
+        if (verifier[n.id]) s.verifier[n.id] = html;
+        // A measured node where a tunnel meets the viaduct is a portal in the profile, drawn at grade by design.
+        if (!u.dlrProfile.sample({ x: 0, z: 0, nodeIndex: n.i, structureScale: scale })._dlrProfile.deckSource) { s.portal++; continue; }
+        // A node at a viaduct's end can sit on a surface, cutting or portal segment too.
+        if (!/<div class="sub">(Elevated railway|Railway embankment) · /.test(html)) { s.offTrack++; continue; }
+        if (!k) { s.bad.push(`unparsed ${n.id}: ${html}`); continue; }
+        const p = u.dlrProfile.sample({ x: c.x, z: c.z, structureScale: scale, maxDistance: 40 });
+        const drawn = ((p.y - u.getStructuralSurfaceY(c)) / 5 / scale).toFixed(1);
+        s.checked++;
+        if (k[2] !== n.m.toFixed(1) || k[3] !== 'LiDAR') s.bad.push(`${n.id} deck ${n.m}: ${html}`);
+        else if (k[4] !== undefined) { s.drawnElsewhere++; if (k[4] !== drawn || k[4] === k[2]) s.bad.push(`${n.id} drawn ${drawn}: ${html}`); }
+        else if (drawn !== k[2]) s.bad.push(`${n.id} drawn ${drawn} but no note: ${html}`);
+      }
+      out.push(s);
+    }
+    return out;
+  }, { nodes, verifier });
+  console.log('DLR hover', JSON.stringify(r.map(s => ({ master: s.master, checked: s.checked, drawnElsewhere: s.drawnElsewhere, offTrack: s.offTrack, portal: s.portal, bad: s.bad.length }))));
+  for (const s of r) {
+    expect(s.bad.slice(0, 5), `Master ${s.master}`).toEqual([]);
+    expect(s.checked, `Master ${s.master}`).toBeGreaterThan(nodes.length * 0.95);
+    for (const [id, m] of Object.entries(verifier)) {
+      const html = s.verifier[id];
+      // At the review Master and at 3 the verifier found these drawn at their deck; at 10 only the deck is pinned.
+      if (s.master !== '10') expect(html, `node ${id} at Master ${s.master}`).toBe(`<b>DLR</b><div class="sub">Elevated railway · ~${m.toFixed(1)}m above ground (LiDAR)</div>`);
+      else expect(html).toContain(`Elevated railway · ~${m.toFixed(1)}m above ground (LiDAR`);
+    }
+  }
 });

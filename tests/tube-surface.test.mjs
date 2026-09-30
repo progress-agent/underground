@@ -10,7 +10,7 @@ import {
   cleanRuns, segmentClasses, encodeSegments, findPortals, inferBandsFromStops, toBng,
 } from '../scripts/prepare-tube-surface.mjs';
 import { deckFromSection, envelope, resolveProfile, denseGraph } from '../scripts/prepare-dlr-deck-heights.mjs';
-import { createDlrProfile, DECK_BASIS } from '../src/dlr-profile.js';
+import { createDlrProfile, DECK_BASIS, dlrHeightLabel } from '../src/dlr-profile.js';
 
 const data = JSON.parse(readFileSync(new URL('../public/data/tube-surface.json', import.meta.url)));
 const overground = JSON.parse(readFileSync(new URL('../public/data/overground.json', import.meta.url)));
@@ -222,4 +222,91 @@ test('dense sample graph: node samples are shared by their edges', () => {
   assert.equal(nodeSample.size, 3);
   assert.equal(samples.length, 3 + 9 + 9);
   assert.equal(adj[nodeSample.get(1)].length, 2);
+});
+
+// Fix round 1 (verifier, 30Sep26w): the DLR hover printed (y - ground) / VE,
+// which is the deck x structureScale (1 / Master): a LiDAR deck of 7.92 m,
+// drawn at 7.92 m, read "~7.2m above ground (LiDAR)" at Master 1.1 and
+// "~2.6m" at Master 3. The profile now reports heights in true metres and the
+// hover reads a deck as its deck. These pin the values, not only the basis.
+const bng = () => {
+  const origin = proj4('EPSG:4326', 'EPSG:27700', [-0.1278, 51.5074]);
+  return (lat, lon) => { const [e, n] = proj4('EPSG:4326', 'EPSG:27700', [lon, lat]); return { x: e - origin[0], z: origin[1] - n }; };
+};
+// The verifier's four LiDAR viaduct decks.
+const VERIFIER_DECKS = { 1752319982: 7.92, 1752475286: 9.14, 1752783321: 6.73, 1752475204: 6.56 };
+
+test('DLR hover: a measured deck reads as its measurement at every Master (the verifier\'s four decks)', () => {
+  const project = bng();
+  for (const master of [1, 1.1, 3, 10]) {
+    const p = createDlrProfile({ project, sampleSurfaceY: () => 0 });
+    p.refresh({ structureScale: 1 / master });
+    for (const [id, m] of Object.entries(VERIFIER_DECKS)) {
+      assert.equal(deck.nodes[id].m, m); assert.equal(deck.nodes[id].source, 'lidar');
+      const i = profileData.nodes.findIndex(n => String(n.id) === id), n = profileData.nodes[i];
+      const at = project(n.lat, n.lon);
+      // At the node itself, and as the hover samples it (nearest track to a hit point).
+      for (const q of [p.sample({ x: 0, z: 0, nodeIndex: i }), p.sample({ x: at.x, z: at.z })]) {
+        const d = q._dlrProfile;
+        assert.equal(d.deckM, m);
+        // Drawn at true size: canonical rise / VE / structureScale, flat ground at 0.
+        assert.ok(Math.abs(q.y / 5 * master - d.groundRelativeM) < 1e-9);
+        assert.equal(dlrHeightLabel(d), `~${m.toFixed(1)}m above ground (LiDAR)`, `node ${id} at Master ${master}`);
+      }
+    }
+  }
+});
+
+test('DLR decks are drawn at their real height at every Master: the 1 m minimum is true size too (D-039)', () => {
+  // Before fix round 1 the minimum clearance was not scaled, so it floored
+  // every deck at Master metres: at Master 10, 6.9% of the LiDAR decks were
+  // drawn at their height, the rest at 10 m.
+  const project = bng();
+  for (const master of [1.1, 3, 10]) {
+    const p = createDlrProfile({ project, sampleSurfaceY: () => 0 });
+    p.refresh({ structureScale: 1 / master });
+    let lidar = 0, atDeck = 0;
+    profileData.nodes.forEach((n, i) => {
+      const d = deck.nodes[n.id]; if (d?.source !== 'lidar') return;
+      lidar++;
+      const q = p.sample({ x: 0, z: 0, nodeIndex: i });
+      if (Math.abs(q.y / 5 * master - Math.max(profileData.heightModel.surfaceM, d.m)) < 0.05) atDeck++;
+    });
+    // The rest are eased by the 8% grade or a portal approach (flat ground here).
+    assert.ok(atDeck / lidar > 0.95, `Master ${master}: ${atDeck} of ${lidar} drawn at their deck`);
+    for (const s of ['EIN', 'BLA']) {
+      const q = p.station({ id: `940GZZDL${s}` });
+      assert.ok(Math.abs(q._dlrProfile.groundRelativeM - q._dlrProfile.deckM) < 1e-9, `${s} at Master ${master}`);
+    }
+  }
+});
+
+test('dlrHeightLabel: the deck first, and where the drawing departs from it, how high it is drawn', () => {
+  assert.equal(dlrHeightLabel({ groundRelativeM: 7.92, deckM: 7.92, surveyed: true }), '~7.9m above ground (LiDAR)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 25.61, deckM: 10.62, surveyed: true }), '~10.6m above ground (LiDAR; drawn ~25.6m above the terrain here)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 1, deckM: 0, surveyed: true }), '~0.0m above ground (LiDAR; drawn ~1.0m above the terrain here)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 8, deckM: 8, surveyed: false }), '~8.0m above ground (modelled)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 1, deckM: null, surveyed: false }), '~1.0m above ground (modelled)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: -18.3, deckM: null, surveyed: false }), '~18.3m below ground (modelled)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: NaN }), null);
+  assert.equal(dlrHeightLabel(null), null);
+});
+
+test('DLR sample: a surface segment does not borrow the deck of the viaduct it meets', () => {
+  const p = createDlrProfile({ project: bng(), sampleSurfaceY: () => 0 });
+  let checked = 0, surface = 0;
+  for (let i = 0; ; i++) {
+    const q = p.sample({ x: 0, z: 0, nodeIndex: i }); if (!q || q._dlrProfile.nodeIndex !== i) break;
+    if (q._dlrProfile.classification !== 'elevated') continue;
+    // Just off the node along every direction: whatever segment is nearest.
+    for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) {
+      const s = p.sample({ x: q.x + dx, z: q.z + dz }), d = s._dlrProfile;
+      const raised = d.classification === 'elevated' || d.classification === 'embankment';
+      if (!raised) { assert.equal(d.deckSource, null); assert.equal(d.deckM, null); surface++; }
+      else assert.ok(Number.isFinite(d.deckM));
+      checked++;
+    }
+  }
+  assert.ok(checked >= 400);
+  assert.ok(surface >= 20, `${surface} samples off a viaduct's end node landed on a surface segment`);
 });

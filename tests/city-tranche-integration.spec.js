@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {MeshBasicMaterial} from 'three';
 import data from '../src/airport-data.json' with {type:'json'};
+import dlrDecks from '../src/dlr-deck-heights.json' with {type:'json'}; // s30:R fix round 1
 import {createAirportSuppression,airportSuppressionSignature} from '../src/airport-suppression.js';
 import {createTileBuildings} from '../src/surface-geometry.js';
 import {parseBakedBuildings,buildBakedTile,fetchBakedBuildings} from '../src/baked-buildings.js';
@@ -161,7 +162,9 @@ test('integrated DLR keeps modelled platforms, genuine tunnels and train state a
     const mesh=u.scene.children.flatMap(g=>g.children).find(m=>m.userData.type==='tube-line'&&m.userData.lineId==='dlr');
     const station=stations.find(s=>s.dlrProfile.classification==='elevated');
     const basis=u.dlrProfile.sample({x:station.pos.x,z:station.pos.z,structureScale:u.getBuildingHeightScale()})._dlrProfile.surveyed?'LiDAR':'modelled'; // s30:R
-    return {alignment,stopCounts,classifications,initial,after:branches.flatMap(b=>b._trains).map(t=>({id:t.uuid,t:t.userData.t})),hover:u.formatInfraTooltip(mesh,station.pos),basis};
+    // s30:R fix round 1: the station's OSM node, its drawn height (true metres, the station tooltip's source) and the terrain under it.
+    const nodeId=String(u.dlrProfile.data.nodes[station.dlrProfile.nodeIndex].id),drawnM=(station.pos.y-u.getStructuralSurfaceY(station.pos))/5/u.getBuildingHeightScale();
+    return {alignment,stopCounts,classifications,initial,after:branches.flatMap(b=>b._trains).map(t=>({id:t.uuid,t:t.userData.t})),hover:u.formatInfraTooltip(mesh,station.pos),basis,nodeId,drawnM,stationProfile:{groundRelativeM:station.dlrProfile.groundRelativeM,deckM:station.dlrProfile.deckM}};
   });
   expect(Math.max(...result.alignment)).toBeLessThan(1e-8);
   expect(result.classifications).toContain('elevated');expect(result.classifications).toContain('tunnel');
@@ -171,7 +174,18 @@ test('integrated DLR keeps modelled platforms, genuine tunnels and train state a
   // from the EA LiDAR where it resolves them; the hover says which basis
   // ('LiDAR' measured, 'modelled' where the deck is interpolated or estimated),
   // and it must be the basis of the deck under that point.
-  expect(result.hover).toContain('above');expect(result.hover).toContain(`(${result.basis})`);expect(result.hover).not.toContain('18m below');
+  expect(result.hover).toContain('above');expect(result.hover).toContain(`(${result.basis}`);expect(result.hover).not.toContain('18m below');
+  // Fix round 1 (verifier, 30Sep26w): the basis string alone let a wrong
+  // number through ((y - ground) / VE is the deck x 1 / Master). The height
+  // printed is the station's deck as measured, in true metres, and where the
+  // drawn deck departs from it the hover says how high it is drawn.
+  const deck=dlrDecks.nodes[result.nodeId];expect(deck,`deck record for node ${result.nodeId}`).toBeTruthy();
+  expect(result.stationProfile.deckM).toBe(deck.m);
+  expect(Math.abs(result.stationProfile.groundRelativeM-result.drawnM)).toBeLessThan(1e-6);
+  const shown=result.hover.match(/~(\d+\.\d)m above ground \((LiDAR|modelled)(?:; drawn ~(\d+\.\d)m above the terrain here)?\)/);
+  expect(shown,result.hover).toBeTruthy();
+  expect(shown[1]).toBe(deck.m.toFixed(1));expect(shown[2]).toBe(result.basis);
+  if(shown[3])expect(shown[3]).toBe(result.drawnM.toFixed(1));else expect(result.drawnM.toFixed(1)).toBe(deck.m.toFixed(1));
 });
 
 test('integrated motorway replaces only overlapping bridges and respects pause and height semantics',async({page})=>{
