@@ -22,6 +22,7 @@ import { passingState, projectOnPolyline, TRAIN_HALF_LENGTH_M } from '../src/tun
 import { platformSection, PLATFORM, ROUNDEL, buildPlatformGeometry, slicePolyline } from '../src/platform-tunnel.js';
 import { PEDESTRIAN_TUNABLES } from '../src/modes/pedestrian-body.js';
 import { tflSource, fetchRouteSequence, tflStats } from '../src/tfl.js';
+import { createTubeInterior, INTERIOR_LAYER } from '../src/tube-interior.js';
 
 const VE = 5;
 const v = (x, depthM, z) => ({ x, y: -depthM * VE, z });
@@ -139,6 +140,74 @@ test('portals: a narrow dip in the ground, a short surfacing and a crossing unde
   const open = net.paths[0].open;
   assert.ok(open.every(([s0, s1]) => s1 <= 1050 || s0 >= 2950), JSON.stringify(open));
   assert.ok(OPEN_MIN_RUN_M >= 30);
+});
+
+// Fix round 1: the verifier found buildings drawn inside the bore within a
+// window of a portal, because the camera was not isolated there. The mouth is
+// now the lining's own daylight cap and the camera stays isolated up to it.
+test('portal mouth: a daylight cap closes the window, graded ground to sky; the camera stays on the lining alone', () => {
+  const pts = [v(0, 25, 0), v(1000, 22, 0), v(2000, 12, 0), v(3000, 0, 0), v(4000, 0, 0), v(5000, 0, 0)];
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: new Map([['metropolitan', [pts]]]), stationLayers: new Map() });
+  assert.equal(markOpenSections(net, { groundY: () => 0, VE }), 1);
+  const [[a]] = net.paths[0].open;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera();
+  const mask0 = camera.layers.mask;
+  const building = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+  scene.add(building);
+  const interior = createTubeInterior({ scene, camera: () => camera });
+  // Held 20 m inside the mouth, as the walk is (PORTAL_STAND_M), facing it.
+  const pos = { path: 0, s: a - 20, dir: 1, side: 0 };
+  interior.show(net, pos);
+  const d = interior.debug();
+  assert.equal(d.portalAhead, true);
+  assert.equal(d.isolated, true, 'isolated right up to the mouth');
+  assert.equal(camera.layers.mask, 1 << INTERIOR_LAYER);
+  assert.ok(!building.layers.test(camera.layers), 'a building over a shallow tunnel is not drawn in it');
+  const g = interior.mesh.geometry, uv = g.attributes.interiorUV, P = g.attributes.position, ax = g.attributes.trueAxisY;
+  const last = interior.windowPoints.at(-1);
+  assert.ok(Math.abs(d.mouth.end - last.s) < 1e-9 && d.mouth.start === null, JSON.stringify(d.mouth));
+  assert.ok(Math.abs(last.s - 20) < 0.5, `the mouth 20 m ahead: ${last.s}`);
+  // The mouth cap: v = -2.5 - 0.5 x (height off the axis / radius), exactly linear
+  // in height (-2 at the invert, -3 at the crown); the far end's cap stays dark.
+  // (On a sloping bore the cap's own up is tilted, so its vertical half-extent
+  // is the radius times the cosine of the slope: measure against that.)
+  let mouthVerts = 0, darkVerts = 0, half = 0;
+  for (let i = 0; i < uv.count; i++) if (uv.getY(i) < -1.5) half = Math.max(half, Math.abs(P.getY(i) - ax.getX(i)));
+  assert.ok(half > d.radius * 0.99 && half <= d.radius + 1e-9, `cap half-height ${half}`);
+  for (let i = 0; i < uv.count; i++) {
+    const y = uv.getY(i);
+    if (y < -1.5) {
+      mouthVerts++;
+      assert.ok(y >= -3 - 1e-6 && y <= -2 + 1e-6, `mouth v ${y}`);
+      const off = (P.getY(i) - ax.getX(i)) / half;
+      assert.ok(Math.abs(y - (-2.5 - 0.5 * off)) < 1e-6, `mouth v ${y} at height ${off}`);
+      // u: the offset across the bore over the radius (the rails run out to the horizon on it).
+      const u = uv.getX(i);
+      assert.ok(Math.abs(u) <= 1 + 1e-9 && Math.abs(u * u + off * off - (y === -2.5 && u === 0 ? 0 : 1)) < 1e-3,
+        `mouth u ${u} v ${y}`);
+    } else if (y < -0.5) { darkVerts++; assert.equal(y, -1); }
+  }
+  assert.ok(mouthVerts > 0 && darkVerts > 0, `${mouthVerts} mouth, ${darkVerts} dark`);
+  // Looking out along the bore the view meets the mouth cap, 20 m ahead: closed, never the model beyond.
+  const here = interior.windowPoints.find(q => q.s === 0);
+  const eye = new THREE.Vector3(here.x, here.y, here.z);
+  const rc = new THREE.Raycaster(eye, new THREE.Vector3(last.x - here.x, last.y - here.y, last.z - here.z).normalize(), 0, 1e4);
+  const hit = rc.intersectObject(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })), false)[0];
+  assert.ok(hit && uv.getY(hit.face.a) < -1.5, 'the view along the bore ends on the daylight cap');
+  // The daylight follows its source (main.js hands over the Sun slider's sky colour).
+  interior.setDaylight(() => new THREE.Color(0.2, 0.3, 0.4));
+  interior.show(net, pos);
+  assert.deepEqual(interior.debug().daylight.map(x => +x.toFixed(6)), [0.2, 0.3, 0.4]);
+  // Away from any portal: dark caps both ends, no mouth.
+  interior.show(net, { path: 0, s: 600, dir: 1, side: 0 });
+  assert.deepEqual(interior.debug().mouth, { start: null, end: null });
+  let anyMouth = false;
+  const uv2 = interior.mesh.geometry.attributes.interiorUV;
+  for (let i = 0; i < uv2.count; i++) if (uv2.getY(i) < -1.5) anyMouth = true;
+  assert.equal(anyMouth, false);
+  interior.hide();
+  assert.equal(camera.layers.mask, mask0);
 });
 
 // ── towards X from the bundled TfL data ──────────────────────────────────────

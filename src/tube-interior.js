@@ -35,11 +35,21 @@
 // PLATFORMS AND PORTALS (sprint 30Sep26w, D-041, Lane P): every platform the
 // window reaches is drawn as the lit, true-size platform tunnel of
 // platform-tunnel.js (its walls, platform edge and roundel boards), and the
-// lining is cut away along it so the bore visibly opens into the station. A
-// window that ends at a portal (pedestrian-tunnels.js markOpenSections) is
-// left open there, with no cap, and while the window reaches a portal the
-// camera is not isolated to the lining: the tunnel mouth looks out on the
-// real world beyond it. All of it is on INTERIOR_LAYER only.
+// lining is cut away along it so the bore visibly opens into the station.
+//
+// THE TUNNEL MOUTH (fix round 1): a window that ends at a portal
+// (pedestrian-tunnels.js markOpenSections) ends in a DAYLIGHT cap instead of
+// a dark one: the opening drawn in the sky colour of the time set on the Sun
+// slider (sun.js; the slider never reaches night) above the horizon, a darker
+// ground below it with the running rails carried out to the horizon, and the
+// daylight washing the last few metres of lining. The camera stays
+// isolated to INTERIOR_LAYER right up to the mouth, as everywhere else in the
+// bore (the sprint 25Sep26f contract: nothing but the walker's own lining is
+// drawn inside it). The first build left the camera unisolated within a
+// window of a mouth so the world would show through it, and it did not: the
+// model has no cutting at a portal (the track simply reaches the ground), so
+// the opening showed building walls and the strata, and buildings over a
+// shallow tunnel cut into its crown. All of it is on INTERIOR_LAYER only.
 
 import * as THREE from 'three';
 import { pointAt, advance, headingAt } from './modes/pedestrian-tunnels.js';
@@ -162,6 +172,12 @@ export function platformZones(net, win, { lengthM = PLATFORM.lengthM } = {}) {
  *   position, normal (inward), trueAxisY, interiorUV = (arc metres, around 0..1
  *   from the invert, or -1 on an end cap).
  * Both ends are closed with dark caps so a window end never shows the city.
+ * s30:P `caps` may be { start, end }, each true (dark cap), false (open) or
+ * 'mouth': a daylight cap at a tunnel mouth, whose interiorUV.y runs from -2
+ * at the invert to -3 at the crown (-2.5 at the axis), linear in height, and
+ * whose interiorUV.x is the offset across the bore over the radius (0 on the
+ * axis), so the shader can grade the opening from ground to sky and run the
+ * rails out to the horizon.
  */
 export function buildInteriorGeometry(points, { radius, radialSegments = INTERIOR.radialSegments, VE = 5,
   caps = true } = {}) {
@@ -201,17 +217,24 @@ export function buildInteriorGeometry(points, { radius, radialSegments = INTERIO
   }
   if (caps) {
     // End caps face back into the bore: a fan about the axis point.
-    // (s30:P `caps` may be { start, end } to leave a portal end open.)
-    const ends = [[0, 1], [n - 1, -1]].filter(([i]) => caps === true || (i === 0 ? caps.start !== false : caps.end !== false));
+    // (s30:P `caps` may be { start, end }: each end dark, open, or a daylight 'mouth'.)
+    const kindOf = (i) => (caps === true ? true : (i === 0 ? caps.start : caps.end) ?? true);
+    const ends = [[0, 1], [n - 1, -1]].filter(([i]) => kindOf(i) !== false);
     for (const [i, facing] of ends) {
       const P = points[i], f = frames[i];
+      const mouth = kindOf(i) === 'mouth';
+      // Dark cap: -1 everywhere. Mouth: -2 (invert) .. -3 (crown), -2.5 at the axis.
+      // (A mouth's u is the point's offset across the bore over the radius, 0 on the axis.)
+      const th = (j) => -Math.PI / 2 + (2 * Math.PI * j) / R;
+      const capU = (j) => (mouth ? Math.cos(th(j)) : P.s);
+      const capV = (j) => (mouth ? -2.5 - 0.5 * Math.sin(th(j)) : -1);
       const centre = pos.length / 3;
-      pos.push(P.x, P.y, P.z); nrm.push(f.t.x * facing, f.t.y * facing, f.t.z * facing); axis.push(P.y); uv.push(P.s, -1);
+      pos.push(P.x, P.y, P.z); nrm.push(f.t.x * facing, f.t.y * facing, f.t.z * facing); axis.push(P.y); uv.push(mouth ? 0 : P.s, mouth ? -2.5 : -1);
       const base = pos.length / 3;
       for (let j = 0; j <= R; j++) {
         const k = i * ring + j;
         pos.push(pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]);
-        nrm.push(f.t.x * facing, f.t.y * facing, f.t.z * facing); axis.push(P.y); uv.push(P.s, -1);
+        nrm.push(f.t.x * facing, f.t.y * facing, f.t.z * facing); axis.push(P.y); uv.push(capU(j), capV(j));
       }
       for (let j = 0; j < R; j++) {
         // Start cap is seen looking backwards (-t); end cap looking forwards (+t).
@@ -239,6 +262,22 @@ const PALETTE = {
   casing: new THREE.Color(0.85, 0.85, 0.85),
 };
 
+// ── s30:P ── the tunnel mouth (fix round 1)
+/** The window arc used when a window has no mouth (far beyond any lining). */
+export const NO_MOUTH = 1e6;
+/** sun.js's legacy sky colour (0x5a7a8f) in linear space, until main.js hands over the Sun slider's. */
+const DAYLIGHT_DEFAULT = new THREE.Color(0x5a7a8f);
+export const MOUTH = Object.freeze({
+  skyWhite: 0.5,        // sky colour taken this far to white: the eye is adapted to the bore's dark
+  skyGain: 1.3,         // about 0.75 to 0.85 linear over the slider: bright, under the bloom threshold (0.88)
+  ground: new THREE.Color(0.52, 0.55, 0.42), // ballast and verges in daylight
+  groundMix: 0.75,
+  groundGain: 0.5,      // well below the sky, so the horizon reads across the opening
+  washGain: 0.12,       // daylight on the lining at the mouth itself
+  washM: 5,             // and its fall-off into the bore (metres of arc); nothing at the walker 20 m in
+});
+// ── /s30:P ──
+
 /** The interior material: unlit lining with procedural rings, stripe and headlamp. */
 export function createInteriorMaterial() {
   const uniforms = {
@@ -249,6 +288,10 @@ export function createInteriorMaterial() {
     uFalloff: { value: INTERIOR.falloffM },
     // ── s30:P ── platform zones: the lining is cut away along them
     uCut: { value: [new THREE.Vector2(1, 0), new THREE.Vector2(1, 0), new THREE.Vector2(1, 0), new THREE.Vector2(1, 0)] },
+    // Tunnel mouths (fix round 1): the daylight (linear sky colour) and the
+    // window arcs of a mouth at its start and end (NO_MOUTH when there is none).
+    uDaylight: { value: DAYLIGHT_DEFAULT.clone() },
+    uMouth: { value: new THREE.Vector2(NO_MOUTH, NO_MOUTH) },
     // ── /s30:P ──
   };
   const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.FrontSide, fog: false, toneMapped: true });
@@ -268,6 +311,8 @@ uniform float uCasing;
 uniform float uRadius;
 uniform float uFalloff;
 uniform vec2 uCut[ 4 ];
+uniform vec3 uDaylight;
+uniform vec2 uMouth;
 varying vec2 vIntUV;
 varying float vIntDist;
 float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( halfWidth, halfWidth + aa, d ); }`)
@@ -329,11 +374,36 @@ float tiBand( float d, float halfWidth, float aa ) { return 1.0 - smoothstep( ha
   col = mix( col, ${v3(P.lamp)}, lamp );
   // Warm pool of lamp light on the wall around each lamp.
   col += ${v3(P.lamp)} * 0.035 * exp( -ld * 0.6 ) * exp( -abs( ang - 2.05 ) * uRadius * 0.8 );
-  if ( vIntUV.y < -0.5 ) col = vec3( 0.004 );
+  // s30:P a tunnel mouth. Seen from a dark bore the opening is over-exposed:
+  // the sky colour taken most of the way to white, the ground well below it.
+  vec3 mouthSky = mix( uDaylight, vec3( 1.0 ), ${MOUTH.skyWhite.toFixed(3)} ) * ${MOUTH.skyGain.toFixed(3)};
+  vec3 mouthGround = mix( uDaylight, ${v3(MOUTH.ground)}, ${MOUTH.groundMix.toFixed(3)} ) * ${MOUTH.groundGain.toFixed(3)};
+  // Daylight falling in lights the last metres of lining, the invert (and its rails) most.
+  float toMouth = min( abs( along - uMouth.x ), abs( along - uMouth.y ) );
+  col += mouthSky * ${MOUTH.washGain.toFixed(3)} * exp( -toMouth / ${MOUTH.washM.toFixed(2)} ) * ( 0.75 - 0.25 * h );
+  // The mouth itself: ground in daylight below the axis, sky above it. (Worked
+  // out for every fragment, like the lining above, so fwidth is never taken in
+  // a branch; only a mouth fragment uses it.)
+  float up01 = clamp( -2.0 - vIntUV.y, 0.0, 1.0 );     // 0 at the invert, 1 at the crown
+  vec3 mouthCol = mix( mouthGround, mouthSky, smoothstep( 0.42, 0.56, up01 ) );
+  // The running rails carry on out into the daylight. The eye is on the bore
+  // axis, so a straight, level track beyond the mouth is seen as two lines
+  // from the rails at the rim to the centre (the horizon's vanishing point):
+  // across / below stays the rail's own ratio all the way in.
+  float below = 1.0 - 2.0 * up01;                        // 1 at the invert, 0 on the axis
+  float gh = ${(INTERIOR.gaugeM / 2).toFixed(4)};
+  float rimDown = sqrt( max( uRadius * uRadius - gh * gh, 1e-4 ) );
+  float ratio = abs( vIntUV.x ) / max( below, 1e-3 );    // across / below (both over the radius)
+  float railOut = tiBand( abs( ratio - gh / rimDown ), 0.035 / rimDown, fwidth( ratio ) * 1.5 )
+    * smoothstep( 0.03, 0.15, below );
+  mouthCol = mix( mouthCol, mouthSky * 0.95, railOut );
+  if ( vIntUV.y < -1.5 ) {
+    col = mouthCol;
+  } else if ( vIntUV.y < -0.5 ) col = vec3( 0.004 );
   diffuseColor.rgb = clamp( col, 0.0, 1.0 );
 }`);
   };
-  mat.customProgramCacheKey = () => 'tube-interior-v3'; // s30:P cut zones and portal caps
+  mat.customProgramCacheKey = () => 'tube-interior-v4'; // s30:P cut zones and daylight mouths
   mat.userData.interiorUniforms = uniforms;
   return patchTrueProportionMaterial(mat, { mode: 'axis' });
 }
@@ -388,6 +458,7 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
   const platformMaterial = createPlatformMaterial();
   const roundelMaterials = new Map();   // station name -> material
   let zones = [];
+  let daylight = null;                  // () => THREE.Color, the mouth's daylight (setDaylight)
   function clearPlatforms() {
     for (const m of [...platformGroup.children]) { platformGroup.remove(m); m.geometry.dispose(); }
   }
@@ -403,8 +474,8 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
     }
     return m;
   }
-  // Like the lining: on the default layer too (the camera is not isolated in a
-  // cross passage or near a portal) and on INTERIOR_LAYER; hidden outside the bore.
+  // Like the lining: on the default layer too (the camera is not isolated in the
+  // cross passage) and on INTERIOR_LAYER; hidden outside the bore.
   function layerOnly(o) {
     o.layers.enable(INTERIOR_LAYER);
     o.frustumCulled = false;
@@ -474,12 +545,15 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
   function rebuild(net, pos, lineId) {
     const radius = Math.max(0.5, boreRadiusM(lineId) - INTERIOR.insetM);
     const w = sampleBoreWindow(net, pos);
-    // s30:P a portal end is left open (no cap): the mouth of the tunnel.
+    // s30:P a portal end is closed by a daylight cap: the mouth of the tunnel.
     const geometry = buildInteriorGeometry(w.points, { radius, VE: net.VE || 5,
-      caps: { start: !w.portalBehind, end: !w.portalAhead } });
+      caps: { start: w.portalBehind ? 'mouth' : true, end: w.portalAhead ? 'mouth' : true } });
     mesh.geometry.dispose();
     mesh.geometry = geometry;
     const u = material.userData.interiorUniforms;
+    const pts = w.points;
+    u.uMouth.value.set(w.portalBehind && pts.length ? pts[0].s : NO_MOUTH,
+      w.portalAhead && pts.length ? pts[pts.length - 1].s : NO_MOUTH);
     const c = new THREE.Color(lineColour(lineId) ?? 0xffffff);
     u.uLineColour.value.copy(c);
     u.uLining.value.copy(PALETTE.lining).lerp(c, 0.04);
@@ -511,11 +585,20 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
       mesh.visible = true;
       platformGroup.visible = true; // s30:P
       hideMapDevices();
-      // s30:P a window that reaches a portal looks out through the mouth onto the real world.
-      const mouth = !!(built?.portalAhead || built?.portalBehind);
-      if (isolate && !mouth) isolateView(); else restoreView();
+      // s30:P the mouth's daylight follows the Sun slider.
+      if (daylight) {
+        const c = daylight();
+        if (c) material.userData.interiorUniforms.uDaylight.value.copy(c);
+      }
+      // Isolated right up to a tunnel mouth too (fix round 1): the mouth is
+      // the lining's own daylight cap, never a view onto the model outside.
+      if (isolate) isolateView(); else restoreView();
       return true;
     },
+    // ── s30:P ──
+    /** Where the mouth's daylight comes from: () => THREE.Color (linear), e.g. the Sun slider's sky colour. */
+    setDaylight(fn) { daylight = typeof fn === 'function' ? fn : null; },
+    // ── /s30:P ──
     hide() {
       mesh.visible = false;
       platformGroup.visible = false; // s30:P
@@ -532,6 +615,9 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
         hiddenDevices: hidden.size, isolated: !!isolated, endAhead: built?.endAhead ?? null, endBehind: built?.endBehind ?? null,
         // ── s30:P ──
         portalAhead: built?.portalAhead ?? null, portalBehind: built?.portalBehind ?? null,
+        mouth: (() => { const m = material.userData.interiorUniforms.uMouth.value;
+          return { start: m.x < NO_MOUTH ? m.x : null, end: m.y < NO_MOUTH ? m.y : null }; })(),
+        daylight: material.userData.interiorUniforms.uDaylight.value.toArray(),
         platforms: zones.map(z => ({ name: z.name, lineId: z.lineId, s: z.s, a0: z.a0, a1: z.a1, sigma: z.sigma })),
         platformMeshes: platformGroup.children.length, platformsVisible: platformGroup.visible,
         // ── /s30:P ──

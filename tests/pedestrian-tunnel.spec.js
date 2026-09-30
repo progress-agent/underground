@@ -14,6 +14,8 @@
 //   * digit keys pick rows while the card is open, and switch modes when it is
 //     closed; opening the card releases pointer lock;
 //   * a portal ends the walk and offers the street;
+//   * at a tunnel mouth nothing but the interior is drawn in the bore, and the
+//     mouth is daylight (fix round 1);
 //   * another mode's picture at a reference pose is unchanged by a trip.
 // Pure logic (crossings at any frame length, portals, towards X, the key
 // capture) is pinned in tests/pedestrian-tunnel.test.mjs.
@@ -358,6 +360,7 @@ test.describe('in the tunnel', () => {
     expect(held.portal.mouthS).toBeCloseTo(at.b, 6);
     expect(held.tunnel.speed).toBe(0);
     expect(held.interior.portalAhead || held.interior.portalBehind).toBe(true);
+    expect(held.interior.isolated).toBe(true); // fix round 1: the lining alone, right up to the mouth
     await expect(page.locator('#ug-mode-hint')).toContainText(/leaves its tunnel/);
     const card = await dbg(page);
     expect(card.card?.kind).toBe('portal');
@@ -369,6 +372,86 @@ test.describe('in the tunnel', () => {
     const g = await page.evaluate(([x, z]) => window.__ug.modes.collision.groundHeightAt(x, z), [d.x, d.z]);
     expect(d.y).toBeCloseTo(g, 3);
     expect(Math.hypot(d.x - held.portal.x, d.z - held.portal.z)).toBeLessThan(1);
+  });
+
+  // Fix round 1. The verifier found the camera unisolated within a window of
+  // a portal, so the model outside was drawn inside the bore: at the District's
+  // portal by Putney Bridge, where every walk there ends, a building cut into
+  // the crown (4.74% of the frame), breaking the sprint 25Sep26f contract that
+  // nothing but the walker's own lining is drawn inside it. The mouth is now
+  // the lining's own daylight cap, and the camera stays isolated.
+  test('at a tunnel mouth nothing but the interior is drawn in the bore; the mouth is daylight, under the bloom threshold', async () => {
+    const mouth = (lineId, pick) => page.evaluate(([lineId, pick]) => {
+      const m = window.__ug.modes.registry.get('pedestrian');
+      const net = m.rebuildNetwork();
+      for (const p of net.paths) {
+        if (p.lineId !== lineId) continue;
+        for (const [a, b] of p.open) {
+          if (!p.stations.some(st => st.name.includes(pick) && (Math.abs(st.s - a) < 1500 || Math.abs(st.s - b) < 1500))) continue;
+          // The held pose: 20 m inside the mouth (PORTAL_STAND_M), facing it.
+          const pos = b < p.length - 300 ? { path: p.id, s: b + 20, dir: -1 } : { path: p.id, s: a - 20, dir: 1 };
+          m.placeInTunnel(pos);
+          return pos;
+        }
+      }
+      return null;
+    }, [lineId, pick]);
+    /** Frame as drawn against the frame with everything off INTERIOR_LAYER hidden, plus the daylight in it. */
+    const interiorOnly = () => page.evaluate(() => {
+      const ug = window.__ug;
+      window.__freeze = true;
+      const drawn = window.__grab();
+      const was = [];
+      ug.scene.traverse(o => {
+        if (!(o.isMesh || o.isLine || o.isPoints || o.isSprite) || !o.visible || (o.layers.mask & (1 << 7))) return;
+        was.push(o); o.visible = false;
+      });
+      const r = ug.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      ug.composer.render(0); r.setRenderTarget(null);   // no tick: nothing re-shows what we hid
+      const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b);
+      for (const o of was) o.visible = true;
+      let bright = 0;
+      for (let i = 0; i < drawn.b.length; i += 4) if (Math.min(drawn.b[i], drawn.b[i + 1], drawn.b[i + 2]) > 150) bright++;
+      const d = window.__diff(drawn, { b, W, H });
+      // Brightest linear value the scene pass writes (half-float, before tone mapping).
+      const rt = ug.composer.renderTarget1;
+      r.setRenderTarget(rt); r.clear(); r.render(ug.scene, ug.camera); r.setRenderTarget(null);
+      const buf = new Uint16Array(4 * rt.width * rt.height);
+      r.readRenderTargetPixels(rt, 0, 0, rt.width, rt.height, buf);
+      const h2f = h => { const e = (h >> 10) & 0x1f, f = h & 0x3ff, s = (h & 0x8000) ? -1 : 1;
+        return e === 0 ? s * 2 ** -14 * (f / 1024) : e === 31 ? (f ? NaN : s * Infinity) : s * 2 ** (e - 15) * (1 + f / 1024); };
+      let max = 0, nonFinite = 0;
+      for (let i = 0; i < buf.length; i++) { if (i % 4 === 3) continue; const v = h2f(buf[i]); if (!Number.isFinite(v)) nonFinite++; else if (v > max) max = v; }
+      window.__thaw();
+      return { ...d, hidden: was.length, brightPct: bright / (W * H) * 100, max, nonFinite, mask: ug.camera.layers.mask };
+    });
+    // Control: with the view unisolated (the defect as found) the check sees the model in the bore.
+    expect(await mouth('district', 'Putney')).not.toBeNull();
+    await page.evaluate(() => {
+      const ti = window.__ug.modes.ctx.tubeInterior;
+      ti.__show = ti.show; ti.show = (net, pos) => ti.__show(net, pos, { isolate: false });
+    });
+    await page.waitForTimeout(800);
+    const control = await interiorOnly();
+    await page.evaluate(() => { const ti = window.__ug.modes.ctx.tubeInterior; ti.show = ti.__show; delete ti.__show; });
+    expect(control.pct, `control must detect foreign geometry: ${JSON.stringify(control)}`).toBeGreaterThan(1);
+    for (const [lineId, pick] of [['district', 'Putney'], ['northern', 'Golders Green']]) {
+      expect(await mouth(lineId, pick), pick).not.toBeNull();
+      await page.waitForTimeout(800);
+      const d = await dbg(page);
+      expect(d.interior.portalAhead || d.interior.portalBehind, pick).toBe(true);
+      expect(d.interior.isolated, pick).toBe(true);
+      const arc = d.interior.mouth.end ?? d.interior.mouth.start;
+      expect(Math.abs(Math.abs(arc) - 20), `${pick}: the mouth 20 m ahead, ${JSON.stringify(d.interior.mouth)}`).toBeLessThan(1);
+      const r = await interiorOnly();
+      expect(r.mask, pick).toBe(1 << 7);
+      expect(r.hidden, pick).toBeGreaterThan(100);
+      expect(r.pct, `${pick}: ${JSON.stringify({ ...r, b: undefined })}`).toBeLessThanOrEqual(0.5);
+      // The mouth is daylight ahead (the sky colour most of the way to white), never a white-out.
+      expect(r.brightPct, pick).toBeGreaterThan(1);
+      expect(r.nonFinite, pick).toBe(0);
+      expect(r.max, pick).toBeLessThanOrEqual(1.0);
+    }
   });
 
   test('another mode\'s picture is unchanged: Deity at the reference pose, before and after a trip down the tunnel', async () => {

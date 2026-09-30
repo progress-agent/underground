@@ -4204,6 +4204,11 @@ function s25InteriorHidesLabels(lineId) {
   return !!lid && lid !== lineId;
 }
 // ── /s25:P ──
+// ── s30:P ──
+// A tunnel mouth is drawn as daylight in the Sun slider's sky colour (linear;
+// the slider never reaches night), so the opening matches the time of day.
+modeSystem.ctx.tubeInterior.setDaylight(() => sunSystem.state.skyColor);
+// ── /s30:P ──
 
 requestAnimationFrame(tick);
 

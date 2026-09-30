@@ -203,7 +203,14 @@ test.describe('Late-run failures: the causes, pinned (lane H)', () => {
   test('a tube line landing inside the chalk never paints its labels', async ({ page }) => {
     let release; const gate = new Promise(r => (release = r));
     let seen = 0, held = null;
-    await page.route(/api\.tfl\.gov\.uk\/Line\/[^/]+\/Route\/Sequence/, async (route) => {
+    // Sprint 30Sep26w (D-041, Lane P): route loading is pinned to the bundled
+    // files, so a line now arrives as /data/tfl/route-sequence/<line>.json and
+    // the live api.tfl.gov.uk request this test used to hold is never made
+    // (only ?tfl=live makes it). Hold the same request in the same place, the
+    // second line's route file (index.json is the manifest, not a line), so
+    // the race it pins is unchanged: lines load one after another, and the
+    // held one lands while the camera is in the chalk.
+    await page.route(/\/data\/tfl\/route-sequence\/(?!index\.json)[^/?]+\.json/, async (route) => {
       seen++;
       if (!held && seen === 2) { held = route.request().url(); await gate; }
       await route.continue();
