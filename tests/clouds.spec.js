@@ -337,6 +337,9 @@ function rimMeasures({ on, off }) {
 
 test('no bright rim or rings across a cloud at dawn and dusk, looking towards the sun', async ({ page }) => {
   await boot(page);
+  // The profiles read the page's pixels: let the loading bar finish and fade.
+  await page.waitForFunction(() => document.querySelector('#loadingBar')?.classList.contains('done'), null, { timeout: 90000 });
+  await page.waitForTimeout(2500);
   await page.evaluate(() => {
     const u = window.__ug; u.controls.enableDamping = false;
     u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 });
