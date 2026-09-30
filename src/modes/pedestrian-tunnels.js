@@ -321,20 +321,23 @@ function crossedOn(p, from, to, travelled, out) {
 }
 
 /**
- * The first in-the-open interval boundary met moving from `from` toward
- * `limit` in direction `dir` (s30:P portals), or null. A walker already
- * inside an open interval is not held (it can always walk back out).
+ * Where a move from `from` toward `limit` in direction `dir` is held short of
+ * an in-the-open interval (s30:P portals): `inset` metres inside the tunnel
+ * before its mouth, or null when nothing is in the way. A walker already
+ * inside an open interval is not held (it can always walk back out); one
+ * already within the inset of a mouth cannot go nearer to it.
  */
-function portalAhead(p, from, dir, limit) {
+function portalAhead(p, from, dir, limit, inset = 0) {
   const O = p.open;
   if (!O || !O.length) return null;
   for (const [a, b] of O) if (from > a + 1e-6 && from < b - 1e-6) return null;
   let best = null;
   for (const [a, b] of O) {
-    const edge = dir > 0 ? a : b;
-    if (dir > 0 ? (edge >= from - 1e-9 && edge <= limit) : (edge <= from + 1e-9 && edge >= limit)) {
-      if (best === null || (dir > 0 ? edge < best : edge > best)) best = edge;
-    }
+    const mouth = dir > 0 ? a : b;
+    if (dir > 0 ? mouth < from - 1e-9 : mouth > from + 1e-9) continue;   // behind the walker
+    const hold = dir > 0 ? Math.max(from, a - inset) : Math.min(from, b + inset);
+    if (dir > 0 ? hold > limit : hold < limit) continue;                   // beyond this move
+    if (best === null || (dir > 0 ? hold < best.hold : hold > best.hold)) best = { hold, mouth };
   }
   return best;
 }
@@ -343,9 +346,10 @@ function portalAhead(p, from, dir, limit) {
  * Move `pos` ({ path, s, dir }) `dist` metres toward the desired horizontal
  * direction `want`. Mutates pos. Returns { stopped, crossed, portal }:
  * stopped at a line end or a portal; crossed = platforms passed [{ stop, at }];
- * portal = { path, s } when the move ended at the mouth of a tunnel.
+ * portal = { path, s, mouth } when the move was held `portalInset` metres
+ * short of the mouth of a tunnel (mouth = the mouth's own arc).
  */
-export function advance(net, pos, dist, want) {
+export function advance(net, pos, dist, want, { portalInset = 0 } = {}) {
   let remaining = Math.max(0, dist);
   let stopped = false;
   let guard = 0;
@@ -359,13 +363,13 @@ export function advance(net, pos, dist, want) {
     const target = pos.s + pos.dir * remaining;
     const j = nextJunction(p, pos.s, pos.dir, target);
     const reach = j === null ? Math.min(p.length, Math.max(0, target)) : j;
-    const mouth = portalAhead(p, pos.s, pos.dir, reach);
-    if (mouth !== null) {
-      crossedOn(p, pos.s, mouth, travelled, crossed);
-      travelled += Math.abs(mouth - pos.s);
-      pos.s = mouth;
+    const held = portalAhead(p, pos.s, pos.dir, reach, portalInset);
+    if (held !== null) {
+      crossedOn(p, pos.s, held.hold, travelled, crossed);
+      travelled += Math.abs(held.hold - pos.s);
+      pos.s = held.hold;
       stopped = true;
-      portal = { path: pos.path, s: mouth };
+      portal = { path: pos.path, s: held.hold, mouth: held.mouth };
       break;
     }
     if (j === null) {

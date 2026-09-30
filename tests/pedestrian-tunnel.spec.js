@@ -204,6 +204,8 @@ test.describe('in the tunnel', () => {
     await page.mouse.click(720, 700);
     const locked = await page.waitForFunction(() => document.pointerLockElement === window.__ug.modes.ctx.canvas, null, { timeout: 5000 })
       .then(() => true, () => false);
+    test.info().annotations.push({ type: 'pointer lock', description: locked ? 'real (headless Chromium granted it)' : 'stand-in (headless refused it)' });
+    console.log(`[pedestrian-tunnel] pointer lock: ${locked ? 'real' : 'stand-in'}`);
     if (!locked) {
       // Headless without pointer lock: stand in for it, so the release is still exercised.
       await page.evaluate(() => {
@@ -351,7 +353,9 @@ test.describe('in the tunnel', () => {
     await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('shift'); });
     expect(held.phase).toBe('tunnel');
     expect(held.tunnel.path).toBe(at.path);
-    expect(held.tunnel.s).toBeCloseTo(at.b, 6);
+    // Held 20 m inside the mouth (the lining runs on to the mouth itself).
+    expect(held.tunnel.s).toBeCloseTo(at.b + 20, 6);
+    expect(held.portal.mouthS).toBeCloseTo(at.b, 6);
     expect(held.tunnel.speed).toBe(0);
     expect(held.interior.portalAhead || held.interior.portalBehind).toBe(true);
     await expect(page.locator('#ug-mode-hint')).toContainText(/leaves its tunnel/);

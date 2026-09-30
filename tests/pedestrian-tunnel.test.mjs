@@ -116,6 +116,15 @@ test('portals: found where the track reaches the ground; the walk stops there an
   const back = advance(net, pos, 50, { x: -1, z: 0 });
   assert.equal(back.stopped, false);
   assert.ok(Math.abs(pos.s - (a - 50)) < 1e-6);
+  // The walker is held an inset short of the mouth, and cannot creep nearer from inside the inset.
+  const walker = { path: 0, s: 1000, dir: 1 };
+  let w;
+  for (let i = 0; i < 400; i++) { w = advance(net, walker, 10, { x: 1, z: 0 }, { portalInset: 20 }); if (w.stopped) break; }
+  assert.ok(Math.abs(walker.s - (a - 20)) < 1e-9 && Math.abs(w.portal.mouth - a) < 1e-9);
+  const inset = { path: 0, s: a - 5, dir: 1 };
+  const w2 = advance(net, inset, 10, { x: 1, z: 0 }, { portalInset: 20 });
+  assert.equal(w2.stopped, true);
+  assert.ok(Math.abs(inset.s - (a - 5)) < 1e-9);
 });
 
 test('portals: a narrow dip in the ground, a short surfacing and a crossing under water are not portals', () => {

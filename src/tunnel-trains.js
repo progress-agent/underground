@@ -26,25 +26,26 @@
 // walker positions, so it is deterministic.
 //
 // LAMPS: a train seen head-on is a dark disc in a dark bore (its lit windows
-// are on its sides), so while the walker is inside, each of the line's trains
-// near them carries a pair of white head lamps at its leading end and red
-// tail lamps at the other, as the real stock does. Two InstancedMeshes, one
-// per colour (D-015: no per-instance colour), shown only while the walker is
-// in the bore (on the default and interior layers, like the lining),
-// translation-only instances with the true-proportion 'local' patch (true
-// size at every Master).
+// are on its sides), so while the walker is inside, the nearest few of the
+// line's trains carry a pair of white head lamps at the leading end and red
+// tail lamps at the other, as the real stock does. Each pair is a small mesh
+// parented to the train itself, so it follows the train's own pose (and its
+// true-proportion matrix) when the frame is drawn, never a frame behind; one
+// material per colour (D-015: no per-instance colour), on the default and
+// interior layers like the lining, and only while the walker is in the bore.
 //
 // trains.js is read only through its train objects (userData.lineId, the
 // batch in userData.batch, userData.nearGroup, position, quaternion); its
 // exports are unchanged.
 
 import * as THREE from 'three';
-import { patchTrueProportionMaterial, trueProportionUniform } from './true-proportion.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export const TRAIN_HALF_LENGTH_M = (96 + 2 * 3.8) / 2;  // trains.js CAPSULE_LENGTH 96 + two caps of CAPSULE_RADIUS 3.8 (caps are not scaled along z)
 export const BORE_TOLERANCE_M = 2.5;
 export const RUSH_REACH_M = 60;          // the air ahead of a train is felt this far out
-export const LAMP = Object.freeze({ radiusM: 0.09, sideM: 0.55, belowAxisM: 0.7, rangeM: 700, max: 64 });
+// Lamps on the train's nose (real metres in its own frame: x across, y up, z along).
+export const LAMP = Object.freeze({ radiusM: 0.09, sideM: 0.55, belowAxisM: 0.7, alongM: 51.3, rangeM: 700, max: 8 });
 
 /** Nearest point of a polyline [{x,y,z,s}] to p, in real metres (y / VE). */
 export function projectOnPolyline(points, p, VE = 5) {
@@ -111,56 +112,61 @@ export function passingState(trains, window, walker, prev, dt, { VE = 5, halfLen
  */
 export function createTunnelTrains({ trainSystem = null, layer = 7 } = {}) {
   const system = () => (typeof trainSystem === 'function' ? trainSystem() : trainSystem);
-  // Head (white) and tail (red) lamps: separate meshes, one colour each.
-  let lamps = null;
-  function ensureLamps() {
-    if (lamps) return lamps;
-    const scene = system()?.scene;
-    if (!scene || !globalThis.document) return null;
-    const geo = new THREE.SphereGeometry(LAMP.radiusM, 10, 6);
-    const make = (hex, name) => {
-      const mat = patchTrueProportionMaterial(new THREE.MeshBasicMaterial({ color: hex, toneMapped: false, fog: false }), { mode: 'local' });
-      const m = new THREE.InstancedMesh(geo, mat, LAMP.max * 2);
-      m.name = name;
-      m.count = 0;
-      m.frustumCulled = false;
-      m.layers.enable(layer);   // and the default layer: near a portal the camera is not isolated
-      m.visible = false;
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      scene.add(m);
-      return m;
+  // Head (white) and tail (red) lamps: a pool of per-train lamp groups.
+  let shared = null;
+  const pool = [];            // { group, train }
+  function lampShared() {
+    if (shared) return shared;
+    const one = (x) => new THREE.SphereGeometry(LAMP.radiusM, 10, 6).translate(x, 0, 0);
+    const pair = mergeGeometries([one(-LAMP.sideM), one(LAMP.sideM)]);
+    shared = {
+      pair,
+      head: new THREE.MeshBasicMaterial({ color: 0xf2efe6, toneMapped: false, fog: false }),
+      tail: new THREE.MeshBasicMaterial({ color: 0xd01010, toneMapped: false, fog: false }),
     };
-    lamps = { head: make(0xf2efe6, 'tunnel-train-headlamps'), tail: make(0xd01010, 'tunnel-train-taillamps') };
-    return lamps;
+    return shared;
   }
-  const _f = new THREE.Vector3(), _side = new THREE.Vector3(), _m = new THREE.Matrix4();
-  function updateLamps(trainsNear, walker) {
-    const L = ensureLamps();
-    if (!L) return;
-    let n = 0;
-    const k = trueProportionUniform.value;   // canonical y per real metre
-    for (const t of trainsNear) {
-      if (n >= LAMP.max) break;
-      const p = t.position;
-      if (walker && Math.hypot(p.x - walker.x, p.z - walker.z) > LAMP.rangeM) continue;
-      _f.set(0, 0, 1).applyQuaternion(t.quaternion); _f.y = 0;
-      if (_f.lengthSq() < 1e-9) continue;
-      _f.normalize();
-      _side.set(-_f.z, 0, _f.x);
-      for (const [mesh, sign] of [[L.head, 1], [L.tail, -1]]) {
-        for (const s of [-1, 1]) {
-          const i = 2 * n + (s > 0 ? 1 : 0);
-          _m.makeTranslation(p.x + _f.x * sign * (TRAIN_HALF_LENGTH_M - 0.05) + _side.x * s * LAMP.sideM,
-            p.y - LAMP.belowAxisM * k,
-            p.z + _f.z * sign * (TRAIN_HALF_LENGTH_M - 0.05) + _side.z * s * LAMP.sideM);
-          mesh.setMatrixAt(i, _m);
-        }
-      }
-      n++;
+  function makeLamps() {
+    const S = lampShared();
+    const group = new THREE.Group();
+    group.name = 'tunnel-train-lamps';
+    for (const [mat, z, name] of [[S.head, LAMP.alongM, 'head'], [S.tail, -LAMP.alongM, 'tail']]) {
+      const m = new THREE.Mesh(S.pair, mat);
+      m.name = `tunnel-train-${name}lamps`;
+      m.position.set(0, -LAMP.belowAxisM, z);
+      m.frustumCulled = false;
+      m.castShadow = m.receiveShadow = false;
+      m.layers.enable(layer);   // and the default layer: near a portal the camera is not isolated
+      group.add(m);
     }
-    for (const mesh of [L.head, L.tail]) { mesh.count = 2 * n; mesh.instanceMatrix.needsUpdate = true; mesh.visible = n > 0; }
+    return { group, train: null };
   }
-  function hideLamps() { if (lamps) { lamps.head.visible = false; lamps.tail.visible = false; lamps.head.count = lamps.tail.count = 0; } }
+  function updateLamps(trainsNear, walker) {
+    if (!globalThis.document) return;
+    const near = trainsNear
+      .map(t => ({ t, d: walker ? Math.hypot(t.position.x - walker.x, t.position.z - walker.z) : 0 }))
+      .filter(x => x.d <= LAMP.rangeM)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, LAMP.max)
+      .map(x => x.t);
+    const want = new Set(near);
+    for (const item of pool) {
+      if (item.train && !want.has(item.train)) { item.train.remove(item.group); item.train = null; }
+    }
+    const held = new Set(pool.filter(i => i.train).map(i => i.train));
+    for (const t of near) {
+      if (held.has(t)) continue;
+      let item = pool.find(i => !i.train);
+      if (!item) { item = makeLamps(); pool.push(item); }
+      // The train's matrix scales its section by sectionScale; undo it so the
+      // lamps are placed and sized in real metres in the train's own frame.
+      const k = t.userData.sectionScale ?? 1;
+      item.group.scale.set(1 / k, 1 / k, 1);
+      t.add(item.group);
+      item.train = t;
+    }
+  }
+  function hideLamps() { for (const item of pool) { if (item.train) { item.train.remove(item.group); item.train = null; } } }
   const enabled = new Set();    // meshes we added `layer` to
   let lineId = null;
   const prev = new Map();
@@ -223,7 +229,7 @@ export function createTunnelTrains({ trainSystem = null, layer = 7 } = {}) {
     get state() { return last; },
     debug() {
       return { lineId, meshes: enabled.size, passes, ...last, nearest: last.nearest ? { ...last.nearest } : null,
-        lamps: lamps ? lamps.head.count / 2 : 0 };
+        lamps: pool.filter(i => i.train).length };
     },
   };
 }

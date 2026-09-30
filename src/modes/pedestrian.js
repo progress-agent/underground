@@ -97,7 +97,8 @@ const REST_MPS = 0.5;                  // at rest on a platform, the arrival car
 const TRANSFER_S = 1.2;                // a change of line: through the cross passage to the other platform
 const SHAKE_RAD = 0.012;               // peak view shake while a train passes through (about 0.7 degrees)
 const SHAKE_DECAY_S = 0.25;
-const PORTAL_CLEAR_M = 25;             // walk this far back from a portal before it can offer the street again
+const PORTAL_STAND_M = 20;             // the walk ends this far inside a tunnel mouth (the lining runs on to it)
+const PORTAL_CLEAR_M = 25;             // walk this far back from there before the portal can offer the street again
 // ── /s30:P ──
 
 const HINT = 'WASD run · Space jump, hold to jetpack · E at a station chooses a platform';
@@ -460,7 +461,7 @@ export function createPedestrianMode(ctx) {
       const dirWant = m.forward >= 0 ? want : { x: -want.x, z: -want.z };
       // Keep the last intent while coasting to a stop.
       tunnel.want = m.forward !== 0 ? dirWant : (tunnel.want || dirWant);
-      const r = advance(n, tunnel, tunnelSpeed * dt, tunnel.want);
+      const r = advance(n, tunnel, tunnelSpeed * dt, tunnel.want, { portalInset: PORTAL_STAND_M });
       crossed = r.crossed || [];
       portal = r.portal;
       if (r.stopped) tunnelSpeed = 0;
@@ -499,7 +500,10 @@ export function createPedestrianMode(ctx) {
     const lineName = routesOf(n.paths[tunnel.path].lineId)?.lineName || n.paths[tunnel.path].lineId;
     // s30:P the mouth of the tunnel: the walk ends here and offers the street.
     if (portal && !(portalAt && portalAt.path === portal.path && Math.abs(portalAt.s - portal.s) < 1e-6)) {
-      portalAt = { path: portal.path, s: portal.s, x: p.x, z: p.z, lineId: n.paths[portal.path].lineId, dismissed: false };
+      // The street is at the mouth itself, PORTAL_STAND_M ahead.
+      const mouth = pointAt(n.paths[portal.path], portal.mouth, {}, tunnel.side);
+      portalAt = { path: portal.path, s: portal.s, mouthS: portal.mouth, x: mouth.x, z: mouth.z,
+        lineId: n.paths[portal.path].lineId, dismissed: false };
     }
     if (portalAt && (portalAt.path !== tunnel.path || Math.abs(portalAt.s - tunnel.s) > PORTAL_CLEAR_M)) {
       if (card?.kind === 'portal') closeCard();
