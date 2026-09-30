@@ -46,28 +46,48 @@
  * so a re-run from the cached download reproduces the same bytes. No
  * timestamps are written.
  *
- * DATA SAFETY: a tile or manifest that is a symlink (into the shared tile
- * store) is REPLACED by a real file in this checkout, never written through.
+ * DATA SAFETY (fix round 1): public/data/surface is shared. In a worktree it
+ * is usually a symlink, or holds symlinks, into the main checkout's store, and
+ * checking only whether the tile FILE is a link misses a symlinked parent
+ * directory (the file is then a real file in the store). So before it
+ * downloads or writes anything, a real run checks the whole path with
+ * scripts/surface-overlay.mjs: tiles/ and baked/ must resolve (realpath)
+ * inside this checkout and not into the main checkout's store (that needs
+ * --promote, run from the main checkout), and no baked file may be a link,
+ * because the `npm run bake` that follows writes with a plain writeFile. It
+ * refuses otherwise and names the one-command remedy
+ * (`node scripts/surface-overlay.mjs prepare`). Each file is written to a
+ * temporary name and renamed into place, so a leaf symlink or hard link is
+ * replaced, never written through.
  *
  * Usage:
+ *   node scripts/surface-overlay.mjs prepare      (once per worktree)
  *   node scripts/merge-microsoft-footprints.mjs [--tiles tile_10_13.json,tile_10_14.json]
- *     [--dry-run] [--report <path>]
- * Download cache: scripts/.cache/microsoft-footprints/ (fetched when absent).
+ *     [--dry-run] [--report <path>] [--root <checkout>] [--promote]
+ *   npm run bake && npm run bake:verify
+ * Download cache: scripts/.cache/microsoft-footprints/ (fetched when absent;
+ * in a worktree scripts/.cache is the orchestrator's link to the shared
+ * download cache, which holds downloads only, never served data).
  * Summary (tracked, pins the per-tile counts for tests): scripts/microsoft-footprints.json
  */
-import { readFile, writeFile, mkdir, rm, lstat, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { existsSync, createReadStream } from 'node:fs';
+import os from 'node:os';
 import { createGunzip } from 'node:zlib';
 import { createInterface } from 'node:readline';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import proj4 from 'proj4';
+import { assertOverlayWritable, writeLocal } from './surface-overlay.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const TILE_DIR = path.join(ROOT, 'public/data/surface/tiles');
-const CACHE = path.join(ROOT, 'scripts/.cache/microsoft-footprints');
-export const SUMMARY_PATH = path.join(ROOT, 'scripts/microsoft-footprints.json');
+const pathsFor = (root) => ({
+  tileDir: path.join(root, 'public/data/surface/tiles'),
+  cache: path.join(root, 'scripts/.cache/microsoft-footprints'),
+  summary: path.join(root, 'scripts/microsoft-footprints.json'),
+});
+export const SUMMARY_PATH = pathsFor(ROOT).summary;
 
 export const DATASET_LINKS = 'https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv';
 export const LOCATION = 'UnitedKingdom';
@@ -327,7 +347,7 @@ async function download(url, dest) {
   return buf.length;
 }
 
-async function ensureSource() {
+async function ensureSource(CACHE) {
   await mkdir(CACHE, { recursive: true });
   const linksPath = path.join(CACHE, 'dataset-links.csv');
   if (!existsSync(linksPath)) await download(DATASET_LINKS, linksPath);
@@ -344,21 +364,18 @@ async function ensureSource() {
 
 // ── Merge ────────────────────────────────────────────────────────────────────
 
-async function readTile(file) {
-  return JSON.parse(await readFile(path.join(TILE_DIR, file), 'utf8'));
-}
-
-async function writeReal(p, text) {
-  const st = await lstat(p).catch(() => null);
-  if (st?.isSymbolicLink()) await rm(p); // never write through into the shared store
-  await writeFile(p, text);
-}
-
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
   const arg = (f) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : null);
   const dry = argv.includes('--dry-run');
+  const root = path.resolve(arg('--root') || ROOT);
+  const guard = { root, promote: argv.includes('--promote'), mainRoot };
+  const { tileDir: TILE_DIR, cache: CACHE, summary: SUMMARY } = pathsFor(root);
+  const readTile = async (file) => JSON.parse(await readFile(path.join(TILE_DIR, file), 'utf8'));
   const targets = arg('--tiles') ? arg('--tiles').split(',') : TARGET_TILES;
-  const src = await ensureSource();
+  // Before any download or write: this checkout's tiles/ and baked/ must be
+  // its own (see DATA SAFETY above). A dry run writes no data and skips it.
+  if (!dry) await assertOverlayWritable(guard);
+  const src = await ensureSource(CACHE);
   const manifestPath = path.join(TILE_DIR, 'manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const entries = new Map(manifest.tiles.map((t) => [t.file, t]));
@@ -459,7 +476,7 @@ export async function main(argv = process.argv.slice(2)) {
       sha256After: createHash('sha256').update(text).digest('hex') };
     console.log(`${file}: OSM ${base.length}, Microsoft candidates ${recs.length}, below 20 m2 ${small}, overlap OSM ${overlap} (${overlapSliver} slivers), added ${added.length} (height given ${heightGiven}, band median ${heightFromBand}); ${before} -> ${text.length} bytes`);
     if (!dry) {
-      await writeReal(tilePath, text);
+      await writeLocal(tilePath, text, guard);
       const e = entries.get(file);
       e.counts = { ...e.counts, buildings: next.buildings.length };
       e.sizeBytes = text.length;
@@ -469,14 +486,17 @@ export async function main(argv = process.argv.slice(2)) {
   if (manifestChanged) {
     manifest.totals.buildings = manifest.tiles.reduce((a, t) => a + (t.counts?.buildings || 0), 0);
     manifest.totals.totalSizeBytes = manifest.tiles.reduce((a, t) => a + (t.sizeBytes || 0), 0);
-    await writeReal(manifestPath, JSON.stringify(manifest, null, 2));
+    await writeLocal(manifestPath, JSON.stringify(manifest, null, 2), guard);
   }
   summary.totals = { added: Object.values(summary.tiles).reduce((a, t) => a + t.added, 0),
                      manifestBuildings: manifest.totals.buildings };
-  const reportPath = arg('--report') || (dry ? path.join(CACHE, 'merge-report.dry.json') : SUMMARY_PATH);
+  // A dry run's report goes to the system temp dir, not the shared download cache.
+  const reportPath = arg('--report') || (dry ? path.join(os.tmpdir(), 'merge-microsoft-footprints.dry.json') : SUMMARY);
   await writeFile(reportPath, JSON.stringify(summary, null, 2) + '\n');
-  console.log(`summary -> ${path.relative(ROOT, reportPath)}`);
+  console.log(`summary -> ${path.relative(root, reportPath)}`);
   return summary;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main().catch((e) => { console.error(e); process.exit(1); });
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => { console.error(e.name === 'OverlayError' ? e.message : e); process.exit(1); });
+}

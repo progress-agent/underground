@@ -5,7 +5,13 @@
 // merged tile overlay (public/data/surface, gitignored): they FAIL, never skip,
 // when the overlay has not been applied, because a checkout without it would
 // deploy a baked payload and a credit line that do not match its tiles.
-// Apply it with: node scripts/merge-microsoft-footprints.mjs && npm run bake
+// Apply it, in a worktree, with:
+//   node scripts/surface-overlay.mjs prepare && node scripts/merge-microsoft-footprints.mjs && npm run bake
+// `prepare` makes this checkout's public/data/surface a local overlay first, so
+// neither the merge nor the bake can write through a symlinked directory into
+// the main checkout's shared store; the merge refuses to run without it
+// (tests/surface-overlay.test.mjs). Or copy a finished overlay in with
+// node scripts/surface-overlay.mjs apply --from <lane checkout>.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
@@ -90,7 +96,7 @@ test('neighbourhood for the overlap test is the 3x3 block', () => {
 
 const summary = JSON.parse(await readFile(path.join(ROOT, 'scripts/microsoft-footprints.json'), 'utf8'));
 const readTile = async (f) => JSON.parse(await readFile(path.join(TILES, f), 'utf8'));
-const overlayMissing = 'Microsoft footprint overlay not applied to public/data/surface: run node scripts/merge-microsoft-footprints.mjs && npm run bake';
+const overlayMissing = 'Microsoft footprint overlay not applied to public/data/surface: run node scripts/surface-overlay.mjs prepare && node scripts/merge-microsoft-footprints.mjs && npm run bake';
 
 test('counts per tile match the tracked summary, byte for byte', async () => {
   assert.deepEqual(Object.keys(summary.tiles), TARGET_TILES);
