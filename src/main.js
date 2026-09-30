@@ -943,9 +943,12 @@ function startSurfaceRail() {
     console.warn('Could not create the surface railway:', err.message);
   });
 }
-function surfaceRailTooltip(mesh, hitPoint) {
-  const d = surfaceRail.describe(mesh, hitPoint);
-  const sub = d.dlrPoint ? dlrLocationLabel(d.dlrPoint._dlrProfile) : d.subtitle;
+function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
+  // Fix round 2: the hit's face names the piece of track under the pointer;
+  // the DLR's height is read there, as drawn (a shared stretch says so too).
+  const d = surfaceRail.describe(mesh, hitPoint, faceIndex);
+  const at = d.dlrPoint ? dlrLocationLabel(d.dlrPoint._dlrProfile) : null;
+  const sub = at ? (d.shared ? `${d.subtitle} · ${at}` : at) : d.subtitle;
   return `<b>${d.title}</b><div class="sub">${sub}</div>`;
 }
 // ── /s30:R ──
@@ -3295,6 +3298,14 @@ let _clearHoverForMotion = null;
       return !(hit.object.userData?.type==='canal' && airportDockGroup?.parent
         && airportDockGroup.visible && getAirportDockInfo(hit.point));
     });
+    // ── s30:R ── fix round 2: above ground (D-040's cull active) the underground
+    // layer's bores are not drawn; where the ray meets the surface railway
+    // drawn there, a bore it also passes through (the DLR's, on a viaduct) does
+    // not take the hover from the railway the viewer is pointing at.
+    if (undergroundCull.status.active && hits.some(h => h.object.userData?.type === SURFACE_RAIL_TYPE)) {
+      for (let i = hits.length - 1; i >= 0; i--) if (hits[i].object.userData?.type === 'tube-line') hits.splice(i, 1);
+    }
+    // ── /s30:R ──
     if (hits.length === 0) return null;
 
     // Sort by priority tier first, then distance
@@ -3349,7 +3360,7 @@ let _clearHoverForMotion = null;
     const ud = mesh.userData;
     const t = ud.type;
     if (t === 'tube-line' && ud.lineId === 'dlr') {
-      const point=hitPoint?dlrProfile.sample({x:hitPoint.x,z:hitPoint.z,structureScale:getBuildingHeightScale()}):null;
+      const point=hitPoint?dlrProfile.sample({x:hitPoint.x,z:hitPoint.z,y:hitPoint.y,structureScale:getBuildingHeightScale()}):null; // s30:R fix round 2: y reads a flyover's own deck
       return `<b>DLR</b>${point?`<div class="sub">${dlrLocationLabel(point._dlrProfile)}</div>`:''}`;
     }
     if (t === 'motorway') return '<b>M25 / A282</b><div class="sub">Orbital motorway · mapped carriageways and modelled road profile</div>';
@@ -3364,7 +3375,7 @@ let _clearHoverForMotion = null;
     }
     if(t === 'overground-line')return `<b>${overgroundGroup.userData.registry.get(ud.lineId).name} line</b><div class="sub">London Overground</div>`;
     // ── s30:R ──
-    if (t === SURFACE_RAIL_TYPE && surfaceRail) return surfaceRailTooltip(mesh, hitPoint);
+    if (t === SURFACE_RAIL_TYPE && surfaceRail) return surfaceRailTooltip(mesh, hitPoint, faceIndex);
     // ── /s30:R ──
     if(t === 'landmark') {
       const info=LANDMARK_INFO[ud.landmarkId];

@@ -8,6 +8,7 @@ import proj4 from 'proj4';
 import {
   ID_MAP, EXCLUDED, LINE_ORDER, collapseLine, splitShared, SegmentIndex, openCoveredWays, elementaryBands,
   cleanRuns, segmentClasses, encodeSegments, findPortals, inferBandsFromStops, toBng,
+  profileTrails, dlrHeightAt, lengthOf, TWIN_NEAR_M, DLR_TWIN_DECK_TOL_M, DLR_SHARE_MAX_DECK_M, DLR_MIN_DECK_PIECE_M,
 } from '../scripts/prepare-tube-surface.mjs';
 import { deckFromSection, envelope, resolveProfile, denseGraph } from '../scripts/prepare-dlr-deck-heights.mjs';
 import { createDlrProfile, DECK_BASIS, dlrHeightLabel } from '../src/dlr-profile.js';
@@ -309,4 +310,179 @@ test('DLR sample: a surface segment does not borrow the deck of the viaduct it m
   }
   assert.ok(checked >= 400);
   assert.ok(surface >= 20, `${surface} samples off a viaduct's end node landed on a surface segment`);
+});
+
+// Fix round 2 (verifier, 30Sep26w): north of Canning Town the DLR's flyover
+// (OSM ways 156792940 and 694613992, decks to 8.8 m) runs directly over the
+// Jubilee, beside a lower viaduct (145452870, to 4.1 m). The twin collapse,
+// which compared only plan and source class, took the flyover for the lower
+// viaduct's other running track, so its deck was drawn nowhere, and the hover
+// of the DLR's band on the Jubilee beneath read it. The DLR's level is now the
+// deck the shared profile gives it.
+// Which of two parallel synthetic lines a BNG point is on: its offset from
+// the first (BNG is not aligned with the lon/lat these are built in).
+const offsetFrom = pts => { const a = toBng(pts[0]), b = toBng(pts.at(-1)), l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  return ([e, n]) => ({ across: Math.abs((b[0] - a[0]) * (n - a[1]) - (b[1] - a[1]) * (e - a[0])) / l, along: ((b[0] - a[0]) * (e - a[0]) + (b[1] - a[1]) * (n - a[1])) / l }); };
+const deckBy = (pts, below, above) => { const at = offsetFrom(pts); return p => (at(p).across > 6 ? above : below); };
+
+test('DLR twins only at the same deck: a flyover beside a lower viaduct is drawn, running tracks on one deck collapse', () => {
+  const low = line(0, 0, 3000, 0, 100), high = line(0, 12, 3000, 12, 100);
+  const km = r => r.pieces.reduce((t, p) => t + lengthOf(p.xy), 0) / 1000, at = offsetFrom(low);
+  const viaducts = [branch(low, 'viaduct'), branch(high, 'viaduct')];
+  // One deck: the two running tracks of one viaduct, one centreline.
+  assert.ok(Math.abs(km(collapseLine(viaducts, { heightAt: () => 4 })) - 3) < 0.05);
+  assert.ok(Math.abs(km(collapseLine(viaducts)) - 3) < 0.05, 'without decks (every Tube line) as before');
+  // Decks 5 m apart: two structures, both drawn.
+  assert.ok(Math.abs(km(collapseLine(viaducts, { heightAt: deckBy(low, 4, 9) })) - 6) < 0.05);
+  // Within the tolerance (1.5 m): still twins.
+  assert.ok(Math.abs(km(collapseLine(viaducts, { heightAt: deckBy(low, 4, 4 + DLR_TWIN_DECK_TOL_M - 0.1) })) - 3) < 0.05);
+  // A flyover only over part of the way: that part is drawn, from 30 m
+  // (source segments of 10 m here: coverage is decided per segment).
+  const fine = [branch(line(0, 0, 3000, 0, 300), 'viaduct'), branch(line(0, 12, 3000, 12, 300), 'viaduct')];
+  for (const [len, kept] of [[600, true], [60, true], [10, false]]) {
+    const x0 = 1200, heightAt = p => { const q = at(p); return q.across > 6 && q.along > x0 && q.along < x0 + len ? 9 : 4; };
+    const r = collapseLine(fine, { heightAt });
+    assert.equal(r.pieces.length === 2, kept, `${len} m flyover`);
+    if (kept) assert.ok(Math.abs(lengthOf(r.pieces[1].xy) - len) <= 20 + 1, `${len} m flyover kept as ${lengthOf(r.pieces[1].xy).toFixed(0)} m`);
+  }
+  assert.equal(DLR_MIN_DECK_PIECE_M, 30);
+});
+
+test('DLR sharing: a stretch on a deck is never shared, even a viaduct short enough to pass as a bridge', () => {
+  const owners = new SegmentIndex(), ownerXY = line(0, 0, 4000, 0, 80).map(toBng);
+  owners.addPolyline(ownerXY, () => ({ key: 'tube:jubilee:0', cls: 'surface' }));
+  // DLR beside it, at grade except a 150 m viaduct in the middle (under the 200 m bridge rule).
+  const pts = line(500, 20, 3500, 20, 300), xy = pts.map(toBng), cls = new Array(300).fill('surface');
+  for (let i = 150; i < 165; i++) cls[i] = 'viaduct';
+  const piece = { lonlat: pts, xy, cls };
+  const onViaduct = ([e]) => { const i = Math.floor((e - xy[0][0]) / 10); return i >= 150 && i < 165 ? 5.2 : 0; };
+  const without = splitShared('dlr', [piece], owners);
+  assert.equal(without.own.length, 0, 'the source class alone: the short viaduct is a bridge and is shared');
+  const withDeck = splitShared('dlr', [piece], owners, { heightAt: (p, c) => (c === 'viaduct' ? onViaduct(p) : 0) });
+  assert.equal(withDeck.own.length, 1, 'the deck: the viaduct is the DLR\'s own');
+  assert.ok(Math.abs(lengthOf(withDeck.own[0].xy) - 150) < 11, `${lengthOf(withDeck.own[0].xy)} m own`);
+  assert.equal(withDeck.shared.length, 2, 'at grade either side: shared');
+  // A deck at grade (within DLR_SHARE_MAX_DECK_M): shared as before.
+  const low = splitShared('dlr', [piece], owners, { heightAt: () => DLR_SHARE_MAX_DECK_M - 0.5 });
+  assert.equal(low.own.length, 0);
+});
+
+test('profile supplement: the DLR\'s raised profile track as source trails, chained through two-edge nodes', () => {
+  const d = { nodes: [0, 1, 2, 3, 4, 5, 6].map(i => ({ lat: 51.5 + i * 1e-4, lon: 0 })), edges: [
+    { a: 0, b: 1, kind: 'elevated' }, { a: 1, b: 2, kind: 'elevated' }, { a: 2, b: 3, kind: 'surface' },
+    { a: 3, b: 4, kind: 'embankment' }, { a: 4, b: 5, kind: 'embankment' }, { a: 1, b: 6, kind: 'elevated' }, { a: 5, b: 6, kind: 'tunnel' }] };
+  const t = profileTrails(d);
+  const key = tr => tr.points.map(p => Math.round((p[1] - 51.5) * 1e4)).join('-');
+  assert.deepEqual(t.map(key).sort(), ['0-1', '1-2', '1-6', '3-4-5'].sort(), 'node 1 is a junction; surface and tunnel are not taken');
+  for (const tr of t) { assert.equal(tr.source, 'dlr-profile'); for (const s of tr.segments) assert.ok(['viaduct', 'embankment'].includes(s.class)); }
+});
+
+test('the tracked dataset: every measured DLR deck is drawn by the DLR\'s own track at its height', () => {
+  // The drawn DLR (its own corridors, sampled every 5 m) at the deck the
+  // renderer lays it on (dlrHeightAt: sampleForSurfaceRail, as
+  // src/tube-surface-rail.js); every LiDAR node raised more than 1.5 m must
+  // have drawn track within the collapse's reach (32 m, a twin running track)
+  // at its deck (within DLR_TWIN_DECK_TOL_M). Before fix round 2, 71 of 1,430
+  // were not, among them the Canning Town flyover, the West India Quay flyover
+  // and the Tower Gateway viaduct (missing from the v2 source, now taken from
+  // the shared profile). What remains is three single nodes where ways meet.
+  const project = bng(), H = dlrHeightAt(), p = createDlrProfile({ project, sampleSurfaceY: () => 0 });
+  const dlr = data.lines.find(l => l.id === 'dlr'), own = [];
+  for (const b of dlr.branches) {
+    const cls = segmentClasses(b.points.length, b.segments);
+    for (let i = 0; i < b.points.length - 1; i++) {
+      if (cls[i] === 'tunnel') continue;
+      const a = toBng(b.points[i]), c = toBng(b.points[i + 1]), n = Math.max(1, Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 5));
+      for (let j = 0; j <= n; j++) { const q = [a[0] + (c[0] - a[0]) * j / n, a[1] + (c[1] - a[1]) * j / n]; own.push({ e: q[0], n: q[1], h: H(q, cls[i]) }); }
+    }
+  }
+  const missing = [];
+  let checked = 0;
+  profileData.nodes.forEach((nd, i) => {
+    const d = deck.nodes[nd.id]; if (d?.source !== 'lidar' || !(d.m > DLR_SHARE_MAX_DECK_M)) return;
+    if (!p.sample({ x: 0, z: 0, nodeIndex: i })._dlrProfile.deckSource) return; // a portal node, drawn at grade
+    checked++;
+    const [e, n] = toBng([nd.lon, nd.lat]);
+    if (!own.some(o => Math.hypot(o.e - e, o.n - n) <= TWIN_NEAR_M + 3 && Math.abs(o.h - d.m) <= DLR_TWIN_DECK_TOL_M)) missing.push(nd.id);
+  });
+  assert.ok(checked > 1400, `${checked} measured decks`);
+  assert.ok(missing.length <= 3, `${missing.length} measured decks drawn nowhere at their height: ${missing.join(', ')}`);
+  for (const id of missing) {
+    const i = profileData.nodes.findIndex(n => n.id === id);
+    assert.ok(new Set(profileData.edges.filter(e => e.a === i || e.b === i).map(e => e.way)).size >= 2, `node ${id} is not where ways meet`);
+  }
+  // The flyover the verifier found (ways 156792940 and 694613992): drawn
+  // through every node of it that stands above the lower viaduct beside it
+  // (145452870, 4.1 m at most), at its deck; its lowest ends converge with
+  // that viaduct's deck and are drawn as its twin (checked above).
+  const fly = profileData.edges.filter(e => e.way === 156792940 || e.way === 694613992).flatMap(e => [e.a, e.b]);
+  let over = 0;
+  for (const i of new Set(fly)) {
+    const nd = profileData.nodes[i], d = deck.nodes[nd.id]; if (!(d?.m > 5)) continue;
+    over++;
+    const [e, n] = toBng([nd.lon, nd.lat]);
+    assert.ok(own.some(o => Math.hypot(o.e - e, o.n - n) < 3 && Math.abs(o.h - d.m) < 0.3), `flyover node ${nd.id} (${d.m} m) drawn through it at its deck`);
+  }
+  assert.ok(over >= 12, `${over} flyover nodes above 5 m`);
+  // Open DLR track the v2 source lacks, from the shared profile: flagged, raised, and not much.
+  const fromProfile = dlr.branches.filter(b => b.source === 'dlr-profile');
+  assert.ok(fromProfile.length >= 3 && fromProfile.length <= 8, `${fromProfile.length} corridors from the profile`);
+  for (const b of fromProfile) for (const s of b.segments) assert.ok(['viaduct', 'embankment'].includes(s.class));
+  assert.ok(dlr.summary.fromProfileM > 300 && dlr.summary.fromProfileM < 1000, `${dlr.summary.fromProfileM} m from the profile`);
+  // The stretches added on another deck: real structures, not a second deck for every running track.
+  assert.ok(dlr.summary.deckSeparatedM > 1000 && dlr.summary.deckSeparatedM < 3000, `${dlr.summary.deckSeparatedM} m added on another deck`);
+});
+
+test('the tracked dataset: the DLR shares only its at-grade track', () => {
+  // Every DLR band lies on another line's corridor where the DLR's own track
+  // is at grade in the shared profile: sampled every 10 m along the owner's
+  // centreline, at-grade DLR track (surface or cutting) is within reach of
+  // the band (30 m of shared corridor plus 10 m), and the DLR track nearest
+  // the owner's centreline with a deck above DLR_SHARE_MAX_DECK_M is never
+  // what the band stands for: it is drawn by the DLR itself (previous test).
+  const project = bng(), p = createDlrProfile({ project, sampleSurfaceY: () => 0 });
+  const ranges = [];
+  for (const l of data.lines) l.branches.forEach(b => { for (const band of b.bands || []) if (band.lines.includes('dlr')) ranges.push({ pts: b.points, j0: band.j0, j1: band.j1 }); });
+  for (const o of data.overgroundShared) if (o.lines.includes('dlr')) ranges.push({ pts: overground.lines.find(l => l.id === o.overground).branches[o.branch].points, j0: o.j0, j1: o.j1 });
+  assert.ok(ranges.length >= 3);
+  let n = 0, atGrade = 0;
+  for (const { pts, j0, j1 } of ranges) for (let j = j0; j < j1; j++) {
+    const a = project(pts[j][1], pts[j][0]), b = project(pts[j + 1][1], pts[j + 1][0]), k = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 10));
+    for (let i = 0; i < k; i++) {
+      const x = a.x + (b.x - a.x) * i / k, z = a.z + (b.z - a.z) * i / k;
+      n++; if (p.sample({ x, z, kinds: ['surface', 'cutting'], maxDistance: 40 })) atGrade++;
+    }
+  }
+  assert.ok(n > 300 && atGrade === n, `${atGrade} of ${n} band samples have the DLR's at-grade track within reach`);
+});
+
+test('DLR profile sample with a height reads the deck it is on: the Canning Town flyover and the track beneath', () => {
+  const project = bng(), p = createDlrProfile({ project, sampleSurfaceY: () => 0 });
+  p.refresh({ structureScale: 1 / 1.1 });
+  const i = profileData.nodes.findIndex(n => n.id === 18037891), nd = profileData.nodes[i], at = project(nd.lat, nd.lon);
+  assert.equal(deck.nodes[18037891].m, 8.83);
+  const top = p.sample({ x: at.x, z: at.z, y: 8.83 * 5 / 1.1 });
+  assert.deepEqual(top._dlrProfile.sourceWayIds, [156792940]);
+  assert.ok(Math.abs(top._dlrProfile.deckM - 8.83) < 1e-9);
+  // At rail-head height (1 m) the same plan position reads a track below the flyover.
+  const low = p.sample({ x: at.x, z: at.z, y: 1 * 5 / 1.1 });
+  assert.notDeepEqual(low._dlrProfile.sourceWayIds, [156792940]);
+  assert.ok(low.y < top.y - 3 * 5 / 1.1, `${low.y} under ${top.y}`);
+  // Without a height, the nearest in plan, as before.
+  assert.deepEqual(p.sample({ x: at.x, z: at.z })._dlrProfile.sourceWayIds, [156792940]);
+});
+
+test('dlrHeightLabel with the drawn height: a cutting or shared track drawn at grade says so; rounding is not a departure', () => {
+  assert.equal(dlrHeightLabel({ groundRelativeM: -2, deckM: null, drawnM: 1, surveyed: false }), '~2.0m below ground (modelled; drawn ~1.0m above the terrain here)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 3.3, deckM: null, drawnM: 1.0, surveyed: false }), '~3.3m above ground (modelled; drawn ~1.0m above the terrain here)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 1, deckM: null, drawnM: 1, surveyed: false }), '~1.0m above ground (modelled)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 8.83, deckM: 8.83, drawnM: 8.83, surveyed: false }), '~8.8m above ground (modelled)');
+  // drawnM takes the place of the profile's height as what is drawn.
+  assert.equal(dlrHeightLabel({ groundRelativeM: 5.36, deckM: 5.36, drawnM: 5.82, surveyed: true }), '~5.4m above ground (LiDAR; drawn ~5.8m above the terrain here)');
+  // A deck of 7.35 m drawn at 7.35 m: floating point puts one either side of
+  // the printed 0.05 ((7.35).toFixed(1) is 7.3, 7.350000000000001 gives 7.4).
+  assert.equal(dlrHeightLabel({ groundRelativeM: 7.350000000000001, deckM: 7.35, surveyed: true }), '~7.3m above ground (LiDAR)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 6.65, deckM: 6.649999999999999, surveyed: true }), '~6.6m above ground (LiDAR)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 7.31, deckM: 7.26, surveyed: true }), '~7.3m above ground (LiDAR)');
+  assert.equal(dlrHeightLabel({ groundRelativeM: 7.36, deckM: 7.31, surveyed: true }), '~7.3m above ground (LiDAR; drawn ~7.4m above the terrain here)');
 });

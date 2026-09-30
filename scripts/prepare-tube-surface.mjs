@@ -36,6 +36,15 @@
 //     Jubilee, District with Piccadilly) are within the same 30 m and are drawn
 //     as one corridor too: at 18 m of ballast per corridor two parallel beds
 //     would overlap.
+//     The DLR (fix round 2, verifier 30Sep26w): its level is also the deck the
+//     shared profile gives it (src/dlr-profile.js, the EA LiDAR decks). After
+//     the collapse above, unchanged, a second pass only ADDS: a DLR stretch
+//     beside kept track in plan but on a deck more than DLR_TWIN_DECK_TOL_M
+//     away is a structure, not a twin (north of Canning Town the 8.8 m flyover
+//     over the Jubilee, beside the 4.1 m viaduct), and the profile's raised
+//     track v2 lacks (the Tower Gateway viaduct) is taken from the profile. A
+//     DLR stretch raised on a deck above DLR_SHARE_MAX_DECK_M is never shared
+//     (step 3): an owner would draw it at its own height, not the DLR's.
 //  4. Portals: every tunnel <-> open transition on each line's collapsed track
 //     (before sharing, so every line has its own), with the lengths of tunnel
 //     and open track either side, the direction into the open, and the
@@ -56,6 +65,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import proj4 from 'proj4';
+// s30:R fix round 2: the DLR's level is read from the shared profile (its
+// measured decks), the same way the renderer lays it.
+import { createDlrProfile, sampleForSurfaceRail, deckOfSample } from '../src/dlr-profile.js';
+import { BNG_REF_E, BNG_REF_N } from '../src/coordinates.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SOURCE = '/Users/macstudio_1/Wisdom/WORK/PROJECTS/UnderGround/Working/prog-rail-geometry-11Jul26s/v2/tube-surface-sections.json';
@@ -77,6 +90,12 @@ export const MIN_PIECE_M = 100;     // an own-line remnant shorter than this is 
 export const SAMPLE_M = 10;         // coverage is tested every 10 m along a segment
 export const STATION_NEAR_M = 300;
 export const MINOR_TUNNEL_M = 400, MINOR_OPEN_M = 150;
+/** s30:R fix round 2: DLR stretches are twins only when their decks agree this closely (m). */
+export const DLR_TWIN_DECK_TOL_M = 1.5;
+/** s30:R fix round 2: a DLR stretch on a deck higher than this (m) is drawn by the DLR, never shared. */
+export const DLR_SHARE_MAX_DECK_M = 1.5;
+/** s30:R fix round 2: a DLR stretch beside kept track in plan but on another deck is a structure, kept from this length (m). */
+export const DLR_MIN_DECK_PIECE_M = 30;
 
 export function toBng([lon, lat]) { return proj4('EPSG:4326', 'EPSG:27700', [lon, lat]); }
 
@@ -142,15 +161,15 @@ export class SegmentIndex {
     }
   }
   addPolyline(xy, infoFor) { for (let i = 0; i < xy.length - 1; i++) this.add(xy[i], xy[i + 1], infoFor(i)); }
-  /** Nearest segment within `near` whose direction is parallel and `accept(info)` holds. */
+  /** Nearest segment within `near` whose direction is parallel and `accept(info, t)` holds (t along it). */
   nearest(p, dir, near, accept = () => true) {
     const c = this.cell, r = Math.ceil(near / c), cx = Math.floor(p[0] / c), cy = Math.floor(p[1] / c);
     let best = null;
     for (let x = cx - r; x <= cx + r; x++) for (let y = cy - r; y <= cy + r; y++) {
       for (const s of this.cells.get(`${x},${y}`) || []) {
         if (dir) { const cos = Math.abs((s.dx * dir[0] + s.dy * dir[1]) / s.len); if (cos < PARALLEL_COS) continue; }
-        if (!accept(s.info)) continue;
         const t = Math.max(0, Math.min(1, ((p[0] - s.a[0]) * s.dx + (p[1] - s.a[1]) * s.dy) / (s.len * s.len)));
+        if (!accept(s.info, t)) continue;
         const d = Math.hypot(p[0] - s.a[0] - s.dx * t, p[1] - s.a[1] - s.dy * t);
         if (d <= near && (!best || d < best.d)) best = { d, t, s };
       }
@@ -162,9 +181,11 @@ export class SegmentIndex {
 /**
  * For each segment of a polyline, the key of the indexed track that covers it
  * (null if none): at least 80% of its 10 m samples lie within `near` of one
- * parallel indexed segment of the same level family.
+ * parallel indexed segment of the same level family. With `heightAt` (the
+ * DLR, fix round 2), also at a deck within `heightTol` of the indexed
+ * segment's there (heightAt at the nearest point of it, with its class).
  */
-export function coverage(xy, cls, index, near, keyOf = info => info.key, fams = cls.map(c => [levelFamily(c)])) {
+export function coverage(xy, cls, index, near, keyOf = info => info.key, fams = cls.map(c => [levelFamily(c)]), { heightAt = null, heightTol = DLR_TWIN_DECK_TOL_M } = {}) {
   const out = [];
   for (let i = 0; i < xy.length - 1; i++) {
     const a = xy[i], b = xy[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9;
@@ -172,7 +193,9 @@ export function coverage(xy, cls, index, near, keyOf = info => info.key, fams = 
     const n = Math.max(1, Math.ceil(L / SAMPLE_M)), votes = new Map();
     for (let j = 0; j <= n; j++) {
       const t = j / n, p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-      const hit = index.nearest(p, dir, near, info => meets(info.fam ?? [levelFamily(info.cls)], fam));
+      const h = heightAt ? heightAt(p, cls[i]) : null;
+      const hit = index.nearest(p, dir, near, (info, u) => meets(info.fam ?? [levelFamily(info.cls)], fam)
+        && (h === null || !info.a || Math.abs(heightAt([info.a[0] + (info.b[0] - info.a[0]) * u, info.a[1] + (info.b[1] - info.a[1]) * u], info.cls) - h) <= heightTol));
       if (hit) { const k = keyOf(hit.s.info); votes.set(k, (votes.get(k) || 0) + 1); }
     }
     let key = null, count = 0;
@@ -226,15 +249,74 @@ export function cleanRuns(keys, xy, { minCovered, gapFill }) {
 
 /** Slice a trail [i0, i1] (segment range) into a piece keeping source points. */
 export function slicePiece(trail, i0, i1) {
-  return { lonlat: trail.lonlat.slice(i0, i1 + 1), xy: trail.xy.slice(i0, i1 + 1), cls: trail.cls.slice(i0, i1) };
+  const piece = { lonlat: trail.lonlat.slice(i0, i1 + 1), xy: trail.xy.slice(i0, i1 + 1), cls: trail.cls.slice(i0, i1) };
+  if (trail.source) piece.source = trail.source;
+  return piece;
 }
 
-/** Pass A: one centreline per corridor for one line. */
-export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIECE_M } = {}) {
-  const trails = branches.map(b => {
+/**
+ * s30:R fix round 2: the DLR's RAISED track as the shared profile maps it
+ * (src/dlr-profile-data.json, the OSM ways every DLR consumer is built on), as
+ * source-format trails: elevated and embankment edges chained through the
+ * nodes where exactly two of them meet, the class from the edge kind.
+ * collapseLine takes them AFTER the v2 trails, so they only add the decks v2
+ * lacks at that level and height: the Tower Gateway viaduct and the Stratford
+ * approach from Pudding Mill Lane. At-grade track is not taken: where v2 and
+ * the profile disagree about a tunnel (the Beckton branch), v2 decides, as it
+ * does for every other line.
+ */
+export const PROFILE_CLASS = { elevated: 'viaduct', embankment: 'embankment' };
+export function profileTrails(profileData) {
+  const open = profileData.edges.filter(e => PROFILE_CLASS[e.kind]);
+  const adj = new Map();
+  open.forEach((e, k) => { for (const n of [e.a, e.b]) { if (!adj.has(n)) adj.set(n, []); adj.get(n).push(k); } });
+  const used = new Uint8Array(open.length), trails = [];
+  // From `node`, leaving along edge `k`, through degree-2 nodes: [nodes..., classes...].
+  const extend = (node, k) => {
+    const nodes = [], cls = [];
+    while (true) {
+      used[k] = 1; const e = open[k], next = e.a === node ? e.b : e.a;
+      nodes.push(next); cls.push(PROFILE_CLASS[e.kind]);
+      const out = adj.get(next);
+      if (out.length !== 2) break;
+      const k2 = out[0] === k ? out[1] : out[0];
+      if (used[k2]) break;
+      node = next; k = k2;
+    }
+    return { nodes, cls };
+  };
+  for (let k = 0; k < open.length; k++) {
+    if (used[k]) continue;
+    const e = open[k];
+    const fwd = extend(e.a, k);
+    // Back from e.a, if it is a pass-through node.
+    const outA = adj.get(e.a), kb = outA.length === 2 ? (outA[0] === k ? outA[1] : outA[0]) : -1;
+    const back = kb >= 0 && !used[kb] ? extend(e.a, kb) : { nodes: [], cls: [] };
+    const nodes = [...back.nodes.reverse(), e.a, ...fwd.nodes], cls = [...back.cls.reverse(), ...fwd.cls];
+    const points = nodes.map(n => [profileData.nodes[n].lon, profileData.nodes[n].lat]);
+    trails.push({ points, segments: encodeSegments(cls), source: 'dlr-profile' });
+  }
+  return trails;
+}
+
+/**
+ * Pass A: one centreline per corridor for one line.
+ *
+ * s30:R fix round 2, the DLR (`heightAt(xy, cls)`, the deck a point is drawn
+ * on): after that pass, unchanged, a second pass only ADDS. Every trail (the
+ * source's, then the `supplement`, the profile's raised track) is compared
+ * with everything kept, in plan AND deck: a stretch beside kept track in plan
+ * but on a deck more than DLR_TWIN_DECK_TOL_M away is a structure (a flyover,
+ * a ramp beside a viaduct), added from `minDeckPiece`; a supplement stretch
+ * with no kept track beside it at all is added from `minPiece`. Nothing the
+ * first pass kept is dropped or moved, so the corridors drawn before stay.
+ */
+export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIECE_M, heightAt = null, supplement = [], minDeckPiece = DLR_MIN_DECK_PIECE_M } = {}) {
+  const prep = list => list.map(b => {
     const lonlat = b.points, xy = lonlat.map(toBng);
-    return { lonlat, xy, cls: segmentClasses(lonlat.length, b.segments), len: lengthOf(xy) };
+    return { lonlat, xy, cls: segmentClasses(lonlat.length, b.segments), len: lengthOf(xy), ...(b.source ? { source: b.source } : {}) };
   }).filter(t => t.xy.length >= 2).sort((a, b) => b.len - a.len);
+  const trails = prep(branches);
   const index = new SegmentIndex(), pieces = [];
   let droppedM = 0;
   for (const trail of trails) {
@@ -247,7 +329,34 @@ export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIEC
       index.addPolyline(piece.xy, i => ({ cls: piece.cls[i] }));
     }
   }
-  return { pieces, droppedM, sourceM: trails.reduce((s, t) => s + t.len, 0) };
+  const sourceM = trails.reduce((s, t) => s + t.len, 0);
+  if (!heightAt) return { pieces, droppedM, sourceM };
+
+  // Pass A2 (the DLR): decks.
+  const decks = new SegmentIndex(), segLen = (xy, i) => Math.hypot(xy[i + 1][0] - xy[i][0], xy[i + 1][1] - xy[i][1]);
+  const index2 = piece => decks.addPolyline(piece.xy, i => ({ cls: piece.cls[i], a: piece.xy[i], b: piece.xy[i + 1] }));
+  pieces.forEach(index2);
+  let deckSeparatedM = 0, fromSupplementM = 0;
+  for (const trail of [...trails, ...prep(supplement)]) {
+    const atDeck = coverage(trail.xy, trail.cls, decks, near, () => 'self', undefined, { heightAt });
+    const inPlan = coverage(trail.xy, trail.cls, decks, near, () => 'self');
+    const apart = atDeck.map((k, i) => k === null && inPlan[i] !== null);
+    // The source's own trails add deck-separated stretches only (their other
+    // uncovered stretches were remnants, decided above); a supplement trail
+    // adds any stretch no kept track covers at its deck.
+    const add = trail.source ? atDeck.map(k => k === null) : apart;
+    for (const run of runsOf(add.map(a => (a ? null : 'kept')), trail.xy)) {
+      if (run.key !== null) continue;
+      let apartM = 0;
+      for (let i = run.i0; i < run.i1; i++) if (apart[i]) apartM += segLen(trail.xy, i);
+      if (apartM < minDeckPiece && !(trail.source && run.len >= minPiece)) continue;
+      const piece = slicePiece(trail, run.i0, run.i1);
+      pieces.push(piece);
+      index2(piece);
+      if (trail.source) fromSupplementM += run.len; else deckSeparatedM += run.len;
+    }
+  }
+  return { pieces, droppedM, sourceM, deckSeparatedM, fromSupplementM };
 }
 
 /**
@@ -330,18 +439,36 @@ export function findPortals(lineId, pieces, stations) {
 }
 
 /**
+ * Per segment: does any 10 m sample of it stand on a deck higher than `maxM`
+ * (`heightAt`, the DLR's profile deck)? Such a segment is never shared.
+ */
+export function raisedSegments(xy, cls, heightAt, maxM = DLR_SHARE_MAX_DECK_M) {
+  return cls.map((c, i) => {
+    if (c === 'tunnel') return false;
+    const a = xy[i], b = xy[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / SAMPLE_M));
+    for (let j = 0; j <= n; j++) if (heightAt([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n], c) > maxM) return true;
+    return false;
+  });
+}
+
+/**
  * Pass B: shared track. `owners` is a SegmentIndex of already-drawn corridors
  * whose info carries {key, cls, owner, piece, seg}; returns, for one line's
  * pieces, the parts it must draw itself (new owners) and the parts it shares.
+ * With `heightAt` (the DLR, fix round 2), a segment raised on a deck above
+ * DLR_SHARE_MAX_DECK_M is its own, whatever the source class says (the
+ * short-bridge rule and the gap fill included): the DLR draws it at its deck.
  */
-export function splitShared(lineId, pieces, owners, { near = SHARED_NEAR_M, minShared = MIN_SHARED_M, gapFill = GAP_FILL_M, minPiece = MIN_PIECE_M } = {}) {
+export function splitShared(lineId, pieces, owners, { near = SHARED_NEAR_M, minShared = MIN_SHARED_M, gapFill = GAP_FILL_M, minPiece = MIN_PIECE_M, heightAt = null } = {}) {
   const own = [], shared = [];
   for (const piece of pieces) {
     // Per segment, the owner segment hit most often (by key = owner piece).
     // Tunnels are never shared: nothing below ground is drawn by the surface
     // railway, and each line keeps its whole bored route for later consumers.
-    const raw = coverage(piece.xy, piece.cls, owners, near, info => info.key, effectiveFamilies(piece.xy, piece.cls)).map((k, i) => piece.cls[i] === 'tunnel' ? null : k);
-    const keys = cleanRuns(raw, piece.xy, { minCovered: minShared, gapFill });
+    const raised = heightAt ? raisedSegments(piece.xy, piece.cls, heightAt) : piece.cls.map(() => false);
+    const fams = effectiveFamilies(piece.xy, piece.cls).map((f, i) => raised[i] ? [] : f);
+    const raw = coverage(piece.xy, piece.cls, owners, near, info => info.key, fams).map((k, i) => piece.cls[i] === 'tunnel' ? null : k);
+    const keys = cleanRuns(raw, piece.xy, { minCovered: minShared, gapFill }).map((k, i) => raised[i] ? null : k);
     for (const run of runsOf(keys, piece.xy)) {
       if (run.key === null) {
         own.push(slicePiece(piece, run.i0, run.i1));
@@ -423,17 +550,34 @@ export function inferBandsFromStops(line, ownerPieces, { near = 150, minStops = 
   return out;
 }
 
+/**
+ * s30:R fix round 2: the deck (true metres, 0 at grade) the surface railway
+ * draws a DLR source point on, read from the shared profile exactly as
+ * src/tube-surface-rail.js reads it (sampleForSurfaceRail); where no profiled
+ * track is within reach, the class estimate the renderer then draws.
+ */
+export function dlrHeightAt(profile = createDlrProfile({ project: (lat, lon) => { const [e, n] = proj4('EPSG:4326', 'EPSG:27700', [lon, lat]); return { x: e - BNG_REF_E, z: -(n - BNG_REF_N) }; }, sampleSurfaceY: () => 0 })) {
+  const ESTIMATE = { viaduct: 8, embankment: 3 };
+  return ([e, n], cls) => {
+    if (cls === 'tunnel') return 0;
+    const s = sampleForSurfaceRail(profile, { x: e - BNG_REF_E, z: -(n - BNG_REF_N), cls, structureScale: 1 });
+    return s ? deckOfSample(s) : (ESTIMATE[cls] ?? 0);
+  };
+}
+
 export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json') } = {}) {
   const src = JSON.parse(await readFile(source, 'utf8'));
   const og = JSON.parse(await readFile(overgroundPath, 'utf8'));
   const report = [];
+  const dlrHeight = dlrHeightAt();
+  const dlrProfileData = JSON.parse(await readFile(path.join(ROOT, 'src/dlr-profile-data.json'), 'utf8'));
 
   // Pass A: collapse each line.
   const lines = [];
   for (const L of src.lines) {
     if (EXCLUDED.has(L.id)) { report.push(`${L.id}: excluded (D-041 item 1, main-line wave)`); continue; }
     const id = ID_MAP[L.id] || L.id;
-    const { pieces, droppedM, sourceM } = collapseLine(L.branches);
+    const { pieces, droppedM, sourceM, deckSeparatedM } = collapseLine(L.branches, id === 'dlr' ? { heightAt: dlrHeight, supplement: profileTrails(dlrProfileData) } : {});
     const coveredWays = pieces.flatMap((piece, pi) => openCoveredWays(piece).map(c => ({ piece: pi, ...c })));
     const stations = (L.stations || []).filter(s => Number.isFinite(s.lon) && Number.isFinite(s.lat)).map(s => {
       const [e, n] = toBng([s.lon, s.lat]);
@@ -441,7 +585,7 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
       return { name: s.name, naptan: s.naptan, lon: s.lon, lat: s.lat, e, n,
         surface: !!near && near.cls !== 'tunnel', trackClass: near?.cls ?? null, railOffsetM: near ? Math.round(near.d) : null };
     });
-    lines.push({ id, sourceId: L.id, name: L.name, colour: L.colour, pieces, stations, droppedM, sourceM, coveredWays,
+    lines.push({ id, sourceId: L.id, name: L.name, colour: L.colour, pieces, stations, droppedM, sourceM, coveredWays, deckSeparatedM,
       sources: L.sources, confidence: L.confidence });
   }
   lines.sort((a, b) => LINE_ORDER.indexOf(a.id) - LINE_ORDER.indexOf(b.id));
@@ -456,7 +600,7 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
   });
   const sharedRanges = new Map(); // owner key -> [{lineId, j0, j1}]
   for (const line of lines) {
-    const { own, shared } = splitShared(line.id, line.pieces, owners);
+    const { own, shared } = splitShared(line.id, line.pieces, owners, { heightAt: line.id === 'dlr' ? dlrHeight : null });
     line.own = own;
     line.shared = shared;
     own.forEach((piece, pi) => {
@@ -493,6 +637,7 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     const branches = line.own.map((piece, pi) => {
       const ranges = sharedRanges.get(`tube:${line.id}:${pi}`) || [];
       const b = { points: piece.lonlat.map(([lon, lat]) => [+lon.toFixed(7), +lat.toFixed(7)]), segments: encodeSegments(piece.cls) };
+      if (piece.source) b.source = piece.source; // s30:R fix round 2: open DLR track v2 lacks, from the shared profile
       const bands = elementaryBands(line.id, ranges);
       if (bands.length) b.bands = bands;
       return b;
@@ -511,6 +656,7 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
         sourceTrailsM: Math.round(line.sourceM), collapsedM: Math.round(line.pieces.reduce((s, p) => s + lengthOf(p.xy), 0)),
         drawnM: Math.round(ownM), drawnOpenM: Math.round(openOwnM), sharedM: sharedWith,
         coveredWaysOpened: line.coveredWays.length, coveredWaysM: line.coveredWays.reduce((s, c) => s + c.lengthM, 0),
+        ...(line.id === 'dlr' ? { deckSeparatedM: Math.round(line.deckSeparatedM), fromProfileM: Math.round(line.own.filter(p => p.source).reduce((s, p) => s + lengthOf(p.xy), 0)) } : {}),
       },
       sources: line.sources, confidence: line.confidence,
     });
@@ -539,6 +685,7 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
         stations: 'surface: the line\'s own nearest track (within 300 m) is not tunnel. trackInferredFrom: the line\'s own OSM route lacks the branch; the stop sits on that line\'s track (see bands.inferred).',
         coveredWays: 'A tunnel run under 60 m between open track (a road overbridge or covered way) is drawn as open track at grade; summary.coveredWaysOpened counts them.',
         dlrHeights: 'DLR deck heights come from src/dlr-deck-heights.json via src/dlr-profile.js (EA LiDAR DSM 1m, flagged fallback); not repeated here.',
+        dlrLevels: `The DLR's level is also its profile deck: after the collapse, a stretch beside kept track but on a deck more than ${DLR_TWIN_DECK_TOL_M} m away is added from ${DLR_MIN_DECK_PIECE_M} m (summary.deckSeparatedM), and a stretch on a deck above ${DLR_SHARE_MAX_DECK_M} m is never shared (the DLR draws it at its own height). Branches with source "dlr-profile" are raised track the v2 source lacks, taken from src/dlr-profile-data.json (summary.fromProfileM).`,
       },
       lines: out.lines,
       overgroundShared,

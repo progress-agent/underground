@@ -235,7 +235,10 @@ export function offsetBand(path, i0, i1, offA, offB, yFn) {
   return { a, b };
 }
 
-export function buildCorridor(path, out, { skipTunnel = false } = {}) {
+// pierShortRuns (s30:R fix round 2; the DLR only, the Overground never passes
+// it): a viaduct run shorter than the pier spacing, which the spacing rule
+// leaves without a pier, stands on one at its middle sample.
+export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = false } = {}) {
   if (path.length < 2) return;
 
   // Split into runs of "kind" so tunnel sections drop the ballast bed and
@@ -292,17 +295,21 @@ export function buildCorridor(path, out, { skipTunnel = false } = {}) {
       out.cutShadow.push(stripGeometry(inner.right, outer.right));
     } else if (cls === 'viaduct') {
       // Piers every PIER_SPACING_M down to terrain.
-      let acc = 0;
-      for (let j = 1; j < run.length; j++) {
-        acc += Math.hypot(run[j].x - run[j - 1].x, run[j].z - run[j - 1].z);
-        if (acc < PIER_SPACING_M) continue;
-        acc = 0;
-        const p = run[j];
+      let acc = 0, piers = 0;
+      const pierAt = (p) => {
         const h = Math.max(2, p.y - p.terrainY);
         const pier = new THREE.BoxGeometry(5, h, 5);
         pier.translate(p.x, p.terrainY + h / 2, p.z);
         out.masonry.push(pier);
+        piers++;
+      };
+      for (let j = 1; j < run.length; j++) {
+        acc += Math.hypot(run[j].x - run[j - 1].x, run[j].z - run[j - 1].z);
+        if (acc < PIER_SPACING_M) continue;
+        acc = 0;
+        pierAt(run[j]);
       }
+      if (pierShortRuns && !piers && run.length >= 3) pierAt(run[Math.floor(run.length / 2)]);
     }
   }
 }

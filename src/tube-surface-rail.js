@@ -23,9 +23,15 @@
 //     untouched; its bands are this module's meshes;
 //   * the DLR's height comes from dlr-profile.js, which now carries the deck
 //     measured from the Environment Agency LiDAR (src/dlr-deck-heights.json),
-//     so the line, trains, markers, shafts, hover and this railway agree. Where
-//     the profile and this railway differ, by design: a cutting or a portal
-//     approach the profile sinks below ground is drawn at grade here (D-024).
+//     so the line, trains, markers, shafts and this railway stand on the same
+//     decks. Where this railway draws something else, by design: a cutting or
+//     a portal approach the profile sinks below ground is drawn at grade here
+//     (D-024), and the DLR's at-grade track shared with the Jubilee or the
+//     Mildmay is drawn at the owner's height. The hover (describe) reads the
+//     geometry under the pointer and says so wherever the two differ;
+//   * fix round 2: the DLR's raised track is never shared (the data builder
+//     reads its level from the profile's decks), and a flyover beside a lower
+//     viaduct is drawn, not collapsed into it as a twin.
 //   * surface station markers are `surfaceOnly` (drawn from above ground);
 //   * no per-instance colour anywhere (D-015): each line has its own materials.
 //
@@ -44,6 +50,7 @@ import {
   llToScene, branchClasses, createRailMorph,
 } from './surface-rail.js';
 import { createStationMarkers } from './stations.js';
+import { sampleForSurfaceRail, SURFACE_RAIL_DLR_MATCH_M } from './dlr-profile.js';
 
 const VE = VERTICAL_EXAGGERATION;
 export const SURFACE_RAIL_PREFIX = 'surface-rail-';
@@ -58,14 +65,32 @@ const DRESSING_PARTS = ['ballast', 'masonry', 'earth', 'cutShadow'];
 // ballast's; the Overground's four materials differ by at most 0.1 in each.
 const DRESSING_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.9, metalness: 0.05, fog: true, side: THREE.DoubleSide });
 
-// DLR: the v2 class of a surface-rail sample -> the profile track kinds that
-// may carry it (nearest first), and the profile kind -> the archetype drawn.
-const DLR_KINDS = {
-  viaduct: ['elevated'], embankment: ['embankment', 'surface', 'elevated'], surface: ['surface', 'embankment', 'cutting'],
-  cutting: ['cutting', 'surface'], tunnel: ['tunnel', 'cutting'],
-};
+// DLR: the profile kind -> the archetype drawn. Which profile track a sample
+// of the source is laid on (by its v2 class) is sampleForSurfaceRail in
+// dlr-profile.js, shared with the data builder.
 const PROFILE_CLASS = { elevated: 'viaduct', embankment: 'embankment', surface: 'surface', cutting: 'cutting', tunnel: 'tunnel' };
-export const DLR_MATCH_M = 40;
+export const DLR_MATCH_M = SURFACE_RAIL_DLR_MATCH_M;
+const ESTIMATE_BASIS = 'Illustrative class estimate; no profiled DLR track within 40 m';
+
+/** Where a DLR sample of v2 class `v2` is drawn at (x, z): the profile point, the archetype, the rail-head y. */
+function dlrPointAt(x, z, terrainY, v2, dlrProfile, structureScale) {
+  const s = sampleForSurfaceRail(dlrProfile, { x, z, cls: v2, structureScale });
+  let cls, y, deck;
+  if (s) {
+    cls = PROFILE_CLASS[s._dlrProfile.classification] ?? v2;
+    y = s.y;
+    deck = { source: s._dlrProfile.deckSource, surveyed: s._dlrProfile.surveyed, basis: s._dlrProfile.heightBasis };
+  } else {
+    // Off the profile's mapped track (rare: two OSM vintages). The class
+    // estimate, flagged, exactly as the Overground would draw it.
+    cls = v2;
+    y = terrainY + (BASE_LIFT + Math.max(0, CLASS_LIFT_M[v2]) * VE) * structureScale;
+    deck = { source: cls === 'viaduct' || cls === 'embankment' ? 'fallback' : null, surveyed: false, basis: ESTIMATE_BASIS, unprofiled: true };
+  }
+  // D-024: only a tunnel may sit below ground.
+  if (cls !== 'tunnel') y = Math.max(y, terrainY + BASE_LIFT * structureScale);
+  return { s, cls, y, deck };
+}
 
 /** Surface-rail path for the DLR, its height taken from the shared DLR profile. */
 export function buildDlrPath(branch, getY, dlrProfile, structureScale) {
@@ -77,26 +102,24 @@ export function buildDlrPath(branch, getY, dlrProfile, structureScale) {
       const t = j / steps, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
       const terrainY = getY({ x, z }); if (!Number.isFinite(terrainY)) continue;
       const v2 = CLASS_LIFT_M[classes[i]] === undefined ? 'surface' : classes[i];
-      const s = dlrProfile.sample({ x, z, structureScale, kinds: DLR_KINDS[v2], maxDistance: DLR_MATCH_M })
-        ?? dlrProfile.sample({ x, z, structureScale, maxDistance: DLR_MATCH_M });
-      let cls, y, deck;
-      if (s) {
-        cls = PROFILE_CLASS[s._dlrProfile.classification] ?? v2;
-        y = s.y;
-        deck = { source: s._dlrProfile.deckSource, surveyed: s._dlrProfile.surveyed, basis: s._dlrProfile.heightBasis };
-      } else {
-        // Off the profile's mapped track (rare: two OSM vintages). The class
-        // estimate, flagged, exactly as the Overground would draw it.
-        cls = v2;
-        y = terrainY + (BASE_LIFT + Math.max(0, CLASS_LIFT_M[v2]) * VE) * structureScale;
-        deck = { source: cls === 'viaduct' || cls === 'embankment' ? 'fallback' : null, surveyed: false, basis: 'Illustrative class estimate; no profiled DLR track within 40 m', unprofiled: true };
-      }
-      // D-024: only a tunnel may sit below ground.
-      if (cls !== 'tunnel') y = Math.max(y, terrainY + BASE_LIFT * structureScale);
-      path.push({ x, z, terrainY, cls, y, src: i, deck });
+      const { cls, y, deck } = dlrPointAt(x, z, terrainY, v2, dlrProfile, structureScale);
+      path.push({ x, z, terrainY, cls, y, src: i, deck, v2 });
     }
   }
   return path;
+}
+
+/** Nearest point of the polyline `samples[i0..i1]` to (x, z): its segment and parameter. */
+function nearestOn(samples, x, z, i0 = 0, i1 = samples.length - 1) {
+  let best = null;
+  for (let i = i0; i < i1; i++) {
+    const a = samples[i], b = samples[i + 1], vx = b.x - a.x, vz = b.z - a.z;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / (vx * vx + vz * vz || 1)));
+    const d = Math.hypot(x - a.x - vx * t, z - a.z - vz * t);
+    if (!best || d < best.d) best = { i, t, d };
+  }
+  if (!best && i0 === i1 && samples[i0]) best = { i: i0, t: 0, d: Math.hypot(x - samples[i0].x, z - samples[i0].z) };
+  return best;
 }
 
 /** Index range of path samples on owner source segments [j0, j1). */
@@ -128,7 +151,7 @@ export function bandGeometries(path, i0, i1, lines, yFn) {
   for (const [a, b] of openRuns(path, i0, i1)) {
     for (let k = 1; k < N; k++) {
       const { a: ea, b: eb } = offsetBand(path, a, b, STRIPE_HALF_W - k * w, STRIPE_HALF_W - (k + 1) * w, yFn);
-      out.push({ lineId: lines[k], geometry: stripGeometry(ea, eb), samples: path.slice(a, b + 1) });
+      out.push({ lineId: lines[k], geometry: stripGeometry(ea, eb), samples: path.slice(a, b + 1), lines });
     }
   }
   return out;
@@ -174,8 +197,12 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   let structureScale = heightScale;
 
   const gridFor = id => { if (!grids.has(id)) grids.set(id, new SampleGrid()); return grids.get(id); };
-  const bandOut = new Map(); // lineId -> [{geometry}]
-  const pushBand = (lineId, g) => { if (!bandOut.has(lineId)) bandOut.set(lineId, []); bandOut.get(lineId).push(g); };
+  const bandOut = new Map(); // lineId -> [geometry]
+  const bandSrc = new Map(); // lineId -> [{samples, lines}] parallel to bandOut: what each band geometry was built on
+  const pushBand = (lineId, g, src) => {
+    if (!bandOut.has(lineId)) { bandOut.set(lineId, []); bandSrc.set(lineId, []); }
+    bandOut.get(lineId).push(g); bandSrc.get(lineId).push(src);
+  };
   const bandPaths = new Map(); // lineId -> [sample arrays] (canonical y) for station placement
 
   // ── Per line: owned corridors ──────────────────────────────────────────────
@@ -217,7 +244,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // The DLR owns nothing shared (it is last in the order), so every owner
     // path here is canonical and the band morphs with the generic morph.
     for (const g of bandGeometries(path, range[0], range[1], band.lines, p => p.y + STRIPE_LIFT + BAND_LIFT)) {
-      pushBand(g.lineId, g.geometry);
+      pushBand(g.lineId, g.geometry, { samples: g.samples, lines: g.lines, morphed: true });
       if (!bandPaths.has(g.lineId)) bandPaths.set(g.lineId, []);
       bandPaths.get(g.lineId).push(g.samples);
       for (const s of g.samples) gridFor(g.lineId).add(s.x, s.z, band.lines);
@@ -227,10 +254,12 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   }
 
   // ── Build meshes ─────────────────────────────────────────────────────────────
-  const addMerged = (info, geos, mat, part, { morphed = true, colours = null } = {}) => {
+  // `sources` (fix round 2), one per geometry: what it was built on. The mesh
+  // keeps, per merged piece, its first face and its source, so a hover hit's
+  // faceIndex names the path (or the shared-track span) under the pointer: at a
+  // flyover the upper and the lower track are different paths.
+  const addMerged = (info, geos, mat, part, { morphed = true, colours = null, sources = null } = {}) => {
     if (!geos.length) return null;
-    if (colours) geos = geos.map((g, k) => { const n = normaliseForMerge(g), c = colours[k], a = new Float32Array(n.attributes.position.count * 3);
-      for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); return n; });
     // The viaduct piers are indexed BoxGeometry with uv; the deck strips are
     // not. mergeGeometries refuses the mix and returns null, which silently
     // drops the whole masonry mesh (deck and piers): that is why the
@@ -238,28 +267,40 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // same way; left as it is, since the Overground must stay pixel-identical;
     // reported for a ruling). Here every piece is made position + normal,
     // non-indexed, so the Tube and DLR viaducts stand on their piers.
-    const merged = mergeGeometries(colours ? geos : geos.map(normaliseForMerge), false);
-    for (const g of geos) g.dispose();
+    const norm = geos.map(normaliseForMerge);
+    if (colours) norm.forEach((n, k) => { const c = colours[k], a = new Float32Array(n.attributes.position.count * 3);
+      for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); });
+    const firstFace = new Int32Array(norm.length);
+    for (let k = 1; k < norm.length; k++) firstFace[k] = firstFace[k - 1] + norm[k - 1].attributes.position.count / 3;
+    const merged = mergeGeometries(norm, false);
+    for (const g of norm) g.dispose();
     if (!merged) { console.warn(`surface rail: ${info.line.id} ${part} did not merge`); return null; }
     const mesh = new THREE.Mesh(merged, mat);
     mesh.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
     mesh.userData = { type: SURFACE_RAIL_TYPE, lineId: info.line.id, name: names.get(info.line.id), part };
+    if (sources) faceSources.set(mesh, { firstFace, sources });
     info.group.add(mesh);
     info.meshes.push(mesh);
     if (morphed) morph.add(mesh);
     return mesh;
   };
+  const faceSources = new WeakMap(); // mesh -> { firstFace, sources }
   const buildOwn = (info) => {
     const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
-    for (const path of info.paths) buildCorridor(path, out, { skipTunnel: true });
-    addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr });
+    const from = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] }; // the path each geometry came from
+    for (const path of info.paths) {
+      const before = Object.fromEntries(Object.keys(out).map(k => [k, out[k].length]));
+      buildCorridor(path, out, { skipTunnel: true, pierShortRuns: info.isDlr });
+      for (const k of Object.keys(out)) for (let j = before[k]; j < out[k].length; j++) from[k].push({ samples: path, own: true, morphed: !info.isDlr });
+    }
+    addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
     const geos = DRESSING_PARTS.flatMap(part => out[part]), colours = DRESSING_PARTS.flatMap(part => out[part].map(() => MATS[part].color));
-    addMerged(info, geos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours });
+    addMerged(info, geos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours, sources: DRESSING_PARTS.flatMap(part => from[part]) });
   };
   for (const info of lineInfo.values()) {
     await breathe();
     buildOwn(info);
-    addMerged(info, bandOut.get(info.line.id) || [], info.bandMat, 'band');
+    addMerged(info, bandOut.get(info.line.id) || [], info.bandMat, 'band', { sources: bandSrc.get(info.line.id) });
     // Hover grid: own track, lines on it where a band says so.
     const spans = bandSpans.get(info.line.id) || [];
     for (const path of info.paths) path.forEach((p, i) => {
@@ -334,19 +375,84 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     writeMarkers();
   }
 
+  // ── Hover: what is drawn under the pointer (fix round 2) ─────────────────────
+  // The verifier (30Sep26w): the DLR hover sampled the profile's nearest track
+  // in plan, so over a flyover it read the other deck, and over the DLR's band
+  // on the Jubilee it read the flyover above it. Now the hit's face names the
+  // piece it belongs to (faceSources), the point is read on that piece's own
+  // centreline, and the height printed as drawn is that geometry's.
+  /** The drawn piece under a hit: its source, segment, parameter, centreline point and current rail-head y. */
+  function locate(mesh, hit, faceIndex) {
+    const fs = faceSources.get(mesh); if (!fs || !hit) return null;
+    const at = (src, n) => {
+      const a = src.samples[n.i], b = src.samples[Math.min(n.i + 1, src.samples.length - 1)], t = n.t;
+      const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t, y = a.y + (b.y - a.y) * t;
+      // Canonical samples (Tube corridors, every band) are drawn through the
+      // morph, whose base is the terrain under the vertex (createRailMorph);
+      // the DLR's own paths are rebuilt at the current scale.
+      const base = src.morphed ? getY({ x, z }) : null;
+      return { src, i: n.i, t, x, z, yCur: src.morphed ? base + (y - base) * structureScale : y };
+    };
+    if (Number.isInteger(faceIndex) && faceIndex >= 0) {
+      let lo = 0, hi = fs.firstFace.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (fs.firstFace[mid] <= faceIndex) lo = mid; else hi = mid - 1; }
+      const src = fs.sources[lo], n = nearestOn(src.samples, hit.x, hit.z);
+      return n ? at(src, n) : null;
+    }
+    // No face (a caller with a point only): the nearest drawn piece in three dimensions.
+    let best = null;
+    const seen = new Set();
+    for (const src of fs.sources) {
+      if (seen.has(src.samples)) continue; seen.add(src.samples);
+      const n = nearestOn(src.samples, hit.x, hit.z); if (!n) continue;
+      const c = at(src, n), score = Number.isFinite(hit.y) ? Math.hypot(n.d, hit.y - c.yCur) : n.d;
+      if (!best || score < best.score) best = { score, c };
+    }
+    return best?.c ?? null;
+  }
+  /** The DLR as drawn at a located point: the profile's reading there, with `drawnM` the height drawn (true metres). */
+  function dlrDrawnAt(at) {
+    const ground = getY({ x: at.x, z: at.z });
+    const drawnM = (at.yCur - ground) / (VE * structureScale);
+    let info;
+    if (at.src.own) {
+      // The profile track this railway laid the point on (the same choice buildDlrPath made).
+      const a = at.src.samples[at.i], { s } = dlrPointAt(at.x, at.z, ground, a.v2 ?? 'surface', dlrProfile, structureScale);
+      info = s ? { ...s._dlrProfile } : {
+        classification: { viaduct: 'elevated', embankment: 'embankment', cutting: 'cutting' }[a.cls] ?? 'surface',
+        groundRelativeM: drawnM, deckM: a.cls === 'viaduct' || a.cls === 'embankment' ? CLASS_LIFT_M[a.cls] : null,
+        deckSource: a.cls === 'viaduct' || a.cls === 'embankment' ? 'fallback' : null, surveyed: false, heightBasis: ESTIMATE_BASIS,
+      };
+    } else {
+      // A band: the DLR's at-grade track on another line's corridor (a raised
+      // DLR stretch is never shared, scripts/prepare-tube-surface.mjs).
+      const s = dlrProfile.sample({ x: at.x, z: at.z, structureScale, kinds: ['surface', 'cutting', 'embankment'], maxDistance: DLR_MATCH_M });
+      info = s ? { ...s._dlrProfile } : { classification: 'surface', groundRelativeM: drawnM, deckM: null, surveyed: false };
+    }
+    info.drawnM = drawnM;
+    return { _dlrProfile: info, x: at.x, z: at.z, yDrawn: at.yCur };
+  }
+
   const api = {
     groups, stationLayers, data, names,
     /** Line ids sharing the track at a point of `lineId`'s surface railway (or of `overground:<id>`). */
     linesAt(lineId, x, z) { return gridFor(lineId).nearest(x, z)?.lines ?? [lineId]; },
-    /** Hover text parts for a surface-rail mesh hit. */
-    describe(mesh, hitPoint) {
-      const ud = mesh.userData, lines = hitPoint ? api.linesAt(ud.lineId, hitPoint.x, hitPoint.z) : [ud.lineId];
+    /**
+     * Hover text parts for a surface-rail mesh hit. With the hit's faceIndex,
+     * the lines and (for the DLR) the height are those of the piece of track
+     * the face was built from, not of whatever runs nearest in plan.
+     */
+    describe(mesh, hitPoint, faceIndex = null) {
+      const ud = mesh.userData, at = hitPoint ? locate(mesh, hitPoint, faceIndex) : null;
+      let lines;
+      if (at?.src.own) lines = (bandSpans.get(ud.lineId) || []).find(s => s.path === at.src.samples && at.i >= s.i0 && at.i < s.i1)?.lines ?? [ud.lineId];
+      else if (at) lines = at.src.lines;
+      else lines = hitPoint ? api.linesAt(ud.lineId, hitPoint.x, hitPoint.z) : [ud.lineId];
       const ordered = [ud.lineId, ...lines.filter(l => l !== ud.lineId)];
       const shared = ordered.length > 1, withOverground = ordered.some(l => overgroundIds.has(l));
-      let dlrPoint = null;
-      if (ud.lineId === 'dlr' && hitPoint && dlrProfile) dlrPoint = dlrProfile.sample({ x: hitPoint.x, z: hitPoint.z, structureScale, maxDistance: DLR_MATCH_M });
+      const dlrPoint = ud.lineId === 'dlr' && at && dlrProfile ? dlrDrawnAt(at) : null;
       return {
-        lines: ordered, title: ordered.map(l => names.get(l) ?? l).join(' · '), dlrPoint,
+        lines: ordered, title: ordered.map(l => names.get(l) ?? l).join(' · '), dlrPoint, shared,
         subtitle: shared ? `Shared track · ${withOverground ? 'London Underground and London Overground' : 'London Underground'}`
           : ud.lineId === 'dlr' ? 'Docklands Light Railway' : 'London Underground · surface railway',
       };

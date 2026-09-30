@@ -24,6 +24,10 @@ export const POSES = {
   'R5-bakerloo-lioness': { cam: [-12871.5, 441, -6798.9], target: [-12639.2, 250, -6515] },
   'R5b-bakerloo-lioness-close': { cam: [-12770.2, 314.9, -6721], target: [-12672.7, 234.9, -6598.5] },
   'R6-docklands-overview': { cam: [6385, 3303, -1137.6], target: [8185, 17.9, 162.4] },
+  // Fix round 2: DLR decks the round-1 data drew nowhere (see docs/tube-surface-rail.md, transform 5).
+  'R8-dlr-canning-town-flyover': { cam: [9590, 230, -790], target: [9414, 45, -965] },
+  'R9-dlr-tower-gateway': { cam: [3930, 260, -300], target: [3790, 150, -462] },
+  'R10-dlr-poplar-flyover': { cam: [7600, 200, -80], target: [7440, 80, -235] },
   'OG1-highbury': { cam: [1282.1, 668.1, -4010.2], target: [1729.1, 182.9, -4416.5] },
   'OG2-surrey-quays': { cam: [6000.3, 472.5, 1609], target: [5507.6, 43.8, 1259.4] },
   'OG3-kew-shared': { cam: [-10507.9, 469.7, 2468.7], target: [-10581.6, 26, 3068.4] },

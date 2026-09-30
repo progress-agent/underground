@@ -19,6 +19,16 @@
 // is built on. The second form holds a lane pose and a fixed pointer instead
 // (R7b: the pointer on the West India Quay deck in pose R4, where the drawn
 // deck departs from the measured one) and writes <tag>-R7b-dlr-hover-*.
+//
+//   node scripts/capture-dlr-hover.mjs <origin> <outDir> <tag> --at <x,z>[;<x,z>...] [--masters 1.1]
+//
+// Fix round 2 (R11): the verifier's real-pointer positions (scene x, z). The
+// camera stands 60 m east, 80 m south and 120 m above the point, the pointer
+// on the top of the surface railway there; writes <tag>-R11-dlr-hover-<x>_<z>-m<Master>.png
+// and <tag>-R11-dlr-hover.json: the tooltip, and what the pointer's ray meets
+// first on the surface railway (line, part, and its height above the terrain
+// under the hit, in true metres; the stripe stands 0.16 m above its rail head
+// on the DLR's own track, a band 0.24 m).
 import { chromium } from '@playwright/test';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { POSES } from './capture-surface-rail.mjs';
@@ -63,6 +73,39 @@ async function hover(x, y) {
   await page.mouse.move(x + 40, y + 40, { steps: 3 }); await page.waitForTimeout(100);
   await page.mouse.move(x, y, { steps: 3 }); await page.waitForTimeout(400);
   return page.evaluate(() => { const t = document.getElementById('hoverTip'); return t && t.style.display !== 'none' ? t.textContent : ''; });
+}
+
+const spots = arg('--at', null)?.split(';').map(v => v.split(',').map(Number));
+if (spots) {
+  const frames = [];
+  for (const master of masters) for (const [x, z] of spots) {
+    const aimAt = await page.evaluate(async ({ x, z, master }) => {
+      const u = window.__ug, T = window.__ugTHREE;
+      const el = document.getElementById('masterHeight'); el.value = master; el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush();
+      const t = u.getStructuralSurfaceY({ x, z });
+      u.camera.position.set(x + 60, t + 120 * 5, z + 80); u.controls.target.set(x, t, z); u.controls.update();
+      await new Promise(r => setTimeout(r, 2500));
+      const rail = []; for (const g of u.surfaceRail.groups.values()) for (const m of g.children) if (m.isMesh) rail.push(m);
+      const ray = new T.Raycaster(); ray.set(new T.Vector3(x, 1e5, z), new T.Vector3(0, -1, 0));
+      const h = ray.intersectObjects(rail, false)[0], v = h.point.clone().project(u.camera);
+      return { px: (v.x + 1) / 2 * innerWidth, py: (1 - v.y) / 2 * innerHeight };
+    }, { x, z, master });
+    const text = await hover(aimAt.px, aimAt.py);
+    const under = await page.evaluate(([px, py]) => {
+      const u = window.__ug, T = window.__ugTHREE, ray = new T.Raycaster(), ss = u.getBuildingHeightScale();
+      ray.setFromCamera(new T.Vector2(px / innerWidth * 2 - 1, -(py / innerHeight) * 2 + 1), u.camera);
+      const rail = []; for (const g of u.surfaceRail.groups.values()) for (const m of g.children) if (m.isMesh) rail.push(m);
+      const h = ray.intersectObjects(rail, false)[0];
+      return h ? { line: h.object.userData.lineId, part: h.object.userData.part, heightM: +((h.point.y - u.getStructuralSurfaceY({ x: h.point.x, z: h.point.z })) / 5 / ss).toFixed(2) } : null;
+    }, [aimAt.px, aimAt.py]);
+    const file = `${tag}-R11-dlr-hover-${x}_${z}-m${master}.png`;
+    await page.screenshot({ path: `${outDir}/${file}` });
+    frames.push({ master: +master, at: [x, z], file, pointer: [Math.round(aimAt.px), Math.round(aimAt.py)], tooltip: text, under });
+    console.log(file, JSON.stringify(text), JSON.stringify(under));
+  }
+  await writeFile(`${outDir}/${tag}-R11-dlr-hover.json`, JSON.stringify({ frames }, null, 2) + '\n');
+  await browser.close();
+  process.exit(0);
 }
 
 const fixedPose = arg('--pose', null), pointer = arg('--pointer', null)?.split(',').map(Number);

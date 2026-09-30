@@ -37,18 +37,49 @@ export const DECK_BASIS = {
  * its basis. Where the point stands on a deck, the height IS that deck (LiDAR,
  * or the class estimate), whatever the Master; where the drawn deck departs
  * from it at the printed precision, the text says how high it is drawn there.
- * Without a deck (surface, cutting, tunnel), the height drawn.
+ * Without a deck (surface, cutting, tunnel), the profile's own height.
+ *
+ * s30:R fix round 2: "drawn" is the profile's height (groundRelativeM: what
+ * the line, trains, markers and shafts are built on) unless the caller gives
+ * `drawnM`, the height of the geometry actually under the pointer. The surface
+ * railway does (src/tube-surface-rail.js describe()): its cuttings and portal
+ * approaches are drawn at grade (D-024), and shared track at the owner's
+ * height, so the hover states the drawn height wherever it departs.
  */
 export function dlrHeightLabel(profile) {
-  const drawn = profile?.groundRelativeM;
-  if (!Number.isFinite(drawn)) return null;
-  const m = Number.isFinite(profile.deckM) ? profile.deckM : drawn;
+  const modelled = profile?.groundRelativeM;
+  if (!Number.isFinite(modelled)) return null;
+  const m = Number.isFinite(profile.deckM) ? profile.deckM : modelled;
+  const drawn = Number.isFinite(profile.drawnM) ? profile.drawnM : modelled;
   const fmt = v => `~${Math.abs(v).toFixed(1)}m`;
   const side = v => (v < 0 ? 'below' : 'above');
   const basis = profile.surveyed ? 'LiDAR' : 'modelled';
-  const same = fmt(m) === fmt(drawn) && side(m) === side(drawn);
+  // Fix round 2: a deck drawn at its height can round either side of a
+  // printed 0.05 (7.35 against 7.3500000001); a note needs a real departure.
+  const same = (fmt(m) === fmt(drawn) && side(m) === side(drawn)) || Math.abs(m - drawn) < 0.05;
   return `${fmt(m)} ${side(m)} ground (${basis}${same ? '' : `; drawn ${fmt(drawn)} ${side(drawn)} the terrain here`})`;
 }
+/**
+ * s30:R fix round 2: which profile track the surface railway (the open-air
+ * DLR, src/tube-surface-rail.js) lays a point of its source on, shared with the
+ * data builder (scripts/prepare-tube-surface.mjs) so both read the same deck.
+ * The source's class picks the profile kinds that may carry it, nearest first
+ * (a viaduct sample never reads the surface track beneath it); failing those,
+ * any track within SURFACE_RAIL_DLR_MATCH_M.
+ */
+export const SURFACE_RAIL_DLR_KINDS = {
+  viaduct: ['elevated'], embankment: ['embankment', 'surface', 'elevated'], surface: ['surface', 'embankment', 'cutting'],
+  cutting: ['cutting', 'surface'], tunnel: ['tunnel', 'cutting'],
+};
+export const SURFACE_RAIL_DLR_MATCH_M = 40;
+export function sampleForSurfaceRail(profile, { x, z, cls, structureScale }) {
+  const kinds = SURFACE_RAIL_DLR_KINDS[cls] ?? SURFACE_RAIL_DLR_KINDS.surface;
+  return profile.sample({ x, z, structureScale, kinds, maxDistance: SURFACE_RAIL_DLR_MATCH_M })
+    ?? profile.sample({ x, z, structureScale, maxDistance: SURFACE_RAIL_DLR_MATCH_M });
+}
+/** The deck a profile point stands on, in true metres; 0 where it is not raised on one. */
+export function deckOfSample(p) { const d = p?._dlrProfile; return d?.deckSource && Number.isFinite(d.deckM) ? d.deckM : 0; }
+
 export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=5, data=bundled, deckHeights=bundledDeck}={}) {
   if(typeof project!=='function'||typeof sampleSurfaceY!=='function')throw new TypeError('DLR requires projection and canonical terrain sampler');
   if(data?.version!==1||!data.nodes?.length||!data.edges?.length||!data.stations||!data.links)throw new Error('Missing verified DLR profile data');
@@ -128,9 +159,12 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
   // s30:R: `kinds` limits the search to track of those classes and
   // `maxDistance` its reach, so a surface-railway point on the lower level of a
   // flyover samples its own deck, not the one above it.
-  function sample({x,z,structureScale=currentScale,nodeIndex,kinds=null,maxDistance=200}={}){if(structureScale!==currentScale)refresh({structureScale});if(Number.isInteger(nodeIndex)&&graph[nodeIndex])return point(nodeIndex);
-    const accept=kinds?new Set(kinds):null;
-    let best=null;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(const s of buckets.get(`${Math.floor(x/100)+dx},${Math.floor(z/100)+dz}`)||[]){if(accept&&!accept.has(s.kind))continue;const a=graph[s.a],b=graph[s.b],vx=b.x-a.x,vz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*vx+(z-a.z)*vz)/(vx*vx+vz*vz||1))),distance=Math.hypot(x-a.x-vx*t,z-a.z-vz*t);if(!best||distance<best.distance)best={s,a,b,t,distance};}
+  // s30:R fix round 2: `y` (a scene height, such as a hover hit on the drawn
+  // track) makes the search three-dimensional, so at a flyover the point is
+  // read on the deck it is on, not the nearest track in plan.
+  function sample({x,z,y:atY=null,structureScale=currentScale,nodeIndex,kinds=null,maxDistance=200}={}){if(structureScale!==currentScale)refresh({structureScale});if(Number.isInteger(nodeIndex)&&graph[nodeIndex])return point(nodeIndex);
+    const accept=kinds?new Set(kinds):null,in3d=Number.isFinite(atY);
+    let best=null;for(let dx=-2;dx<=2;dx++)for(let dz=-2;dz<=2;dz++)for(const s of buckets.get(`${Math.floor(x/100)+dx},${Math.floor(z/100)+dz}`)||[]){if(accept&&!accept.has(s.kind))continue;const a=graph[s.a],b=graph[s.b],vx=b.x-a.x,vz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*vx+(z-a.z)*vz)/(vx*vx+vz*vz||1))),distance=Math.hypot(x-a.x-vx*t,z-a.z-vz*t),score=in3d?Math.hypot(distance,a.y+(b.y-a.y)*t-atY):distance;if(!best||score<best.score)best={s,a,b,t,distance,score};}
     if(!best||best.distance>Math.min(200,maxDistance))return null;const {a,b,t,s}=best,y=a.y+(b.y-a.y)*t,ground=a.groundY+(b.groundY-a.groundY)*t,p=new THREE.Vector3(x,y,z);
     const near=t<.5?a:b,far=near===a?b:a,basis=(s.kind==='elevated'||s.kind==='embankment')?[near,far].find(n=>n.deckSource)??near:near;
     // s30:R fix round 1: only a raised segment stands on a deck (a surface
