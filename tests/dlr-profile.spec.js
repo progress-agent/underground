@@ -10,7 +10,11 @@ const id=s=>'940GZZDL'+s;
 test('mapped station platforms fix entrance-coordinate errors and preserve tunnels',()=>{
  const profile=createDlrProfile({project,sampleSurfaceY:()=>50});
  for(const scale of [.2,1]){
-  for(const suffix of ['EIN','BLA']){const p=profile.station({id:id(suffix),structureScale:scale});expect(p.y).toBeGreaterThan(50+4.5);expect(p._dlrProfile.classification).toBe('elevated');expect(p._dlrProfile.needsShaft).toBe(false);expect(p._depthM).toBeLessThan(0);expect(p._dlrProfile.surveyed).toBe(false);}
+  // Sprint 30Sep26w (D-041 technical ruling, Lane R): the elevated decks are
+  // now measured from the Environment Agency LiDAR (src/dlr-deck-heights.json)
+  // and East India and Blackwall are measured nodes, so they read as surveyed
+  // with that basis. Was surveyed:false when every viaduct was the illustrative 8 m.
+  for(const suffix of ['EIN','BLA']){const p=profile.station({id:id(suffix),structureScale:scale});expect(p.y).toBeGreaterThan(50+4.5);expect(p._dlrProfile.classification).toBe('elevated');expect(p._dlrProfile.needsShaft).toBe(false);expect(p._depthM).toBeLessThan(0);expect(p._dlrProfile.surveyed).toBe(true);expect(p._dlrProfile.deckSource).toBe('lidar');}
   for(const suffix of ['BNK','ISL','CUT','WLA']){const p=profile.station({id:id(suffix)});expect(p.y).toBeLessThan(50);expect(p._dlrProfile.needsShaft).toBe(true);}
   for(const suffix of ['GRE','DEV','BOW'])expect(profile.station({id:id(suffix)})._dlrProfile.classification).toBe('surface');
  }

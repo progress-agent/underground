@@ -116,6 +116,9 @@ import { getAirportDockBedY } from './airport-docks.js';
 // ── s24:R ──
 import { createEconomies, isShown } from './render-economies.js';
 import { createUndergroundCull, isAboveGroundView } from './underground-cull.js';
+// ── s30:R ──
+import { createTubeSurfaceRail, SURFACE_RAIL_TYPE } from './tube-surface-rail.js';
+// ── /s30:R ──
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
 import { setTrainEconomies, trainBatchStats } from './trains.js';
@@ -915,6 +918,36 @@ function syncMotorwayBridges() {
 let airportFingerprintPromise = null;
 let dlrProfile = null;
 const dlrStationPoints = [];
+// ── s30:R ── Open-air Tube and DLR drawn as surface railway (D-041 item 2).
+// Top-level groups `surface-rail-<line>` (never `line:`, so D-040's cull leaves
+// them drawn above ground), surfaceOnly station markers registered beside the
+// line layers as `surface:<line>`, and shared track drawn once with bands.
+let surfaceRail = null, surfaceRailStarting = false;
+function startSurfaceRail() {
+  if (surfaceRail || surfaceRailStarting || !terrain) return;
+  surfaceRailStarting = true;
+  // The DLR's surface deck is read from the shared profile: make sure it has
+  // sampled the terrain (snapAllTubesToTerrain may not have run yet).
+  if (dlrProfile?.terrainPending) dlrProfile.refresh({ structureScale: getBuildingHeightScale() });
+  createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ,
+    heightScale: getBuildingHeightScale(), overground: overgroundGroup, dlrProfile }).then(rail => {
+    surfaceRail = rail;
+    for (const [key, layers] of rail.stationLayers) {
+      layers.stationsLayer.mesh.visible = stationsVisible;
+      lineShaftLayers.set(key, layers);
+    }
+    dbg('Surface railway (Tube, DLR) added to scene');
+  }).catch(err => {
+    surfaceRailStarting = false;
+    console.warn('Could not create the surface railway:', err.message);
+  });
+}
+function surfaceRailTooltip(mesh, hitPoint) {
+  const d = surfaceRail.describe(mesh, hitPoint);
+  const sub = d.dlrPoint ? dlrLocationLabel(d.dlrPoint._dlrProfile) : d.subtitle;
+  return `<b>${d.title}</b><div class="sub">${sub}</div>`;
+}
+// ── /s30:R ──
 
 const sim = {
   trains: [],
@@ -1056,6 +1089,9 @@ function deleteUrlParam(key) {
     airportsGroup?.userData.setHeightScale(value);
     motorwayGroup?.userData.setHeightScale(value);
     if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
+    // ── s30:R ── after the DLR profile has refreshed at this scale
+    surfaceRail?.setHeightScale(value);
+    // ── /s30:R ──
     // ── s25:integrate ── Lane E x Lane S: the District rides the Fulham and Kew
     // railway-bridge decks, whose height is a structure (true size, so its
     // canonical height follows 1 / Master). Re-seat it on the morphed decks.
@@ -1322,8 +1358,14 @@ const thamesDataPromise = loadThamesData();
           initialiseOvergroundStations();
           dbg('Overground rail added to scene');
         }
+        // ── s30:R ── after the Overground: shared track lays bands on its corridors
+        startSurfaceRail();
+        // ── /s30:R ──
       }).catch(err => {
         console.warn('Could not create Overground rail:', err.message);
+        // ── s30:R ──
+        startSurfaceRail();
+        // ── /s30:R ──
       });
 
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
@@ -2102,6 +2144,9 @@ const lineRibbonsById = new Map();
 
 function setLineVisible(lineId, visible) {
   const g = lineGroups.get(lineId);
+  // ── s30:R ── the line's open-air railway and surface markers follow it
+  surfaceRail?.setLineVisible(lineId, visible);
+  // ── /s30:R ──
   if (!g) return;
   g.visible = visible;
 }
@@ -2264,7 +2309,7 @@ function dlrLocationLabel(profile) {
   const name=names[profile.classification]||'DLR';
   if(profile.classification==='portal')return name;
   const relative=profile.groundRelativeM;
-  return Number.isFinite(relative)?`${name} · ~${Math.abs(relative).toFixed(1)}m ${relative<0?'below':'above'} ground (modelled)`:name;
+  return Number.isFinite(relative)?`${name} · ~${Math.abs(relative).toFixed(1)}m ${relative<0?'below':'above'} ground (${profile.surveyed?'LiDAR':'modelled'})`:name; // s30:R: measured decks say so
 }
 
 function syncHeightExplanation() {
@@ -3169,6 +3214,9 @@ let _clearHoverForMotion = null;
     'tube-line': 3, 'overground-line': 3, 'motorway': 3,
     'canal': 3, 'reservoir': 3,
     'thames': 4, 'airport-dock': 4, 'chalk': 4,
+    // ── s30:R ──
+    [SURFACE_RAIL_TYPE]: 3,
+    // ── /s30:R ──
   };
 
   // Large-area surface types that would intercept every ray — exclude from pickables.
@@ -3217,6 +3265,9 @@ let _clearHoverForMotion = null;
     if (airportsGroup?.visible) pickables.push(...airportsGroup.userData.pickables);
     if (motorwayGroup?.visible) pickables.push(...motorwayGroup.userData.pickables);
     if (airportDockGroup?.visible) pickables.push(...airportDockGroup.userData.pickables);
+    // ── s30:R ──
+    if (surfaceRail) pickables.push(...surfaceRail.pickables());
+    // ── /s30:R ──
     return pickables;
   }
 
@@ -3311,6 +3362,9 @@ let _clearHoverForMotion = null;
       return `<b>${safeName}</b>${_renderInfraTable([['HEIGHT',info.heightM ? `${info.heightM}m` : null]])}`;
     }
     if(t === 'overground-line')return `<b>${overgroundGroup.userData.registry.get(ud.lineId).name} line</b><div class="sub">London Overground</div>`;
+    // ── s30:R ──
+    if (t === SURFACE_RAIL_TYPE && surfaceRail) return surfaceRailTooltip(mesh, hitPoint);
+    // ── /s30:R ──
     if(t === 'landmark') {
       const info=LANDMARK_INFO[ud.landmarkId];
       return `<b>${info.name}</b>${_renderInfraTable([['HEIGHT',info.height],[info.dateLabel || 'COMPLETED',info.date]])}`;
@@ -4231,6 +4285,9 @@ if (import.meta.env.DEV) {
     get thamesInteriorShell() { return thamesMesh?.userData?.interiorShell ?? null; },
     get thamesMesh() { return thamesMesh; },
     get overground() { return overgroundGroup; },
+    // ── s30:R ──
+    get surfaceRail() { return surfaceRail; },
+    // ── /s30:R ──
     water: getWaterTuningSurface(),
     get waterParams() { return getWaterTuningSurface().params; },
     setWaterParams: (next) => getWaterTuningSurface().setWaterParams(next),

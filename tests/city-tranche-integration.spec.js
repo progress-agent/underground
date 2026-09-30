@@ -160,13 +160,18 @@ test('integrated DLR keeps modelled platforms, genuine tunnels and train state a
     const classifications=stations.map(s=>s.dlrProfile.classification);
     const mesh=u.scene.children.flatMap(g=>g.children).find(m=>m.userData.type==='tube-line'&&m.userData.lineId==='dlr');
     const station=stations.find(s=>s.dlrProfile.classification==='elevated');
-    return {alignment,stopCounts,classifications,initial,after:branches.flatMap(b=>b._trains).map(t=>({id:t.uuid,t:t.userData.t})),hover:u.formatInfraTooltip(mesh,station.pos)};
+    const basis=u.dlrProfile.sample({x:station.pos.x,z:station.pos.z,structureScale:u.getBuildingHeightScale()})._dlrProfile.surveyed?'LiDAR':'modelled'; // s30:R
+    return {alignment,stopCounts,classifications,initial,after:branches.flatMap(b=>b._trains).map(t=>({id:t.uuid,t:t.userData.t})),hover:u.formatInfraTooltip(mesh,station.pos),basis};
   });
   expect(Math.max(...result.alignment)).toBeLessThan(1e-8);
   expect(result.classifications).toContain('elevated');expect(result.classifications).toContain('tunnel');
   expect(result.after).toEqual(result.initial);
   for(const [stops,trainStops]of result.stopCounts)expect(trainStops).toBe(stops);
-  expect(result.hover).toContain('above');expect(result.hover).toContain('modelled');expect(result.hover).not.toContain('18m below');
+  // Sprint 30Sep26w (D-041 technical ruling, Lane R): DLR decks are measured
+  // from the EA LiDAR where it resolves them; the hover says which basis
+  // ('LiDAR' measured, 'modelled' where the deck is interpolated or estimated),
+  // and it must be the basis of the deck under that point.
+  expect(result.hover).toContain('above');expect(result.hover).toContain(`(${result.basis})`);expect(result.hover).not.toContain('18m below');
 });
 
 test('integrated motorway replaces only overlapping bridges and respects pause and height semantics',async({page})=>{
