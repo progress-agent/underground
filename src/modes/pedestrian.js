@@ -1015,8 +1015,10 @@ export function createPedestrianMode(ctx) {
       jumpLatch = useLatch = false;
       // s30:P out of the bore (a transfer, the shaft, the street) a shake only dies away.
       if (phase !== 'tunnel' && shake > 0) ({ shake, passT } = stepShake({ shake, passT }, null, dt));
-      // s01:P every other line is mapped onto its drawn track lazily, within a budget a frame.
-      if (net) openAir.pump(net);
+      // s01:P every other line is mapped onto its drawn track lazily, within a budget a frame; not while
+      // the entry eases Master to real scale (the DLR's drawn deck follows Master, so its mapping would be
+      // rebuilt at every step of the ease: 146 ms of it, measured).
+      if (net && !ease.running) openAir.pump(net);
       if (phase === 'enter') updateEnter(dt);
       else if (phase === 'body') updateBody(dt, use, jump);
       else if (phase === 'shaft') updateShaft(dt);
@@ -1106,6 +1108,8 @@ export function createPedestrianMode(ctx) {
     },
     // ── s01:P ── test surface
     get openAir() { return openAir; },
+    /** Per line: paths, mapped, open metres, build ms, refused stretches and Lane T's refusal counts (the brief's report). */
+    openAirReport() { return openAir.debug(network()); },
     /** The point shown for a tunnel state (tests): { x, y, z } and the regime it is shown in. */
     presentAt(pos) { if (!net?.paths[pos.path]) return null; const reg = openAir.isOpen(net.paths[pos.path], pos.s) ? 'open' : 'bore';
       return { ...walkerPoint(pos, reg), regime: reg }; },

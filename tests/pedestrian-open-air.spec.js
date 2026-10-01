@@ -573,6 +573,73 @@ test('an open-air fork, taken each way by facing the branch', async () => {
   }
 });
 
+test('changes of line: between the open air and the bore a cut, never an ease through the ground; between two surface platforms an ease above it', async () => {
+  const r = await page.evaluate(async () => {
+    const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+    const frame = () => new Promise(res => requestAnimationFrame(res));
+    const net = m.rebuildNetwork(), oa = m.openAir;
+    for (const l of new Set(net.paths.map(p => p.lineId))) oa.ensureLine(net, l);
+    const open = (st) => oa.isOpen(net.paths[st.path], st.s);
+    const arriveAt = async (st) => {
+      const p = net.paths[st.path];
+      m.placeInTunnel({ path: st.path, s: st.s, dir: st.s < p.length - 1 ? 1 : -1 });
+      for (let i = 0; i < 3; i++) await frame();
+      m.press('use');
+      for (let i = 0; i < 30; i++) { await frame(); if (m.debug().card?.kind === 'arrival') break; }
+      return m.chooser.rows;
+    };
+    const out = { cuts: [], eases: [] };
+    for (const e of net.entrances) {
+      if (new Set(e.stops.map(s => s.lineId)).size < 2) continue;
+      const from = e.stops.find(open);
+      if (!from) continue;
+      const rows = await arriveAt(from);
+      const i = rows.findIndex(r => r.kind === 'change' && !open(r.stop));
+      const j = rows.findIndex(r => r.kind === 'change' && open(r.stop));
+      if (i >= 0 && out.cuts.length < 2) {
+        m.chooseRow(i); await frame();
+        const d = m.debug();
+        out.cuts.push({ name: e.name, phase: d.phase, regime: d.regime, cut: d.openAir.cut?.kind ?? null, interior: d.interior.visible });
+        continue;
+      }
+      if (j >= 0 && out.eases.length < 1) {
+        m.chooseRow(j);
+        const log = [];
+        for (let k = 0; k < 200; k++) { await frame(); const d = m.debug(), c = ug.camera.position; log.push({ phase: d.phase, regime: d.regime, y: c.y, g: ug.modes.ctx.getTerrainY(c.x, c.z), transferOpen: d.transfer?.open ?? null }); if (d.phase === 'tunnel' && k > 2) break; }
+        out.eases.push({ name: e.name, log });
+        continue;
+      }
+      m.chooser.close();
+      if (out.cuts.length >= 2 && out.eases.length >= 1) break;
+    }
+    return out;
+  });
+  expect(r.cuts.length, 'an interchange where one line is in the open and another in the bore').toBeGreaterThan(0);
+  for (const c of r.cuts) expect(c, c.name).toMatchObject({ phase: 'tunnel', regime: 'bore', cut: 'dip', interior: true });
+  expect(r.eases.length, 'an interchange with two surface platforms').toBeGreaterThan(0);
+  for (const e of r.eases) {
+    expect(e.log.some(f => f.phase === 'transfer' && f.transferOpen === true), e.name).toBe(true);
+    for (const f of e.log) expect(f.y, `${e.name}: the change stays above the ground`).toBeGreaterThanOrEqual(f.g + 1 * VE - 1e-6);
+    expect(e.log.at(-1)).toMatchObject({ phase: 'tunnel', regime: 'open' });
+  }
+});
+
+test('the mapping report: per line, built, timed, its refused open stretches listed', async () => {
+  // Every line is mapped lazily within a budget a frame once the walker is in the mode (the walker's own line
+  // synchronously): wait for the lazy pump to finish on its own.
+  await page.waitForFunction(() => Object.values(window.__ug.modes.registry.get('pedestrian').openAirReport().lines)
+    .every(v => !v.paths || v.mapped === v.paths), null, { timeout: 60000 });
+  const rep = await page.evaluate(() => window.__ug.modes.registry.get('pedestrian').openAirReport());
+  const lines = Object.entries(rep.lines).filter(([, v]) => v.paths);
+  expect(lines.length).toBeGreaterThanOrEqual(12);
+  for (const [lineId, v] of lines) {
+    expect(v.mapped, lineId).toBe(v.paths);
+    expect(Array.isArray(v.refused ?? []), lineId).toBe(true);
+  }
+  console.log('[open-air] mapping', JSON.stringify(Object.fromEntries(lines.map(([l, v]) => [l, { paths: v.paths, ms: v.ms, maxPathMs: v.maxPathMs,
+    openKm: +((v.openM || 0) / 1000).toFixed(1), refused: (v.refused || []).map(x => `${x.from.replace(/ (Underground|DLR) Station/, '')}-${x.to.replace(/ (Underground|DLR) Station/, '')}`) }]))));
+});
+
 test('surface stops are stops: every station of a line in the open is arrived at, and none beyond the edge', async () => {
   const s = await page.evaluate(() => {
     const m = window.__ug.modes.registry.get('pedestrian');
