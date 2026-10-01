@@ -19,20 +19,22 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 export const SHOTS = {
   // A Jubilee train standing at West Hampstead, drawn whole (387dff0: a stub of 1 to 3 cars on the undrawn tunnel piece).
-  'T1-west-hampstead-jubilee': { kind: 'dwell', line: 'jubilee', station: 'West Hampstead', dist: 230, up: 70, whole: true },
+  'T1-west-hampstead-jubilee': { kind: 'dwell', line: 'jubilee', station: 'West Hampstead', dist: 170, up: 170, whole: true },
   // A Metropolitan train standing at Watford, its front at the buffers.
   'T2-watford-metropolitan': { kind: 'dwell', line: 'metropolitan', station: 'Watford', dist: 230, up: 70, whole: true, terminus: true },
-  // Trains on the Hainault loop (Lane R's new track): one standing at Fairlop, and the loop from above Barkingside.
+  // Trains on the Hainault loop (Lane R's new track): standing at Fairlop, Newbury Park (out of the tunnel) and Chigwell.
   'T3-hainault-loop-fairlop-central': { kind: 'dwell', line: 'central', station: 'Fairlop', dist: 230, up: 70, whole: true },
-  'T3b-hainault-loop-central': { kind: 'cluster', line: 'central', station: 'Barkingside', radius: 1200 },
+  'T3b-hainault-loop-newbury-park-central': { kind: 'dwell', line: 'central', station: 'Newbury Park', dist: 230, up: 90, whole: true },
+  'T3c-hainault-loop-chigwell-central': { kind: 'dwell', line: 'central', station: 'Chigwell', dist: 230, up: 90, whole: true },
   // A Central train at West Acton (Lane R's new Ealing Broadway branch), beside the new footprints.
   'T4-west-acton-central': { kind: 'dwell', line: 'central', station: 'West Acton', dist: 230, up: 70, whole: true },
   // The termini fitted this sprint.
-  'T5-earls-court-district': { kind: 'dwell', line: 'district', station: "Earl's Court", dist: 260, up: 90, terminus: true },
+  'T5-earls-court-district': { kind: 'dwell', line: 'district', station: "Earl's Court", dist: 120, up: 230, terminus: true },
   // A District train from Upminster standing at Earl's Court, the end of its curve: its rear two cars inside the tunnel it came out of.
   'T5b-earls-court-arrival-district': { kind: 'dwell', line: 'district', station: "Earl's Court", dist: 120, up: 230, terminus: true, curve: 'district@2610' },
-  'T6-barking-hammersmith-city': { kind: 'dwell', line: 'hammersmith-city', station: 'Barking', dist: 230, up: 70, whole: true, terminus: true },
-  'T7-stratford-dlr': { kind: 'dwell', line: 'dlr', station: 'Stratford', dist: 260, up: 90, whole: true, terminus: true, curveNear: 200 },
+  'T6-barking-hammersmith-city': { kind: 'dwell', line: 'hammersmith-city', station: 'Barking', dist: 150, up: 170, whole: true, terminus: true },
+  // The Canning Town curve's trains at Stratford (387dff0 and Lane R's head: undrawn for the last 120 m and at the stop).
+  'T7-stratford-dlr': { kind: 'dwell', line: 'dlr', station: 'Stratford', dist: 220, up: 110, whole: true, terminus: true, curveNear: 200, curve: 'dlr@945,-98>859,-393#6:fwd' },
   'T8-theydon-bois-central': { kind: 'dwell', line: 'central', station: 'Theydon Bois', dist: 230, up: 70, whole: true },
 };
 
@@ -110,9 +112,9 @@ if (process.argv[1]?.endsWith('capture-s01-trains.mjs')) {
         simT = best.t; note = `${best.trs.length} whole ${shot.line} trains within ${shot.radius} m of ${shot.station}`;
         const mids = best.trs.map(tr => tr.cars[tr.cars.length >> 1].m), mx = mids.reduce((a, m) => a + m[12], 0) / mids.length, mz = mids.reduce((a, m) => a + m[14], 0) / mids.length;
         const ex = Math.max(...mids.map(m => m[12])) - Math.min(...mids.map(m => m[12])), ez = Math.max(...mids.map(m => m[14])) - Math.min(...mids.map(m => m[14]));
-        const ax = ez > ex ? 1 : 0, az = ez > ex ? 0 : 1, D = 0.9 * Math.max(ex, ez) + 350; // look across the trains' spread
+        const ax = ez > ex ? 1 : 0, az = ez > ex ? 0 : 1, D = 0.6 * Math.max(ex, ez) + 300; // look across the trains' spread
         const cx = mx + ax * D, cz = mz + az * D;
-        cam = [cx, ground(cx, cz) + 0.75 * D * 5 / 1.1, cz]; target = [mx, ground(mx, mz), mz];
+        cam = [cx, ground(cx, cz) + 0.55 * D * 5 / 1.1, cz]; target = [mx, ground(mx, mz), mz];
       }
       if (simT === null) return { error: 'no simulation time found' };
       u.trainSystem.simTime = simT;
