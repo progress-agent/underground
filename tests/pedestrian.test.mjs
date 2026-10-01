@@ -293,13 +293,26 @@ test('tunnel lock: W walks the centreline, facing picks the branch at the juncti
   assert.ok(pointAt(net.paths[back.path], back.s).x < 320);
 });
 
-test('shallow and elevated stations have no platform to descend to', () => {
-  const branchesByLine = new Map([['dlr', [[v(0, -8, 0), v(400, -8, 0)]]]]);
+// Sprint 01Oct26h (D-042 item 1, Lane P): inverted. Jordan: "only possible to exit them at stations", and
+// the walk now rides on above ground, so every station is a stop, elevated and surface ones included; the ones
+// shallower than MIN_PLATFORM_DEPTH_M (skipped before: the 30Sep26w pin was "no platform to descend to") are
+// marked `shallow`. A deep station on the same line is unchanged.
+test('shallow and elevated stations are stops and entrances, marked shallow', () => {
+  const branchesByLine = new Map([['dlr', [[v(0, -8, 0), v(400, -8, 0), v(800, 20, 0)]]]]);
   const stationLayers = new Map([['dlr', { stationsLayer: { stations: [
     { id: 'x', name: 'Elevated', pos: new THREE.Vector3(0, 8 * VE, 0), surfaceY: 0, depthM: -8 },
+    { id: 'y', name: 'Surface', pos: new THREE.Vector3(400, 8 * VE, 0), surfaceY: 0, depthM: -8 },
+    { id: 'z', name: 'Deep', pos: new THREE.Vector3(800, -20 * VE, 0), surfaceY: 0, depthM: 20 },
   ] } }]]);
   const net = buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE });
-  assert.equal(net.entrances.length, 0);
+  assert.equal(net.entrances.length, 3);
+  const byName = Object.fromEntries(net.paths[0].stops.map(({ stop }) => [stop.name, stop]));
+  assert.equal(byName.Elevated.shallow, true);
+  assert.ok(byName.Elevated.depthM < 0, 'an elevated platform is above the street');
+  assert.equal(byName.Surface.shallow, true);
+  assert.equal(byName.Deep.shallow, false);
+  assert.equal(byName.Deep.depthM, 20);
+  assert.equal(net.stats.stops, 3);
 });
 
 // ── twin bores: the walker is inside a RENDERED tunnel, not between them ─────

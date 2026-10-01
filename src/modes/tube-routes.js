@@ -53,18 +53,32 @@ export function joinOr(list) {
   return `${list.slice(0, -1).join(', ')} or ${list.at(-1)}`;
 }
 
+/** s01:P how many stops on a route may lie between a station and the next one the walker's path reaches. */
+export const TOWARDS_WITHIN_STOPS = 3;
+
 /**
  * Destinations of the trains that leave `stationId` for `nextId`.
+ * s01:P when no route has `nextId` directly after `stationId`, a route where it
+ * comes within the next TOWARDS_WITHIN_STOPS stops is accepted, before the
+ * caller falls back to the path's end station. (Heathrow: the walker's path
+ * from Terminal 4 reaches Hatton Cross next, but the trains from Terminal 4
+ * call at Terminals 2 & 3 first, so the card read "towards Hatton Cross".)
  * @param {{ orderedLineRoutes: {name, naptanIds}[], names?: Map<string,string> }} routes
  */
-export function towards(routes, { stationId, nextId }) {
+export function towards(routes, { stationId, nextId }, { withinStops = TOWARDS_WITHIN_STOPS } = {}) {
+  const direct = towardsWithin(routes, { stationId, nextId }, 1);
+  if (direct.destinations.length || !(withinStops > 1)) return direct;
+  return towardsWithin(routes, { stationId, nextId }, withinStops);
+}
+
+function towardsWithin(routes, { stationId, nextId }, within) {
   const list = routes?.orderedLineRoutes || [];
   const names = routes?.names || null;
   const found = new Map(); // base -> Set of via ('' for none)
   for (const r of list) {
     const ids = r?.naptanIds || [];
     for (let i = 0; i < ids.length - 1; i++) {
-      if (ids[i] !== stationId || ids[i + 1] !== nextId) continue;
+      if (ids[i] !== stationId || !ids.slice(i + 1, i + 1 + within).includes(nextId)) continue;
       const d = routeDestination(r, names);
       if (!d.base) continue;
       let via = d.via;

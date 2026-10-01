@@ -2,7 +2,9 @@
 // tunnel). Pure logic, pinned without a browser:
 //   * arrival is the crossing of a platform inside advance(), at 60 and 200 m/s
 //     and any frame length, exactly once per platform;
-//   * portals found geometrically end the walk, and the walker can walk back;
+//   * portals found geometrically hold the bore's lining window (its daylight cap) and the walker can walk
+//     back; sprint 01Oct26h (D-042 item 1): that hold is the interior's opt-in, and the walk itself
+//     (holdAtPortals: false) crosses every stop to the line end;
 //   * "Line · towards X" from TfL's bundled ordered routes;
 //   * the chooser's capture-phase digit keys (they pick rows while it is open,
 //     and pass through to the mode keys while it is closed);
@@ -91,7 +93,11 @@ test('the next station along a path, either way', () => {
 
 // ── portals ──────────────────────────────────────────────────────────────────
 
-test('portals: found where the track reaches the ground; the walk stops there and can walk back', () => {
+// Sprint 01Oct26h (D-042 item 1, Lane P): Jordan, "we should stop and be offered the street at stations
+// only, not when a line leaves its tunnel". The hold below is kept, as the bore lining's opt-in
+// (tube-interior.js sampleBoreWindow draws its daylight cap where it stops); the walk passes
+// holdAtPortals: false and crosses every stop to the end of the line (the last block).
+test('portals: found where the track reaches the ground; the hold (the interior\'s opt-in) stops there; the walk crosses on to the line end', () => {
   // Deep at 0-2 km, rising to the surface by 3 km and staying there (a line leaving its tunnel).
   const pts = [v(0, 25, 0), v(1000, 22, 0), v(2000, 12, 0), v(3000, 0, 0), v(4000, 0, 0), v(5000, 0, 0)];
   const stations = [0, 1, 2].map(i => ({ id: `D${i}`, name: `Deep ${i}`, pos: new THREE.Vector3(pts[i].x, pts[i].y, pts[i].z), surfaceY: 0, depthM: -pts[i].y / VE }));
@@ -128,6 +134,20 @@ test('portals: found where the track reaches the ground; the walk stops there an
   const w2 = advance(net, inset, 10, { x: 1, z: 0 }, { portalInset: 20 });
   assert.equal(w2.stopped, true);
   assert.ok(Math.abs(inset.s - (a - 5)) < 1e-9);
+  // s01:P the walk: no hold, every stop crossed, on to the end of the line, at 60 and 200 m/s.
+  for (const step of [60 / 60, 200 / 20]) {
+    const walk = { path: 0, s: 0, dir: 1 };
+    const seen = [];
+    let w;
+    for (let i = 0; i < 20000; i++) {
+      w = advance(net, walk, step, { x: 1, z: 0 }, { holdAtPortals: false });
+      for (const c of w.crossed) seen.push(c.stop.name);
+      assert.equal(w.portal, null, 'never held at the mouth');
+      if (w.stopped) break;
+    }
+    assert.deepEqual(seen, ['Deep 1', 'Deep 2'], `${step} m a frame`);
+    assert.ok(Math.abs(walk.s - net.paths[0].length) < 1e-9, 'at the end of the line');
+  }
 });
 
 test('portals: a narrow dip in the ground, a short surfacing and a crossing under water are not portals', () => {
@@ -544,11 +564,22 @@ test('portals from the drawn railway: a line drawn deep but running in the open 
   assert.equal(Math.round(b), Math.round(net.paths[0].length));
   assert.equal(net.openSource, 'track');
   assert.ok(Math.abs(net.stats.openShare.central - (5000 - a) / 5000) < 1e-9);
-  // The walk from the station at 1 km ends there, held the inset short.
+  // The interior's hold (its opt-in) stops there, the inset short.
   const pos = { path: 0, s: 1000, dir: 1 };
   let r;
   for (let i = 0; i < 400; i++) { r = advance(net, pos, 10, { x: 1, z: 0 }, { portalInset: 20 }); if (r.stopped) break; }
   assert.ok(r.portal && Math.abs(r.portal.mouth - a) < 1e-9 && Math.abs(pos.s - (a - 20)) < 1e-9);
+  // s01:P the walk does not: from the station at 0 it crosses C10 and runs on to the end of the line.
+  const walk = { path: 0, s: 0, dir: 1 };
+  const seen = [];
+  for (let i = 0; i < 1000; i++) {
+    const w = advance(net, walk, 10, { x: 1, z: 0 }, { holdAtPortals: false });
+    for (const c of w.crossed) seen.push(c.stop.name);
+    assert.equal(w.portal, null);
+    if (w.stopped) break;
+  }
+  assert.deepEqual(seen, ['C10']);
+  assert.ok(Math.abs(walk.s - net.paths[0].length) < 1e-9);
   // A line with no drawn track near it stays underground, counted.
   const none = make();
   assert.equal(markOpenSectionsFromTrack(none, { classAt: () => null }), 0);
