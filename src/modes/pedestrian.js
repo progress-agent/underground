@@ -64,7 +64,9 @@
 //     standing round a walker at rest passes nothing; fix round 2). Nothing
 //     about a train touches the walk.
 //   * Where a line leaves its tunnel (a portal, found geometrically), the walk
-//     ends and the card offers the street.
+//     ends and the card offers the street. (Sprint 30Sep26w integration: the
+//     portals come from the drawn railway, Lane R's data, wherever it exists;
+//     the geometric test is the fallback.)
 
 import { PEDESTRIAN_TUNABLES, BODY, createBody, stepBody } from './pedestrian-body.js';
 import { createScaleEase } from './pedestrian-scale.js';
@@ -72,6 +74,10 @@ import {
   buildTunnelNetwork, pointAt, advance, nearestEntrance, chooseStop, nearestStopOnPath, travelDir,
   headingAt, markOpenSections,
 } from './pedestrian-tunnels.js';
+// ── s30:integrate ── portals from the drawn railway (Lane R's data), preferred to the ground test
+import { markOpenSectionsFromTrack } from './pedestrian-tunnels.js';
+import { buildOpenTrackIndex } from './open-track.js';
+// ── /s30:integrate ──
 // ── s30:P ──
 import { platformRows, cleanStationName } from './tube-routes.js';
 import { createPlatformChooser } from './platform-chooser.js';
@@ -177,9 +183,35 @@ export function createPedestrianMode(ctx) {
     return net;
   }
 
+  // ── s30:integrate ── Portals where the drawn railway leaves its tunnel. Lane R's
+  // surface railway carries each line's open-air classes; the ground test below
+  // found no portal on six lines, because the depth model draws most open-air
+  // Tube 7 to 32 m underground (the Lane P verifier's blocking finding). The
+  // railway is built during the opening; until it exists (and for at most
+  // SURFACE_RAIL_WAIT_S of the mode's time) nothing is marked, and a marking
+  // made from the ground is replaced as soon as the railway is there.
+  const SURFACE_RAIL_WAIT_S = 20;
+  let trackIndex = null, trackIndexFor = null;
+  function openTrack() {
+    const rail = typeof ctx.surfaceRail === 'function' ? ctx.surfaceRail() : null;
+    if (!rail?.data || !rail.paths) return null;
+    if (trackIndexFor !== rail) {
+      trackIndex = buildOpenTrackIndex({ data: rail.data, ownerPaths: rail.paths, overgroundPaths: ctx.overgroundLinePaths?.() ?? null });
+      trackIndexFor = rail;
+    }
+    return trackIndex;
+  }
+  // ── /s30:integrate ──
   // ── s30:P ── portals: where a line's track reaches the surface (retried until the ground is there)
   function markPortals(n) {
-    if (!n || n.openMarked) return;
+    // ── s30:integrate ──
+    if (!n || n.openSource === 'track') return;
+    try {
+      const idx = openTrack();
+      if (idx) { markOpenSectionsFromTrack(n, { classAt: idx.classAt }); return; }
+    } catch (err) { console.warn('[pedestrian] portals from the railway', err); }
+    if (n.openMarked || (typeof ctx.surfaceRail === 'function' && clock < SURFACE_RAIL_WAIT_S)) return;
+    // ── /s30:integrate ──
     const ground = ctx.getStructuralY || ctx.getTerrainY;
     if (typeof ground !== 'function') return;
     try {

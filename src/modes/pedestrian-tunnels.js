@@ -54,6 +54,8 @@
 //                    advance() stops at the first one it would enter and reports it as `portal`.
 //   nextStation(path, s, dir)             -> the next station along the path from s, or null
 //   markOpenSections(net, { groundY, isWater, VE }) -> finds each Tube line's portals geometrically
+//   markOpenSectionsFromTrack(net, { classAt })  -> sprint 30Sep26w integration: portals from the drawn
+//                                             railway (Lane R's data), preferred wherever it exists
 
 export const SAMPLE_STEP_M = 10;
 export const MIN_PLATFORM_DEPTH_M = 3;   // shallower "stations" (elevated DLR, surface Met) have no shaft
@@ -434,8 +436,6 @@ export function markOpenSections(net, { groundY, isWater = null, waterY = null, 
   if (!known) return -1;
   let portals = 0;
   for (const p of net.paths) {
-    const open = [];
-    let start = null;
     const raw = new Float64Array(p.n), known = new Uint8Array(p.n);
     for (let j = 0; j < p.n; j++) { const g = groundY(p.x[j], p.z[j]); if (Number.isFinite(g)) { raw[j] = g; known[j] = 1; } }
     // Box average over +/- smoothM of arc (two pointers).
@@ -455,29 +455,106 @@ export function markOpenSections(net, { groundY, isWater = null, waterY = null, 
     };
     const flags = new Array(p.n);
     for (let j = 0; j < p.n; j++) flags[j] = isOpen(j);
-    // Platforms are underground by definition: never inside an open run.
-    for (const { s } of p.stops) {
-      let j = 0;
-      while (j < p.n - 1 && p.s[j + 1] <= s) j++;
-      flags[j] = false; if (j + 1 < p.n && Math.abs(p.s[j + 1] - s) < 1e-6) flags[j + 1] = false;
-    }
-    for (let j = 0; j <= p.n; j++) {
-      const f = j < p.n && flags[j];
-      if (f && start === null) start = j;
-      if (!f && start !== null) {
-        const end = j - 1;
-        // Boundaries half-way between an underground sample and an open one.
-        const s0 = start > 0 ? (p.s[start - 1] + p.s[start]) / 2 : 0;
-        const s1 = end < p.n - 1 ? (p.s[end] + p.s[end + 1]) / 2 : p.length;
-        if (s1 - s0 >= minRunM) open.push([s0, s1]);
-        start = null;
-      }
-    }
-    p.open = open;
-    for (const [a, b] of open) portals += (a > 1e-6 ? 1 : 0) + (b < p.length - 1e-6 ? 1 : 0);
+    portals += setOpenIntervals(p, flags, minRunM);
   }
   net.openMarked = true;
+  net.openSource = 'ground';
   net.stats.portals = portals;
+  return portals;
+}
+
+/**
+ * path.open from per-sample in-the-open flags (shared by both portal finders):
+ * platforms are underground by definition, never inside an open run; each run
+ * of open samples at least minRunM long becomes an interval, its boundaries
+ * half-way between an underground sample and an open one. Returns the number
+ * of portals (interval ends inside the path).
+ */
+function setOpenIntervals(p, flags, minRunM) {
+  for (const { s } of p.stops) {
+    let j = 0;
+    while (j < p.n - 1 && p.s[j + 1] <= s) j++;
+    flags[j] = false; if (j + 1 < p.n && Math.abs(p.s[j + 1] - s) < 1e-6) flags[j + 1] = false;
+  }
+  const open = [];
+  let start = null;
+  for (let j = 0; j <= p.n; j++) {
+    const f = j < p.n && flags[j];
+    if (f && start === null) start = j;
+    if (!f && start !== null) {
+      const end = j - 1;
+      const s0 = start > 0 ? (p.s[start - 1] + p.s[start]) / 2 : 0;
+      const s1 = end < p.n - 1 ? (p.s[end] + p.s[end + 1]) / 2 : p.length;
+      if (s1 - s0 >= minRunM) open.push([s0, s1]);
+      start = null;
+    }
+  }
+  p.open = open;
+  let portals = 0;
+  for (const [a, b] of open) portals += (a > 1e-6 ? 1 : 0) + (b < p.length - 1e-6 ? 1 : 0);
+  return portals;
+}
+
+// A bore sample takes the class of its line's nearest drawn track within this, in plan: the reach Lane R's
+// surface-station flag and Lane T's station matching use. Measured against Lane R's portal records (01Oct26h,
+// 150 tunnel mouths, platform gaps excluded): median 56 m, p90 389 m (120 m reach: p90 586 m).
+export const TRACK_MATCH_M = 300;
+
+/**
+ * Portals from the drawn railway (sprint 30Sep26w integration; supersedes
+ * markOpenSections wherever Lane R's surface railway exists). The geometric
+ * finder above asks whether the bore reaches the ground, but the app's depth
+ * model draws most open-air Tube stretches 7 to 32 m underground (Epping,
+ * Loughton and Leytonstone 28 m, Rayners Lane 30 m), so it found no portal at
+ * all on six lines (the lane verifier's blocking finding). The surface railway
+ * (public/data/tube-surface.json, src/tube-surface-rail.js) carries each
+ * line's real open-air classes, shared track included.
+ *
+ * `classAt(lineId, x, z, reachM)` -> 1 where the line's nearest drawn track
+ * within reachM is open, 0 where it is tunnel, null where none of its track is
+ * that near (src/modes/open-track.js builds it). A bore is a station-chord
+ * curve, so on long open stretches it can run hundreds of metres from the
+ * real track: a sample with no match takes the class of the matched samples
+ * either side of it along the path, split half-way where the two differ (a
+ * portal between them). A path with no match at all is left underground and
+ * counted (stats.unmatchedPaths). Platforms stay underground, as in the
+ * geometric finder: at a surface station the walk ends at once and the street
+ * is offered. Returns the number of portals; stats.openShare is each line's
+ * share of bore length marked open.
+ */
+export function markOpenSectionsFromTrack(net, { classAt, reachM = TRACK_MATCH_M, minRunM = OPEN_MIN_RUN_M } = {}) {
+  if (!net || typeof classAt !== 'function') return -1;
+  let portals = 0, unmatched = 0;
+  const share = {};
+  for (const p of net.paths) {
+    const c = new Int8Array(p.n);
+    let known = 0;
+    for (let j = 0; j < p.n; j++) {
+      const k = classAt(p.lineId, p.x[j], p.z[j], reachM);
+      c[j] = k === null || k === undefined ? -1 : (k ? 1 : 0);
+      if (c[j] >= 0) known++;
+    }
+    if (!known) { unmatched++; p.open = []; continue; }
+    for (let j = 0; j < p.n;) {
+      if (c[j] >= 0) { j++; continue; }
+      let k = j;
+      while (k < p.n && c[k] < 0) k++;
+      const L = j > 0 ? c[j - 1] : -1, R = k < p.n ? c[k] : -1;
+      const mid = L >= 0 && R >= 0 ? (p.s[j - 1] + p.s[k]) / 2 : null;
+      for (let q = j; q < k; q++) c[q] = L < 0 ? R : R < 0 ? L : (p.s[q] <= mid ? L : R);
+      j = k;
+    }
+    const flags = Array.from(c, v => v === 1);
+    portals += setOpenIntervals(p, flags, minRunM);
+    const sh = share[p.lineId] ||= { open: 0, length: 0 };
+    sh.length += p.length;
+    for (const [a, b] of p.open) sh.open += b - a;
+  }
+  net.openMarked = true;
+  net.openSource = 'track';
+  net.stats.portals = portals;
+  net.stats.unmatchedPaths = unmatched;
+  net.stats.openShare = Object.fromEntries(Object.entries(share).map(([l, v]) => [l, v.length ? v.open / v.length : 0]));
   return portals;
 }
 

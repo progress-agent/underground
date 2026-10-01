@@ -4271,6 +4271,13 @@ modeSystem.ctx.trainSystem = trainSystem;
 modeSystem.ctx.tubeRoutes = s30pTubeRoutes;
 modeSystem.ctx.lineColour = (lineId) => lineColoursById.get(lineId);
 // ── /s30:P ──
+// ── s30:integrate ──
+// The Pedestrian tunnel's portals come from Lane R's surface railway (each
+// line's drawn open-air track, shared track included), not from the depth
+// model, which draws most open-air Tube well underground.
+modeSystem.ctx.surfaceRail = () => surfaceRail;
+modeSystem.ctx.overgroundLinePaths = () => overgroundGroup?.userData?.linePaths ?? null;
+// ── /s30:integrate ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map

@@ -513,3 +513,67 @@ test('route data: pinned to the bundled files; ?tfl=live keeps the live fetch', 
     globalThis.fetch = realFetch;
   }
 });
+
+// ── Sprint 30Sep26w integration: portals from the drawn railway ─────────────
+// The Lane P verifier failed the geometric finder: the depth model draws most
+// open-air Tube 7 to 32 m underground, so it found no portal on six lines. The
+// portals now come from Lane R's surface railway wherever it exists.
+test('portals from the drawn railway: a line drawn deep but running in the open has its portal where the track leaves the tunnel', async () => {
+  const { markOpenSectionsFromTrack, TRACK_MATCH_M } = await import('../src/modes/pedestrian-tunnels.js');
+  // A bore 28 m deep all the way (as the app draws Epping or Leytonstone), stations at 0 and 1 km only.
+  const pts = Array.from({ length: 51 }, (_, i) => v(i * 100, 28, 0));
+  const stations = [0, 10].map(i => ({ id: `C${i}`, name: `C${i}`, pos: new THREE.Vector3(pts[i].x, pts[i].y, pts[i].z), surfaceY: 0, depthM: 28 }));
+  const make = () => buildTunnelNetwork({ THREE, VE, branchesByLine: new Map([['central', [pts]]]), stationLayers: new Map([['central', { stationsLayer: { stations } }]]) });
+  // Control: the ground test sees a deep bore and no portal at all (the defect as found).
+  const geo = make();
+  assert.equal(markOpenSections(geo, { groundY: () => 0, VE }), 0);
+  // The drawn track runs 40 m north of the bore in tunnel west of x = 2600 and in the open east of it; between
+  // x = 2000 and 3000 it swings 400 m away (a chord cutting a bend), so nothing there is within reach.
+  const classAt = (lineId, x, z, reach) => {
+    if (lineId !== 'central') return null;
+    const off = x > 2000 && x < 3000 ? 400 : 40;
+    return off <= reach ? (x < 2600 ? 0 : 1) : null;
+  };
+  const net = make();
+  const portals = markOpenSectionsFromTrack(net, { classAt });
+  assert.ok(TRACK_MATCH_M >= 60 && TRACK_MATCH_M < 400);
+  assert.equal(portals, 1);
+  const [[a, b]] = net.paths[0].open;
+  // Unmatched samples take the matched class either side, split half-way: the mouth at ~2500, not at 2000 or 3000.
+  assert.ok(Math.abs(a - 2500) <= 60, `portal at ${a}`);
+  assert.equal(Math.round(b), Math.round(net.paths[0].length));
+  assert.equal(net.openSource, 'track');
+  assert.ok(Math.abs(net.stats.openShare.central - (5000 - a) / 5000) < 1e-9);
+  // The walk from the station at 1 km ends there, held the inset short.
+  const pos = { path: 0, s: 1000, dir: 1 };
+  let r;
+  for (let i = 0; i < 400; i++) { r = advance(net, pos, 10, { x: 1, z: 0 }, { portalInset: 20 }); if (r.stopped) break; }
+  assert.ok(r.portal && Math.abs(r.portal.mouth - a) < 1e-9 && Math.abs(pos.s - (a - 20)) < 1e-9);
+  // A line with no drawn track near it stays underground, counted.
+  const none = make();
+  assert.equal(markOpenSectionsFromTrack(none, { classAt: () => null }), 0);
+  assert.equal(none.stats.unmatchedPaths, 1);
+  assert.equal(none.paths[0].open.length, 0);
+});
+
+test('the open-track index: own track as Lane R draws it, shared bands on Tube and Overground corridors', async () => {
+  const { buildOpenTrackIndex } = await import('../src/modes/open-track.js');
+  const mk = (cls, z = 0) => cls.map((c, i) => ({ x: i * 12, z, y: 0, terrainY: 0, cls: c, src: i }));
+  // The Metropolitan's corridor, samples 12 m apart: a lone 'surface' sample at 2 (not drawn), open from 6.
+  const met = mk(['tunnel', 'tunnel', 'surface', 'tunnel', 'tunnel', 'tunnel', 'cutting', 'surface', 'surface', 'surface']);
+  const lioness = mk(['tunnel', 'surface', 'surface', 'surface'], 500);
+  const data = {
+    lines: [{ id: 'metropolitan', branches: [{ bands: [{ j0: 5, j1: 9, lines: ['metropolitan', 'jubilee'] }] }] }],
+    overgroundShared: [{ overground: 'lioness', branch: 0, j0: 0, j1: 3, lines: ['lioness', 'bakerloo'] }],
+  };
+  const idx = buildOpenTrackIndex({ data, ownerPaths: new Map([['metropolitan', [met]]]), overgroundPaths: new Map([['lioness', [lioness]]]) });
+  assert.deepEqual(idx.lines.sort(), ['bakerloo', 'jubilee', 'lioness', 'metropolitan']);
+  assert.equal(idx.classAt('metropolitan', 24, 3, 50), 0, 'the lone open sample is not drawn: tunnel');
+  assert.equal(idx.classAt('metropolitan', 96, 3, 50), 1);
+  assert.equal(idx.classAt('jubilee', 96, 3, 50), 1, 'on its band');
+  assert.equal(idx.classAt('jubilee', 40, 0, 50), 0, 'the band starts at sample 5 (x 60, tunnel): 20 m away');
+  assert.equal(idx.classAt('jubilee', -200, 0, 50), null);
+  assert.equal(idx.classAt('bakerloo', 24, 500, 50), 1, 'on the Overground corridor');
+  assert.equal(idx.classAt('bakerloo', 0, 500, 5), 0);
+  assert.equal(idx.classAt('victoria', 0, 0, 1000), null);
+});

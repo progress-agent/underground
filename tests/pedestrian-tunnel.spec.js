@@ -39,7 +39,8 @@ async function boot(page, query = '?skip=1&buildings=baked') {
     const b = window.__ug.bakedStats;
     return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal && window.__ug.lineBranchCenterPts.size > 11
       && window.__ug.unifiedShaftLayer && window.__ug.trainSystem?.allTrains.length > 100
-      && window.__ug.modes.ctx.tubeRoutes?.size > 11;
+      && window.__ug.modes.ctx.tubeRoutes?.size > 11
+      && window.__ug.surfaceRail; // sprint 30Sep26w integration: the portals come from the surface railway
   }, null, { timeout: 180000 });
 }
 const dbg = (page) => page.evaluate(() => window.__ug.modes.registry.get('pedestrian').debug());
@@ -413,20 +414,28 @@ test.describe('in the tunnel', () => {
     const at = await page.evaluate(() => {
       const m = window.__ug.modes.registry.get('pedestrian');
       const net = m.rebuildNetwork();
-      // The Northern at Golders Green, found geometrically (the track reaching the ground).
+      // The Northern at Golders Green: the Hampstead tunnel's northern mouth. Sprint 30Sep26w integration: the
+      // portals come from the drawn railway (Lane R's data), so a surface station's platform is a 10 m underground
+      // gap between two open intervals; that gap is not a tunnel mouth, so the mouth taken here has no platform at
+      // it and tunnel beyond it (round 2 took the first interval ending within 400 m of the station).
+      const mouthAt = (p, s, out) => !p.stops.some(st => Math.abs(st.s - s) < 25)
+        && !p.open.some(([a2, b2]) => Math.min(s, s + out) < b2 && Math.max(s, s + out) > a2);
       for (const p of net.paths) {
         if (p.lineId !== 'northern') continue;
-        for (const [a, b] of p.open) {
-          const gg = p.stations.find(st => /Golders Green/.test(st.name));
-          if (gg && Math.abs(gg.s - b) < 400) {
-            m.placeInTunnel({ path: p.id, s: b + 250, dir: -1 });
-            return { path: p.id, a, b, stats: net.stats };
-          }
+        const gg = p.stations.find(st => /Golders Green/.test(st.name));
+        if (!gg) continue;
+        const ends = p.open.map(([a, b]) => [a, b]).filter(([, b]) => Math.abs(gg.s - b) < 1500 && mouthAt(p, b, 250))
+          .sort((x, y) => Math.abs(gg.s - x[1]) - Math.abs(gg.s - y[1]));
+        if (ends.length) {
+          const [a, b] = ends[0];
+          m.placeInTunnel({ path: p.id, s: b + 250, dir: -1 });
+          return { path: p.id, a, b, stats: net.stats, fromStation: b - gg.s, source: net.openSource };
         }
       }
       return null;
     });
     expect(at).not.toBeNull();
+    expect(at.source).toBe('track');
     expect(at.stats.portals).toBeGreaterThan(10);
     await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__ug.fpsControls.keys.add('shift'); });
     await page.waitForFunction(() => !!window.__ug.modes.registry.get('pedestrian').debug().portal, null, { timeout: 60000 });
@@ -455,6 +464,43 @@ test.describe('in the tunnel', () => {
     expect(Math.hypot(d.x - held.portal.x, d.z - held.portal.z)).toBeLessThan(1);
   });
 
+  // Sprint 30Sep26w integration: the Lane P verifier's blocking finding. The ground test found no portal on six lines
+  // (the depth model draws most open-air Tube 7 to 32 m underground): Stratford to Leytonstone ended in a bore 28 m
+  // deep. The portals now come from the drawn railway (Lane R's data).
+  test('portals from the drawn railway: every line in the open has its mouths, and a walk out of a tunnel ends at the real one', async () => {
+    const cover = await page.evaluate(async () => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const net = m.rebuildNetwork();
+      const { BNG_REF_E, BNG_REF_N } = await import('/src/coordinates.js');
+      const portals = {};
+      for (const L of ug.surfaceRail.data.lines) portals[L.id] = L.portals.map(q => [q.e - BNG_REF_E, -(q.n - BNG_REF_N)]);
+      window.__s30portals = portals;
+      return { source: net.openSource, share: net.stats.openShare, unmatched: net.stats.unmatchedPaths };
+    });
+    expect(cover.source).toBe('track');
+    expect(cover.unmatched).toBe(0);
+    for (const l of ['bakerloo', 'central', 'circle', 'district', 'dlr', 'hammersmith-city', 'jubilee', 'metropolitan', 'northern', 'piccadilly']) {
+      expect(cover.share[l], l).toBeGreaterThan(0.2); // 01Oct26h: 29% (Northern) to 86% (Metropolitan); the ground test gave 0% on six
+    }
+    expect(cover.share.victoria).toBe(0);
+    expect(cover.share['waterloo-city']).toBe(0);
+    for (const [lineId, from, toward, nearM] of [['central', 'Mile End', 'Stratford', 400], ['northern', 'Hampstead', 'Golders Green', 400],
+      ['jubilee', 'Swiss Cottage', 'Finchley Road', 400]]) {
+      expect(await placeAt(page, lineId, from, toward), `${from} toward ${toward}`).not.toBeNull();
+      await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__ug.fpsControls.keys.add('shift'); });
+      await page.waitForFunction((t) => { const d = window.__ug.modes.registry.get('pedestrian').debug();
+        return !!d.portal || d.arrivals.some(a => a.name.startsWith(t)); }, toward, { timeout: 60000 });
+      await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('shift'); });
+      const d = await dbg(page);
+      expect(d.portal, `${from} toward ${toward}: the walk ends at the mouth`).toBeTruthy();
+      expect(d.arrivals.some(a => a.name.startsWith(toward)), `${toward} is in the open: never arrived at`).toBe(false);
+      // The mouth (on the bore, a station-chord curve) is near one of Lane R's portal records for the line.
+      const near = await page.evaluate(([l, x, z]) => Math.min(...window.__s30portals[l].map(([px, pz]) => Math.hypot(px - x, pz - z))), [lineId, d.portal.x, d.portal.z]);
+      expect(near, `${from} toward ${toward}: mouth ${near.toFixed(0)} m from Lane R's portal`).toBeLessThan(nearM);
+      await page.keyboard.press('Escape');
+    }
+  });
+
   // Fix round 1. The verifier found the camera unisolated within a window of
   // a portal, so the model outside was drawn inside the bore: at the District's
   // portal by Putney Bridge, where every walk there ends, a building cut into
@@ -465,12 +511,17 @@ test.describe('in the tunnel', () => {
     const mouth = (lineId, pick) => page.evaluate(([lineId, pick]) => {
       const m = window.__ug.modes.registry.get('pedestrian');
       const net = m.rebuildNetwork();
+      // Sprint 30Sep26w integration: a tunnel mouth, never a surface station's 10 m platform gap (see the portal test).
+      const mouthAt = (p, s, out) => !p.stops.some(st => Math.abs(st.s - s) < 25)
+        && !p.open.some(([a2, b2]) => Math.min(s, s + out) < b2 && Math.max(s, s + out) > a2);
       for (const p of net.paths) {
         if (p.lineId !== lineId) continue;
         for (const [a, b] of p.open) {
           if (!p.stations.some(st => st.name.includes(pick) && (Math.abs(st.s - a) < 1500 || Math.abs(st.s - b) < 1500))) continue;
           // The held pose: 20 m inside the mouth (PORTAL_STAND_M), facing it.
-          const pos = b < p.length - 300 ? { path: p.id, s: b + 20, dir: -1 } : { path: p.id, s: a - 20, dir: 1 };
+          const pos = b < p.length - 300 && mouthAt(p, b, 20) ? { path: p.id, s: b + 20, dir: -1 }
+            : a > 300 && mouthAt(p, a, -20) ? { path: p.id, s: a - 20, dir: 1 } : null;
+          if (!pos) continue;
           m.placeInTunnel(pos);
           return pos;
         }
@@ -507,16 +558,31 @@ test.describe('in the tunnel', () => {
       return { ...d, hidden: was.length, brightPct: bright / (W * H) * 100, max, nonFinite, mask: ug.camera.layers.mask };
     });
     // Control: with the view unisolated (the defect as found) the check sees the model in the bore.
-    expect(await mouth('district', 'Putney')).not.toBeNull();
+    // Sprint 30Sep26w integration: round 2's control pose was the District's "mouth" on the Fulham railway bridge,
+    // found by the ground test, which the verifier showed is not a portal. The portals now come from the drawn
+    // railway, and at a real mouth drawn deep in the ground nothing reaches into the bore, so the control takes the
+    // first of these mouths where something does; that mouth is then checked isolated with the others below.
+    const candidates = [['district', 'Putney'], ['northern', 'Golders Green'], ['dlr', 'Shadwell'], ['dlr', 'Cutty Sark'],
+      ['dlr', 'Island Gardens'], ['metropolitan', 'Finchley Road'], ['central', 'Stratford'], ['bakerloo', 'Queen']];
     await page.evaluate(() => {
       const ti = window.__ug.modes.ctx.tubeInterior;
       ti.__show = ti.show; ti.show = (net, pos) => ti.__show(net, pos, { isolate: false });
     });
-    await page.waitForTimeout(800);
-    const control = await interiorOnly();
+    let control = null, controlAt = null;
+    const tried = [];
+    for (const c of candidates) {
+      if (!(await mouth(...c))) { tried.push([c[1], null]); continue; }
+      await page.waitForTimeout(800);
+      const r = await interiorOnly();
+      tried.push([c[1], +r.pct.toFixed(2)]);
+      if (r.pct > 1) { control = r; controlAt = c; break; }
+    }
     await page.evaluate(() => { const ti = window.__ug.modes.ctx.tubeInterior; ti.show = ti.__show; delete ti.__show; });
-    expect(control.pct, `control must detect foreign geometry: ${JSON.stringify(control)}`).toBeGreaterThan(1);
-    for (const [lineId, pick] of [['district', 'Putney'], ['northern', 'Golders Green']]) {
+    console.log('mouth control', JSON.stringify(tried));
+    expect(control?.pct, `control must detect foreign geometry at a mouth: ${JSON.stringify(tried)}`).toBeGreaterThan(1);
+    const checked = [['district', 'Putney'], ['northern', 'Golders Green']];
+    if (!checked.some(([l, p]) => l === controlAt[0] && p === controlAt[1])) checked.push(controlAt);
+    for (const [lineId, pick] of checked) {
       expect(await mouth(lineId, pick), pick).not.toBeNull();
       await page.waitForTimeout(800);
       const d = await dbg(page);
