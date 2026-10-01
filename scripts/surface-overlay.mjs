@@ -24,9 +24,12 @@
  * overlay without touching the store: every symlinked directory on the path
  * (public, public/data, public/data/surface, tiles) becomes a real directory
  * holding one symlink per child, and baked/ becomes a real copy, because the
- * bake (scripts/bake-surface.mjs, scripts/bake-ground.mjs) writes its files
- * with a plain writeFile that would follow a link. After `prepare`, the merge
- * script replaces only its own tiles and the bake writes only this baked/.
+ * bake (scripts/bake-surface.mjs, scripts/bake-ground.mjs) rewrites its files
+ * there. After `prepare`, the merge script replaces only its own tiles and the
+ * bake writes only this baked/. Since sprint 01Oct26h both bakes also refuse,
+ * before any work, an output directory that fails this guard
+ * (assertBakeOutput), so a bare `npm run bake` in a linked worktree stops
+ * instead of rewriting the store, and in the main checkout it needs --promote.
  *
  * Usage:
  *   node scripts/surface-overlay.mjs check   [--root <checkout>]
@@ -34,7 +37,7 @@
  *   node scripts/surface-overlay.mjs apply --from <checkout> [--to <checkout>]
  *        [--files tiles/a.json,baked/b.bin] [--promote]
  * --root and --to default to the checkout holding this script. apply copies
- * the listed files (relative to public/data/surface; default: Lane M's five)
+ * the listed files (relative to public/data/surface; default: Lane M's seven)
  * from one checkout's overlay into another's, after preparing the destination,
  * and fails if the main checkout's store changed while it ran.
  */
@@ -48,10 +51,18 @@ import { fileURLToPath } from 'node:url';
 
 export const SCRIPT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SURFACE_REL = 'public/data/surface';
-/** Lane M's overlay (sprint 30Sep26w, D-041), relative to public/data/surface. */
+/**
+ * Lane M's overlay, relative to public/data/surface: the Microsoft-footprint
+ * tiles of sprint 30Sep26w (D-041, Park Royal and West Acton) and of sprint
+ * 01Oct26h (D-043, North/East Acton and Harlesden/Willesden Junction), the
+ * manifest and the baked payload. Sprint 01Oct26h's checkout holds all seven,
+ * with the 30Sep26w tiles byte-identical to that sprint's, so one apply from
+ * it is the whole overlay (the 30Sep26w checkout's five are a subset, and its
+ * manifest and payload predate the new tiles: never apply them after these).
+ */
 export const LANE_M_FILES = [
-  'tiles/tile_10_13.json', 'tiles/tile_10_14.json', 'tiles/manifest.json',
-  'baked/buildings.bin', 'baked/meta.json',
+  'tiles/tile_10_13.json', 'tiles/tile_10_14.json', 'tiles/tile_11_13.json', 'tiles/tile_11_14.json',
+  'tiles/manifest.json', 'baked/buildings.bin', 'baked/meta.json',
 ];
 
 export class OverlayError extends Error {
@@ -163,6 +174,41 @@ export async function assertOverlayWritable(opts = {}) {
   // Each refusal names its own remedy; the leaf-link ones need `prepare`.
   const hint = problems.some((p) => !p.includes('--promote') && !p.includes(PREPARE_HINT)) ? `\n${PREPARE_HINT}` : '';
   throw new OverlayError(`public/data/surface is not safe to write:\n  - ${problems.join('\n  - ')}${hint}`);
+}
+
+/**
+ * The bakes' guard (scripts/bake-surface.mjs, scripts/bake-ground.mjs; sprint
+ * 01Oct26h, D-043). Both used to write baked/ with a plain writeFile, so run
+ * bare in a worktree whose public/data/surface is a symlink they rewrote the
+ * main checkout's store. Called before any of the bake's work, so a refusal costs
+ * nothing: the output directory (default public/data/surface/baked, or --out),
+ * or the nearest part of its path that exists yet, must pass assertLocalDir
+ * (inside this checkout, and not the main store without --promote), and none
+ * of `files` already there may be a symlink or a hard link the write would
+ * follow. The bakes then write each file through writeLocal, which re-checks
+ * the directory and replaces rather than follows a leaf link. Returns the real
+ * output directory, or the real path of its nearest existing ancestor.
+ */
+export async function assertBakeOutput(outDir, files, opts = {}) {
+  const dir = path.resolve(outDir);
+  let probe = dir;
+  while (!(await lstatOrNull(probe))) {
+    const up = path.dirname(probe);
+    if (up === probe) throw new OverlayError(`refusing to bake into ${dir}: no part of the path exists`);
+    probe = up;
+  }
+  const real = await assertLocalDir(probe, opts);
+  if (probe !== dir) return real; // created fresh by the bake's mkdir, under a checked directory
+  const problems = [];
+  for (const name of files) {
+    const st = await lstatOrNull(path.join(dir, name));
+    if (st?.isSymbolicLink()) problems.push(`${name} is a symlink; the bake would write through it`);
+    else if (st?.isFile() && st.nlink > 1) problems.push(`${name} is a hard link (${st.nlink}); the bake would write through it`);
+  }
+  if (problems.length) {
+    throw new OverlayError(`refusing to bake into ${dir}:\n  - ${problems.join('\n  - ')}\n${PREPARE_HINT}`);
+  }
+  return real;
 }
 
 // ── prepare ──────────────────────────────────────────────────────────────────

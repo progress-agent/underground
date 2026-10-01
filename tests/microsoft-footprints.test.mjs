@@ -1,5 +1,8 @@
 // Sprint 30Sep26w Lane M (D-040 item 3, D-041): Microsoft building footprints
 // fill Park Royal and West Acton only where OpenStreetMap maps no building.
+// Sprint 01Oct26h Lane M (D-042 item 5, D-043): and North Acton, East Acton,
+// Harlesden and Willesden Junction (tile_11_13, tile_11_14), with their own
+// height pool, leaving Park Royal and West Acton byte-identical.
 //
 // Two halves. The geometry and parsing tests are pure. The data tests read the
 // merged tile overlay (public/data/surface, gitignored): they FAIL, never skip,
@@ -14,15 +17,18 @@
 // node scripts/surface-overlay.mjs apply --from <lane checkout>.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   intersectionArea, footprintsOverlap, boundariesOverlap, strictlyInside, featureToRecord,
   bandMedians, heightBand, HEIGHT_BANDS_M2, neighbourFiles, TARGET_TILES, isMicrosoft,
-  DEFAULT_BUILDING_HEIGHT,
+  DEFAULT_BUILDING_HEIGHT, TILE_GROUPS, groupOf, main as mergeMain, LOCATION, QUADKEY,
 } from '../scripts/merge-microsoft-footprints.mjs';
+import { LANE_M_FILES } from '../scripts/surface-overlay.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TILES = path.join(ROOT, 'public/data/surface/tiles');
@@ -92,11 +98,122 @@ test('neighbourhood for the overlap test is the 3x3 block', () => {
   for (const f of ['tile_09_12.json', 'tile_11_14.json', 'tile_10_13.json']) assert.ok(n.includes(f));
 });
 
+test('target tiles: two height pools, one per sprint, disjoint; the overlay carries all four tiles', () => {
+  assert.deepEqual(TILE_GROUPS.map((g) => g.tiles), [['tile_10_13.json', 'tile_10_14.json'], ['tile_11_13.json', 'tile_11_14.json']]);
+  assert.deepEqual(TARGET_TILES, TILE_GROUPS.flatMap((g) => g.tiles));
+  assert.equal(new Set(TARGET_TILES).size, TARGET_TILES.length, 'no tile in two pools');
+  for (const f of TARGET_TILES) assert.equal(groupOf(f).tiles.includes(f), true);
+  assert.equal(groupOf('tile_12_13.json'), null);
+  // The 30Sep26w text is part of those tiles' bytes: it must never change.
+  assert.equal(TILE_GROUPS[0].heightRule, 'Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across the target tiles (heightBands); 10 m only for a band with no given heights.');
+  for (const f of TARGET_TILES) assert.ok(LANE_M_FILES.includes(`tiles/${f}`), `${f} travels with the overlay`);
+  for (const f of ['tiles/manifest.json', 'baked/buildings.bin', 'baked/meta.json']) assert.ok(LANE_M_FILES.includes(f));
+});
+
+/**
+ * A self-contained checkout for the merge: the four target tiles (real bounds,
+ * no OSM buildings), a manifest, and a cached "download" holding `features`.
+ */
+async function mergeFixture(features) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ug-merge-pools-'));
+  const tiles = path.join(root, 'public/data/surface/tiles');
+  await mkdir(tiles, { recursive: true });
+  await mkdir(path.join(root, 'public/data/surface/baked'));
+  const cache = path.join(root, 'scripts/.cache/microsoft-footprints');
+  await mkdir(cache, { recursive: true });
+  const manifest = { tiles: [], totals: { buildings: 0, totalSizeBytes: 0 } };
+  for (const file of TARGET_TILES) {
+    const [, c, r] = /^tile_(\d+)_(\d+)\.json$/.exec(file).map(Number);
+    const bounds = { sw: [51.2792 + r * 0.018, -0.5894 + c * 0.029], ne: [51.2792 + (r + 1) * 0.018, -0.5894 + (c + 1) * 0.029] };
+    const text = JSON.stringify({ bounds, buildings: [], parks: [], roads: [], greenery: [] }, null, 2);
+    await writeFile(path.join(tiles, file), text);
+    manifest.tiles.push({ file, bounds, counts: { buildings: 0 }, sizeBytes: text.length });
+  }
+  await writeFile(path.join(tiles, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  await writeFile(path.join(cache, 'dataset-links.csv'), `Location,QuadKey,Url,Size,UploadDate\n${LOCATION},${QUADKEY},https://example.invalid/x.csv.gz,1KB,2026-02-23\n`);
+  const gz = gzipSync(features.map((x) => JSON.stringify(x)).join('\n') + '\n');
+  await writeFile(path.join(cache, `${LOCATION}-${QUADKEY}.csv.gz`), gz);
+  const read = async (f) => readFile(path.join(tiles, f), 'utf8');
+  const sha = createHash('sha256').update(gz).digest('hex');
+  return { root, read, sha, /** The tile with its download's hash (provenance) named, for comparing different downloads. */
+    readNormalised: async (f) => (await read(f)).split(sha).join('<download sha256>'), summary: async () => JSON.parse(await readFile(path.join(root, 'scripts/microsoft-footprints.json'), 'utf8')),
+           cleanup: () => rm(root, { recursive: true, force: true }) };
+}
+/** Squares of about 180 m2 (all in the 150 to 400 m2 band), 70 m apart in a row east from (lat, lon), one per height (-1: none given). */
+const houses = (lat, lon, heights) => heights.map((height, i) => {
+  const w = lon + i * 0.001, d = 0.00012;
+  return { type: 'Feature', properties: { height, confidence: -1 },
+    geometry: { type: 'Polygon', coordinates: [[[w, lat], [w + d * 1.6, lat], [w + d * 1.6, lat + d], [w, lat + d], [w, lat]]] } };
+});
+
+test('height pools: a later pool never changes an earlier pool\'s bytes; --tiles only chooses what is written', async () => {
+  const parkRoyal = houses(51.520, -0.290, [4, 5, 6, -1]);      // tile_10_13: pool 30Sep26w, band median 5
+  const northActon = houses(51.520, -0.260, [10, 11, 12, -1]);  // tile_11_13: pool 01Oct26h, band median 11
+  const alone = await mergeFixture(parkRoyal), both = await mergeFixture([...parkRoyal, ...northActon]);
+  const subset = await mergeFixture([...parkRoyal, ...northActon]);
+  try {
+    await mergeMain(['--root', alone.root], { mainRoot: null });
+    await mergeMain(['--root', both.root], { mainRoot: null });
+    const untouched = await subset.read('tile_10_13.json');
+    await mergeMain(['--root', subset.root, '--tiles', 'tile_11_13.json'], { mainRoot: null });
+    const heightsOf = async (fx, f) => JSON.parse(await fx.read(f)).buildings.map((b) => b.height).sort((a, b) => a - b);
+    // Each pool fills its missing height from its own median (pooled together it would be 6 for both).
+    assert.deepEqual(await heightsOf(both, 'tile_10_13.json'), [4, 5, 5, 6]);
+    assert.deepEqual(await heightsOf(both, 'tile_11_13.json'), [10, 11, 11, 12]);
+    // Adding North Acton's pool leaves Park Royal's tile byte-identical, but for
+    // the provenance hash of the (here different) download file.
+    assert.notEqual(both.sha, alone.sha);
+    assert.equal(await both.readNormalised('tile_10_13.json'), await alone.readNormalised('tile_10_13.json'));
+    // A --tiles run writes only that tile, with the bytes a full run writes, and
+    // its summary still describes every tile and pool exactly as a full run's
+    // (only the manifest total differs: that fixture's tile_10_13 is unmerged).
+    assert.equal(await subset.read('tile_11_13.json'), await both.read('tile_11_13.json'));
+    assert.equal(await subset.read('tile_10_13.json'), untouched, 'not asked for, not written');
+    const [sS, sB] = [await subset.summary(), await both.summary()];
+    assert.deepEqual(sS.tiles, sB.tiles);
+    assert.deepEqual(sS.heightPools, sB.heightPools);
+    assert.equal(sS.totals.added, sB.totals.added);
+    assert.deepEqual(Object.keys((await both.summary()).tiles), TARGET_TILES);
+    await assert.rejects(mergeMain(['--root', both.root, '--tiles', 'tile_12_13.json'], { mainRoot: null }), /not in TILE_GROUPS/);
+  } finally { await Promise.all([alone, both, subset].map((x) => x.cleanup())); }
+});
+
 // ── Data (the merged overlay) ───────────────────────────────────────────────
 
 const summary = JSON.parse(await readFile(path.join(ROOT, 'scripts/microsoft-footprints.json'), 'utf8'));
 const readTile = async (f) => JSON.parse(await readFile(path.join(TILES, f), 'utf8'));
 const overlayMissing = 'Microsoft footprint overlay not applied to public/data/surface: run node scripts/surface-overlay.mjs prepare && node scripts/merge-microsoft-footprints.mjs && npm run bake';
+// Park Royal and West Acton exactly as sprint 30Sep26w wrote them (its tracked
+// summary at 0d3818c / 387dff0; the bytes promoted with that sprint's overlay).
+const PARK_ROYAL_WEST_ACTON_30SEP26W = {
+  'tile_10_13.json': 'db3f1e1b3f7ef9b3626a3d2e556e75fbac7c2dd872f86d10ca1301c651c3b95c',
+  'tile_10_14.json': 'd2cc9624fc1553016079e9b62259113b7f8d86f18928a1b8800821e071de1dbf',
+};
+
+test('Park Royal and West Acton are byte-identical to sprint 30Sep26w (their medians are not re-pooled)', async () => {
+  for (const [f, hash] of Object.entries(PARK_ROYAL_WEST_ACTON_30SEP26W)) {
+    assert.equal(summary.tiles[f].sha256After, hash, `${f}: the merge, run over all four tiles, still computes the 30Sep26w bytes`);
+    assert.equal(createHash('sha256').update(await readFile(path.join(TILES, f))).digest('hex'), hash, `${f} on disk`);
+  }
+  assert.deepEqual(summary.heightPools[0].heightBands.map((b) => b.medianM), [3.6, 4.1, 5.5, 5.5, 6.1, 7.6], 'the 30Sep26w pool medians');
+});
+
+test('each tile carries its own pool\'s medians and rule, and every band-filled height is one of them', async () => {
+  assert.deepEqual(summary.heightPools.map((p) => p.tiles), TILE_GROUPS.map((g) => g.tiles));
+  for (const f of TARGET_TILES) {
+    const tile = await readTile(f), pool = summary.heightPools.find((p) => p.tiles.includes(f));
+    assert.equal(summary.tiles[f].pool, pool.pool);
+    assert.deepEqual(tile.microsoft.heightBands, pool.heightBands, `${f} heightBands`);
+    assert.equal(tile.microsoft.heightRule, groupOf(f).heightRule, `${f} heightRule`);
+    // A Microsoft height is never negative and is rounded to 0.1 m; at least the
+    // band-filled count of records sits exactly on the pool median of its band.
+    const ms = tile.buildings.filter(isMicrosoft);
+    const onMedian = ms.filter((b) => b.height === pool.heightBands[heightBand(b.area)].medianM).length;
+    assert.ok(onMedian >= summary.tiles[f].heightFromBand, `${f}: ${onMedian} records on their band median, ${summary.tiles[f].heightFromBand} filled`);
+  }
+  // The new pool is its own: computed from North/East Acton and Harlesden/Willesden Junction, not copied.
+  assert.notDeepEqual(summary.heightPools[1].heightBands.map((b) => b.medianM), summary.heightPools[0].heightBands.map((b) => b.medianM));
+});
 
 test('counts per tile match the tracked summary, byte for byte', async () => {
   assert.deepEqual(Object.keys(summary.tiles), TARGET_TILES);
@@ -124,9 +241,9 @@ test('counts per tile match the tracked summary, byte for byte', async () => {
       assert.ok(b.footprint.length >= 4 && b.footprint.flat().every(Number.isInteger));
     }
   }
-  // Park Royal and West Acton only: the manifest's totals are the tile sums,
-  // and only the two target tiles hold Microsoft records (raw text scan of
-  // every tile, so a stray merge anywhere else fails here).
+  // The target tiles only: the manifest's totals are the tile sums, and only
+  // the four target tiles hold Microsoft records (raw text scan of every
+  // tile, so a stray merge anywhere else fails here).
   const manifest = await readTile('manifest.json');
   assert.equal(manifest.totals.buildings, manifest.tiles.reduce((a, t) => a + t.counts.buildings, 0));
   for (const f of TARGET_TILES) assert.equal(manifest.tiles.find((t) => t.file === f).counts.buildings, summary.tiles[f].buildingsAfter);
@@ -135,7 +252,9 @@ test('counts per tile match the tracked summary, byte for byte', async () => {
     if (TARGET_TILES.includes(f)) continue;
     if ((await readFile(path.join(TILES, f), 'utf8')).includes('"source": "microsoft"')) stray.push(f);
   }
-  assert.deepEqual(stray, [], 'Microsoft records outside Park Royal and West Acton');
+  assert.deepEqual(stray, [], 'Microsoft records outside the four target tiles');
+  // Floors, not this run's counts: each new tile gains hundreds of buildings.
+  for (const f of ['tile_11_13.json', 'tile_11_14.json']) assert.ok(summary.tiles[f].added >= 500, `${f} added ${summary.tiles[f].added}`);
 });
 
 test('no added footprint overlaps an OpenStreetMap building (exact, and an independent point sample)', async () => {
@@ -251,5 +370,7 @@ test('the Data credits name Microsoft Building Footprints under the ODbL', async
   assert.match(line, /https:\/\/github\.com\/microsoft\/GlobalMLBuildingFootprints/);
   assert.match(line, /ODbL/);
   assert.match(line, /opendatacommons\.org\/licenses\/odbl/);
-  assert.match(line, /Park Royal and West Acton/);
+  for (const area of ['Park Royal', 'West Acton', 'North Acton', 'East Acton', 'Harlesden', 'Willesden Junction']) {
+    assert.ok(line.includes(area), `the credit line names ${area}`);
+  }
 });

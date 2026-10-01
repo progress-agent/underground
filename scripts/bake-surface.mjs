@@ -32,14 +32,24 @@
 // RE-RUN WHEN: the tile set changes, the terrain changes (heightmap, river
 // carve, M25 ring), or the landmark registry changes. Not when VE changes.
 //
-// Usage:  node scripts/bake-surface.mjs [--out public/data/surface/baked]
+// Usage:  node scripts/bake-surface.mjs [--out public/data/surface/baked] [--promote]
+//
+// DATA SAFETY (sprint 01Oct26h, D-043). public/data/surface is shared: in a
+// worktree it is usually a symlink, or holds symlinks, into the main checkout's
+// store, which production builds from. Before any work this script refuses an
+// output directory that resolves outside this checkout or into the main
+// store (the main checkout itself needs --promote), or a file there that is a
+// link it would write through (scripts/surface-overlay.mjs assertBakeOutput);
+// the remedy is `node scripts/surface-overlay.mjs prepare`. Each file is then
+// written to a temporary name and renamed into place.
 
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { readFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { installNodeEnv, ROOT } from './bake-node-env.mjs';
 import { LANDMARKS, isSuppressed } from './landmarks.mjs';
 import { createHash } from 'node:crypto';
 import { createAirportSuppression, airportSuppressionSignature, AIRPORT_SUPPRESSION_VERSION } from '../src/airport-suppression.js';
+import { assertBakeOutput, writeLocal, OverlayError } from './surface-overlay.mjs';
 
 installNodeEnv();
 
@@ -47,6 +57,17 @@ const OUT_DIR = (() => {
   const i = process.argv.indexOf('--out');
   return path.join(ROOT, i > -1 ? process.argv[i + 1] : 'public/data/surface/baked');
 })();
+
+// The guard (DATA SAFETY above), before any of the work below.
+const GUARD = { root: ROOT, promote: process.argv.includes('--promote') };
+const OUT_FILES = ['buildings.bin', 'landmark-footprints.json', 'meta.json'];
+try {
+  await assertBakeOutput(OUT_DIR, OUT_FILES, GUARD);
+} catch (e) {
+  if (!(e instanceof OverlayError)) throw e;
+  console.error(e.message);
+  process.exit(1);
+}
 
 const MAGIC = 0x31424755;    // 'UGB1' little-endian
 const REC_BYTES = 10;        // u16 cx_dm, u16 cz_dm, u16 h_dm, u16 side_dm, i16 base_dm
@@ -181,9 +202,9 @@ tileRecords.forEach((t, i) => {
 });
 
 await mkdir(OUT_DIR, { recursive: true });
-await writeFile(path.join(OUT_DIR, 'buildings.bin'), buf);
-await writeFile(path.join(OUT_DIR, 'landmark-footprints.json'), JSON.stringify(retainedPolys));
-await writeFile(path.join(OUT_DIR, 'meta.json'), JSON.stringify({
+await writeLocal(path.join(OUT_DIR, 'buildings.bin'), buf, GUARD);
+await writeLocal(path.join(OUT_DIR, 'landmark-footprints.json'), JSON.stringify(retainedPolys), GUARD);
+await writeLocal(path.join(OUT_DIR, 'meta.json'), JSON.stringify({
   format: 'UGB1', version: 1, recordBytes: REC_BYTES, directoryBytes: DIR_BYTES,
   units: 'decimetres; every vertical value is REAL METRES x 10, never scene-Y',
   fields: ['u16 cx_dm (tile-relative)', 'u16 cz_dm (tile-relative)', 'u16 heightM_dm',
@@ -197,7 +218,7 @@ await writeFile(path.join(OUT_DIR, 'meta.json'), JSON.stringify({
   note: 'builtWithVE is RECORDED, NOT APPLIED — it documents the terrain scale the base elevations were divided by. Changing VE does NOT require a re-bake.',
   landmarks: LANDMARKS.map(l => ({ id: l.id, suppressed: (retainedPolys[l.id] || []).length })),
   stats, generated: new Date().toISOString(),
-}, null, 2));
+}, null, 2), GUARD);
 
 const mb = (b) => (b / 1024 / 1024).toFixed(2) + ' MB';
 log(`\nbuildings.bin  ${mb(buf.length)}  (${n.toLocaleString()} buildings, ${tileRecords.length} tiles)`);
