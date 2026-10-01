@@ -25,8 +25,19 @@ function harness(){
 }
 const pixels=q=>q.scale*q.scale;
 const levelOf=(scale,samples)=>QUALITY_LEVELS.findIndex(q=>q.scale===scale&&q.samples===samples&&!q.shadows);
-// D-040: thinned clouds save a little frame time in these models too.
-const CLOUDS_THIN_SAVES=0.8;
+// D-040: what the clouds cost in these models (level 1 thins them before
+// level 2 drops shadows). Sprint 25Sep26f's clouds on the M5 as lived: full
+// clouds 1.5ms over thinned ones at street, 0.8ms at the river. D-041's clouds
+// (half the cover; fewer, larger puffs lit as one body) drew their sprites for
+// about two thirds of the old cost on the Mac Studio's M2 Max (street 0.28
+// against 0.41ms, river 0.17 against 0.26ms; 30Sep26w, measure-cloud-cost.mjs),
+// so these models scale the M5 figures by that. PROVISIONAL: measured on an M2
+// Max, not the M5; re-measure on the M5 before promotion.
+const CLOUD_COST_SCALE=0.67;
+const CLOUDS_FULL_OVER_THIN=1.5*CLOUD_COST_SCALE; // street, ~1.0ms
+const CLOUDS_THIN_SAVES=0.8*CLOUD_COST_SCALE;     // river, ~0.54ms
+// The rung that thins the clouds and keeps shadows, by meaning.
+const THIN_WITH_SHADOWS=QUALITY_LEVELS.findIndex(q=>q.shadows&&q.clouds==='thin');
 
 test('sustained whole-city overload lowers quality, bounded at the floor',()=>{
  // GPU-bound: 200ms at full quality, only the 35% floor fits the budget.
@@ -68,18 +79,19 @@ test('clouds thin first, then shadows go, and no lower rung brings either back',
  for(const q of QUALITY_LEVELS.slice(FIRST_UNSHADOWED))assert.equal(q.shadows,false);
 });
 test('a view that fits with thin clouds keeps its shadows, and does not bounce',()=>{
- // Full clouds push the frame to 19.7ms (past the 19ms shadow line); thinned
- // clouds bring it to 18.2ms, inside it. Shadows stay; the clouds stay thin.
- const h=harness();const cost=(q,k)=>17+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05);
- h.sim(cost,20000);assert.deepEqual(h.controller.get(),{level:1,...QUALITY_LEVELS[1]});
+ // Full clouds push the frame to 19.6ms (past the 19ms shadow line); thinned
+ // clouds bring it to 18.6ms, inside it. Shadows stay; the clouds stay thin.
+ // (D-041: base 17.4ms with ~1.0ms of full clouds; 17ms with 1.5ms before.)
+ const h=harness();const cost=(q,k)=>17.4+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05);
+ h.sim(cost,20000);assert.deepEqual(h.controller.get(),{level:THIN_WITH_SHADOWS,...QUALITY_LEVELS[THIN_WITH_SHADOWS]});
  const settle=h.changes.length;h.sim(cost,90000);
- assert.equal(h.controller.get().level,1);
+ assert.equal(h.controller.get().level,THIN_WITH_SHADOWS);
  assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
 });
 test('full clouds come back once the view is light again',()=>{
- const h=harness();h.sim((q,k)=>17+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),20000);
- assert.equal(h.controller.get().level,1);
- h.sim((q,k)=>13+(q.clouds==='full'?1.5:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),30000);
+ const h=harness();h.sim((q,k)=>17.4+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),20000);
+ assert.equal(h.controller.get().level,THIN_WITH_SHADOWS);
+ h.sim((q,k)=>13+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),30000);
  assert.equal(h.controller.get().level,0);
 });
 test('rungs are fine: no step removes more than a quarter of the pixels',()=>{

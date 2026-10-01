@@ -63,46 +63,89 @@ const wrap = (v, n) => ((v % n) + n) % n;
 // ── Layout ─────────────────────────────────────────────────────────────────
 
 /**
- * One cumulus: a flat base, a cauliflower dome. Puff centres are in real
- * metres relative to the cloud's base centre; dy is height above the base.
+ * The sprint 25Sep26f generator drew each cloud's puffs from the layout's own
+ * random stream, between one cloud and the next: 5 to 11 puffs by width, five
+ * draws per base puff and six per dome puff. The layout still consumes exactly
+ * those draws (and ignores them), so every cloud keeps the place, size and
+ * height it had: at 1.25 oktas (D-041) the sky is the first clouds of the old
+ * 2.5-okta sky, unmoved. The puffs themselves now come from a stream of their
+ * own per cloud (cloudPuffs below).
  */
-function makeCloud(rand, P, cx, cz) {
-  const width = lerp(P.widthM[0], P.widthM[1], Math.pow(rand(), P.widthSkew));
-  const height = width * lerp(P.aspect[0], P.aspect[1], rand());
-  const depth = width * lerp(P.elongation[0], P.elongation[1], rand());
-  const heading = rand() * TAU;
-  const base = lerp(P.baseM[0], P.baseM[1], rand());
+export const LAYOUT_REPLAY_PUFFS = Object.freeze([5, 11]);
+function replayOldPuffDraws(rand, P, width) {
+  const [p0, p1] = LAYOUT_REPLAY_PUFFS;
+  const n = Math.round(lerp(p0, p1, (width - P.widthM[0]) / (P.widthM[1] - P.widthM[0])));
+  const nBase = Math.max(3, Math.round(n * 0.45));
+  for (let k = 5 * n + (n - Math.min(n, nBase)); k > 0; k--) rand();
+}
+
+/** A cloud's own puff stream: a pure function of the layout seed and the cloud's index. */
+function puffSeed(seed, index) {
+  let h = (seed ^ Math.imul(index + 1, 0x9E3779B1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85EBCA6B) >>> 0;
+  return (h ^ (h >>> 13)) >>> 0;
+}
+
+/**
+ * One cumulus: a flat base and a dome, as the heap the shader lights as ONE
+ * body (clouds.js). Sprint 30Sep26w (D-041): fewer, larger, overlapping puffs.
+ * A row of wide base puffs spans the cloud's length at its flat base; smaller
+ * dome puffs stack towards the top and the middle. Overlap is generous, so no
+ * puff stands alone as a ball: the look comes from the heap's light, and the
+ * puffs only give it its lumpy outline. Puff centres are real metres relative
+ * to the cloud's base centre; dy is height above the base.
+ */
+function cloudPuffs(prand, P, cloud) {
+  const { width, height, depth, heading } = cloud;
   const n = Math.round(lerp(P.puffs[0], P.puffs[1], (width - P.widthM[0]) / (P.widthM[1] - P.widthM[0])));
+  const nBase = Math.max(2, Math.round(n * 0.5));
+  const nDome = n - nBase;
   const ch = Math.cos(heading), sh = Math.sin(heading);
   const puffs = [];
-  const nBase = Math.max(3, Math.round(n * 0.45));
-  for (let k = 0; k < n; k++) {
-    const isBase = k < nBase;
-    // Base puffs are wide and low; the dome's are rounder and smaller towards the top.
-    const r = width * (isBase ? lerp(0.2, 0.3, rand()) : lerp(0.15, 0.26, rand()));
-    let h, spread;
-    if (isBase) {
-      h = r * 0.55;
-      spread = 1;
-    } else {
-      const f = Math.pow(rand(), 0.8);
-      h = r * 0.55 + f * Math.max(0, height - r * 1.5);
-      spread = Math.sqrt(Math.max(0, 1 - f * f)) * 0.8 + 0.1;
-    }
-    const a = rand() * TAU, q = Math.sqrt(rand()) * spread;
-    const lx = Math.cos(a) * q * Math.max(0, width / 2 - r * 0.8);
-    const lz = Math.sin(a) * q * Math.max(0, depth / 2 - r * 0.8);
-    puffs.push({
-      dx: lx * ch - lz * sh, dz: lx * sh + lz * ch, dy: h, r,
-      variant: Math.floor(rand() * 4), rot: rand() * TAU, rank: 0,
-    });
+  const push = (lx, lz, h, r) => puffs.push({
+    dx: lx * ch - lz * sh, dz: lx * sh + lz * ch, dy: h, r,
+    variant: Math.floor(prand() * 4), rot: prand() * TAU, rank: 0,
+  });
+  // Base row: evenly spread along the length, jittered, centres half a radius
+  // above the base so the flat cut runs through their lower halves.
+  for (let k = 0; k < nBase; k++) {
+    const r = width * lerp(0.28, 0.36, prand());
+    const along = nBase > 1 ? lerp(-1, 1, k / (nBase - 1)) : 0;
+    const lx = (along * 0.8 + (prand() - 0.5) * 0.3) * Math.max(0, width / 2 - r);
+    const lz = (prand() - 0.5) * Math.max(0, depth - 2 * r) * 0.8;
+    push(lx, lz, r * 0.5, r);
+  }
+  // Dome: rising towards the top, drawing in towards the middle.
+  for (let k = 0; k < nDome; k++) {
+    const r = width * lerp(0.22, 0.3, prand());
+    const f = (k + 0.4 + 0.5 * prand()) / nDome;
+    const h = r * 0.5 + f * Math.max(0, height - r * 1.1);
+    const spread = (1 - f * 0.75) * Math.max(0, width / 2 - r) * 0.8;
+    const a = prand() * TAU;
+    push(Math.cos(a) * spread * prand(), Math.sin(a) * spread * 0.6 * prand(), h, r);
   }
   // Rank 0 is the largest puff: thinning and quality drop the smallest first.
   const order = puffs.map((p, i) => i).sort((i, j) => puffs[j].r - puffs[i].r);
   order.forEach((i, k) => { puffs[i].rank = n > 1 ? k / (n - 1) : 0; });
   // Draw order inside a cloud: bottom to top (reversed when viewed from below).
   puffs.sort((p, q) => p.dy - q.dy);
-  return { cx, cz, base, width, height, depth, puffs };
+  return puffs;
+}
+
+/**
+ * One cloud's identity (place, size, height, heading) from the layout stream,
+ * then its puffs from its own stream.
+ */
+function makeCloud(rand, P, cx, cz, index) {
+  const width = lerp(P.widthM[0], P.widthM[1], Math.pow(rand(), P.widthSkew));
+  const height = width * lerp(P.aspect[0], P.aspect[1], rand());
+  const depth = width * lerp(P.elongation[0], P.elongation[1], rand());
+  const heading = rand() * TAU;
+  const base = lerp(P.baseM[0], P.baseM[1], rand());
+  replayOldPuffDraws(rand, P, width);
+  const cloud = { index, cx, cz, base, width, height, depth, heading, puffs: null };
+  cloud.puffs = cloudPuffs(mulberry32(puffSeed(P.seed, index)), P, cloud);
+  return cloud;
 }
 
 /** Footprint of one puff seen from straight above: soft disc. */
@@ -170,7 +213,7 @@ export function buildCloudLayout(presetOrId) {
   let covered = 0;
   const clouds = [];
   for (let guard = 0; covered < target && guard < 20000; guard++) {
-    const cloud = makeCloud(rand, P, F.originX + rand() * F.size, F.originZ + rand() * F.size);
+    const cloud = makeCloud(rand, P, F.originX + rand() * F.size, F.originZ + rand() * F.size, clouds.length);
     clouds.push(cloud);
     covered += splatCloud(raw, N, texel, F, cloud);
   }
