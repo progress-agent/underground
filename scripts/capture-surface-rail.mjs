@@ -3,7 +3,7 @@
 // the same frames come from any build (the before build, c820ea9, has no
 // surface railway to aim at). Needs a DEV server (window.__ug).
 //
-//   node scripts/capture-surface-rail.mjs <origin> <outDir> <tag> [--poses a,b] [--isolate-overground] [--jpg]
+//   node scripts/capture-surface-rail.mjs <origin> <outDir> <tag> [--poses a,b] [--isolate-overground] [--jpg] [--live]
 //
 // Frames: 1440x900 at DPR 1, Manual quality at 100% and MSAA 4, time paused,
 // the tick frozen and two frames stepped before the render that is read back,
@@ -12,6 +12,13 @@
 // elapsed time): run it on two builds and compare the PNGs pixel by pixel.
 // Run-to-run noise on one build is a handful of pixels at 1 level, in fogged
 // distance near the horizon (30Sep26w: 1, 3 and 25 pixels at OG1 to OG3).
+//
+// --live (sprint 01Oct26h, fix round 1): the default buildings path instead,
+// `?buildings=live`, whose tiles stream in by camera proximity. The page first
+// waits until no tile has arrived or left for 20 s (the round-1 build stopped
+// lifting markers over roofs after 15 s without a new tile), and each pose
+// waits for a building tile over its target and 5 s more, so the markers there
+// have had their chance to be lifted.
 import { chromium } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 
@@ -60,6 +67,11 @@ export const POSES = {
   'S6b-overground-haggerston-viaduct': { cam: [3697.7, 540.3, -3111.8], target: [3537.7, 98.9, -3051.8] },
   'S9b-dlr-tower-gateway-terminus': { cam: [3798.5, 320.3, -624.8], target: [3758.5, 123.6, -464.8] },
   'S11b-dlr-lewisham-terminus': { cam: [7963.5, 754.9, 4191.2], target: [8023.5, 74.0, 4451.2] },
+  // Fix round 1 (--live): stations whose building tile streams in after the
+  // first quiet 15 s; camera 150 m west, 260 m south, 110 m up of the marker.
+  'L1-jubilee-wembley-park-live': { cam: [-10806.8, 749.9, -5687.1], target: [-10656.8, 209.9, -5947.1] },
+  'L2-metropolitan-hillingdon-live': { cam: [-22606.8, 732.5, -4368.1], target: [-22456.8, 192.5, -4628.1] },
+  'L3-central-ealing-broadway-live': { cam: [-12220.8, 711.9, -293.1], target: [-12070.8, 171.9, -553.1] },
 };
 
 if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
@@ -69,6 +81,7 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
   const arg = (k, d) => process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : d;
   const isolate = flag('--isolate-overground');
   const jpg = flag('--jpg'); // s01:R: JPEG at quality 0.9 (the Reader page embeds them)
+  const live = flag('--live'); // s01:R fix round 1: live building tiles (the default path)
   const names = arg('--poses', Object.keys(POSES).join(',')).split(',');
   await mkdir(outDir, { recursive: true });
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
@@ -79,20 +92,40 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
     window.__step = n => { for (let i = 0; i < n; i++) { const cb = held.shift(); if (cb) cb(lastTs); } };
     window.__thaw = () => { window.__freeze = false; for (const cb of held.splice(0)) window.requestAnimationFrame(cb); };
   });
-  await page.goto(`${origin}/?fast=1&buildings=baked&mh=1.1`);
-  await page.waitForFunction(() => window.__ug?.bakedStats?.tilesTotal > 0 && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal
-    && window.__ug.groundReady && window.__ug.overground?.userData.stationsAttached && ('surfaceRail' in window.__ug ? !!window.__ug.surfaceRail : true), null, { timeout: 180000 });
+  await page.goto(`${origin}/?fast=1&buildings=${live ? 'live' : 'baked'}&mh=1.1`);
+  await page.waitForFunction(live => (live || window.__ug?.bakedStats?.tilesTotal > 0 && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal)
+    && window.__ug?.groundReady && window.__ug.overground?.userData.stationsAttached && ('surfaceRail' in window.__ug ? !!window.__ug.surfaceRail : true), live, { timeout: 180000 });
   await page.evaluate(() => { const u = window.__ug; u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 }); u.sim.paused = true; });
   // s01:R: on builds that lift surface markers over roofs, wait for that pass.
   await page.waitForFunction(() => !window.__ug.surfaceRail || !('liftMarkersOverRoofs' in window.__ug.surfaceRail) || !!window.__ug.surfaceRail.roofLift, null, { timeout: 60000 });
+  // Live: until no building tile has arrived or left for 20 s (up to 3 min).
+  if (live) await page.evaluate(async () => {
+    const count = () => (window.__ug.scene.getObjectByName('surfaceGeometry')?.children || []).filter(m => m.name?.startsWith('buildings-')).length;
+    let last = count(), since = performance.now(); const t0 = since;
+    while (performance.now() - since < 20000 && performance.now() - t0 < 180000) {
+      await new Promise(r => setTimeout(r, 500)); const n = count(); if (n !== last) { last = n; since = performance.now(); }
+    }
+  });
   for (const name of names) {
     const P = POSES[name];
-    await page.evaluate(async ({ P }) => {
+    await page.evaluate(async ({ P, live }) => {
       window.__thaw();
       const u = window.__ug; u.camera.position.fromArray(P.cam); u.controls.target.fromArray(P.target); u.controls.update();
+      if (live) {
+        // A live building tile over the target (its instances' plan bounds), then 5 s.
+        const [x, , z] = P.target, t0 = performance.now();
+        const covered = () => (u.scene.getObjectByName('surfaceGeometry')?.children || []).some(m => {
+          if (!m.isInstancedMesh || !m.name?.startsWith('buildings-')) return false;
+          const a = m.instanceMatrix.array; let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+          for (let i = 0; i < m.count; i++) { const o = i * 16; x0 = Math.min(x0, a[o + 12]); x1 = Math.max(x1, a[o + 12]); z0 = Math.min(z0, a[o + 14]); z1 = Math.max(z1, a[o + 14]); }
+          return x >= x0 && x <= x1 && z >= z0 && z <= z1;
+        });
+        while (!covered() && performance.now() - t0 < 60000) await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 5000));
+      }
       await new Promise(r => setTimeout(r, 2500));
       window.__freeze = true; await new Promise(r => setTimeout(r, 100)); window.__step(3);
-    }, { P });
+    }, { P, live });
     const png = await page.evaluate(({ isolate, jpg }) => {
       const u = window.__ug, rr = u.composer.renderer, gl = rr.getContext(), restore = [];
       if (isolate) {
