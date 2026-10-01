@@ -547,6 +547,17 @@ test('no station label is drawn in the bore, the walker\'s own line\'s included;
   const d = await dbg();
   expect(d.regime).toBe('open');
   expect((await visible()).length).toBeGreaterThan(0);
+  // On the drawn track the station markers and shafts (sized for the view from the sky: 12 m balls at
+  // platform level) are hidden as in the bore, and the lining is not drawn; leaving the mode restores them.
+  expect(d.interior.visible).toBe(false);
+  expect(d.interior.hiddenDevices).toBeGreaterThan(0);
+  const markers = () => page.evaluate(() => { let n = 0; window.__ug.scene.traverse(o => { if (o.userData?.kind === 'station-markers' && o.visible) n++; }); return n; });
+  expect(await markers()).toBe(0);
+  await page.keyboard.press('1');
+  await page.waitForTimeout(300);
+  expect(await markers()).toBeGreaterThan(0);
+  await page.keyboard.press('2');
+  await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
 });
 
 test('an open-air fork, taken each way by facing the branch', async () => {

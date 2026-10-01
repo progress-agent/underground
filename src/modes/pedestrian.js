@@ -341,6 +341,10 @@ export function createPedestrianMode(ctx) {
       ctx.tubeInterior?.show(net, bore, { isolate: phase === 'tunnel' });
       // s30:P the walker's own line's trains are drawn inside the bore.
       trains.show(net.paths[bore.path]?.lineId ?? null);
+    } else if (open && ctx.tubeInterior?.hideDevicesOnly) {
+      // s01:P on the drawn track, the station markers and shafts sized for the sky are hidden as in the bore.
+      ctx.tubeInterior.hideDevicesOnly();
+      trains.hide();
     } else {
       ctx.tubeInterior?.hide();
       trains.hide();
