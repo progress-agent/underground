@@ -69,6 +69,30 @@ import proj4 from 'proj4';
 // measured decks), the same way the renderer lays it.
 import { createDlrProfile, sampleForSurfaceRail, deckOfSample } from '../src/dlr-profile.js';
 import { BNG_REF_E, BNG_REF_N } from '../src/coordinates.js';
+// s01:R: the open-air track v2 lacks, from OSM (cached Overpass answer).
+import { CACHE_FILE as OSM_CACHE_FILE, placeTrails, PLACES } from './fetch-tube-surface-osm.mjs';
+
+/**
+ * s01:R (sprint 01Oct26h, D-043 item 4): the places whose OSM track is merged
+ * into a line (scripts/fetch-tube-surface-osm.mjs PLACES), with ways also on
+ * another line's relations left out where that line owns the shared track.
+ */
+export const OSM_GAPS = {
+  central: [['central-ealing'], ['central-hainault'], ['central-epping']],
+  // Harrow-on-the-Hill to Rayners Lane only: from the junction east of
+  // Rayners Lane the track is the Piccadilly's (transform 4 lays the
+  // Metropolitan's colour on it, as before).
+  metropolitan: [['metropolitan-west-harrow', { exclude: ['piccadilly'] }], ['metropolitan-watford']],
+  // Lewisham: also the classes of the v2 track there (reclassFromOsm).
+  dlr: [['dlr-stratford'], ['dlr-lewisham', { reclass: true }]],
+};
+export async function loadOsmCache(file = OSM_CACHE_FILE) {
+  try { return JSON.parse(await readFile(file, 'utf8')); }
+  catch (e) { throw new Error(`${file} is missing: run node scripts/fetch-tube-surface-osm.mjs (it caches the Overpass answer) (${e.message})`); }
+}
+export function osmTrailsFor(lineId, answer) {
+  return (OSM_GAPS[lineId] || []).flatMap(([place, opts]) => placeTrails(answer, place, lineId, opts));
+}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SOURCE = '/Users/macstudio_1/Wisdom/WORK/PROJECTS/UnderGround/Working/prog-rail-geometry-11Jul26s/v2/tube-surface-sections.json';
@@ -251,7 +275,28 @@ export function cleanRuns(keys, xy, { minCovered, gapFill }) {
 export function slicePiece(trail, i0, i1) {
   const piece = { lonlat: trail.lonlat.slice(i0, i1 + 1), xy: trail.xy.slice(i0, i1 + 1), cls: trail.cls.slice(i0, i1) };
   if (trail.source) piece.source = trail.source;
+  // s01:R: where points came from (OSM extensions) and segments opened as covered ways.
+  if (trail.place) piece.place = trail.place;
+  if (trail.from) piece.from = trail.from.slice(i0, i1 + 1);
+  if (trail.opened) piece.opened = trail.opened.slice(i0, i1);
   return piece;
+}
+
+/** s01:R: point ranges of a piece whose `from` label is set: [{p0, p1, place}]. */
+export function fromRanges(from) {
+  const out = [];
+  (from || []).forEach((f, i) => {
+    if (!f) return;
+    if (out.length && out.at(-1).place === f && out.at(-1).p1 === i - 1) out.at(-1).p1 = i;
+    else out.push({ p0: i, p1: i, place: f });
+  });
+  return out;
+}
+/** s01:R: segment ranges flagged in `opened`: [{i0, i1}]. */
+export function openedRanges(opened) {
+  const out = [];
+  (opened || []).forEach((o, i) => { if (!o) return; if (out.length && out.at(-1).i1 === i) out.at(-1).i1 = i + 1; else out.push({ i0: i, i1: i + 1 }); });
+  return out;
 }
 
 /**
@@ -311,10 +356,10 @@ export function profileTrails(profileData) {
  * with no kept track beside it at all is added from `minPiece`. Nothing the
  * first pass kept is dropped or moved, so the corridors drawn before stay.
  */
-export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIECE_M, heightAt = null, supplement = [], minDeckPiece = DLR_MIN_DECK_PIECE_M } = {}) {
+export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIECE_M, heightAt = null, supplement = [], minDeckPiece = DLR_MIN_DECK_PIECE_M, osm = [] } = {}) {
   const prep = list => list.map(b => {
     const lonlat = b.points, xy = lonlat.map(toBng);
-    return { lonlat, xy, cls: segmentClasses(lonlat.length, b.segments), len: lengthOf(xy), ...(b.source ? { source: b.source } : {}) };
+    return { lonlat, xy, cls: segmentClasses(lonlat.length, b.segments), len: lengthOf(xy), ...(b.source ? { source: b.source } : {}), ...(b.place ? { place: b.place } : {}) };
   }).filter(t => t.xy.length >= 2).sort((a, b) => b.len - a.len);
   const trails = prep(branches);
   const index = new SegmentIndex(), pieces = [];
@@ -330,7 +375,10 @@ export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIEC
     }
   }
   const sourceM = trails.reduce((s, t) => s + t.len, 0);
-  if (!heightAt) return { pieces, droppedM, sourceM };
+  // s01:R: track v2 lacks, from OSM (scripts/fetch-tube-surface-osm.mjs), merged
+  // AFTER the v2 trails by the same coverage test, so it only adds.
+  const osmReport = osm.length ? supplementFromOsm(pieces, index, prep(osm), { near, minPiece }) : null;
+  if (!heightAt) return { pieces, droppedM, sourceM, osm: osmReport };
 
   // Pass A2 (the DLR): decks.
   const decks = new SegmentIndex(), segLen = (xy, i) => Math.hypot(xy[i + 1][0] - xy[i][0], xy[i + 1][1] - xy[i][1]);
@@ -349,6 +397,21 @@ export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIEC
       if (run.key !== null) continue;
       let apartM = 0;
       for (let i = run.i0; i < run.i1; i++) if (apart[i]) apartM += segLen(trail.xy, i);
+      // s01:R: a short supplement stretch that runs on from the end of kept
+      // track to the buffers (the last 41 m of the profile's track to
+      // platform 4a at Stratford, beyond the end of OSM's route track)
+      // extends that piece.
+      // Only toward a dead end: the run reaches the end of the profile's
+      // track, with no kept track beyond it (a flyover stub between other
+      // decks, at West India Quay, is left as it was).
+      const atTrailEnd = run.i0 === 0 || run.i1 === trail.xy.length - 1;
+      const farEnd = run.i0 === 0 ? trail.xy[0] : trail.xy[trail.xy.length - 1];
+      if (trail.source && !apartM && run.len < minPiece && atTrailEnd && !decks.nearest(farEnd, null, near)) {
+        const arc = arcOf(trail.xy), join = findJoin(pieces, trail, arc, run);
+        const x = join && applyJoin(join, trail, arc, run, trail.source);
+        if (x) { for (let i = x.from; i < x.to; i++) decks.add(join.piece.xy[i], join.piece.xy[i + 1], { cls: join.piece.cls[i], a: join.piece.xy[i], b: join.piece.xy[i + 1] }); fromSupplementM += x.lengthM; }
+        continue;
+      }
       if (apartM < minDeckPiece && !(trail.source && run.len >= minPiece)) continue;
       const piece = slicePiece(trail, run.i0, run.i1);
       pieces.push(piece);
@@ -356,7 +419,316 @@ export function collapseLine(branches, { near = TWIN_NEAR_M, minPiece = MIN_PIEC
       if (trail.source) fromSupplementM += run.len; else deckSeparatedM += run.len;
     }
   }
-  return { pieces, droppedM, sourceM, deckSeparatedM, fromSupplementM };
+  return { pieces, droppedM, sourceM, deckSeparatedM, fromSupplementM, osm: osmReport };
+}
+
+/**
+ * s01:R (sprint 01Oct26h, D-043 item 4): open-air track the v2 delivery lacks,
+ * from OpenStreetMap (scripts/fetch-tube-surface-osm.mjs: the line's own route
+ * relations in a box around each gap, classed by pipeline-v2.py's rules).
+ * The OSM trails, longest first, go through the same coverage test as pass A
+ * against everything kept (v2 first), in plan: a stretch within 32 m of kept
+ * track of the line, parallel, is that track and is not added (whatever the
+ * two vintages' classes there).
+ * An uncovered stretch is:
+ *  - JOINED to a kept piece when that piece ends beside it (its end within
+ *    JOIN_M of the stretch near the covered side, running the same way): the
+ *    stretch's points beyond the end are appended (or prepended) to the
+ *    piece, so a line runs on to its buffers as one piece (Watford, Epping,
+ *    Lewisham), whatever the length;
+ *  - otherwise added as a piece of its own from MIN_PIECE_M (the Ealing
+ *    Broadway branch, the Hainault loop, Harrow-on-the-Hill to Rayners Lane);
+ *  - otherwise dropped (twin noise).
+ * Nothing kept before is moved; an extended piece keeps every point it had.
+ * Returns {addedM, extendedM, droppedM, added: [...], extended: [...]}.
+ */
+export const JOIN_M = 32;
+export const JUNCTION_SNAP_M = 6, JUNCTION_REACH_M = 150;
+/** Arc length at each point of a polyline. */
+const arcOf = xy => { const arc = [0]; for (let i = 0; i < xy.length - 1; i++) arc.push(arc[i] + Math.hypot(xy[i + 1][0] - xy[i][0], xy[i + 1][1] - xy[i][1])); return arc; };
+
+/**
+ * A kept piece ending beside an uncovered stretch run[i0..i1] of a trail, near
+ * its covered side and running on into it (JOIN_M; see supplementFromOsm), or
+ * null: {piece, atEnd, side, pr}.
+ */
+export function findJoin(pieces, trail, arc, run, joinM = JOIN_M) {
+  const project = (p, s0, s1) => {
+    let best = null;
+    for (let i = Math.max(0, s0); i < Math.min(s1, trail.xy.length - 1); i++) {
+      const a = trail.xy[i], b = trail.xy[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+      const d = Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t);
+      if (!best || d < best.d) best = { d, s: arc[i] + t * Math.sqrt(l2), seg: i };
+    }
+    return best;
+  };
+  let join = null;
+  for (const piece of pieces) {
+    if (piece.xy.length < 2) continue;
+    for (const atEnd of [true, false]) {
+      const E = atEnd ? piece.xy.at(-1) : piece.xy[0], F = atEnd ? piece.xy.at(-2) : piece.xy[1];
+      const dir = [E[0] - F[0], E[1] - F[1]], dl = Math.hypot(...dir) || 1;
+      for (const side of ['start', 'end']) {
+        // The covered side of the run: before i0 (start) or after i1 (end).
+        const pr = side === 'start' ? project(E, run.i0 - 3, run.i1) : project(E, run.i0, run.i1 + 3);
+        if (!pr || pr.d > joinM) continue;
+        const edge = side === 'start' ? arc[run.i0] : arc[run.i1];
+        if (Math.abs(pr.s - edge) > 40) continue;
+        // The stretch runs away from the covered side; the piece must run the same way.
+        const k = Math.min(pr.seg, trail.xy.length - 2), tdir = [trail.xy[k + 1][0] - trail.xy[k][0], trail.xy[k + 1][1] - trail.xy[k][1]];
+        const sign = side === 'start' ? 1 : -1, cos = sign * (dir[0] * tdir[0] + dir[1] * tdir[1]) / (dl * (Math.hypot(...tdir) || 1));
+        if (cos < 0.5) continue;
+        const beyond = side === 'start' ? arc[run.i1] - pr.s : pr.s - arc[run.i0];
+        if (beyond < 5) continue;
+        if (!join || pr.d < join.pr.d) join = { piece, atEnd, side, pr };
+      }
+    }
+  }
+  return join;
+}
+
+/**
+ * Append (or prepend) to the joined piece the trail's points beyond the
+ * projection of its end, away from the covered side, labelled `label` in the
+ * piece's `from`. Returns {lengthM, classes, from, to} (point indices in the
+ * piece, for indexing) or null.
+ */
+export function applyJoin(join, trail, arc, run, label) {
+  const { piece, atEnd, side, pr } = join;
+  const idx = [];
+  if (side === 'start') { for (let i = run.i0; i <= run.i1; i++) if (arc[i] > pr.s + 0.5) idx.push(i); }
+  else { for (let i = run.i1; i >= run.i0; i--) if (arc[i] < pr.s - 0.5) idx.push(i); }
+  if (!idx.length) return null;
+  const clsOf = i => side === 'start' ? trail.cls[Math.max(0, i - 1)] : trail.cls[Math.min(i, trail.cls.length - 1)];
+  const pts = idx.map(i => trail.xy[i]), ll = idx.map(i => trail.lonlat[i]), cl = idx.map(clsOf);
+  const E = atEnd ? piece.xy.at(-1) : piece.xy[0];
+  let len = Math.hypot(pts[0][0] - E[0], pts[0][1] - E[1]);
+  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  piece.from ||= piece.xy.map(() => (piece.source === 'osm' ? piece.place : null));
+  piece.opened ||= piece.cls.map(() => 0);
+  const tags = pts.map(() => label);
+  let from, to;
+  if (atEnd) {
+    from = piece.xy.length - 1;
+    piece.xy.push(...pts); piece.lonlat.push(...ll); piece.cls.push(...cl); piece.from.push(...tags); piece.opened.push(...cl.map(() => 0));
+    to = piece.xy.length - 1;
+  } else {
+    piece.xy.unshift(...pts.reverse()); piece.lonlat.unshift(...ll.reverse()); piece.cls.unshift(...cl.reverse());
+    piece.from.unshift(...tags); piece.opened.unshift(...cl.map(() => 0));
+    from = 0; to = pts.length;
+  }
+  return { lengthM: len, classes: [...new Set(cl)], at: atEnd ? 'end' : 'start', from, to };
+}
+
+export function supplementFromOsm(pieces, index, trails, { near = TWIN_NEAR_M, minPiece = MIN_PIECE_M, joinM = JOIN_M } = {}) {
+  const rep = { addedM: 0, extendedM: 0, droppedM: 0, added: [], extended: [] };
+  const indexPiece = (piece, from = 0, to = piece.xy.length - 1) => { for (let i = from; i < to; i++) index.add(piece.xy[i], piece.xy[i + 1], { cls: piece.cls[i] }); };
+  for (const trail of trails) {
+    const arc = arcOf(trail.xy);
+    // In plan only, whatever the level: the supplement fills track v2 has
+    // nowhere. Two OSM vintages draw class boundaries (a bridge, a covered
+    // way) metres apart, and a level test would re-add the line beside itself
+    // wherever they disagree (seen on the Central at Snaresbrook).
+    const anyLevel = trail.cls.map(() => ['tunnel', 'raised', 'grade']);
+    const keys = cleanRuns(coverage(trail.xy, trail.cls, index, near, () => 'self', anyLevel), trail.xy, { minCovered: 0, gapFill: minPiece });
+    for (const run of runsOf(keys, trail.xy)) {
+      if (run.key !== null) continue;
+      // A kept piece ending beside this stretch, near its covered side, running on into it.
+      const join = findJoin(pieces, trail, arc, run, joinM);
+      if (join) {
+        const x = applyJoin(join, trail, arc, run, trail.place);
+        if (!x) continue;
+        indexPiece(join.piece, x.from, x.to);
+        rep.extendedM += x.lengthM;
+        rep.extended.push({ place: trail.place, lengthM: Math.round(x.lengthM), at: x.at, classes: x.classes });
+        continue;
+      }
+      if (run.len < minPiece) { rep.droppedM += run.len; continue; }
+      // A new branch reaches back to the junction it leaves: on a side where
+      // the trail runs on beside kept track (covered), the piece takes the
+      // covered points back to the first within JUNCTION_SNAP_M of that track
+      // (at most JUNCTION_REACH_M), so it meets the line it branches from as
+      // v2's own branches do, instead of stopping 32 m short of it.
+      let a = run.i0, b = run.i1;
+      const nearKept = i => index.nearest(trail.xy[i], null, JUNCTION_SNAP_M);
+      const reach = (from, step) => { let i = from, m = 0; while (i + step >= 0 && i + step < trail.xy.length && m < JUNCTION_REACH_M) { m += Math.hypot(trail.xy[i + step][0] - trail.xy[i][0], trail.xy[i + step][1] - trail.xy[i][1]); i += step; if (nearKept(i)) return i; } return from; };
+      if (a > 0) a = reach(a, -1);
+      if (b < trail.xy.length - 1) b = reach(b, 1);
+      const piece = slicePiece(trail, a, b);
+      pieces.push(piece);
+      indexPiece(piece);
+      rep.addedM += run.len;
+      rep.added.push({ place: trail.place, lengthM: Math.round(run.len), classes: [...new Set(piece.cls)] });
+    }
+  }
+  return rep;
+}
+
+/**
+ * s01:R: the classes of kept track inside a place's box, from OSM, where the
+ * v2 vintage and today's OSM disagree. Used only where OSM_GAPS asks (the
+ * DLR's Lewisham terminus: v2 tags its last 106 m tunnel to the buffers;
+ * today's OSM tags 85 m under the main-line railway as tunnel and the
+ * platforms beyond it as open). A kept segment takes the class of the
+ * parallel OSM segment within RECLASS_NEAR_M of its middle.
+ */
+export const RECLASS_NEAR_M = 12;
+export function reclassFromOsm(pieces, trails, box, { near = RECLASS_NEAR_M } = {}) {
+  const idx = new SegmentIndex();
+  for (const t of trails) { const xy = t.points.map(toBng), cls = segmentClasses(t.points.length, t.segments); idx.addPolyline(xy, i => ({ cls: cls[i] })); }
+  const [S, W, N, E] = box, changes = [];
+  for (const piece of pieces) for (let i = 0; i < piece.cls.length; i++) {
+    const [lon, lat] = piece.lonlat[i], [lon2, lat2] = piece.lonlat[i + 1];
+    const mlon = (lon + lon2) / 2, mlat = (lat + lat2) / 2;
+    if (mlat < S || mlat > N || mlon < W || mlon > E) continue;
+    const a = piece.xy[i], b = piece.xy[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9;
+    const hit = idx.nearest([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], [(b[0] - a[0]) / L, (b[1] - a[1]) / L], near);
+    if (hit && hit.s.info.cls !== piece.cls[i]) { changes.push({ from: piece.cls[i], to: hit.s.info.cls, lengthM: L }); piece.cls[i] = hit.s.info.cls; }
+  }
+  return changes;
+}
+
+/**
+ * s01:R (sprint 01Oct26h, D-043 item 4): a TUNNEL STUB. A piece that is
+ * tunnel throughout, shorter than STUB_TUNNEL_MAX_M, and lies wholly (every
+ * 10 m sample) within STUB_NEAR_M of the same line's open track is the other
+ * running track's covered stretch, which the twin collapse cannot drop
+ * (tunnel and grade never count as one level, coverage above). It is dropped.
+ * The case that asked for it: the Jubilee at West Hampstead, a 227 m tunnel
+ * piece running west from the station 13 to 46 m beside the open main track,
+ * which classed the station as tunnel (no surface marker) and drew Jubilee
+ * trains as stubs. A real tunnel is never beside open track of its own line
+ * for its whole length; every piece the rule drops is reported.
+ */
+export const STUB_TUNNEL_MAX_M = 400, STUB_NEAR_M = 32;
+export function dropTunnelStubs(pieces, { maxM = STUB_TUNNEL_MAX_M, near = STUB_NEAR_M, isRealTunnel = null } = {}) {
+  const dropped = [], spared = [];
+  const isStub = (piece) => piece.cls.length && piece.cls.every(c => c === 'tunnel') && lengthOf(piece.xy) < maxM;
+  const open = new SegmentIndex();
+  pieces.forEach(p => { if (!isStub(p)) p.cls.forEach((c, i) => { if (c !== 'tunnel') open.add(p.xy[i], p.xy[i + 1], { cls: c }); }); });
+  const keep = [];
+  for (const piece of pieces) {
+    if (!isStub(piece)) { keep.push(piece); continue; }
+    let all = true, worst = 0;
+    for (let i = 0; i < piece.xy.length - 1 && all; i++) {
+      const a = piece.xy[i], b = piece.xy[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / SAMPLE_M));
+      for (let j = 0; j <= n; j++) {
+        const hit = open.nearest([a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n], null, near);
+        if (!hit) { all = false; break; }
+        worst = Math.max(worst, hit.d);
+      }
+    }
+    const real = all && isRealTunnel ? isRealTunnel(piece) : null;
+    if (all && !real) dropped.push({ piece, lengthM: Math.round(lengthOf(piece.xy)), maxDistanceM: Math.round(worst) });
+    else { keep.push(piece); if (all) spared.push({ piece, lengthM: Math.round(lengthOf(piece.xy)), evidence: real }); }
+  }
+  pieces.length = 0; pieces.push(...keep);
+  dropped.spared = spared;
+  return dropped;
+}
+
+/**
+ * s01:R: is a stub candidate a REAL tunnel? Today's OSM decides, from a cached
+ * Overpass probe of the railway ways around every candidate
+ * (scripts/.cache/tube-surface-stub-probe.json, written by
+ * `node scripts/prepare-tube-surface.mjs --probe-stubs`): it is real when a way
+ * of the same line tagged tunnel (not merely covered=yes, such as Heron Quays
+ * station's building over its viaduct) passes within STUB_REAL_NEAR_M of the
+ * stub's middle. The Bakerloo's stub west of Kensal Green is the Kensal Green
+ * Tunnel itself (v2 classes the main track open there), so it is kept; the
+ * Jubilee's at West Hampstead lies where OSM's Jubilee is open (its only
+ * tunnel there is the 30 m under West End Lane, 236 m away), so it goes.
+ */
+export const STUB_REAL_NEAR_M = 25;
+export const STUB_PROBE_FILE = path.join(ROOT, 'scripts/.cache/tube-surface-stub-probe.json');
+export const LINE_NAME = {
+  bakerloo: /bakerloo/i, central: /central/i, circle: /circle/i, district: /district/i, 'hammersmith-city': /hammersmith/i,
+  jubilee: /jubilee/i, metropolitan: /metropolitan/i, northern: /northern/i, piccadilly: /piccadilly/i, victoria: /victoria/i,
+  'waterloo-city': /waterloo/i, dlr: /docklands|dlr/i,
+};
+export function stubKey(lineId, piece) {
+  const [lon, lat] = piece.lonlat[Math.floor(piece.lonlat.length / 2)];
+  return `${lineId}@${lat.toFixed(5)},${lon.toFixed(5)}`;
+}
+export function realTunnelFromProbe(lineId, piece, probe, { near = STUB_REAL_NEAR_M } = {}) {
+  const entry = probe?.candidates?.[stubKey(lineId, piece)];
+  if (!entry) return undefined; // not probed
+  const mid = toBng(piece.lonlat[Math.floor(piece.lonlat.length / 2)]);
+  for (const w of probe.ways) {
+    const t = w.tags || {};
+    if (!t.tunnel || t.tunnel === 'no' || !LINE_NAME[lineId]?.test(`${t.name ?? ''} ${t.line ?? ''}`)) continue;
+    const xy = w.geometry.map(g => toBng([g.lon, g.lat]));
+    for (let i = 0; i < xy.length - 1; i++) {
+      const a = xy[i], b = xy[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
+      const u = Math.max(0, Math.min(1, ((mid[0] - a[0]) * dx + (mid[1] - a[1]) * dy) / l2));
+      const d = Math.hypot(mid[0] - a[0] - dx * u, mid[1] - a[1] - dy * u);
+      if (d <= near) return `OSM way ${w.id} (${t.name ?? t.line}${t['tunnel:name'] ? `, ${t['tunnel:name']}` : ''}, tunnel=${t.tunnel}) ${Math.round(d)} m from its middle`;
+    }
+  }
+  return null;
+}
+
+/**
+ * s01:R: a STATION'S COVERED WAY. A tunnel run shorter than
+ * STATION_COVERED_WAY_MAX_M between open track, with a stop of the line
+ * beside it (within STATION_COVERED_WAY_NEAR_M) whose nearest track is in
+ * the run, is the station under a road bridge or its own building: Preston
+ * Road (a 131 m run under Preston Road and the station), Wembley Park,
+ * Hillingdon, the Central at Stratford. So is the approach to a terminus
+ * whose platforms lie beyond it (the Lewisham DLR, under the main-line
+ * railway). It is drawn as open track like the covered ways above. The open
+ * track either side must be at least MINOR_OPEN_M long or run to the end of
+ * the line (the buffers), so a station between two real tunnels (a short
+ * daylight gap, in central London) stays in tunnel. Records every run opened.
+ */
+export const STATION_COVERED_WAY_MAX_M = 150, STATION_COVERED_WAY_NEAR_M = 60;
+export function openStationCoveredWays(pieces, stations, { maxM = STATION_COVERED_WAY_MAX_M, near = STATION_COVERED_WAY_NEAR_M, minOpenM = MINOR_OPEN_M } = {}) {
+  const out = [];
+  const segLen = (xy, i) => Math.hypot(xy[i + 1][0] - xy[i][0], xy[i + 1][1] - xy[i][1]);
+  const segDist = (a, b, p) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9; const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)); return Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t); };
+  // A piece end is the end of the line when no other piece of the line comes within 50 m of it.
+  const lineEnd = (pi, atEnd) => {
+    const E = atEnd ? pieces[pi].xy.at(-1) : pieces[pi].xy[0];
+    return !pieces.some((q, k) => k !== pi && q.xy.some((_, i) => i < q.xy.length - 1 && segDist(q.xy[i], q.xy[i + 1], E) < 50));
+  };
+  // Each stop's nearest track: piece and segment.
+  const nearestOf = s => { let best = null; pieces.forEach((piece, pi) => { for (let i = 0; i < piece.xy.length - 1; i++) { const d = segDist(piece.xy[i], piece.xy[i + 1], [s.e, s.n]); if (!best || d < best.d) best = { d, pi, i }; } }); return best; };
+  const nearest = stations.map(nearestOf);
+  pieces.forEach((piece, pi) => {
+    for (let i0 = 1; i0 < piece.cls.length;) {
+      if (piece.cls[i0] !== 'tunnel' || piece.cls[i0 - 1] === 'tunnel') { i0++; continue; }
+      let i1 = i0; while (i1 < piece.cls.length && piece.cls[i1] === 'tunnel') i1++;
+      const next = i1;
+      if (i1 === piece.cls.length) { i0 = next; continue; } // open track on both sides
+      let len = 0; for (let i = i0; i < i1; i++) len += segLen(piece.xy, i);
+      const openRun = (from, step) => { let m = 0, i = from; while (i >= 0 && i < piece.cls.length && piece.cls[i] !== 'tunnel') { m += segLen(piece.xy, i); i += step; } return { m, toEnd: i < 0 || i >= piece.cls.length }; };
+      const before = openRun(i0 - 1, -1), after = openRun(i1, 1);
+      const terminusBefore = before.m < minOpenM && before.toEnd && lineEnd(pi, false);
+      const terminusAfter = after.m < minOpenM && after.toEnd && lineEnd(pi, true);
+      const sideOk = (side, terminus) => side.m >= minOpenM || terminus;
+      if (len < maxM && sideOk(before, terminusBefore) && sideOk(after, terminusAfter)) {
+        // The stop: its nearest track is in this run, or this run is the
+        // approach to a terminus whose platforms are beyond it.
+        let stop = null;
+        const dist = (s, a, b) => { let d = Infinity; for (let i = a; i < b; i++) d = Math.min(d, segDist(piece.xy[i], piece.xy[i + 1], [s.e, s.n])); return d; };
+        stations.forEach((s, k) => {
+          const inRun = nearest[k] && nearest[k].pi === pi && nearest[k].i >= i0 && nearest[k].i < i1;
+          // At a terminus the stop is at the platforms beyond the run.
+          const d = inRun ? dist(s, i0, i1) : terminusAfter ? dist(s, i1, piece.cls.length) : terminusBefore ? dist(s, 0, i0) : Infinity;
+          if (d <= near && (!stop || d < stop.d)) stop = { d, s };
+        });
+        if (stop) {
+          const open = piece.cls[i0 - 1];
+          piece.opened ||= piece.cls.map(() => 0);
+          for (let i = i0; i < i1; i++) { piece.cls[i] = open === 'viaduct' ? 'surface' : open; piece.opened[i] = 1; }
+          out.push({ piece: pi, i0, i1, lengthM: Math.round(len), station: stop.s.name, stationDistanceM: Math.round(stop.d), terminus: terminusBefore || terminusAfter });
+        }
+      }
+      i0 = next;
+    }
+  });
+  return out;
 }
 
 /**
@@ -377,7 +749,8 @@ export function openCoveredWays(piece, maxM = COVERED_WAY_MAX_M) {
     while (j < piece.cls.length && piece.cls[j] === 'tunnel') { len += Math.hypot(piece.xy[j + 1][0] - piece.xy[j][0], piece.xy[j + 1][1] - piece.xy[j][1]); j++; }
     if (i > 0 && j < piece.cls.length && len < maxM) {
       const open = piece.cls[i - 1];
-      for (let k = i; k < j; k++) piece.cls[k] = open === 'viaduct' ? 'surface' : open;
+      piece.opened ||= piece.cls.map(() => 0);
+      for (let k = i; k < j; k++) { piece.cls[k] = open === 'viaduct' ? 'surface' : open; piece.opened[k] = 1; }
       out.push({ i0: i, i1: j, lengthM: Math.round(len) });
     }
     i = j;
@@ -528,7 +901,11 @@ export function elementaryBands(ownerLine, ranges) {
  * added between the outermost of those stops.
  */
 export function inferBandsFromStops(line, ownerPieces, { near = 150, minStops = 3 } = {}) {
-  const orphans = line.stations.filter(s => s.trackClass === null);
+  // s01:R: a stop the v2 track misses (v2Orphan); before the OSM supplement
+  // that was every stop with no track at all. The Metropolitan's Rayners Lane
+  // is still placed on the Piccadilly's track: OSM's own Metropolitan track
+  // ends at the junction east of it, where the shared stretch begins.
+  const orphans = line.stations.filter(s => s.v2Orphan ?? s.trackClass === null);
   const out = [];
   for (const [key, xy] of ownerPieces) {
     if (key === `tube:${line.id}` || key.startsWith(`tube:${line.id}:`)) continue;
@@ -544,11 +921,29 @@ export function inferBandsFromStops(line, ownerPieces, { near = 150, minStops = 
       if (best) hits.push({ s, i: best.i, d: best.d });
     }
     if (hits.length < minStops) continue;
-    const i0 = Math.min(...hits.map(h => h.i)), i1 = Math.max(...hits.map(h => h.i)) + 1;
+    let i0 = Math.min(...hits.map(h => h.i)), i1 = Math.max(...hits.map(h => h.i)) + 1;
+    // s01:R: where the line's own track now meets that corridor (OSM's
+    // Metropolitan from West Harrow joins the Piccadilly's at the junction east
+    // of Rayners Lane), the band reaches the junction, so the line's colour,
+    // and its trains, run on from its own track without a gap.
+    for (const piece of line.pieces || []) for (const E of [piece.xy[0], piece.xy.at(-1)]) {
+      let best = null;
+      for (let i = 0; i < xy.length - 1; i++) {
+        const a = xy[i], b = xy[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
+        const t = Math.max(0, Math.min(1, ((E[0] - a[0]) * dx + (E[1] - a[1]) * dy) / l2));
+        const d = Math.hypot(E[0] - a[0] - dx * t, E[1] - a[1] - dy * t);
+        if (d <= BAND_JOIN_M && (!best || d < best.d)) best = { d, i };
+      }
+      if (!best) continue;
+      const span = (j0, j1) => { let m = 0; for (let k = j0; k < j1; k++) m += Math.hypot(xy[k + 1][0] - xy[k][0], xy[k + 1][1] - xy[k][1]); return m; };
+      if (best.i < i0 && span(best.i, i0) <= BAND_JOIN_REACH_M) i0 = best.i;
+      if (best.i + 1 > i1 && span(i1, best.i + 1) <= BAND_JOIN_REACH_M) i1 = best.i + 1;
+    }
     out.push({ key, lineId: line.id, j0: i0, j1: i1, inferred: true, stops: hits });
   }
   return out;
 }
+export const BAND_JOIN_M = 15, BAND_JOIN_REACH_M = 1000;
 
 /**
  * s30:R fix round 2: the deck (true metres, 0 at grade) the surface railway
@@ -565,29 +960,78 @@ export function dlrHeightAt(profile = createDlrProfile({ project: (lat, lon) => 
   };
 }
 
-export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json') } = {}) {
+export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json'), osmCache = null, probe = null, probeOnly = false } = {}) {
   const src = JSON.parse(await readFile(source, 'utf8'));
   const og = JSON.parse(await readFile(overgroundPath, 'utf8'));
   const report = [];
   const dlrHeight = dlrHeightAt();
   const dlrProfileData = JSON.parse(await readFile(path.join(ROOT, 'src/dlr-profile-data.json'), 'utf8'));
 
+  // s01:R: OSM track for the v2 delivery's gaps (cached Overpass answer).
+  const osmAnswer = osmCache ?? await loadOsmCache();
+  // s01:R: the OSM probe that tells a real tunnel from a tunnel stub.
+  const stubProbe = probe ?? await readFile(STUB_PROBE_FILE, 'utf8').then(JSON.parse, () => null);
+  const missingProbes = [];
   // Pass A: collapse each line.
   const lines = [];
   for (const L of src.lines) {
     if (EXCLUDED.has(L.id)) { report.push(`${L.id}: excluded (D-041 item 1, main-line wave)`); continue; }
     const id = ID_MAP[L.id] || L.id;
-    const { pieces, droppedM, sourceM, deckSeparatedM } = collapseLine(L.branches, id === 'dlr' ? { heightAt: dlrHeight, supplement: profileTrails(dlrProfileData) } : {});
+    const osm = osmTrailsFor(id, osmAnswer);
+    const { pieces, droppedM, sourceM, deckSeparatedM, osm: osmReport } = collapseLine(L.branches, id === 'dlr' ? { heightAt: dlrHeight, supplement: profileTrails(dlrProfileData), osm } : { osm });
+    // s01:R: where OSM_GAPS asks, the classes of kept track from today's OSM (the Lewisham terminus).
+    const reclassed = (OSM_GAPS[id] || []).filter(([, o]) => o?.reclass)
+      .flatMap(([place, o]) => reclassFromOsm(pieces, placeTrails(osmAnswer, place, id, o), PLACES[place].box).map(c => ({ place, ...c })));
+    for (const [place, group] of Object.entries(Object.groupBy(reclassed, c => c.place))) {
+      const by = {}; for (const c of group) by[`${c.from}->${c.to}`] = (by[`${c.from}->${c.to}`] || 0) + c.lengthM;
+      report.push(`${id} classes from OSM in ${place}: ${Object.entries(by).map(([k, m]) => `${k} ${Math.round(m)} m`).join(', ')}`);
+    }
+    // s01:R: tunnel stubs beside the line's own open track (West Hampstead),
+    // unless today's OSM has the line in tunnel there (Kensal Green).
+    const isRealTunnel = piece => {
+      const r = realTunnelFromProbe(id, piece, stubProbe);
+      if (r === undefined) { missingProbes.push({ key: stubKey(id, piece), points: [piece.lonlat[0], piece.lonlat[Math.floor(piece.lonlat.length / 2)], piece.lonlat.at(-1)] }); return probeOnly ? 'unprobed' : null; }
+      return r;
+    };
+    // The covered ways under road bridges first, so a stub is judged against
+    // the open track as drawn; then the stubs (before the stations' covered
+    // ways, whose test asks which track is nearest a stop: at Wembley Park the
+    // stub was); then once more for any stub the stations' covered ways have
+    // put beside open track.
     const coveredWays = pieces.flatMap((piece, pi) => openCoveredWays(piece).map(c => ({ piece: pi, ...c })));
-    const stations = (L.stations || []).filter(s => Number.isFinite(s.lon) && Number.isFinite(s.lat)).map(s => {
-      const [e, n] = toBng([s.lon, s.lat]);
-      const near = nearestClass(pieces, [e, n]);
-      return { name: s.name, naptan: s.naptan, lon: s.lon, lat: s.lat, e, n,
-        surface: !!near && near.cls !== 'tunnel', trackClass: near?.cls ?? null, railOffsetM: near ? Math.round(near.d) : null };
+    const stubs = dropTunnelStubs(pieces, { isRealTunnel });
+    const stops = (L.stations || []).filter(s => Number.isFinite(s.lon) && Number.isFinite(s.lat)).map(s => { const [e, n] = toBng([s.lon, s.lat]); return { ...s, e, n }; });
+    // s01:R: stations under a road bridge or their own building (Preston Road, Lewisham DLR).
+    const stationCoveredWays = openStationCoveredWays(pieces, stops);
+    const stubs2 = dropTunnelStubs(pieces, { isRealTunnel });
+    stubs.push(...stubs2); stubs.spared.push(...stubs2.spared.filter(sp => !stubs.spared.some(x => x.piece === sp.piece)));
+    for (const sp of stubs.spared) report.push(`${id} tunnel stub KEPT, a real tunnel: ${sp.lengthM} m at ${stubKey(id, sp.piece).split('@')[1]}: ${sp.evidence}`);
+    const v2Pieces = pieces.filter(p => p.source !== 'osm');
+    const stations = stops.map(s => {
+      const near = nearestClass(pieces, [s.e, s.n]);
+      // The source gap repair (transform 4) asks which stops the v2 track misses.
+      const v2 = nearestClass(v2Pieces, [s.e, s.n]);
+      return { name: s.name, naptan: s.naptan, lon: s.lon, lat: s.lat, e: s.e, n: s.n,
+        surface: !!near && near.cls !== 'tunnel', trackClass: near?.cls ?? null, railOffsetM: near ? Math.round(near.d) : null, v2Orphan: !v2 };
     });
+    for (const st of stubs) {
+      const mid = st.piece.lonlat[Math.floor(st.piece.lonlat.length / 2)], [e, n] = toBng(mid);
+      let nearest = null; for (const s of stations) { const d = Math.hypot(s.e - e, s.n - n); if (!nearest || d < nearest.d) nearest = { d, s }; }
+      st.report = `${id} tunnel stub dropped: ${st.lengthM} m at ${mid[1].toFixed(5)},${mid[0].toFixed(5)}, ${Math.round(nearest?.d ?? 0)} m from ${nearest?.s.name.replace(/ (Underground|DLR) Station$/, '')}, every point within ${st.maxDistanceM} m of the line's open track`;
+      report.push(st.report);
+    }
+    for (const c of stationCoveredWays) report.push(`${id} station covered way opened: ${c.lengthM} m at ${c.station.replace(/ (Underground|DLR) Station$/, '')} (${c.stationDistanceM} m)`);
+    if (osmReport) {
+      for (const a of osmReport.added) report.push(`${id} OSM track added: ${a.lengthM} m (${a.place}; ${a.classes.join(', ')})`);
+      for (const x of osmReport.extended) report.push(`${id} OSM track extends a piece at its ${x.at}: ${x.lengthM} m (${x.place}; ${x.classes.join(', ')})`);
+    }
     lines.push({ id, sourceId: L.id, name: L.name, colour: L.colour, pieces, stations, droppedM, sourceM, coveredWays, deckSeparatedM,
+      osm: osmReport, stubs: stubs.map(s => ({ lengthM: s.lengthM, maxDistanceM: s.maxDistanceM, report: s.report })), stationCoveredWays,
+      stubsKept: (stubs.spared || []).map(sp => ({ lengthM: sp.lengthM, at: stubKey(id, sp.piece).split('@')[1], evidence: sp.evidence })),
       sources: L.sources, confidence: L.confidence });
   }
+  if (probeOnly) return { missingProbes };
+  if (missingProbes.length) throw new Error(`${missingProbes.length} tunnel stub candidates have no OSM probe (${missingProbes.map(m => m.key).join('; ')}): run node scripts/prepare-tube-surface.mjs --probe-stubs`);
   lines.sort((a, b) => LINE_ORDER.indexOf(a.id) - LINE_ORDER.indexOf(b.id));
 
   // Pass B: shared track, Overground corridors first (they are drawn already).
@@ -599,12 +1043,22 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     owners.addPolyline(xy, i => ({ key, cls: cls[i], fam: fam[i] }));
   });
   const sharedRanges = new Map(); // owner key -> [{lineId, j0, j1}]
-  for (const line of lines) {
-    const { own, shared } = splitShared(line.id, line.pieces, owners, { heightAt: line.id === 'dlr' ? dlrHeight : null });
-    line.own = own;
-    line.shared = shared;
-    own.forEach((piece, pi) => {
-      const key = `tube:${line.id}:${pi}`;
+  // s01:R: in two rounds. First every line's corridors from v2 (with any
+  // points appended to them), in the data's order, exactly as before; then
+  // the corridors OSM adds, which only add: where one runs beside a corridor
+  // already drawn (the Central's Ealing Broadway branch beside the District
+  // into Ealing Broadway) it is that corridor's band, and nothing drawn
+  // before changes hands.
+  for (const line of lines) { line.own = []; line.shared = []; }
+  for (const round of ['v2', 'osm']) for (const line of lines) {
+    const pieces = line.pieces.filter(p => (p.source === 'osm') === (round === 'osm'));
+    if (!pieces.length) continue;
+    const { own, shared } = splitShared(line.id, pieces, owners, { heightAt: line.id === 'dlr' ? dlrHeight : null });
+    const base = line.own.length;
+    line.own.push(...own);
+    line.shared.push(...shared);
+    own.forEach((piece, k) => {
+      const key = `tube:${line.id}:${base + k}`;
       ownerXY.set(key, piece.xy);
       ownerCls.set(key, piece.cls);
       const fam = effectiveFamilies(piece.xy, piece.cls);
@@ -637,7 +1091,12 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     const branches = line.own.map((piece, pi) => {
       const ranges = sharedRanges.get(`tube:${line.id}:${pi}`) || [];
       const b = { points: piece.lonlat.map(([lon, lat]) => [+lon.toFixed(7), +lat.toFixed(7)]), segments: encodeSegments(piece.cls) };
-      if (piece.source) b.source = piece.source; // s30:R fix round 2: open DLR track v2 lacks, from the shared profile
+      if (piece.source) b.source = piece.source; // s30:R fix round 2: open DLR track v2 lacks, from the shared profile; s01:R 'osm'
+      if (piece.source === 'osm') b.place = piece.place; // s01:R: which gap (scripts/fetch-tube-surface-osm.mjs PLACES)
+      const extended = piece.source === 'osm' ? [] : fromRanges(piece.from).map(({ p0, p1, place }) => ({ p0, p1, from: place }));
+      if (extended.length) b.extended = extended; // s01:R: points appended to a corridor (to the buffers): from an OSM place, or the DLR profile
+      const opened = openedRanges(piece.opened);
+      if (opened.length) b.coveredWays = opened; // s01:R: segments tagged tunnel in OSM, drawn open (a covered way)
       const bands = elementaryBands(line.id, ranges);
       if (bands.length) b.bands = bands;
       return b;
@@ -650,13 +1109,18 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     out.lines.push({
       id: line.id, sourceId: line.sourceId, name: line.name, mode: line.id === 'dlr' ? 'dlr' : 'tube', colour: line.colour,
       branches,
-      stations: line.stations.map(({ e, n, ...s }) => s),
+      stations: line.stations.map(({ e, n, v2Orphan, ...s }) => s),
       portals,
       summary: {
         sourceTrailsM: Math.round(line.sourceM), collapsedM: Math.round(line.pieces.reduce((s, p) => s + lengthOf(p.xy), 0)),
         drawnM: Math.round(ownM), drawnOpenM: Math.round(openOwnM), sharedM: sharedWith,
         coveredWaysOpened: line.coveredWays.length, coveredWaysM: line.coveredWays.reduce((s, c) => s + c.lengthM, 0),
-        ...(line.id === 'dlr' ? { deckSeparatedM: Math.round(line.deckSeparatedM), fromProfileM: Math.round(line.own.filter(p => p.source).reduce((s, p) => s + lengthOf(p.xy), 0)) } : {}),
+        ...(line.id === 'dlr' ? { deckSeparatedM: Math.round(line.deckSeparatedM), fromProfileM: Math.round(line.own.filter(p => p.source === 'dlr-profile').reduce((s, p) => s + lengthOf(p.xy), 0)) } : {}),
+        // s01:R: OSM track for the v2 gaps, tunnel stubs dropped, stations' covered ways opened.
+        ...(line.osm ? { osmAddedM: Math.round(line.osm.addedM), osmExtendedM: Math.round(line.osm.extendedM) } : {}),
+        ...(line.stubs.length ? { tunnelStubsDropped: line.stubs.map(s => s.lengthM) } : {}),
+        ...(line.stubsKept.length ? { tunnelStubsKept: line.stubsKept } : {}),
+        ...(line.stationCoveredWays.length ? { stationCoveredWays: line.stationCoveredWays.map(c => ({ station: c.station, lengthM: c.lengthM })) } : {}),
       },
       sources: line.sources, confidence: line.confidence,
     });
@@ -683,7 +1147,9 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
         overgroundShared: 'Bands on public/data/overground.json corridors: {overground, branch, j0, j1, lines} with j indexing that branch\'s points.',
         portals: 'Per line, before sharing: tunnel <-> open transitions. bearingIntoOpenDeg is the compass bearing (BNG grid) from the tunnel into the open; minor = tunnel under 400 m (an underpass) or open under 150 m (a daylight gap). See docs/tube-surface-rail.md.',
         stations: 'surface: the line\'s own nearest track (within 300 m) is not tunnel. trackInferredFrom: the line\'s own OSM route lacks the branch; the stop sits on that line\'s track (see bands.inferred).',
-        coveredWays: 'A tunnel run under 60 m between open track (a road overbridge or covered way) is drawn as open track at grade; summary.coveredWaysOpened counts them.',
+        coveredWays: 'A tunnel run under 60 m between open track (a road overbridge or covered way) is drawn as open track at grade; summary.coveredWaysOpened counts them. s01:R: so is a tunnel run under 150 m at a stop of the line, with open track either side at least 150 m long or running to the buffers (the station under a road bridge or its own building; summary.stationCoveredWays). branches[].coveredWays lists every segment range so opened, {i0,i1}.',
+        osm: 'Sprint 01Oct26h (s01:R): open-air track the v2 delivery lacks, from OpenStreetMap through scripts/fetch-tube-surface-osm.mjs (the line\'s own route relations in a box around each gap, cached Overpass answer, classes by pipeline-v2.py\'s rules), merged after v2 by the same coverage test: branches with source "osm" (and place) are new corridors (the Central\'s Ealing Broadway branch and Hainault loop, the Metropolitan from Harrow-on-the-Hill to Rayners Lane, the DLR into Stratford); branches[].extended {p0,p1,from} are points appended to a corridor to its buffers (from an OSM place: Epping, Stratford DLR; from "dlr-profile": the last metres to platform 4a at Stratford), and the Hainault loop is appended to the short v2 pieces at Hainault. summary.osmAddedM and osmExtendedM.',
+        tunnelStubs: 'Sprint 01Oct26h (s01:R): a piece that is tunnel throughout, under 400 m, lying wholly within 32 m of the line\'s own open track is the other running track\'s covered stretch and is dropped (the Jubilee at West Hampstead); summary.tunnelStubsDropped lists their lengths, and the build prints each with its place. A candidate is kept when today\'s OSM has a way of the line tagged tunnel within 25 m of its middle (a cached Overpass probe, scripts/.cache/tube-surface-stub-probe.json): summary.tunnelStubsKept, with the way as evidence (the Kensal Green Tunnel, for one).',
         dlrHeights: 'DLR deck heights come from src/dlr-deck-heights.json via src/dlr-profile.js (EA LiDAR DSM 1m, flagged fallback); not repeated here.',
         dlrLevels: `The DLR's level is also its profile deck: after the collapse, a stretch beside kept track but on a deck more than ${DLR_TWIN_DECK_TOL_M} m away is added from ${DLR_MIN_DECK_PIECE_M} m (summary.deckSeparatedM), and a stretch on a deck above ${DLR_SHARE_MAX_DECK_M} m is never shared (the DLR draws it at its own height). Branches with source "dlr-profile" are raised track the v2 source lacks, taken from src/dlr-profile-data.json (summary.fromProfileM).`,
       },
@@ -697,6 +1163,20 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const arg = (k, d) => process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : d;
   const outPath = arg('--out', path.join(ROOT, 'public/data/tube-surface.json'));
+  if (process.argv.includes('--probe-stubs')) {
+    // Every stub candidate (whole-tunnel piece beside the line's open track),
+    // probed in one cached Overpass query: the railway ways within 60 m of its
+    // start, middle and end, with tags and geometry.
+    const { missingProbes } = await build({ source: arg('--source', DEFAULT_SOURCE), overgroundPath: arg('--overground', path.join(ROOT, 'public/data/overground.json')), probe: { candidates: {}, ways: [] }, probeOnly: true });
+    const around = missingProbes.flatMap(m => m.points.map(([lon, lat]) => `  way(around:60,${lat.toFixed(6)},${lon.toFixed(6)})["railway"~"^(subway|light_rail|rail)$"];`));
+    const query = `[out:json][timeout:90];\n(\n${around.join('\n')}\n);\nout tags geom;\n`;
+    const { overpass } = await import('./fetch-tube-surface-osm.mjs');
+    const json = await overpass(query);
+    const out = { query, fetched: 'Overpass API', candidates: Object.fromEntries(missingProbes.map(m => [m.key, { points: m.points }])), ways: json.elements.filter(e => e.type === 'way').map(w => ({ id: w.id, tags: w.tags, geometry: w.geometry })) };
+    await writeFile(STUB_PROBE_FILE, JSON.stringify(out));
+    console.log(`probed ${missingProbes.length} stub candidates: ${out.ways.length} ways cached in ${STUB_PROBE_FILE}`);
+    process.exit(0);
+  }
   const { data, report } = await build({ source: arg('--source', DEFAULT_SOURCE), overgroundPath: arg('--overground', path.join(ROOT, 'public/data/overground.json')) });
   await writeFile(outPath, JSON.stringify(data));
   console.log(report.join('\n'));

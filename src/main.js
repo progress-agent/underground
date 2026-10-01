@@ -949,6 +949,72 @@ function startSurfaceRail() {
     console.warn('Could not create the surface railway:', err.message);
   });
 }
+// ── s01:R ── Surface station markers stand above the roof of any building box
+// over their centre (a station building or canopy over the platforms, in the
+// map's data, hid them from above: West Hampstead, Wembley Park and Lewisham
+// DLR among them). Once the city is built (baked: the payload done; live: the
+// tile manifest read), a poll every 0.5 s finds the building meshes that
+// arrived, left or changed since the last one, and reads again the markers
+// within their plan bounds. Fix round 1: the poll never stops. Live buildings
+// (the default) stream in by camera proximity and are disposed beyond it, so
+// a station whose tile arrives late (Hillingdon, Ealing Broadway, Wembley
+// Park when the visit starts in town) is lifted when its building appears and
+// set back on its track when the building goes; switching the buildings off
+// or the path over does the same.
+function s01rRoofHeightAt(x, z, r) {
+  const col = modeSystem?.collision; if (!col) return 0;
+  const scale = getBuildingHeightScale() || 1;
+  let h = 0;
+  for (const b of col.buildingsNear(x, z, r)) {
+    const dx = Math.max(b.minX - x, 0, x - b.maxX), dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+    if (Math.hypot(dx, dz) > r) continue;
+    h = Math.max(h, (b.roofY - b.baseY) / (VERTICAL_EXAGGERATION * scale));
+  }
+  return h;
+}
+// Building mesh -> its instance count and plan bounds (metres) at the last poll.
+const s01rRoofMeshes = new Map();
+function s01rMeshBounds(mesh) {
+  const n = mesh.count | 0, bb = mesh.boundingBox;
+  // As the collision service reads them: the baked mesh's own box, else the
+  // instances (axis-aligned, [0] = side, [12] / [14] = x / z).
+  if (bb && Number.isFinite(bb.min?.x)) return { n, minX: bb.min.x, maxX: bb.max.x, minZ: bb.min.z, maxZ: bb.max.z };
+  const a = mesh.instanceMatrix.array;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const o = i * 16, h = Math.abs(a[o]) * 0.5;
+    minX = Math.min(minX, a[o + 12] - h); maxX = Math.max(maxX, a[o + 12] + h);
+    minZ = Math.min(minZ, a[o + 14] - h); maxZ = Math.max(maxZ, a[o + 14] + h);
+  }
+  return { n, minX, maxX, minZ, maxZ };
+}
+function s01rRoofPoll() {
+  if (!surfaceRail || !modeSystem?.collision || !surfaceGeometryGroup) return;
+  const done = buildingsPath === 'baked' ? !!bakedBuilder?.isDone() : surfaceDataLoaded;
+  if (!done) return;
+  // The meshes the collision service reads (installModes' getBuildingMeshes).
+  const now = new Set(surfaceGeometryGroup.visible ? surfaceGeometryGroup.children.filter(c => c.isInstancedMesh
+    && (c.name?.startsWith('buildings-') || c.name?.startsWith('baked-buildings-'))) : []);
+  const changed = [];
+  for (const m of now) {
+    const was = s01rRoofMeshes.get(m);
+    if (was && was.n === (m.count | 0)) continue;
+    const b = s01rMeshBounds(m); s01rRoofMeshes.set(m, b); changed.push(b);
+    if (was) changed.push(was);
+  }
+  for (const [m, b] of s01rRoofMeshes) if (!now.has(m)) { s01rRoofMeshes.delete(m); changed.push(b); }
+  if (!changed.length) return;
+  const meshes = modeSystem.collision.sync();
+  // A marker reads boxes within MARKER_ROOF_REACH_M (2 m); 10 m is ample.
+  const near = (x, z) => changed.some(b => x >= b.minX - 10 && x <= b.maxX + 10 && z >= b.minZ - 10 && z <= b.maxZ + 10);
+  const t0 = performance.now(), pass = surfaceRail.liftMarkersOverRoofs(s01rRoofHeightAt, near);
+  surfaceRail.roofLift = { ...pass, meshes, changed: changed.length, passes: (surfaceRail.roofLift?.passes ?? 0) + 1,
+    ms: +(performance.now() - t0).toFixed(1), at: performance.now() };
+}
+setInterval(() => {
+  try { s01rRoofPoll(); } catch (err) { console.warn('surface markers over roofs:', err.message); }
+}, 500);
+// ── /s01:R ──
 function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
   // Fix round 2: the hit's face names the piece of track under the pointer;
   // the DLR's height is read there, as drawn (a shared stretch says so too).

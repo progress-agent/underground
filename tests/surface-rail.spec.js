@@ -18,8 +18,10 @@ test.setTimeout(300000);
 const TUBE_LINES = ['bakerloo', 'central', 'circle', 'district', 'hammersmith-city', 'jubilee', 'metropolitan', 'northern', 'piccadilly', 'victoria', 'waterloo-city', 'dlr'];
 
 let page;
+const consoleErrors = []; // s01:R: every console error from the first load
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   await page.addInitScript(() => {
     const raf = window.requestAnimationFrame.bind(window);
     const held = []; let lastTs = 0;
@@ -132,6 +134,19 @@ test('the surface railway draws nothing below the ground: no tunnel, and D-024 h
   expect(r.grazing / r.total).toBeLessThan(0.005);
 });
 
+// Sprint 01Oct26h (D-042 item 4): the stripe, ballast, earth and cutting
+// meshes of every Overground line exactly as 387dff0 (and c820ea9) built them:
+// [vertex count, FNV-1a of the positions, FNV-1a of the normals], read with
+// tests/helpers/overground-fingerprint.js on 387dff0, Mac Studio, 01Oct26h.
+const OVERGROUND_PARTS_387DFF0 = {
+  'liberty|stripe': [2952, '1aa5fdcb', 'edf34843'], 'liberty|ballast': [2922, '48754ed4', '5e2034aa'],
+  'lioness|stripe': [16410, '9014d5c9', '6324ce47'], 'lioness|ballast': [14616, '8634cf39', '1aa9fe89'], 'lioness|earth': [324, '2e9e463', '249eca2c'],
+  'mildmay|stripe': [22626, 'ae4e9044', 'd2627f5a'], 'mildmay|ballast': [16866, 'b10f7a0', '370c5c06'], 'mildmay|earth': [4608, '7fb462b1', '5457c543'], 'mildmay|cutShadow': [3024, '6f6e01e1', '990db4f4'],
+  'suffragette|stripe': [13332, 'e2763bb1', 'adf458fe'], 'suffragette|ballast': [8358, '23e5283a', '80439ddb'], 'suffragette|cutShadow': [1056, '9ecf286a', '7485496f'],
+  'weaver|stripe': [23520, 'ed77ec20', 'e3fb6875'], 'weaver|ballast': [16398, '3ef65a3b', 'd06d296d'], 'weaver|earth': [1008, '7d18e7d1', 'cb03ed77'], 'weaver|cutShadow': [36, 'e338bcae', '5a38f6ae'],
+  'windrush|stripe': [27402, '493d9b89', '43bcbcff'], 'windrush|ballast': [19728, 'e557da80', 'f66b53c0'], 'windrush|earth': [1908, '503d90b3', '37817b77'], 'windrush|cutShadow': [4284, '68e32bef', 'ffe671ee'],
+};
+
 test('the Overground builds exactly what c820ea9 built, and draws the same pixels with the Tube railway beside it', async () => {
   // Fingerprint (tests/helpers/overground-fingerprint.js: every track mesh's
   // positions, vertex count, render order and material) measured on
@@ -139,8 +154,21 @@ test('the Overground builds exactly what c820ea9 built, and draws the same pixel
   // overground.js now builds from surface-rail.js; a changed number anywhere
   // in the archetypes changes this. The pixel diffs at three poses against
   // c820ea9 are in the lane's captures (Working/sprint-30Sep26w/R/).
+  //
+  // Re-pinned sprint 01Oct26h (D-042 item 4, Jordan: "Overground viaduct decks
+  // and piers: yes, next sprint"; D-043 item 4): was { total: '53a95c03',
+  // meshes: 21, vertices: 201408 }. The masonry list (viaduct decks and piers)
+  // is now merged through normaliseForMerge, so five lines gain a masonry
+  // mesh (21 -> 26: Lioness, Mildmay, Suffragette, Weaver and Windrush; the
+  // Liberty's only viaduct merged before, being deck strips alone, and gains
+  // its pier: 30 -> 66 vertices) and 32,652 vertices are added. Everything
+  // else is pinned byte-identical to 387dff0 part by part (positions and
+  // normals of every stripe, ballast, earth and cutting mesh), below.
   const fp = await page.evaluate(overgroundFingerprint);
-  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: '53a95c03', meshes: 21, vertices: 201408 });
+  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: 'a0c6e9b8', meshes: 26, vertices: 234060 });
+  const others = Object.fromEntries(Object.entries(fp.parts).filter(([k]) => !k.endsWith('|masonry')));
+  expect(others).toEqual(OVERGROUND_PARTS_387DFF0);
+  expect(Object.keys(fp.parts).filter(k => k.endsWith('|masonry')).sort()).toEqual(['liberty', 'lioness', 'mildmay', 'suffragette', 'weaver', 'windrush'].map(l => `${l}|masonry`));
   await trackPose({ track: 'og:lioness', lat: 51.5701, lon: -0.3081, side: 110, back: 190, up: 40, ahead: 160 });
   const r = await page.evaluate(() => {
     const u = window.__ug, rr = u.composer.renderer, gl = rr.getContext();
@@ -186,8 +214,9 @@ test('shared track is drawn once, with each line\'s colour side by side', async 
         const hits = down(across(path, i, 0));
         // Beds under the centreline, by the line that drew them. A second
         // corridor would bring a second line's bed; the owner's own bed can
-        // appear twice where two of its runs overlap by a sample, and the
-        // Overground's viaducts draw no bed at all (see docs/tube-surface-rail.md).
+        // appear twice where two of its runs overlap by a sample. Since sprint
+        // 01Oct26h the Overground's viaducts draw their deck (masonry) too,
+        // except over the Thames, where bridges.js draws the bridge.
         const owners = new Set(hits.filter(h => beds.includes(h.object.userData.part)).map(h => h.object.userData.lineId));
         if ([...owners].every(l => l === lines[0])) out.bedOwnerOnly++;
         if (owners.size) out.bedded++;
@@ -233,6 +262,13 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
     const deckAt = () => {
       const paths = u.surfaceRail.paths.get('dlr').filter(Boolean);
       const raised = paths.flat().filter(p => p.cls === 'viaduct' || p.cls === 'embankment');
+      // s01:R: the deck check skips each path's first and last sample: there
+      // the deck strip ends exactly on the sample, and a ray down through that
+      // edge can miss it (it did on 01Oct26h at West India Quay, where the
+      // data now carries a flyover piece three samples longer, ending at
+      // (7451, -146): the ray from above met only the lower viaduct beside it,
+      // while a ray 0.1 m inside met this deck at its height).
+      const ends = new Set(paths.flatMap(path => [path[0], path.at(-1)]));
       const sources = {}; let flagged = true, surveyedOk = true;
       for (const p of raised) {
         const s = p.deck?.source ?? 'none'; sources[s] = (sources[s] || 0) + 1;
@@ -245,7 +281,7 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
       // ray can meet the neighbour's first (seen near Canning Town, Custom
       // House and Poplar), so the drawn deck is looked for among the hits.
       let checked = 0, within = 0;
-      raised.filter(p => p.cls === 'viaduct').forEach((p, k) => {
+      raised.filter(p => p.cls === 'viaduct' && !ends.has(p)).forEach((p, k) => {
         if (k % 25) return;
         ray.set(new T.Vector3(p.x, 20000, p.z), new T.Vector3(0, -1, 0));
         const hits = ray.intersectObjects(masonry, false); if (!hits.length) return;
@@ -600,4 +636,205 @@ test('the DLR is drawn at its real elevated height where it flies over: Canning 
     expect(+(k[2] ?? k[1]), `${x},${z}: ${got.tip}`).toBeCloseTo(got.drawn, 1);
   }
   await page.mouse.move(5, 5);
+});
+
+// ── Sprint 01Oct26h, Lane R (D-042 item 4, D-043 items 2 and 4) ──────────────
+
+/** Pixels (share of the frame) that change when `group` is hidden, the cull as the app runs it. */
+async function railPixels(groupName) {
+  return page.evaluate((groupName) => {
+    const u = window.__ug, rr = u.composer.renderer, gl = rr.getContext();
+    const rail = u.scene.getObjectByName(groupName);
+    const grab = on => { rail.visible = on; u.undergroundCull.render(u.aboveGroundView && u.economies.on('underAbove'), () => u.composer.render(0)); rr.setRenderTarget(null);
+      const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); rail.visible = true; return b; };
+    const A = grab(true), B = grab(false);
+    let n = 0; for (let i = 0; i < A.length; i += 4) if (Math.max(Math.abs(A[i] - B[i]), Math.abs(A[i + 1] - B[i + 1]), Math.abs(A[i + 2] - B[i + 2])) > 2) n++;
+    const set = u.undergroundCull.collect(), lineGroups = u.scene.children.filter(c => c.name?.startsWith('line:'));
+    return { pct: n / (A.length / 4) * 100, above: u.aboveGroundView, active: u.undergroundCull.status.active, linesCulled: lineGroups.length === 12 && lineGroups.every(g => set.includes(g)),
+      namedLine: u.scene.children.filter(c => c.name?.startsWith('line:') && !set.includes(c)).length };
+  }, groupName);
+}
+
+test('s01: the open-air track OSM adds is drawn from above ground, and the cull still hides everything underground', async () => {
+  // The Central through West Acton, round the Hainault loop (Newbury Park,
+  // Hainault), the Metropolitan at West Harrow, the DLR into Stratford.
+  const places = [
+    ['central', 51.5180, -0.2810, 'West Acton'], ['central', 51.5755, 0.0899, 'Newbury Park'], ['central', 51.6030, 0.0933, 'Hainault'],
+    ['metropolitan', 51.5795, -0.3533, 'West Harrow'], ['dlr', 51.5407, -0.0045, 'Stratford'],
+  ];
+  for (const [track, lat, lon, name] of places) {
+    const at = await trackPose({ track, lat, lon, side: 150, back: 200, up: 60, ahead: 150 });
+    // The pose is on the line's own drawn track near the place (not another branch 1 km away).
+    const d = await page.evaluate(({ lat, lon, at }) => { const c = window.__ug.llToXZ(lat, lon); return Math.hypot(c.x - at.x, c.z - at.z); }, { lat, lon, at });
+    expect(d, `${name}: nearest drawn ${track} track ${d.toFixed(0)} m away`).toBeLessThan(150);
+    const r = await railPixels(`surface-rail-${track}`);
+    expect(r.above && r.active, name).toBe(true);
+    expect(r.pct, name).toBeGreaterThan(0.05);
+    expect(r.linesCulled, name).toBe(true);
+    expect(r.namedLine, name).toBe(0);
+  }
+  await page.evaluate(() => window.__thaw());
+});
+
+test('s01: the Overground viaducts stand on decks and piers; none of it in the Thames; no mergeGeometries error', async () => {
+  const r = await page.evaluate(() => {
+    const u = window.__ug, T = window.__ugTHREE, ray = new T.Raycaster(), VE = u.VERTICAL_EXAGGERATION;
+    const out = {};
+    for (const [lineId, paths] of u.overground.userData.linePaths) {
+      const viaduct = paths.filter(Boolean).flat().filter(p => p.cls === 'viaduct');
+      // Inside a viaduct run (both neighbours viaduct too): at a run's end the
+      // deck strip ends on the sample and a ray through its edge can miss it.
+      const inner = paths.filter(Boolean).flatMap(path => path.filter((p, i) => p.cls === 'viaduct' && path[i - 1]?.cls === 'viaduct' && path[i + 1]?.cls === 'viaduct'));
+      if (!viaduct.length) continue;
+      const mas = u.overground.getObjectByName(`overground-${lineId}`).children.find(m => m.userData.part === 'masonry');
+      const rec = out[lineId] = { viaduct: viaduct.length, masonry: !!mas, indexed: !!mas?.geometry.index, inThames: 0, feet: 0, deckHits: 0, deckChecked: 0, deckOff: 0 };
+      if (!mas) continue;
+      const pos = mas.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        if (u.isInThames(pos.getX(i), pos.getZ(i))) rec.inThames++;
+        const g = u.getStructuralSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
+        if (Number.isFinite(g) && Math.abs(pos.getY(i) - g) < 2 * VE) rec.feet++;
+      }
+      // The deck under the stripe, at the path's height, wherever the viaduct
+      // is on land: more than a deck's width (and a sample) from the Thames,
+      // where the deck stops at the bank. Where two of a line's viaducts run
+      // side by side (the Weaver's branches through Hackney Downs) the ray can
+      // meet both decks: the one at the path's height counts.
+      const nearThames = p => { for (let a = 0; a < 8; a++) for (const r of [0, 12, 24]) if (u.isInThames(p.x + r * Math.cos(a * Math.PI / 4), p.z + r * Math.sin(a * Math.PI / 4))) return true; return false; };
+      inner.filter((_, k) => k % 7 === 0).forEach(p => {
+        if (nearThames(p)) return;
+        rec.deckChecked++;
+        ray.set(new T.Vector3(p.x, 1e5, p.z), new T.Vector3(0, -1, 0));
+        const hits = ray.intersectObject(mas, false);
+        if (hits.length) { rec.deckHits++; if (!hits.some(h => Math.abs(h.point.y - p.y) <= 1)) rec.deckOff++; }
+      });
+    }
+    return out;
+  });
+  console.log('Overground masonry', JSON.stringify(r));
+  expect(Object.keys(r).sort()).toEqual(['liberty', 'lioness', 'mildmay', 'suffragette', 'weaver', 'windrush']);
+  for (const [lineId, rec] of Object.entries(r)) {
+    expect(rec.masonry, lineId).toBe(true);
+    expect(rec.indexed, lineId).toBe(false);
+    expect(rec.inThames, lineId).toBe(0);
+    expect(rec.feet, `${lineId} pier feet`).toBeGreaterThan(0);
+    // Every land viaduct sample has its deck under the stripe, at the track's height.
+    expect(rec.deckHits, lineId).toBe(rec.deckChecked);
+    expect(rec.deckOff, lineId).toBe(0);
+  }
+  // The five "mergeGeometries ... index attribute" errors of 387dff0 are gone.
+  expect(consoleErrors.filter(e => /mergeGeometries/.test(e))).toEqual([]);
+});
+
+test('s01: the stations the last sprint left without a marker have surfaceOnly markers, visible from above', async () => {
+  // Lifted over the roof of any building box standing over them (Greenwich and
+  // Lewisham DLR stand under their station buildings in the map's data).
+  await page.waitForFunction(() => !!window.__ug.surfaceRail.roofLift, null, { timeout: 60000 });
+  const named = [['jubilee', 'West Hampstead'], ['jubilee', 'Wembley Park'], ['metropolitan', 'Preston Road'], ['dlr', 'Lewisham DLR'], ['dlr', 'Greenwich DLR'], ['dlr', 'Stratford DLR']];
+  const r = await page.evaluate(async (named) => {
+    window.__thaw();
+    const u = window.__ug, T = window.__ugTHREE, rr = u.composer.renderer, gl = rr.getContext(), set = u.undergroundCull.collect();
+    const grab = () => { u.undergroundCull.render(u.aboveGroundView && u.economies.on('underAbove'), () => u.composer.render(0)); rr.setRenderTarget(null);
+      const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); return { b, W, H }; };
+    const out = [];
+    for (const [lineId, name] of named) {
+      const layer = u.surfaceRail.stationLayers.get(`surface:${lineId}`)?.stationsLayer.mesh;
+      const i = layer ? layer.userData.stations.findIndex(s => s.name.startsWith(name)) : -1;
+      if (i < 0) { out.push({ name, found: false }); continue; }
+      const st = layer.userData.stations[i], p = st.pos, g = u.getTerrainMeshSurfaceY({ x: p.x, z: p.z });
+      u.camera.position.set(p.x, g + 250 * 5, p.z + 300); u.controls.target.set(p.x, p.y, p.z); u.controls.update();
+      await new Promise(r => setTimeout(r, 600));
+      const A = grab();
+      const m = new T.Matrix4(); layer.getMatrixAt(i, m); const away = m.clone(); away.setPosition(0, -1e6, 0); layer.setMatrixAt(i, away); layer.instanceMatrix.needsUpdate = true;
+      const B = grab(); layer.setMatrixAt(i, m); layer.instanceMatrix.needsUpdate = true;
+      const v = new T.Vector3(p.x, p.y, p.z).project(u.camera), sx = Math.round((v.x + 1) / 2 * A.W), sy = Math.round((v.y + 1) / 2 * A.H);
+      let px = 0; for (let y = Math.max(0, sy - 40); y < Math.min(A.H, sy + 40); y++) for (let x = Math.max(0, sx - 40); x < Math.min(A.W, sx + 40); x++) { const k = (y * A.W + x) * 4; if (Math.abs(A.b[k] - B.b[k]) + Math.abs(A.b[k + 1] - B.b[k + 1]) + Math.abs(A.b[k + 2] - B.b[k + 2]) > 6) px++; }
+      out.push({ name, found: true, surfaceOnly: layer.userData.surfaceOnly, culled: set.includes(layer), px, above: u.aboveGroundView });
+    }
+    // Hatton Cross is an underground station (OSM: the Piccadilly is in cut-and-cover tunnel there): no surface marker.
+    const hatton = [...u.surfaceRail.stationLayers.values()].some(l => l.stationsLayer.mesh.userData.stations.some(s => /Hatton Cross/.test(s.name)));
+    // No surface marker sits inside a building box (its centre under a roof).
+    const col = u.modes.collision; let underRoof = 0;
+    for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) {
+      const roof = col.roofHeightAt(s.pos.x, s.pos.z); if (roof !== null && roof > s.pos.y) underRoof++;
+    }
+    window.__thaw();
+    return { out, hatton, underRoof, lift: u.surfaceRail.roofLift };
+  }, named);
+  console.log('named markers', JSON.stringify(r));
+  for (const m of r.out) {
+    expect(m.found, m.name).toBe(true);
+    expect(m.surfaceOnly, m.name).toBe(true);
+    expect(m.culled, m.name).toBe(false);
+    expect(m.above, m.name).toBe(true);
+    expect(m.px, `${m.name}: marker pixels from above`).toBeGreaterThan(150);
+  }
+  expect(r.hatton).toBe(false);
+  expect(r.underRoof).toBe(0);
+  expect(r.lift.lifted).toBeGreaterThan(0);
+});
+
+test('s01: the drawn railway stops at the map edge, and no surface marker stands beyond it', async () => {
+  const r = await page.evaluate(async () => {
+    const u = window.__ug, { isOffMapEdge, getMapEdgeRing, signedDistanceToRing } = await import('/src/m25-edge.js');
+    const ring = getMapEdgeRing();
+    let beyond = 0, worst = 0, checked = 0;
+    for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
+      if (!o.isMesh || o.userData.part !== 'stripe') return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i += 3) { checked++; if (isOffMapEdge({ x: p.getX(i), z: p.getZ(i) })) { beyond++; worst = Math.max(worst, -signedDistanceToRing(p.getX(i), p.getZ(i), ring)); } }
+    });
+    let markersBeyond = 0;
+    for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) if (isOffMapEdge(s.pos)) markersBeyond++;
+    // The Central runs on to the edge north of Theydon Bois: its last drawn sample there is at the cliff.
+    const central = u.surfaceRail.paths.get('central').filter(Boolean);
+    let edgeGap = Infinity;
+    for (const path of central) {
+      const f = path.map(p => !p.offMap && p.cls !== 'tunnel');
+      for (let i = 0; i < path.length - 1; i++) {
+        if (f[i] && path[i + 1].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i].x, path[i].z, ring)));
+        if (f[i + 1] && path[i].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i + 1].x, path[i + 1].z, ring)));
+      }
+    }
+    const names = [...u.surfaceRail.stationLayers.values()].flatMap(l => l.stationsLayer.mesh.userData.stations.map(s => s.name));
+    return { beyond, worst, checked, markersBeyond, edgeGap, epping: names.some(n => /Epping/.test(n)), amersham: names.some(n => /Amersham|Chesham|Chorleywood/.test(n)), theydon: names.some(n => /Theydon Bois/.test(n)) };
+  });
+  console.log('map edge', JSON.stringify(r));
+  expect(r.checked).toBeGreaterThan(10000);
+  // Stripe vertices may stand at most a stripe half-width (4.5 m) past the ring where the track meets it obliquely.
+  expect(r.worst).toBeLessThan(5);
+  expect(r.markersBeyond).toBe(0);
+  expect(r.epping || r.amersham).toBe(false);
+  expect(r.theydon).toBe(true);
+  expect(r.edgeGap).toBeLessThan(13); // within one 12 m sample of the cliff
+});
+
+test('s01: Tower Gateway: the DLR deck under the canopy is drawn at about 9 m, not at the roof, at every Master', async () => {
+  const r = await page.evaluate(() => {
+    const u = window.__ug, c = u.llToXZ(51.510617, -0.074818);
+    const setMaster = v => { const el = document.getElementById('masterHeight'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush(); };
+    const read = () => {
+      const scale = u.getBuildingHeightScale(), out = [];
+      for (const path of u.surfaceRail.paths.get('dlr').filter(Boolean)) for (const p of path) {
+        const dx = p.x - c.x, dz = p.z - c.z; if (dx < 20 || dx > 75 || Math.abs(dz) > 15 || p.cls === 'tunnel') continue; // the last ~55 m, under the canopy
+        out.push((p.y - p.terrainY) / 5 / scale);
+      }
+      return out;
+    };
+    const at11 = read(); setMaster('3'); const at3 = read(); setMaster('1.1');
+    const st = u.surfaceRail.stationLayers.get('surface:dlr').stationsLayer.mesh.userData.stations.find(s => /Tower Gateway/.test(s.name));
+    return { at11, at3, marker: st ? (st.pos.y - u.getStructuralSurfaceY(st.pos)) / 5 / u.getBuildingHeightScale() : null };
+  });
+  console.log('Tower Gateway', JSON.stringify(r));
+  // Before: 12.1 to 12.7 m over these samples (the canopy roof). Now the deck
+  // read through the canopy, 9.0 m; a sample can stand lower where the
+  // profile's grade limit lays the deck over a rise in the app's terrain (the
+  // departure docs/tube-surface-rail.md describes, which grows with Master).
+  for (const [k, v] of [['1.1', r.at11], ['3', r.at3]]) {
+    expect(v.length, `Master ${k}`).toBeGreaterThan(3);
+    for (const h of v) { expect(h, `Master ${k}`).toBeGreaterThan(7.5); expect(h, `Master ${k}`).toBeLessThan(9.6); }
+    const med = [...v].sort((a, b) => a - b)[v.length >> 1];
+    expect(Math.abs(med - 9), `Master ${k} median ${med}`).toBeLessThan(0.3);
+  }
+  expect(Math.abs(r.marker - 9)).toBeLessThan(0.5); // the station marker stands on the deck, not on the roof
 });

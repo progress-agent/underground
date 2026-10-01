@@ -248,33 +248,70 @@ export function offsetBand(path, i0, i1, offA, offB, yFn) {
  */
 export function drawnOpenFlags(path) {
   const n = path?.length || 0, f = new Uint8Array(n);
-  const open = i => path[i].cls !== 'tunnel';
+  // s01:R: a sample beyond the map edge (offMap, tube-surface-rail.js) is not drawn either.
+  const open = i => path[i].cls !== 'tunnel' && !path[i].offMap;
   for (let i = 0; i < n; i++) if (open(i) && ((i > 0 && open(i - 1)) || (i + 1 < n && open(i + 1)))) f[i] = 1;
   return f;
 }
 
-// pierShortRuns (s30:R fix round 2; the DLR only, the Overground never passes
-// it): a viaduct run shorter than the pier spacing, which the spacing rule
-// leaves without a pier, stands on one at its middle sample.
-export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = false } = {}) {
+/**
+ * Position + normal (and a baked colour), non-indexed: the attribute set every
+ * strip geometry has (s01:R, moved here from tube-surface-rail.js). The
+ * viaduct piers are indexed BoxGeometry with uv and the deck strips are not;
+ * mergeGeometries refuses that mix and returns null, which silently dropped
+ * the whole masonry mesh (deck and piers). Strips pass through unchanged (the
+ * same object, no attribute touched), so normalising a list of strips changes
+ * nothing in it.
+ */
+export function normaliseForMerge(g) {
+  const out = g.index ? g.toNonIndexed() : g;
+  for (const name of Object.keys(out.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') out.deleteAttribute(name);
+  if (!out.attributes.normal) out.computeVertexNormals();
+  if (out !== g) g.dispose();
+  return out;
+}
+
+/** Half width of a viaduct deck (scene units = metres in XZ). */
+export const DECK_HALF_W = BALLAST_HALF_W + 1.5;
+/** Pier footprint (metres). */
+export const PIER_SIDE_M = 5;
+
+// pierShortRuns (s30:R fix round 2, the DLR; s01:R the Overground too): a
+// viaduct run shorter than the pier spacing, which the spacing rule leaves
+// without a pier, stands on one at its middle sample.
+//
+// structureClear (s01:R): (x, z) => false where no viaduct deck or pier may
+// stand. The Overground and the open-air Tube pass "not in the Thames": where
+// their viaducts cross the river, bridges.js already draws the railway bridge
+// (Kew, Battersea, Fulham), so the deck and its piers stop at the bank and the
+// stripe alone crosses on the bridge model. A deck sample is drawn only when
+// its centre and both deck edges are clear; a pier only when its centre and
+// its four corners are. Every other archetype (stripe, ballast, earth skirts,
+// cutting bands) is built exactly as before.
+export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = false, structureClear = null } = {}) {
   if (path.length < 2) return;
 
   // Split into runs of "kind" so tunnel sections drop the ballast bed and
   // viaduct/embankment/cutting get their dressing per run.
+  // s01:R: with skipTunnel, a sample flagged offMap (beyond the map edge,
+  // tube-surface-rail.js) is undrawn like a tunnel: the track stops where the
+  // map does. The Overground never flags it, so its runs are as before.
+  const kind = p => (skipTunnel && p.offMap ? 'offmap' : p.cls);
+  const hidden = p => p.cls === 'tunnel' || p.offMap;
   let runStart = 0;
   for (let i = 1; i <= path.length; i++) {
-    const boundary = i === path.length || path[i].cls !== path[runStart].cls;
+    const boundary = i === path.length || kind(path[i]) !== kind(path[runStart]);
     if (!boundary) continue;
-    const cls = path[runStart].cls;
+    const cls = path[runStart].cls, k = kind(path[runStart]);
     // skipTunnel (Tube, DLR): a tunnel run is drawn by the underground layer,
     // and the open runs either side do not overlap into it.
     const run = skipTunnel
-      ? path.slice(Math.max(0, runStart - (runStart > 0 && path[runStart - 1].cls === 'tunnel' ? 0 : 1)),
-        i + (i < path.length && path[i].cls === 'tunnel' ? 0 : 1))
+      ? path.slice(Math.max(0, runStart - (runStart > 0 && hidden(path[runStart - 1]) ? 0 : 1)),
+        i + (i < path.length && hidden(path[i]) ? 0 : 1))
       : path.slice(Math.max(0, runStart - 1), i + 1); // 1-pt overlap for continuity
     runStart = i;
     if (run.length < 2) continue;
-    if (skipTunnel && cls === 'tunnel') continue;
+    if (skipTunnel && (k === 'tunnel' || k === 'offmap')) continue;
 
     // Identity stripe always renders (it IS the line on the map).
     const stripe = offsetRails(run, STRIPE_HALF_W, (p) => p.y + STRIPE_LIFT);
@@ -282,8 +319,21 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
     if (cls === 'tunnel') continue;
 
     // Ballast/deck bed.
-    const bed = offsetRails(run, cls === 'viaduct' ? BALLAST_HALF_W + 1.5 : BALLAST_HALF_W, (p) => p.y);
-    out[cls === 'viaduct' ? 'masonry' : 'ballast'].push(stripGeometry(bed.left, bed.right));
+    const bed = offsetRails(run, cls === 'viaduct' ? DECK_HALF_W : BALLAST_HALF_W, (p) => p.y);
+    if (cls === 'viaduct' && structureClear) {
+      // s01:R: the deck only over samples whose centre and edges are clear,
+      // in stretches of two samples or more (the rails of the whole run, so a
+      // stretch's edges are those the full deck would have had).
+      const clear = run.map((p, j) => structureClear(p.x, p.z) && structureClear(bed.left[j].x, bed.left[j].z) && structureClear(bed.right[j].x, bed.right[j].z));
+      for (let a = 0; a < run.length;) {
+        if (!clear[a]) { a++; continue; }
+        let b = a; while (b + 1 < run.length && clear[b + 1]) b++;
+        if (b > a) out.masonry.push(stripGeometry(bed.left.slice(a, b + 1), bed.right.slice(a, b + 1)));
+        a = b + 1;
+      }
+    } else {
+      out[cls === 'viaduct' ? 'masonry' : 'ballast'].push(stripGeometry(bed.left, bed.right));
+    }
 
     if (cls === 'embankment') {
       // Earth skirts: bed edge down to terrain, splayed outward 1.5x the drop.
@@ -314,9 +364,12 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
     } else if (cls === 'viaduct') {
       // Piers every PIER_SPACING_M down to terrain.
       let acc = 0, piers = 0;
+      const half = PIER_SIDE_M / 2;
+      const pierClear = (p) => !structureClear || [[0, 0], [-half, -half], [half, -half], [-half, half], [half, half]].every(([dx, dz]) => structureClear(p.x + dx, p.z + dz));
       const pierAt = (p) => {
+        if (!pierClear(p)) return;
         const h = Math.max(2, p.y - p.terrainY);
-        const pier = new THREE.BoxGeometry(5, h, 5);
+        const pier = new THREE.BoxGeometry(PIER_SIDE_M, h, PIER_SIDE_M);
         pier.translate(p.x, p.terrainY + h / 2, p.z);
         out.masonry.push(pier);
         piers++;
