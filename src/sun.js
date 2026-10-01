@@ -34,8 +34,9 @@
 // only by buildings, landmarks, bridges and airport architecture, and are
 // received by those plus the terrain, the Overground, the M25 and airfields.
 // Underground layers never take part. The toggle defaults ON and persists.
-// Automatic quality drops shadows before anything but the clouds
-// (adaptive-quality.js: level 1 thins the clouds, level 2 drops shadows).
+// Automatic quality drops shadows before anything else (adaptive-quality.js:
+// FIRST_UNSHADOWED is the rung straight after full quality; D-043 removed the
+// thinned-clouds rung that D-040 had put before it).
 //
 // Switching shadows off, by toggle, by the Automatic ladder, by altitude or by
 // going underground, never recompiles a shader: the map simply stops being

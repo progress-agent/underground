@@ -1,12 +1,15 @@
 // clouds.js: fair-weather cumulus (sprint 25Sep26f, Lane C, D-039; sprint
-// 30Sep26w, Lane C, D-041).
+// 30Sep26w, Lane C, D-041; sprint 01Oct26h, Lane C, D-043).
 //
 // Jordan's cloud-scope answers (24Sep26h) and his D-041 rulings, as built here:
 //   - a permanent fair-weather cumulus sky, now at 1.25 oktas (D-041: "reduce
 //     the cloud cover by 50%" from 2.5), structured as presets
 //     (clouds-presets.js) so other weathers can be added later;
 //   - clouds move with the shared wind (wind.js) as one field (clouds-field.js);
-//   - above the clouds the layer thins to about a third;
+//   - every cloud inside the map is always drawn (D-043): nothing appears or
+//     vanishes with distance, quality or height;
+//   - above the clouds the layer thins to about a third, as ONE smooth fade of
+//     the whole layer with the camera's height (D-043), opacity only;
 //   - cloud shadows move across the whole city (clouds-shadow.js);
 //   - altitude follows Master like the landscape, while the cloud BODIES keep
 //     true proportions like every structure (Lane S rule): a puff is a round
@@ -33,17 +36,32 @@
 // as the camera turns), and within a cloud bottom-up or top-down depending on
 // which side the camera is.
 //
-// COST. One draw call. Per frame: a drift lookup (memoised integral), a few
-// uniform writes and the shadow parameters; about once a second the visible
-// clouds are re-sorted and their puffs re-packed (about 3,500 visible of
-// 9,300 puffs at 1.25 oktas, well under a millisecond). Puffs of clouds faded out at the edge,
-// beyond the fog, or dropped by thinning/quality collapse to nothing in the
-// vertex shader.
+// EVERY CLOUD ALWAYS DRAWN (D-043, 01Oct26h). Jordan: "the clouds look great,
+// but they are appearing and disappearing quite unnaturally". The field always
+// covered the whole map; the pops came from managing it: each cloud dropped
+// half its puffs, unfaded, as the camera climbed past its top; far clouds kept
+// only their largest puffs from 5 km and faded out at 15 to 24 km (7 to 12 km
+// on Automatic's thinned-clouds rung); clouds beyond 25.5 km left the instance
+// buffer; and Automatic's edge smoothing dropped puffs too. All of that is
+// gone. What decides whether a cloud shows is now only: the M25 edge fade (a
+// fixed property of where the cloud is), the air weight (nothing underground
+// or underwater), one fade of the whole layer with the camera's height, a
+// dissolve of a puff the camera is about to enter, and a fade at 42 to 48.5 km
+// so the camera's 50 km far plane never cuts a cloud. Each is a smooth
+// function of the camera's position.
+//
+// COST. One draw call of every puff inside the map (about 875 clouds and
+// 4,150 of the 9,279 puffs at 1.25 oktas; the count moves slowly as clouds
+// drift in and out across the edge, at zero opacity). Per frame: a drift lookup (memoised
+// integral), a few uniform writes and the shadow parameters; about once a
+// second the clouds are re-sorted far to near and, where the order changed,
+// their puffs re-packed. Puffs of clouds faded out at the edge or beyond the
+// far fade collapse to nothing in the vertex shader.
 
 import * as THREE from 'three';
 import {
   CLOUD_FIELD, buildCloudLayout, cloudDrift, cloudPosition, sampleEdgeFade,
-  shadowStrengthFor, updraftAt as fieldUpdraftAt, cloudSunFactor, shadowPlaneY, mulberry32,
+  shadowStrengthFor, updraftAt as fieldUpdraftAt, cloudSunFactor, shadowPlaneY, mulberry32, smoothstep,
 } from './clouds-field.js';
 import { resolveCloudPreset, DEFAULT_CLOUD_PRESET } from './clouds-presets.js';
 import {
@@ -54,18 +72,19 @@ import { resolveSunDirection } from './environment.js';
 const VE = 5;
 const DEG = Math.PI / 180;
 const FLOATS = 16; // per puff: aPuff(4) aCloud(4) aMisc(4) aShape(4)
+// Camera far plane (main.js, display metres): the terrain is clipped there too.
+export const CAMERA_FAR_M = 50000;
 
 export const CLOUD_CONFIG = {
   resortSeconds: 1,
   resortJumpM: 1500,        // a camera jump this large re-sorts at once
-  // Distance (display metres): far clouds keep only their largest puffs, then
-  // fade out into the haze and are not drawn at all. Clouds stack deeply
-  // towards the horizon, which is where the fill cost goes.
-  lodM: [5000, 15000],
-  // D-041: 0.3 until the puffs became fewer and larger; at 0.3 a far cloud of
-  // 3 puffs kept one, and the distance read as scattered single discs.
-  farKeep: 0.55,
-  fadeM: [15000, 24000],
+  // The one distance fade (D-043): 3D display metres from the camera to a
+  // cloud's centre. It only keeps the far plane from cutting a cloud: it ends
+  // 1.5 km short of the plane, more than any puff's centre reaches from its
+  // cloud's centre (half a 2 km cloud and its height), so no puff is clipped.
+  // Beyond about 32 km at street level, and 60 km aloft, the fog has already
+  // taken a cloud to the horizon's colour.
+  farFadeM: [42000, 48500],
   maxLum: 0.8,              // under the bloom threshold (0.88)
   renderOrder: 50,
   // The look (D-041), as the shader's uLook: relief (how much of the atlas's
@@ -74,26 +93,27 @@ export const CLOUD_CONFIG = {
   // scattering floor (the share of sunlight left deep in the heap) and the
   // weight of the flat grey base.
   look: [0.3, 0.45, 0.3, 0.85],
-  // Per-puff opacity above the layer, and the fraction of each cloud's puffs
-  // kept (largest first). Calibrated by measurement (scripts/measure-cloud-
-  // thinning.mjs) so that the layer's visible effect from above is about a
-  // third of the unthinned layer's. Recalibrated for D-041 (1.25 oktas, 3 to 7
-  // puffs a cloud; was 0.12 and 0.35 with 5 to 11): overview 0.35, above 0.32,
-  // straight down 0.37 (30Sep26w, Mac Studio).
-  thinAlpha: 0.1,
-  thinKeep: 0.5,
-  // Automatic's thinned clouds (D-040, level 1 and below): distant clouds fade
-  // into the haze sooner and keep only their largest puffs from nearer, while
-  // near clouds are unchanged. Measured on the M5 as lived (26Sep26s, render
-  // bench, seven interleaved rounds): recovered about 60% of the clouds' cost
-  // at street level near Bank, 45% at the river at Greenwich. Re-measured for
-  // D-041 on the Mac Studio's M2 Max (30Sep26w, scripts/measure-cloud-cost.mjs,
-  // base and candidate alternated): the new sprites cost 0.28ms at street and
-  // 0.17ms at the river as lived (the 2.5-okta sprites 0.41 and 0.26), and the
-  // thinning still sheds about 45% and 75% of that, so these values stand.
-  // PROVISIONAL: an M2 Max is not the M5; re-measure there before promotion.
-  // Eased over easeS seconds of real time so a quality change never pops the sky.
-  thinQuality: { lodM: [2000, 7000], fadeM: [7000, 12000], easeS: 0.8 },
+  // "Thin to a third above them" (D-039, Jordan's cloud-scope answer 2), as
+  // D-043 rules it: ONE fade of the whole layer by the camera's height against
+  // the layer's mean top (display metres: mean base x Master plus mean height),
+  // eased (a smoothstep) over a kilometre of climb, starting at the mean top.
+  // Opacity only: no puff is removed, and every cloud keeps the same share. It
+  // replaces D-039's per-cloud thinning, in which each cloud dropped half its
+  // puffs, unfaded, as the camera passed its own top. `alpha` is the layer's
+  // opacity at the end of the climb, calibrated by measurement (scripts/
+  // measure-cloud-thinning.mjs) so that the layer's visible effect from above
+  // is about a third of its effect unthinned. Seen from above, a cloud stacks
+  // about five puffs deep, so the effect is far from linear in the opacity:
+  // 0.25 left 0.65 of it, 0.1 left 0.41, 0.07 leaves 0.32 to 0.33 at the
+  // overview, above-the-layer and straight-down poses (01Oct26h, Mac Studio).
+  // In absolute terms the thinned layer then changes the picture as much as
+  // 387dff0's did (mean luminance change 9.7, 9.5, 4.7 against 8.7, 8.9, 5.3):
+  // the same look from above, with no puff removed. For the same reason the
+  // opacity is eased geometrically (alpha ^ t, t the smoothstep of the climb),
+  // not linearly: a linear blend would leave the layer looking whole for most
+  // of the kilometre and then drop it in the last few hundred metres; the
+  // geometric one takes the visible effect down about evenly.
+  above: { fromM: 0, spanM: 1000, alpha: 0.07 },
 };
 
 // ── Puff atlas ──────────────────────────────────────────────────────────────
@@ -171,6 +191,33 @@ export function buildPuffAtlas(size = 128) {
 }
 function smooth(e0, e1, x) { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
 
+// ── What decides a cloud's opacity (pure; the shader computes the same) ───
+
+/** The layer's mean top in display metres: mean base x Master plus mean height (true size). */
+export function layerMeanTopM(layout, ratio, ve = VE) {
+  return layout.meanBaseM * ratio * ve + 2 * layout.meanHalfHeightM;
+}
+
+/**
+ * The whole layer's opacity for a camera at display height `cameraY` (metres):
+ * 1 up to the layer's mean top, easing to `above.alpha` a kilometre higher (D-043).
+ * Eased in the climb (smoothstep) and geometrically in the opacity (see `above`).
+ */
+export function layerOpacity(cameraY, meanTopM, above = CLOUD_CONFIG.above) {
+  const t = smoothstep(meanTopM + above.fromM, meanTopM + above.fromM + above.spanM, cameraY);
+  return Math.pow(above.alpha, t);
+}
+
+/** The far-plane fade for a cloud whose centre is `d` display metres away (3D). */
+export function farFade(d, [a, b] = CLOUD_CONFIG.farFadeM) {
+  return 1 - smoothstep(a, b, d);
+}
+
+/** A puff's dissolve as the camera nears it: `d` display metres from its centre, radius `r`. */
+export function nearDissolve(d, r) {
+  return smoothstep(r * 0.6, r * 2.2, d);
+}
+
 // ── Shaders ────────────────────────────────────────────────────────────────
 
 // Heap geometry (D-041). Each cloud is lit as one body: an ellipsoid over its
@@ -186,20 +233,15 @@ export const HEAP = Object.freeze({ centre: 0.3, pad: 1.06 });
 const VERTEX = /* glsl */`
 attribute vec4 aPuff;   // dx, dy (above base), dz, radius: real metres
 attribute vec4 aCloud;  // cloud centre x, z at t=0 (scene), base altitude, height: real metres
-attribute vec4 aMisc;   // rank (0 = largest), variant, rotation, 0
+attribute vec4 aMisc;   // variant, rotation, 0, 0
 attribute vec4 aShape;  // half-width, half-depth (real metres), heading (radians), 0
 uniform vec4 uField;    // originX, originZ, size, VE
 uniform vec4 uEdgeXf;   // originX, originZ, size, 0
 uniform sampler2D uEdge;
 uniform vec2 uDrift;
 uniform float uRatio;   // Master / VE: display y = canonical y x ratio
-uniform float uKeep;    // quality: largest fraction of puffs kept
-uniform float uThinAlpha; // per-puff opacity above the layer (the layer reads as a third)
-uniform float uThinOn;  // 1, or 0 to measure the unthinned layer
-uniform float uThinKeep; // fraction of puffs (largest first) kept above the layer
-uniform vec2 uLod;      // display distance where far detail starts and ends
-uniform float uFarKeep; // fraction of puffs kept at and beyond uLod.y
-uniform vec2 uFade;     // display distance over which clouds fade out
+uniform float uLayer;   // the whole layer's opacity for the camera's height (layerOpacity)
+uniform vec2 uFar;      // display distance over which a cloud fades before the far plane
 uniform float uOpacity; // air weight x enabled
 uniform vec3 uSunDir;   // canonical, towards the sun
 uniform vec2 uHeap;     // HEAP.centre, HEAP.pad
@@ -215,6 +257,9 @@ varying vec3 vL;        // towards the sun, heap frame, unit
 varying vec3 vEx;       // the sprite's axes in the heap frame, for the relief
 varying vec3 vEy;
 varying float vTowards; // cosine between the view ray and the sun
+#ifdef UG_PROBE
+varying vec4 vProbe;    // the probe's readout (see probe() below)
+#endif
 #include <fog_pars_vertex>
 // A view-space vector as a display-space world vector (metres; the body keeps
 // true size, so this is also real metres within a cloud).
@@ -227,25 +272,32 @@ void main() {
   vec2 c = uField.xy + mod( aCloud.xy + uDrift - uField.xy, uField.z );
   float edge = texture2D( uEdge, ( c - uEdgeXf.xy ) / uEdgeXf.z ).r;
   float master = uRatio * uField.w;
-  // Thinning: how far the camera is above this cloud's top (display metres).
-  float above = cameraPosition.y * uRatio - ( aCloud.z * master + aCloud.w );
-  float thin = smoothstep( 0.0, 400.0, above ) * uThinOn;
-  float keepThin = mix( 1.0, uThinKeep, thin );
-  // Distance detail: far clouds keep only their largest puffs (they are a few
-  // pixels across and stack deeply towards the horizon, where fill is spent).
-  float dist = length( ( modelViewMatrix * vec4( c.x, ( aCloud.z * master ) / uRatio, c.y, 1.0 ) ).xyz );
-  float lodKeep = mix( 1.0, uFarKeep, smoothstep( uLod.x, uLod.y, dist ) );
-  float far = 1.0 - smoothstep( uFade.x, uFade.y, dist );
-  float keep = min( min( uKeep, keepThin ), lodKeep );
-  if ( uOpacity <= 0.0 || edge < 0.004 || far <= 0.0 || aMisc.x > keep + 1e-4 ) {
-    gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); // collapsed: no fragments
-    return;
-  }
+  // The far plane (D-043): 3D display distance to the cloud's centre, so all
+  // of a cloud's puffs fade together.
+  float dist = length( ( modelViewMatrix * vec4( c.x, ( aCloud.z * master + 0.5 * aCloud.w ) / uRatio, c.y, 1.0 ) ).xyz );
+  float far = 1.0 - smoothstep( uFar.x, uFar.y, dist );
   // Canonical centre: base follows Master, the body keeps true size.
   vec3 centre = vec3( c.x + aPuff.x, ( aCloud.z * master + aPuff.y ) / uRatio, c.y + aPuff.z );
   vec4 mvC = modelViewMatrix * vec4( centre, 1.0 );
   float r = aPuff.w;
-  float cr = cos( aMisc.z ), sr = sin( aMisc.z );
+  // Dissolve a puff the camera is inside or about to enter.
+  float near = smoothstep( r * 0.6, r * 2.2, length( mvC.xyz ) );
+  bool shown = edge > 0.0 && far > 0.0;
+#ifdef UG_PROBE
+  // One point per puff, at pixel (instance % W, instance / W): red the cloud's
+  // opacity from everything that is per cloud (layer, edge, far plane; not the
+  // air weight, read from uOpacity), green the puff's own dissolve, blue 1.
+  vProbe = vec4( shown ? uLayer * edge * far : 0.0, near, 1.0, 1.0 );
+  gl_Position = vec4( ( vec2( float( gl_InstanceID % UG_PROBE_W ), float( gl_InstanceID / UG_PROBE_W ) ) + 0.5 )
+    / vec2( float( UG_PROBE_W ), float( UG_PROBE_H ) ) * 2.0 - 1.0, 0.0, 1.0 );
+  gl_PointSize = 1.0;
+  return;
+#endif
+  if ( uOpacity <= 0.0 || !shown ) {
+    gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); // collapsed: no fragments
+    return;
+  }
+  float cr = cos( aMisc.y ), sr = sin( aMisc.y );
   vec2 corner = position.xy;
   vec2 rc = vec2( corner.x * cr - corner.y * sr, corner.x * sr + corner.y * cr ) * r;
   vec4 mv = mvC + vec4( rc, 0.0, 0.0 );
@@ -267,10 +319,8 @@ void main() {
   vEx = toHeap * toDisplay( vec3( cr, sr, 0.0 ) );
   vEy = toHeap * toDisplay( vec3( -sr, cr, 0.0 ) );
   vTowards = dot( normalize( -mv.xyz ), -normalize( mat3( viewMatrix ) * uSunDir ) );
-  // Dissolve a puff the camera is inside or about to enter.
-  float near = smoothstep( r * 0.6, r * 2.2, length( mvC.xyz ) );
-  vAlpha = uOpacity * edge * far * near * mix( 1.0, uThinAlpha, thin ) * ( 1.0 + 0.6 * ( 1.0 - lodKeep ) );
-  float variant = aMisc.y;
+  vAlpha = uOpacity * uLayer * edge * far * near;
+  float variant = aMisc.x;
   vUv = corner;
   vTile = vec2( mod( variant, 2.0 ), floor( variant / 2.0 ) ) * 0.5;
   vec4 mvPosition = mv;
@@ -366,12 +416,13 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   setCloudShadowLayout(layout, CLOUD_FIELD);
   let on = enabled ?? readCloudsParam() ?? true;
   let shadowsOn = true;
+  let aboveFadeOn = true;
 
   // Static per-cloud puff data, packed once.
   const packed = layout.clouds.map(c => {
     const a = new Float32Array(c.puffs.length * FLOATS);
     c.puffs.forEach((p, i) => {
-      a.set([p.dx, p.dy, p.dz, p.r, c.cx, c.cz, c.base, c.height, p.rank, p.variant, p.rot, 0,
+      a.set([p.dx, p.dy, p.dz, p.r, c.cx, c.cz, c.base, c.height, p.variant, p.rot, 0, 0,
         c.width / 2, c.depth / 2, c.heading, 0], i * FLOATS);
     });
     // The same puffs top-down, for a camera below the cloud.
@@ -408,13 +459,8 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
     uPuff: { value: null },
     uDrift: { value: new THREE.Vector2() },
     uRatio: { value: 1.1 / VE },
-    uKeep: { value: 1 },
-    uThinAlpha: { value: CLOUD_CONFIG.thinAlpha },
-    uThinOn: { value: 1 },
-    uThinKeep: { value: CLOUD_CONFIG.thinKeep },
-    uLod: { value: new THREE.Vector2(...CLOUD_CONFIG.lodM) },
-    uFarKeep: { value: CLOUD_CONFIG.farKeep },
-    uFade: { value: new THREE.Vector2(...CLOUD_CONFIG.fadeM) },
+    uLayer: { value: 1 },
+    uFar: { value: new THREE.Vector2(...CLOUD_CONFIG.farFadeM) },
     uOpacity: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uSunCol: { value: new THREE.Color(1, 1, 1) },
@@ -444,75 +490,103 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   const sunDir = new THREE.Vector3(0, 1, 0);
   const lastSortCam = new THREE.Vector3(Infinity, 0, 0);
   let lastSortTime = -Infinity, time = 0, timeOverride = null;
-  // Sort scratch, allocated once: candidate cloud ids, their keys, and the
-  // order last written to the buffer (id * 2 + below) so an unchanged order
-  // skips the rewrite and upload.
+  // Sort scratch, allocated once. Every cloud inside the map is drawn (D-043),
+  // so a re-sort orders all of them (about 875): kept cheap, since it runs at
+  // least once a second (measured 01Oct26h; scripts/measure-cloud-sort.mjs):
+  //   - which clouds are inside the map depends only on the wind's drift, so
+  //     the list is kept until the field has drifted MEMBERS_DRIFT_M (a cloud
+  //     drifting in across the edge then joins at an edge fade under 0.002);
+  //   - the order is a native sort of packed numbers (distance squared, whole
+  //     square metres, times IDX, plus the cloud's id), not a comparator sort;
+  //   - only the stretch of the buffer whose order changed is re-packed and
+  //     uploaded (outside it the same clouds sit at the same puff offsets).
   const nClouds = layout.clouds.length;
-  const cand = [], keys = new Float64Array(nClouds), below = new Uint8Array(nClouds);
-  let written = new Int32Array(0);
-  const byKey = (a, b) => keys[b] - keys[a];
+  const MEMBERS_DRIFT_M = 25;
+  const IDX = 2 ** Math.ceil(Math.log2(nClouds + 1));
+  const members = new Int32Array(nClouds);
+  let nMembers = 0, membersChanged = true;
+  const membersAt = { x: NaN, z: NaN };
+  const sortKeys = new Float64Array(nClouds);
+  const below = new Uint8Array(nClouds);
+  let order = new Int32Array(0);       // cloud ids, far first
+  let written = new Int32Array(0);     // id * 2 + below, as last written
+  let offsetAt = new Int32Array(1);    // first puff of each position, as last written
   const status = {
     enabled: on, visible: false, opacity: 0, time: 0, drift, clouds: layout.clouds.length,
     visibleClouds: 0, instances: 0, sorts: 0, shadowStrength: 0, shadowsPatched: shadowsOk,
-    preset: P.id, ratio: 1.1 / VE, keep: 1, thin: 0, planeY: 0,
+    preset: P.id, ratio: 1.1 / VE, layer: 1, meanTopM: 0, planeY: 0,
   };
-  // Automatic's cloud thinning, eased on the real clock (the world clock can pause).
-  const TQ = CLOUD_CONFIG.thinQuality;
-  let thinT = 0, lastEaseAt = null;
-  const easeThin = (target) => {
-    const now = typeof performance === 'undefined' ? Date.now() : performance.now();
-    const dt = lastEaseAt === null ? 0 : Math.min(0.25, (now - lastEaseAt) / 1000);
-    lastEaseAt = now;
-    const step = dt / TQ.easeS;
-    thinT = target > thinT ? Math.min(target, thinT + step) : Math.max(target, thinT - step);
-    status.thin = thinT;
-    const k = thinT * thinT * (3 - 2 * thinT);
-    uniforms.uLod.value.set(
-      CLOUD_CONFIG.lodM[0] + (TQ.lodM[0] - CLOUD_CONFIG.lodM[0]) * k,
-      CLOUD_CONFIG.lodM[1] + (TQ.lodM[1] - CLOUD_CONFIG.lodM[1]) * k);
-    uniforms.uFade.value.set(
-      CLOUD_CONFIG.fadeM[0] + (TQ.fadeM[0] - CLOUD_CONFIG.fadeM[0]) * k,
-      CLOUD_CONFIG.fadeM[1] + (TQ.fadeM[1] - CLOUD_CONFIG.fadeM[1]) * k);
-  };
+
+  /** The clouds inside the map: every cloud whose M25 edge fade is above 0 (D-043). */
+  function refreshMembers() {
+    if (Math.hypot(drift.x - membersAt.x, drift.z - membersAt.z) < MEMBERS_DRIFT_M) return;
+    membersAt.x = drift.x; membersAt.z = drift.z;
+    let n = 0, changed = false;
+    for (let i = 0; i < nClouds; i++) {
+      cloudPosition(layout.clouds[i], drift, pos);
+      // Only the edge fade, a property of where the cloud is, leaves one out,
+      // and only where it is exactly 0, so a cloud drifting in across the edge
+      // joins at zero opacity. Never the camera's distance.
+      if (!(sampleEdgeFade(layout, pos.x, pos.z) > 0)) continue;
+      if (n >= nMembers || members[n] !== i) changed = true;
+      members[n++] = i;
+    }
+    if (n !== nMembers) changed = true;
+    nMembers = n;
+    membersChanged = membersChanged || changed;
+  }
 
   function resort(camera, ratio) {
     const master = ratio * VE, cx = camera.position.x, cz = camera.position.z;
     const camDispY = camera.position.y * ratio;
-    const cull2 = (CLOUD_CONFIG.fadeM[1] + 1500) ** 2; // + a cloud's reach
-    cand.length = 0;
-    for (let i = 0; i < nClouds; i++) {
-      const c = layout.clouds[i];
+    refreshMembers();
+    const keys = sortKeys.subarray(0, nMembers);
+    for (let k = 0; k < nMembers; k++) {
+      const i = members[k], c = layout.clouds[i];
       cloudPosition(c, drift, pos);
       const dx = pos.x - cx, dz = pos.z - cz;
       const dy = c.base * master + c.height / 2 - camDispY; // display metres
-      const d2 = dx * dx + dz * dz + dy * dy;
-      if (d2 > cull2 || sampleEdgeFade(layout, pos.x, pos.z) < 0.004) continue;
-      keys[i] = d2; below[i] = dy > 0 ? 1 : 0;
-      cand.push(i);
+      keys[k] = Math.floor(dx * dx + dz * dz + dy * dy) * IDX + i;
+      below[i] = dy > 0 ? 1 : 0;
     }
-    cand.sort(byKey); // far first
+    keys.sort(); // nearest first
+    if (order.length !== nMembers) order = new Int32Array(nMembers);
+    for (let k = 0; k < nMembers; k++) order[k] = keys[nMembers - 1 - k] % IDX; // far first
     lastSortCam.copy(camera.position);
     lastSortTime = time;
     status.sorts++;
-    let same = written.length === cand.length;
-    for (let k = 0; same && k < cand.length; k++) same = written[k] === cand[k] * 2 + below[cand[k]];
-    if (same) return;
-    if (written.length !== cand.length) written = new Int32Array(cand.length);
-    let n = 0;
-    for (let k = 0; k < cand.length; k++) {
-      const i = cand[k];
+    // The stretch [first, last] of positions whose cloud (or its up/down order) changed.
+    let first = 0, last = nMembers - 1;
+    if (!membersChanged && written.length === nMembers) {
+      first = -1;
+      for (let k = 0; k < nMembers; k++) {
+        if (written[k] !== order[k] * 2 + below[order[k]]) { if (first < 0) first = k; last = k; }
+      }
+      if (first < 0) return;
+    } else {
+      if (written.length !== nMembers) written = new Int32Array(nMembers);
+      if (offsetAt.length !== nMembers + 1) offsetAt = new Int32Array(nMembers + 1);
+    }
+    membersChanged = false;
+    let n = offsetAt[first];
+    for (let k = first; k <= last; k++) {
+      const i = order[k];
       written[k] = i * 2 + below[i];
+      offsetAt[k] = n;
       const src = below[i] ? packed[i].down : packed[i].up;
       buffer.set(src, n * FLOATS);
       n += src.length / FLOATS;
     }
-    geometry.instanceCount = n;
+    if (last === nMembers - 1) offsetAt[nMembers] = n;
+    const total = offsetAt[nMembers];
+    geometry.instanceCount = total;
     inter.clearUpdateRanges?.();
-    inter.addUpdateRange(0, n * FLOATS);
+    inter.addUpdateRange(offsetAt[first] * FLOATS, (n - offsetAt[first]) * FLOATS);
     inter.needsUpdate = true;
-    status.visibleClouds = cand.length;
-    status.instances = n;
+    status.visibleClouds = nMembers;
+    status.instances = total;
     status.rewrites = (status.rewrites || 0) + 1;
+    status.rewrittenPuffs = n - offsetAt[first];
   }
 
   const _c = new THREE.Color();
@@ -533,9 +607,10 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   /**
    * Per frame, after the sun, sky and environment updates. `time` is the
    * shared world clock (the mode registry's, which the wind consumers read).
-   * `quality` is Automatic's current level ({ samples, clouds }), or null in Manual.
+   * Automatic's quality level is not read (D-043: no rung changes the clouds);
+   * main.js still passes it, harmlessly.
    */
-  function update({ camera, time: t = 0, airWeight = null, quality = null } = {}) {
+  function update({ camera, time: t = 0, airWeight = null } = {}) {
     time = timeOverride ?? (Number.isFinite(t) ? t : 0);
     status.time = time;
     cloudDrift(time, P, drift);
@@ -554,8 +629,11 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
     if (camera) camera.updateMatrixWorld();
     updateCloudShadow({ drift, sunDir, strength, planeY, skyShare: P.shadowSkyShare ?? 0, camera });
 
-    // Eased even while hidden, so surfacing from underground shows no transition.
-    easeThin(quality?.clouds === 'thin' ? 1 : 0);
+    // The whole layer's fade above the clouds: a smooth function of the camera's
+    // height, so it needs no easing in time and is right on the first frame.
+    status.meanTopM = layerMeanTopM(layout, ratio);
+    status.layer = uniforms.uLayer.value = camera && aboveFadeOn
+      ? layerOpacity(camera.position.y * ratio, status.meanTopM) : 1;
 
     mesh.visible = opacity > 0;
     status.visible = mesh.visible;
@@ -564,8 +642,6 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
     uniforms.uDrift.value.set(drift.x, drift.z);
     uniforms.uRatio.value = ratio;
     uniforms.uSunDir.value.copy(sunDir);
-    const samples = quality?.samples;
-    status.keep = uniforms.uKeep.value = samples === undefined || samples >= 4 ? 1 : samples >= 2 ? 0.75 : 0.55;
     light(sunSystem?.state ?? null);
     if (time - lastSortTime >= CLOUD_CONFIG.resortSeconds || time < lastSortTime
       || camera.position.distanceToSquared(lastSortCam) > CLOUD_CONFIG.resortJumpM ** 2) {
@@ -576,12 +652,63 @@ export function createCloudSystem({ scene, sunSystem = null, skySystem = null, p
   function setEnabled(v) { on = !!v; status.enabled = on; return on; }
   /** Cloud shadows on the city (on by default; off for comparisons). */
   function setShadowsEnabled(v) { shadowsOn = !!v; return shadowsOn; }
-  /** Measurement only: switch the above-the-layer thinning off and on. */
-  function setThinning(v) { uniforms.uThinOn.value = v ? 1 : 0; }
+  /** Measurement only: switch the fade above the layer off and on. */
+  function setThinning(v) { aboveFadeOn = !!v; }
+
+  // ── Probe (tests and measurement; never drawn in the scene) ──
+  // The same vertex program with UG_PROBE defined: each puff instance becomes
+  // one point whose colour is what the shader decided for it (see VERTEX), read
+  // back from a float target. So a test reads the opacity the GPU actually
+  // gives every drawn puff, not a copy of the arithmetic.
+  let probeKit = null;
+  function probe(renderer, camera) {
+    const W = 128, H = Math.ceil(layout.puffCount / W);
+    if (!probeKit) {
+      const g = new THREE.InstancedBufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3));
+      for (const k of ['aPuff', 'aCloud', 'aMisc', 'aShape']) g.setAttribute(k, geometry.getAttribute(k));
+      const m = new THREE.ShaderMaterial({
+        name: 'clouds-probe', uniforms, vertexShader: VERTEX, defines: { UG_PROBE: '', UG_PROBE_W: W, UG_PROBE_H: H },
+        fragmentShader: 'varying vec4 vProbe;\nvoid main() { gl_FragColor = vProbe; }',
+        blending: THREE.NoBlending, depthTest: false, depthWrite: false, fog: false, transparent: false,
+      });
+      const points = new THREE.Points(g, m);
+      points.frustumCulled = false;
+      const s = new THREE.Scene();
+      s.add(points);
+      const target = new THREE.WebGLRenderTarget(W, H, {
+        type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false,
+      });
+      probeKit = { g, scene: s, target, buf: new Float32Array(W * H * 4) };
+    }
+    const { g, scene: s, target, buf } = probeKit;
+    const n = geometry.instanceCount;
+    g.instanceCount = n;
+    const prevTarget = renderer.getRenderTarget(), prevAuto = renderer.autoClear;
+    const prevColor = renderer.getClearColor(new THREE.Color()), prevAlpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
+    renderer.autoClear = false;
+    renderer.render(s, camera);
+    renderer.readRenderTargetPixels(target, 0, 0, W, H, buf);
+    renderer.autoClear = prevAuto;
+    renderer.setClearColor(prevColor, prevAlpha);
+    renderer.setRenderTarget(prevTarget);
+    const perCloud = new Float32Array(n), near = new Float32Array(n);
+    let missing = 0;
+    for (let i = 0; i < n; i++) {
+      perCloud[i] = buf[4 * i]; near[i] = buf[4 * i + 1];
+      if (buf[4 * i + 2] !== 1) missing++;
+    }
+    // The air weight as drawn: 0 while the mesh is hidden (update() leaves the
+    // uniform alone then).
+    return { count: n, perCloud, near, missing, opacity: mesh.visible ? uniforms.uOpacity.value : 0, layer: uniforms.uLayer.value };
+  }
 
   const api = {
     mesh, material, layout, preset: P, status, config: CLOUD_CONFIG,
-    update, setEnabled, setShadowsEnabled, setThinning,
+    update, setEnabled, setShadowsEnabled, setThinning, probe,
     get enabled() { return on; },
     /** Force a time (tests, captures); null returns to the world clock. */
     setTimeOverride(t) { timeOverride = Number.isFinite(t) ? t : null; lastSortTime = -Infinity; },

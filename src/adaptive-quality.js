@@ -1,8 +1,9 @@
 // Automatic rendering quality (sprint 24Sep26h, Lane R, D-038; supersedes the
-// 11Sep26f controller). Target: about 60 fps. The clouds thin first (level 1),
-// then near-camera sun shadows go (level 2 is full resolution and full edge
-// smoothing without shadows, and no lower level brings them back); then
-// resolution and edge smoothing fall in fine steps.
+// 11Sep26f controller). Target: about 60 fps. Near-camera sun shadows are the
+// first thing to go (FIRST_UNSHADOWED, the rung after full quality, is full
+// resolution and full edge smoothing without shadows, and no lower rung brings
+// them back); then resolution and edge smoothing fall in fine steps. The
+// clouds are never on the ladder (D-043): every cloud is always drawn.
 //
 // What changed, and why (profile 24Sep26h, Working/sprint-24Sep26h/profile.md):
 // - Finer rungs. The old ladder jumped 100% -> 85% -> 75%/2x -> 60%/2x -> 50%/off.
@@ -30,7 +31,7 @@
 //   against the same 19ms line, so a ~56 fps view is allowed to keep them.
 //   Coming back (sprint 25Sep26f, Step 0): every rung probes up when the mean
 //   of its recent in-band windows (the last 3s) is at or below 1.07 x target
-//   (17.8ms, ~56 fps). The first fix loosened only level 1's line, and each
+//   (17.8ms, ~56 fps). The first fix loosened only the no-shadow rung's line, and each
 //   window had to clear it on its own, four in a row. A camera arriving at a
 //   CPU-bound river view several rungs down (from a GPU-heavy street) wanders
 //   17.1 to 17.9ms per window, so it held at 92% or 85% without shadows for
@@ -39,45 +40,42 @@
 //   one that passes its first window on noise and drifts back over within 6s:
 //   measured on the M5 as lived, that late drop escaped the backoff and the
 //   river bounced 2<->3 every ~3.5s.
-// - Clouds thin before shadows go (D-040, Jordan's answer (c), 26Sep26s). The
-//   sprint 25Sep26f clouds cost 1.4 to 2ms at street and river, which tipped
-//   the M5 as lived past the 19ms shadow line. (D-041 halved the cover and
-//   relit the clouds; on an M2 Max their sprites cost about two thirds of the
-//   old ones', provisional until re-measured on the M5: clouds.js
-//   CLOUD_CONFIG.) Level 1 keeps shadows with the
-//   clouds thinned (distant clouds fade into the haze sooner, near ones are
-//   unchanged; clouds.js eases between the two); level 2 then drops shadows.
-//   Both shadow rungs use the tolerant 19ms line, and both first steps are
-//   the agreed trade-offs, so neither is judged by the "did it help" check.
+// - No cloud rung (D-043, 01Oct26h; supersedes D-040's "Automatic thins clouds
+//   before shadows"). From 26Sep26s to 01Oct26h a rung between full quality
+//   and shadows-off faded every cloud beyond 7 to 12 km, and Jordan saw clouds
+//   appear and vanish as he flew. Every cloud inside the map is now always
+//   drawn, at every rung (clouds.js), so the ladder is back to 15 rungs and
+//   shadows are again the first thing to go. The shadows rung keeps the
+//   tolerant 19ms line, and the drop to FIRST_UNSHADOWED is the agreed
+//   trade-off, so it is not judged by the "did it help" check.
 // - Probes back off per level and only retry early when the scene has become
 //   clearly lighter, which stops the 2<->3 bounce every 4 to 5s.
 export const QUALITY_LEVELS = [
-  { scale: 1, samples: 4, shadows: true, clouds: 'full' },
-  { scale: 1, samples: 4, shadows: true, clouds: 'thin' },
-  { scale: 1, samples: 4, shadows: false, clouds: 'thin' },
-  { scale: 0.92, samples: 4, shadows: false, clouds: 'thin' },
-  { scale: 0.85, samples: 4, shadows: false, clouds: 'thin' },
-  { scale: 0.85, samples: 2, shadows: false, clouds: 'thin' },
-  { scale: 0.8, samples: 2, shadows: false, clouds: 'thin' },
-  { scale: 0.75, samples: 2, shadows: false, clouds: 'thin' },
-  { scale: 0.7, samples: 2, shadows: false, clouds: 'thin' },
-  { scale: 0.65, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.6, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.55, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.5, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.45, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.4, samples: 0, shadows: false, clouds: 'thin' },
-  { scale: 0.35, samples: 0, shadows: false, clouds: 'thin' },
+  { scale: 1, samples: 4, shadows: true },
+  { scale: 1, samples: 4, shadows: false },
+  { scale: 0.92, samples: 4, shadows: false },
+  { scale: 0.85, samples: 4, shadows: false },
+  { scale: 0.85, samples: 2, shadows: false },
+  { scale: 0.8, samples: 2, shadows: false },
+  { scale: 0.75, samples: 2, shadows: false },
+  { scale: 0.7, samples: 2, shadows: false },
+  { scale: 0.65, samples: 0, shadows: false },
+  { scale: 0.6, samples: 0, shadows: false },
+  { scale: 0.55, samples: 0, shadows: false },
+  { scale: 0.5, samples: 0, shadows: false },
+  { scale: 0.45, samples: 0, shadows: false },
+  { scale: 0.4, samples: 0, shadows: false },
+  { scale: 0.35, samples: 0, shadows: false },
 ];
 
-/** The first rung without shadows: every drop down to it is an agreed trade-off
- * (clouds, then shadows), and resolution descents are judged from it. */
+/** The first rung without shadows: the drop to it is the agreed trade-off
+ * (shadows go first), and resolution descents are judged from it. */
 export const FIRST_UNSHADOWED = QUALITY_LEVELS.findIndex(q => !q.shadows);
 
 export const ADAPTIVE_TUNING = {
   targetMs: 1000 / 60,
   overBudget: 1.10,     // drop when the mean interval exceeds 1.10 x target (~54.5 fps)
-  shadowsOverBudget: 1.14, // but leave a shadows-on level (0 or 1) only above 19ms (~52.6 fps)
+  shadowsOverBudget: 1.14, // but leave the shadows-on rung only above 19ms (~52.6 fps)
   severe: 1.8,          // one window is enough above this (~33 fps)
   doubleStep: 2.5,      // and two rungs at once above this (~24 fps)
   underBudget: 1.07,    // probe up when the recent stable mean is at or below 17.8ms (~56 fps)
@@ -185,7 +183,8 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
       // late (it passed its first window on noise): back off as if it had.
       if (lastProbe && lastProbe.to === level && now - lastProbe.at < K.probeGraceMs) backOff(level, lastProbe.before, now);
       lastProbe = null;
-      const step = mean > K.targetMs * K.doubleStep && level >= 1 ? 2 : 1;
+      // Never two rungs at once from full quality: shadows go on their own first.
+      const step = mean > K.targetMs * K.doubleStep && level >= FIRST_UNSHADOWED ? 2 : 1;
       const next = Math.min(MAX, level + step);
       const exempt = next <= FIRST_UNSHADOWED;
       if (!exempt && !descent) descent = { level: Math.max(FIRST_UNSHADOWED, level), mean };

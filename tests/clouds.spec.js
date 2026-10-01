@@ -9,7 +9,8 @@
 //   3. Cloud shadows darken part of the city above ground (rendered pixels),
 //      about half as much of it as at the old cover.
 //   4. The Dawn to Dusk slider changes only the light on the clouds.
-//   5. Clouds fade at the M25 edge: none are drawn whose centre is faded out.
+//   5. Clouds fade at the M25 edge: none are drawn whose centre is faded out
+//      (the edge fade is the only thing that leaves a cloud out, D-043).
 //   6. No rings and no bright rim at dawn and dusk (D-041).
 //
 // Deliberately NOT measured: frames per second (the GPU is shared during the
@@ -174,7 +175,21 @@ test('clouds fade out at the M25 edge: no faded-out cloud is drawn', async ({ pa
   }, { ...CLOUD_FIELD });
   const layout = buildCloudLayout();
   expect(drawn.length).toBeGreaterThan(100);
-  for (const [x, z] of drawn) expect(sampleEdgeFade(layout, x, z)).toBeGreaterThanOrEqual(0.004);
+  // Faded out means a fade of exactly 0. Until D-043 the cut was 0.004, the
+  // shader's collapse line; a cloud drifting in across the edge then joined
+  // the drawn set at up to 1.2% opacity (tests/clouds-no-pop.spec.js, drift),
+  // so the cut is now 0 in both places and a cloud joins at zero opacity.
+  for (const [x, z] of drawn) expect(sampleEdgeFade(layout, x, z)).toBeGreaterThan(0);
+  // And the converse (D-043): every cloud the edge leaves in is drawn, however
+  // far it is from this camera (up to about 40 km here).
+  const unique = await page.evaluate(() => {
+    const g = window.__ugClouds.mesh.geometry, a = g.getAttribute('aCloud'), seen = new Set();
+    for (let i = 0; i < g.instanceCount; i++) seen.add(`${a.getX(i)},${a.getY(i)}`);
+    return seen.size;
+  });
+  const pos = cloudPositionsAt(layout, 900);
+  const inside = layout.clouds.filter((c, i) => sampleEdgeFade(layout, pos[2 * i], pos[2 * i + 1]) > 0).length;
+  expect(unique).toBe(inside);
 });
 
 // ── Sprint 30Sep26w (D-041): the dawn and dusk rings ───────────────────────

@@ -1,11 +1,13 @@
 // measure-cloud-cost.mjs: what the clouds cost a frame, full, thinned and off
-// (sprint 30Sep26w, Lane C, D-041; from the sprint 25Sep26f lane script).
+// (sprint 30Sep26w, Lane C, D-041; from the sprint 25Sep26f lane script;
+// sprint 01Oct26h, D-043).
 //
-// Automatic's level 1 thins the clouds before level 2 drops shadows (D-040).
-// This measures, per standard view, the frame time with the clouds FULL (level
-// 0), THIN (level 1's distant fade and far-puff thinning, clouds.js
-// CLOUD_CONFIG.thinQuality) and OFF, all with sun and cloud shadows as those
-// levels have them. The render loop is held and the three states are rendered
+// From D-040 to D-043 Automatic's level 1 thinned the clouds before level 2
+// dropped shadows. This measures, per standard view, the frame time with the
+// clouds FULL (on a D-043 build: every cloud inside the map, always), THIN
+// (D-040 builds only: level 1's distant fade and far-puff thinning, clouds.js
+// CLOUD_CONFIG.thinQuality; a D-043 build has no such state and reports null)
+// and OFF, all with sun and cloud shadows on. The render loop is held and the three states are rendered
 // in turn, frame after frame, each timed through a pixel read (so GPU work is
 // inside the timing); paired per-round differences cancel slow drift from
 // other load. Manual quality at 100% and MSAA 4x (level 0 and 1's resolution).
@@ -63,7 +65,9 @@ async function run(setup) {
       u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update();
       await sleep(2000); window.__paused = true; await sleep(150);
       const r = u.composer.renderer, gl = r.getContext(), px = new Uint8Array(4);
-      const U = c.material.uniforms, lod0 = U.uLod.value.clone(), fade0 = U.uFade.value.clone();
+      const U = c.material.uniforms, hasThin = !!U.uLod;
+      const lod0 = U.uLod?.value.clone(), fade0 = U.uFade?.value.clone();
+      const STATES = hasThin ? ['full', 'thin', 'off'] : ['full', 'off'];
       const sync = () => { r.setRenderTarget(null); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
       // Level 1's thinned clouds, as clouds.js eases them (end state).
       // (c820ea9 does not expose its config; its values were these.)
@@ -71,18 +75,19 @@ async function run(setup) {
       const set = k => {
         c.setEnabled(k !== 'off'); c.setShadowsEnabled(k !== 'off');
         c.update({ camera: u.camera, time: 900 });
+        if (!hasThin) return;
         if (k === 'thin') { U.uLod.value.set(...TQ.lodM); U.uFade.value.set(...TQ.fadeM); }
         else { U.uLod.value.copy(lod0); U.uFade.value.copy(fade0); }
       };
       const t = { full: [], thin: [], off: [] };
-      for (let i = 0; i < rounds; i++) for (const k of ['full', 'thin', 'off']) {
+      for (let i = 0; i < rounds; i++) for (const k of STATES) {
         set(k); sync(); if (window.__ugSun.status.active) r.shadowMap.needsUpdate = true;
         const s = performance.now(); u.composer.render(0.016); sync(); if (i >= 5) t[k].push(performance.now() - s);
       }
       set('full'); window.__resume();
       const med = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
       const d = (a, b) => med(t[a].map((x, i) => x - t[b][i]));
-      const clouds = d('full', 'off'), thin = d('thin', 'off');
+      const clouds = d('full', 'off'), thin = hasThin ? d('thin', 'off') : null;
       // The sprites alone: the same scene target (MSAA, half float), only the
       // cloud mesh drawn, against the same draw with it hidden. Isolates the
       // cloud draw from the rest of the frame and from most outside load.
@@ -93,7 +98,7 @@ async function run(setup) {
       const sp = { full: [], thin: [], none: [] }, px16 = new Uint16Array(4);
       let drawn = null;
       shown.forEach(o => { o.visible = false; }); u.scene.background = null;
-      for (let i = 0; i < rounds; i++) for (const k of ['full', 'thin', 'none']) {
+      for (let i = 0; i < rounds; i++) for (const k of hasThin ? ['full', 'thin', 'none'] : ['full', 'none']) {
         set(k === 'none' ? 'full' : k); c.mesh.visible = k !== 'none';
         // A one-pixel read of the target itself (its resolved half-float
         // texture) waits for the draw into it; a read of the default
@@ -109,9 +114,9 @@ async function run(setup) {
       shown.forEach(o => { o.visible = true; }); u.scene.background = bg; r.setRenderTarget(null);
       set('full'); window.__resume();
       const ds = (a, b) => med(sp[a].map((x, i) => x - sp[b][i]));
-      const sprites = ds('full', 'none'), spritesThin = ds('thin', 'none');
-      return { fullMs: med(t.full), offMs: med(t.off), clouds, thin, saved: clouds > 0.05 ? (clouds - thin) / clouds : null,
-        sprites, spritesThin, spritesSaved: sprites > 0.05 ? (sprites - spritesThin) / sprites : null,
+      const sprites = ds('full', 'none'), spritesThin = hasThin ? ds('thin', 'none') : null;
+      return { fullMs: med(t.full), offMs: med(t.off), clouds, thin, saved: hasThin && clouds > 0.05 ? (clouds - thin) / clouds : null,
+        sprites, spritesThin, spritesSaved: hasThin && sprites > 0.05 ? (sprites - spritesThin) / sprites : null,
         spritesMs: med(sp.full), emptyMs: med(sp.none), drawn: JSON.stringify(drawn),
         instances: c.status.instances, visibleClouds: c.status.visibleClouds };
     }, { pose, rounds: ROUNDS });

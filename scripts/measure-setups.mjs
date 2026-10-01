@@ -13,8 +13,9 @@
 // VIEWS: the five standard views (overview, streetBank, riverGreenwich,
 // m25Edge, heathrow) plus 'arrival': Automatic pushed to level 3 or deeper at
 // street by synthetic GPU-bound frames on a held render loop, then flown to
-// the river at Greenwich (does it climb back to shadows?). Since D-040 the
-// trace also records whether Automatic has thinned the clouds (6th column).
+// the river at Greenwich (does it climb back to shadows?). The trace's 6th
+// column records whether Automatic had thinned the clouds: D-040 builds only
+// (26Sep26s to 01Oct26h); D-043 removed the cloud rung, so it reads 0 there.
 //
 // Per view it records: the settled rung (most frequent level over the last 8s),
 // fps over a 2.5s live window after the settle, rung changes in the last 8s,
@@ -180,8 +181,8 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
           u.camera.position.fromArray(street.p); u.controls.target.fromArray(street.t); u.controls.update();
           await sleep(1500);
           // Hold the render loop; feed Automatic GPU-bound frames whose cost follows
-          // resolution (as the node tests' model({cpu:6,gpu:24})) until 85% or deeper (level 4
-          // since D-040 added the thinned-clouds rung; level 3 before),
+          // resolution (as the node tests' model({cpu:6,gpu:24})) until 85% or deeper (level 3;
+          // level 4 on D-040 builds, whose thinned-clouds rung came first),
           // then realign the controller's clock to real time and fly to the river.
           window.__paused = true; await sleep(100);
           const E = { 4: 1, 2: 0.8, 0: 0.62 }; let t = performance.now();

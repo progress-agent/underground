@@ -1,5 +1,5 @@
 // capture-clouds.mjs: captures of the cloud layer (Lane C: sprint 25Sep26f, D-039;
-// sprint 30Sep26w, D-041).
+// sprint 30Sep26w, D-041; sprint 01Oct26h, D-043).
 //
 // Usage: node scripts/capture-clouds.mjs <origin> <outDir> [options]
 //   origin        a dev server (window.__ug and window.__ugClouds are dev-only)
@@ -11,6 +11,9 @@
 //   --shots a,b   a subset of SHOTS (default: all).
 //   --time <s>    world clock in seconds (default 900: the same sky in every shot;
 //                 a shot may set its own).
+//   --thin-rung   hold the clouds in the state of Automatic's thinned-clouds rung
+//                 (D-040 builds only, 26Sep26s to 01Oct26h: clouds faded out at
+//                 7 to 12 km). D-043 builds have no such rung and ignore it.
 // Every shot: Manual quality at 100% and MSAA 4x, sun shadows on, headless
 // Chromium with ANGLE Metal (real GPU). Most shots are 1440x900 at DPR 1;
 // Jordan's pose is 1344x821 at DPR 2, the size of his screenshot (2688x1642).
@@ -39,6 +42,23 @@ export const SHOTS = {
   // the horizon at Master 1.1, as in his screenshot.
   // World time 3000 s: the sun shows through a gap, as in his screenshot.
   jordan: { label: "Jordan's pose: above Southwark, +122 m, looking south, midday sun ahead", above: [1860, 122, -340], dir: [0.1045, 0.9945], pitchDeg: -4.7, sun: 0.5, mh: 1.1, size: [1344, 821], dpr: 2, time: 3000 },
+  // Sprint 01Oct26h (D-043): the climb out of the opening, as Jordan flew it.
+  // The opening lands 37 m under Marylebone (-194, -2163) looking north-west;
+  // holding E climbs straight up without turning. At street level that spot is
+  // inside a building, so the strip stands 1.8 km away on the open ground of
+  // Regent's Park (the Hub fields, 51.5312 N 0.1555 W), with the landing's
+  // heading and its 0.6 degree upward pitch at Master 1.1. Heights are the
+  // altimeter's (real metres above the ground).
+  climbStreet: { label: 'Climb: street level in Regent\'s Park, +3 m', above: [-1988.96, 3, -2597.85], dir: [-0.7952, 0.6063], pitchDeg: 0.6 },
+  climbEmerging: { label: 'Climb: emerging over the roofs, +120 m', above: [-1988.96, 120, -2597.85], dir: [-0.7952, 0.6063], pitchDeg: 0.6 },
+  climb1km: { label: 'Climb: 1 km on the altimeter, among the cloud bases', above: [-1988.96, 1000, -2597.85], dir: [-0.7952, 0.6063], pitchDeg: 0.6 },
+  climb2km: { label: 'Climb: 2 km, above most cloud tops', above: [-1988.96, 2000, -2597.85], dir: [-0.7952, 0.6063], pitchDeg: 0.6 },
+  climb3km: { label: 'Climb: 3 km, above every cloud', above: [-1988.96, 3000, -2597.85], dir: [-0.7952, 0.6063], pitchDeg: 0.6 },
+  // The far clouds: from 1.5 km on the altimeter over Camden, looking south
+  // across the centre just below the horizon, where Automatic's thinned-clouds
+  // rung (D-040) faded every cloud beyond 7 to 12 km and full quality every
+  // cloud beyond 15 to 24 km (with only the largest puffs kept from 5 km).
+  horizon: { label: 'The horizon from 1.5 km over Camden, looking south across the centre', above: [0, 1500, -3000], dir: [0, 1], pitchDeg: -2 },
 };
 
 const args = process.argv.slice(2);
@@ -46,6 +66,7 @@ const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const VALUED = new Set(['--tag', '--shots', '--time']);
 const [origin = 'http://localhost:5214', outDir = './cloud-captures'] = args.filter((a, i) => !a.startsWith('--') && !VALUED.has(args[i - 1]));
 const tag = opt('--tag', 'after');
+const thinRung = args.includes('--thin-rung');
 const onoff = args.includes('--onoff');
 const T_WORLD = +opt('--time', 900);
 const names = (opt('--shots', '') || Object.keys(SHOTS).join(',')).split(',');
@@ -73,13 +94,19 @@ for (const [k, group] of groups) {
     && window.__ug.groundReady && window.__ugClouds
     && document.querySelector('#loadingBar')?.classList.contains('done'), null, { timeout: 240000 });
   await page.waitForTimeout(2500); // the TfL notice and the bar's fade clear
-  await page.evaluate((tw) => {
+  await page.evaluate(({ tw, thinRung }) => {
     const u = window.__ug; u.controls.enableDamping = false; u.fpsControls.enabled = false;
     u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 });
     window.__ugSun.setShadowsEnabled(true, { persist: false });
     window.__ugClouds.setTimeOverride(tw);
     document.getElementById('hudDetails')?.removeAttribute('open');
-  }, T_WORLD);
+    if (thinRung) {
+      // Hold the clouds as Automatic's thinned-clouds rung had them (Manual
+      // mode passes no quality, so the rung is injected; D-043 builds ignore it).
+      const c = window.__ugClouds, o = c.update;
+      c.update = a => o({ ...a, quality: { scale: 1, samples: 4, shadows: true, clouds: 'thin' } });
+    }
+  }, { tw: T_WORLD, thinRung });
   for (const name of group) {
     const s = SHOTS[name];
     for (const phase of onoff ? ['before', 'after'] : [tag]) {
@@ -103,7 +130,13 @@ for (const [k, group] of groups) {
       await page.waitForTimeout(1800);
       const file = `${name}-${phase}.png`;
       await page.screenshot({ path: join(outDir, file) });
-      const st = await page.evaluate(() => { const c = window.__ugClouds.status; return { visibleClouds: c.visibleClouds, instances: c.instances, shadow: +c.shadowStrength.toFixed(3), opacity: c.opacity }; });
+      const st = await page.evaluate(() => {
+        const u = window.__ug, c = window.__ugClouds.status, p = u.camera.position;
+        const alt = (p.y - u.getTerrainMeshSurfaceY({ x: p.x, z: p.z })) / u.VERTICAL_EXAGGERATION;
+        return { visibleClouds: c.visibleClouds, instances: c.instances, shadow: +c.shadowStrength.toFixed(3), opacity: c.opacity,
+          altimeterM: Math.round(alt), displayY: Math.round(p.y * u.masterHeight.ratio),
+          ...(c.layer !== undefined ? { layer: +c.layer.toFixed(3) } : {}), ...(c.thin !== undefined ? { thinRung: +c.thin.toFixed(2) } : {}) };
+      });
       index.push({ file, shot: name, phase, label: s.label, pose: { ...pose, sun: s.sun ?? 'default', mh: s.mh ?? 1.1, worldTime: s.time ?? T_WORLD }, size: `${k}`, status: st });
       console.log(file, JSON.stringify(st));
     }

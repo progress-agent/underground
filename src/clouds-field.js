@@ -104,7 +104,7 @@ function cloudPuffs(prand, P, cloud) {
   const puffs = [];
   const push = (lx, lz, h, r) => puffs.push({
     dx: lx * ch - lz * sh, dz: lx * sh + lz * ch, dy: h, r,
-    variant: Math.floor(prand() * 4), rot: prand() * TAU, rank: 0,
+    variant: Math.floor(prand() * 4), rot: prand() * TAU,
   });
   // Base row: evenly spread along the length, jittered, centres half a radius
   // above the base so the flat cut runs through their lower halves.
@@ -124,9 +124,8 @@ function cloudPuffs(prand, P, cloud) {
     const a = prand() * TAU;
     push(Math.cos(a) * spread * prand(), Math.sin(a) * spread * 0.6 * prand(), h, r);
   }
-  // Rank 0 is the largest puff: thinning and quality drop the smallest first.
-  const order = puffs.map((p, i) => i).sort((i, j) => puffs[j].r - puffs[i].r);
-  order.forEach((i, k) => { puffs[i].rank = n > 1 ? k / (n - 1) : 0; });
+  // No puff is ever dropped (D-043), so puffs carry no rank any more (until
+  // then the smallest went first when a cloud was thinned).
   // Draw order inside a cloud: bottom to top (reversed when viewed from below).
   puffs.sort((p, q) => p.dy - q.dy);
   return puffs;
