@@ -47,10 +47,30 @@ import { RENDER_ORDER } from './render-layers.js';
 import {
   MATS, BASE_LIFT, STRIPE_LIFT, STRIPE_HALF_W, CLASS_LIFT_M, SAMPLE_STEP_M,
   buildPath, buildCorridor, stationOnRail, createStripeMaterial, stripGeometry, offsetBand,
-  llToScene, branchClasses, createRailMorph,
+  llToScene, branchClasses, createRailMorph, normaliseForMerge, drawnOpenFlags,
 } from './surface-rail.js';
 import { createStationMarkers } from './stations.js';
 import { sampleForSurfaceRail, SURFACE_RAIL_DLR_MATCH_M } from './dlr-profile.js';
+// s01:R: the drawn track stops at the map edge, and no deck or pier stands in the Thames.
+import { isOffMapEdge } from './m25-edge.js';
+import { isInThames } from './thames-mask.js';
+
+/**
+ * s01:R (sprint 01Oct26h): flag every sample of a built path that lies beyond
+ * the map edge (the outer face of the M25's outer barrier, m25-edge.js, where
+ * the ground ends in a cliff). buildCorridor (skipTunnel) and drawnOpenFlags
+ * leave flagged samples undrawn, so the Central towards Epping and the
+ * Metropolitan beyond Rickmansworth stop where the map does instead of
+ * floating over the void; the path keeps them, so the data still runs to the
+ * buffers. Returns the number flagged.
+ */
+export function flagOffMap(path, offMap = isOffMapEdge) {
+  let n = 0;
+  for (const p of path) { let off = false; try { off = offMap({ x: p.x, z: p.z }); } catch { off = false; } if (off) { p.offMap = true; n++; } }
+  return n;
+}
+/** s01:R: no viaduct deck or pier in the Thames (bridges.js draws the railway bridges). */
+export const structureClear = (x, z) => !isInThames(x, z);
 
 const VE = VERTICAL_EXAGGERATION;
 export const SURFACE_RAIL_PREFIX = 'surface-rail-';
@@ -70,7 +90,17 @@ const DRESSING_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexCol
 // dlr-profile.js, shared with the data builder.
 const PROFILE_CLASS = { elevated: 'viaduct', embankment: 'embankment', surface: 'surface', cutting: 'cutting', tunnel: 'tunnel' };
 export const DLR_MATCH_M = SURFACE_RAIL_DLR_MATCH_M;
+/**
+ * s01:R: a marker is lifted only when a building box stands over its centre
+ * (within MARKER_ROOF_REACH_M of it: inside a station building or under a
+ * canopy, where nothing of it shows), not when a building merely stands beside
+ * it; its centre then stands MARKER_ROOF_CLEARANCE_M above that roof (true m).
+ */
+export const MARKER_ROOF_REACH_M = 2, MARKER_ROOF_CLEARANCE_M = 1.5;
+/** s01:R: how far an open platform may be from a DLR station's mapped point, and from the drawn track. */
+export const DLR_OPEN_PLATFORM_M = 250, DLR_PLATFORM_ON_TRACK_M = 30;
 const ESTIMATE_BASIS = 'Illustrative class estimate; no profiled DLR track within 40 m';
+const COVERED_WAY_BASIS = 'Covered way drawn at grade (tagged tunnel in OSM; scripts/prepare-tube-surface.mjs)';
 
 /** Where a DLR sample of v2 class `v2` is drawn at (x, z): the profile point, the archetype, the rail-head y. */
 function dlrPointAt(x, z, terrainY, v2, dlrProfile, structureScale) {
@@ -95,6 +125,10 @@ function dlrPointAt(x, z, terrainY, v2, dlrProfile, structureScale) {
 /** Surface-rail path for the DLR, its height taken from the shared DLR profile. */
 export function buildDlrPath(branch, getY, dlrProfile, structureScale) {
   const pts = branch.points, classes = branchClasses(branch), path = [];
+  // s01:R: segments the data opened as covered ways (the Lewisham terminus
+  // approach under the main-line railway) are drawn at grade, whatever the
+  // profile, which keeps OSM's tunnel there.
+  const opened = new Set(); for (const c of branch.coveredWays || []) for (let i = c.i0; i < c.i1; i++) opened.add(i);
   for (let i = 0; i < pts.length - 1; i++) {
     const a = llToScene(...pts[i]), b = llToScene(...pts[i + 1]);
     const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / SAMPLE_STEP_M));
@@ -102,6 +136,10 @@ export function buildDlrPath(branch, getY, dlrProfile, structureScale) {
       const t = j / steps, x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
       const terrainY = getY({ x, z }); if (!Number.isFinite(terrainY)) continue;
       const v2 = CLASS_LIFT_M[classes[i]] === undefined ? 'surface' : classes[i];
+      if (opened.has(i)) {
+        path.push({ x, z, terrainY, cls: v2, y: terrainY + BASE_LIFT * structureScale, src: i, deck: { source: null, surveyed: false, basis: COVERED_WAY_BASIS, coveredWay: true }, v2 });
+        continue;
+      }
       const { cls, y, deck } = dlrPointAt(x, z, terrainY, v2, dlrProfile, structureScale);
       path.push({ x, z, terrainY, cls, y, src: i, deck, v2 });
     }
@@ -138,7 +176,7 @@ function openRuns(path, i0, i1) {
   const runs = [];
   let start = null;
   for (let i = i0; i <= i1; i++) {
-    const open = path[i].cls !== 'tunnel';
+    const open = path[i].cls !== 'tunnel' && !path[i].offMap; // s01:R: nor beyond the map edge
     if (open && start === null) start = i;
     if ((!open || i === i1) && start !== null) { const end = open ? i : i - 1; if (end > start) runs.push([start, end]); start = null; }
   }
@@ -157,14 +195,9 @@ export function bandGeometries(path, i0, i1, lines, yFn) {
   return out;
 }
 
-/** Position + normal (and a baked colour), non-indexed: the attribute set every strip geometry has. */
-export function normaliseForMerge(g) {
-  const out = g.index ? g.toNonIndexed() : g;
-  for (const name of Object.keys(out.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'color') out.deleteAttribute(name);
-  if (!out.attributes.normal) out.computeVertexNormals();
-  if (out !== g) g.dispose();
-  return out;
-}
+// normaliseForMerge moved to surface-rail.js (s01:R): the Overground's masonry
+// goes through it too. Re-exported for callers of this module.
+export { normaliseForMerge };
 
 /** Uniform grid for "which lines run here" hover lookups. */
 class SampleGrid {
@@ -219,6 +252,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     lineInfo.set(line.id, info);
     const byBranch = line.branches.map(b => {
       const path = info.isDlr ? buildDlrPath(b, getY, dlrProfile, structureScale) : buildPath(b, getY);
+      if (path.length >= 2) flagOffMap(path); // s01:R
       return path.length >= 2 ? path : null;
     });
     ownerPaths.set(line.id, byBranch);
@@ -263,10 +297,10 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // The viaduct piers are indexed BoxGeometry with uv; the deck strips are
     // not. mergeGeometries refuses the mix and returns null, which silently
     // drops the whole masonry mesh (deck and piers): that is why the
-    // Overground has drawn no viaduct deck since a095a84 (its merge fails the
-    // same way; left as it is, since the Overground must stay pixel-identical;
-    // reported for a ruling). Here every piece is made position + normal,
-    // non-indexed, so the Tube and DLR viaducts stand on their piers.
+    // Overground drew no viaduct deck from a095a84 until sprint 01Oct26h
+    // (D-042 item 4), when its masonry went through the same normaliseForMerge
+    // (surface-rail.js). Every piece is made position + normal, non-indexed,
+    // so the viaducts stand on their piers.
     const norm = geos.map(normaliseForMerge);
     if (colours) norm.forEach((n, k) => { const c = colours[k], a = new Float32Array(n.attributes.position.count * 3);
       for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); });
@@ -290,7 +324,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     const from = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] }; // the path each geometry came from
     for (const path of info.paths) {
       const before = Object.fromEntries(Object.keys(out).map(k => [k, out[k].length]));
-      buildCorridor(path, out, { skipTunnel: true, pierShortRuns: info.isDlr });
+      buildCorridor(path, out, { skipTunnel: true, pierShortRuns: info.isDlr, structureClear });
       for (const k of Object.keys(out)) for (let j = before[k]; j < out[k].length; j++) from[k].push({ samples: path, own: true, morphed: !info.isDlr });
     }
     addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
@@ -304,7 +338,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // Hover grid: own track, lines on it where a band says so.
     const spans = bandSpans.get(info.line.id) || [];
     for (const path of info.paths) path.forEach((p, i) => {
-      if (p.cls === 'tunnel') return;
+      if (p.cls === 'tunnel' || p.offMap) return;
       const span = spans.find(s => s.path === path && i >= s.i0 && i <= s.i1);
       gridFor(info.line.id).add(p.x, p.z, span ? span.lines : [info.line.id]);
     });
@@ -317,6 +351,27 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
 
   // ── Surface station markers (surfaceOnly) ───────────────────────────────────
   await breathe();
+  const offMap = p => { try { return isOffMapEdge({ x: p.x, z: p.z }); } catch { return false; } };
+  // s01:R: a DLR station whose mapped anchor platform is in tunnel (Stratford:
+  // platform 16, on a way OSM tags tunnel under the station) is still an
+  // open-air station when another of its platforms is open and the drawn
+  // track reaches it (platforms 4a and 4b, where the line from Pudding Mill
+  // Lane now ends): its surface marker stands on the nearest such platform.
+  const dlrDrawn = () => (lineInfo.get('dlr')?.paths ?? []).flatMap(path => { const f = drawnOpenFlags(path); return path.filter((_, i) => f[i]); });
+  let dlrDrawnSamples = null;
+  function dlrSurfaceStation(id, s) {
+    if (s.kind !== 'tunnel') return dlrProfile.station({ id, structureScale });
+    dlrDrawnSamples ??= dlrDrawn();
+    for (const c of [...s.candidates].sort((a, b) => a.distance - b.distance)) {
+      if (c.distance > DLR_OPEN_PLATFORM_M) break;
+      const q = dlrProfile.station({ id, nodeIndex: c.node, structureScale });
+      if (q._dlrProfile.classification === 'tunnel') continue;
+      if (!dlrDrawnSamples.some(p => Math.hypot(p.x - q.x, p.z - q.z) <= DLR_PLATFORM_ON_TRACK_M)) continue;
+      q.openPlatform = true;
+      return q;
+    }
+    return null;
+  }
   const markerStations = new Map(); // lineId -> stations
   const seen = new Set();
   for (const line of data.lines) {
@@ -324,17 +379,19 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     if (info.isDlr) {
       if (!dlrProfile) continue;
       for (const [id, s] of Object.entries(dlrProfile.data.stations)) {
-        if (s.kind === 'tunnel' || seen.has(id)) continue;
+        if (seen.has(id)) continue;
+        const p = dlrSurfaceStation(id, s);
+        if (!p || offMap(p)) continue; // s01:R: wholly in tunnel, or beyond the map edge
         seen.add(id);
-        const p = dlrProfile.station({ id, structureScale });
-        stations.push({ id, name: s.name, pos: p.clone(), surfaceY: p.y, dlrProfile: p._dlrProfile, network: 'dlr', lineId: 'dlr', lineCount: 1, isTerminus: false, surfaceRail: true });
+        stations.push({ id, name: s.name, pos: p.clone(), surfaceY: p.y, dlrProfile: p._dlrProfile, nodeIndex: p._dlrProfile.nodeIndex, openPlatform: !!p.openPlatform,
+          network: 'dlr', lineId: 'dlr', lineCount: 1, isTerminus: false, surfaceRail: true });
       }
     } else {
       const paths = [...info.paths, ...(bandPaths.get(line.id) || [])];
       for (const s of line.stations) {
         if (!s.surface || seen.has(s.naptan)) continue;
         const st = stationOnRail(s, paths, getY, projectStation, 'tube-surface');
-        if (!st) continue;
+        if (!st || offMap(st.pos)) continue; // s01:R: beyond the map edge (Epping, Amersham)
         seen.add(s.naptan);
         st.lineId = line.id; st.isTerminus = false; st.surfaceRail = true;
         st.groundY = getY(st.pos); st.liftM = (st.pos.y - st.groundY) / VE;
@@ -364,15 +421,28 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     if (rebuildDlr && dlr && dlrProfile) {
       // Rebuild the DLR's own meshes from the profile at this scale.
       for (const m of [...dlr.meshes]) if (m.userData.part !== 'band') { dlr.group.remove(m); m.geometry.dispose(); dlr.meshes.splice(dlr.meshes.indexOf(m), 1); }
-      const byBranch = dlr.line.branches.map(b => { const p = buildDlrPath(b, getY, dlrProfile, ratio); return p.length >= 2 ? p : null; });
+      const byBranch = dlr.line.branches.map(b => { const p = buildDlrPath(b, getY, dlrProfile, ratio); if (p.length >= 2) flagOffMap(p); return p.length >= 2 ? p : null; });
       ownerPaths.set('dlr', byBranch); dlr.paths = byBranch.filter(Boolean);
       buildOwn(dlr);
     }
-    for (const [lineId, stations] of markerStations) for (const st of stations) {
-      if (lineId === 'dlr' && dlrProfile) { const p = dlrProfile.station({ id: st.id, structureScale: ratio }); st.pos.copy(p); st.surfaceY = p.y; st.dlrProfile = p._dlrProfile; }
-      else { st.pos.y = st.groundY + st.liftM * VE * ratio; st.surfaceY = st.pos.y; }
-    }
+    for (const [lineId, stations] of markerStations) for (const st of stations) placeMarker(lineId, st, ratio);
     writeMarkers();
+  }
+  // A marker's height at a structure scale: on its track (the DLR: the
+  // profile), and s01:R above the roof of any building box over it (roofM, true
+  // metres, liftMarkersOverRoofs), so a station under its own building or a
+  // canopy (Greenwich and Lewisham DLR, 41 Overground stations among others)
+  // still shows its marker from above. True size at every Master (D-039).
+  function placeMarker(lineId, st, ratio) {
+    const roof = st.roofM > 0 ? st.roofM + MARKER_ROOF_CLEARANCE_M : 0;
+    if (lineId === 'dlr' && dlrProfile) {
+      const p = dlrProfile.station({ id: st.id, nodeIndex: st.nodeIndex, structureScale: ratio });
+      st.pos.copy(p); st.dlrProfile = p._dlrProfile;
+      if (roof) { const g = getY({ x: p.x, z: p.z }); if (Number.isFinite(g)) st.pos.y = Math.max(st.pos.y, g + roof * VE * ratio); }
+    } else {
+      st.pos.y = st.groundY + Math.max(st.liftM, roof) * VE * ratio;
+    }
+    st.surfaceY = st.pos.y;
   }
 
   // ── Hover: what is drawn under the pointer (fix round 2) ─────────────────────
@@ -458,6 +528,26 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       };
     },
     setHeightScale,
+    /**
+     * s01:R: lift every surface station marker above the building boxes over
+     * it. `roofHeightAt(x, z, r)` gives the true height (m) of the tallest
+     * building box within r of (x, z), 0 where there is none. Returns the
+     * markers lifted.
+     */
+    liftMarkersOverRoofs(roofHeightAt) {
+      let lifted = 0;
+      for (const [lineId, stations] of markerStations) for (const st of stations) {
+        const r = roofHeightAt(st.pos.x, st.pos.z, MARKER_ROOF_REACH_M);
+        st.roofM = Number.isFinite(r) && r > 0 ? r : 0;
+        const before = st.pos.y;
+        placeMarker(lineId, st, structureScale);
+        if (st.pos.y > before + 1e-6) lifted++;
+      }
+      writeMarkers();
+      return lifted;
+    },
+    /** s01:R: every surface marker station, by line (tests and hover). */
+    markerStations,
     setLineVisible(lineId, visible) {
       const g = groups.get(lineId); if (g) g.visible = visible;
       const layer = stationLayers.get(`surface:${lineId}`); if (layer) layer.stationsLayer.mesh.visible = visible;

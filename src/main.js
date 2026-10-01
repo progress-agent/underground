@@ -949,6 +949,39 @@ function startSurfaceRail() {
     console.warn('Could not create the surface railway:', err.message);
   });
 }
+// ── s01:R ── Surface station markers stand above the roof of any building box
+// over their centre (a station building or canopy over the platforms, in the
+// map's data, hid them from above: West Hampstead, Wembley Park and Lewisham
+// DLR among them). Run once the city is built, and again whenever the set of
+// building meshes changes (live tiles streaming in).
+function s01rRoofHeightAt(x, z, r) {
+  const col = modeSystem?.collision; if (!col) return 0;
+  const scale = getBuildingHeightScale() || 1;
+  let h = 0;
+  for (const b of col.buildingsNear(x, z, r)) {
+    const dx = Math.max(b.minX - x, 0, x - b.maxX), dz = Math.max(b.minZ - z, 0, z - b.maxZ);
+    if (Math.hypot(dx, dz) > r) continue;
+    h = Math.max(h, (b.roofY - b.baseY) / (VERTICAL_EXAGGERATION * scale));
+  }
+  return h;
+}
+let s01rRoofSignature = -1, s01rRoofStable = 0;
+const s01rRoofTimer = setInterval(() => {
+  try {
+    if (!surfaceRail || !modeSystem?.collision) return;
+    // Only once the city is built (not during the opening's loading), then
+    // again whenever live tiles stream in; stops after 15 s without change.
+    const done = buildingsPath === 'baked' ? !!bakedBuilder?.isDone() : surfaceDataLoaded;
+    if (!done) return;
+    const meshes = modeSystem.collision.sync();
+    if (meshes !== s01rRoofSignature) {
+      s01rRoofSignature = meshes; s01rRoofStable = 0;
+      const t0 = performance.now(), lifted = surfaceRail.liftMarkersOverRoofs(s01rRoofHeightAt);
+      surfaceRail.roofLift = { lifted, meshes, ms: +(performance.now() - t0).toFixed(1) };
+    } else if (++s01rRoofStable >= 10) clearInterval(s01rRoofTimer);
+  } catch (err) { console.warn('surface markers over roofs:', err.message); clearInterval(s01rRoofTimer); }
+}, 1500);
+// ── /s01:R ──
 function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
   // Fix round 2: the hit's face names the piece of track under the pointer;
   // the DLR's height is read there, as drawn (a shared stretch says so too).

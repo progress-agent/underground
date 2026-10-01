@@ -3,7 +3,7 @@
 // the same frames come from any build (the before build, c820ea9, has no
 // surface railway to aim at). Needs a DEV server (window.__ug).
 //
-//   node scripts/capture-surface-rail.mjs <origin> <outDir> <tag> [--poses a,b] [--isolate-overground]
+//   node scripts/capture-surface-rail.mjs <origin> <outDir> <tag> [--poses a,b] [--isolate-overground] [--jpg]
 //
 // Frames: 1440x900 at DPR 1, Manual quality at 100% and MSAA 4, time paused,
 // the tick frozen and two frames stepped before the render that is read back,
@@ -31,6 +31,35 @@ export const POSES = {
   'OG1-highbury': { cam: [1282.1, 668.1, -4010.2], target: [1729.1, 182.9, -4416.5] },
   'OG2-surrey-quays': { cam: [6000.3, 472.5, 1609], target: [5507.6, 43.8, 1259.4] },
   'OG3-kew-shared': { cam: [-10507.9, 469.7, 2468.7], target: [-10581.6, 26, 3068.4] },
+  // Sprint 01Oct26h (Lane R): the track OSM adds, the Overground viaducts, the
+  // Tower Gateway deck and the stations given surface markers. Computed once
+  // from each place (camera offset east and south, metres up) on 387dff0 and
+  // fixed here, so before and after are the same frames.
+  'S1-central-west-acton': { cam: [-10909.1, 1045.6, -568], target: [-10659.1, 167.8, -918] },
+  'S2-central-newbury-park': { cam: [14640.8, 1090.5, -7581.7], target: [14890.8, 105.2, -7981.7] },
+  'S3-central-hainault': { cam: [14788.8, 1168.3, -10646.5], target: [15038.8, 198.8, -11046.5] },
+  'S4-metropolitan-west-harrow': { cam: [-16029.3, 1300.4, -7241.9], target: [-15829.3, 282.7, -7641.9] },
+  'S5-overground-hackney-central-wick': { cam: [5621.4, 639.1, -4060.8], target: [5771.4, 60.8, -4390.8] },
+  'S6-overground-shoreditch-haggerston': { cam: [3829.4, 688.5, -2357], target: [3549.4, 106.8, -2607] },
+  'S7-kew-railway-bridge': { cam: [-10721.2, 481.2, 3168.6], target: [-10461.2, -10, 2868.6] },
+  'S8-battersea-railway-bridge': { cam: [-3745.2, 460.8, 4195.6], target: [-3485.2, -25, 3895.6] },
+  'S9-dlr-tower-gateway': { cam: [3930, 260, -300], target: [3790, 150, -462] },
+  'S10-jubilee-west-hampstead': { cam: [-4616.7, 777.5, -4023], target: [-4466.7, 284.5, -4283] },
+  'S11-dlr-lewisham': { cam: [7899.8, 607.4, 4765.8], target: [8059.8, 53, 4505.8] },
+  'S12-metropolitan-preston-road': { cam: [-11920.4, 742.2, -6650.4], target: [-11770.4, 220.7, -6900.4] },
+  'S13-dlr-stratford': { cam: [8252.9, 718.7, -3718.1], target: [8452.9, 36.1, -4018.1] },
+  'S14-central-epping-map-edge': { cam: [15243.7, 2390.9, -18425.1], target: [15743.7, 258.8, -19525.1] },
+  'S15-metropolitan-watford': { cam: [-20608.7, 877, -15979.2], target: [-20458.7, 342, -16229.2] },
+  'S16-piccadilly-hatton-cross': { cam: [-20559.7, 665, 5237], target: [-20409.7, 112.8, 4987] },
+  'S17-district-fulham-railway-bridge': { cam: [-5825.2, 484.4, 5055.6], target: [-5565.2, -15, 4755.6] },
+  'S18-jubilee-wembley-park': { cam: [-10824.3, 723.1, -5741.4], target: [-10674.3, 196.1, -5991.4] },
+  'S19-dlr-greenwich': { cam: [7835.5, 588.1, 3300], target: [7985.5, 36.1, 3050] },
+  // Closer frames where the first ones are lost among the buildings: the
+  // viaduct decks and piers, the Tower Gateway terminus and the Lewisham buffers.
+  'S5b-overground-hackney-wick-viaduct': { cam: [6827.2, 520.9, -3998.2], target: [6677.2, 65.2, -4248.2] },
+  'S6b-overground-haggerston-viaduct': { cam: [3697.7, 540.3, -3111.8], target: [3537.7, 98.9, -3051.8] },
+  'S9b-dlr-tower-gateway-terminus': { cam: [3798.5, 320.3, -624.8], target: [3758.5, 123.6, -464.8] },
+  'S11b-dlr-lewisham-terminus': { cam: [7963.5, 754.9, 4191.2], target: [8023.5, 74.0, 4451.2] },
 };
 
 if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
@@ -39,6 +68,7 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
   const flag = k => process.argv.includes(k);
   const arg = (k, d) => process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : d;
   const isolate = flag('--isolate-overground');
+  const jpg = flag('--jpg'); // s01:R: JPEG at quality 0.9 (the Reader page embeds them)
   const names = arg('--poses', Object.keys(POSES).join(',')).split(',');
   await mkdir(outDir, { recursive: true });
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
@@ -53,6 +83,8 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
   await page.waitForFunction(() => window.__ug?.bakedStats?.tilesTotal > 0 && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal
     && window.__ug.groundReady && window.__ug.overground?.userData.stationsAttached && ('surfaceRail' in window.__ug ? !!window.__ug.surfaceRail : true), null, { timeout: 180000 });
   await page.evaluate(() => { const u = window.__ug; u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 }); u.sim.paused = true; });
+  // s01:R: on builds that lift surface markers over roofs, wait for that pass.
+  await page.waitForFunction(() => !window.__ug.surfaceRail || !('liftMarkersOverRoofs' in window.__ug.surfaceRail) || !!window.__ug.surfaceRail.roofLift, null, { timeout: 60000 });
   for (const name of names) {
     const P = POSES[name];
     await page.evaluate(async ({ P }) => {
@@ -61,7 +93,7 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
       await new Promise(r => setTimeout(r, 2500));
       window.__freeze = true; await new Promise(r => setTimeout(r, 100)); window.__step(3);
     }, { P });
-    const png = await page.evaluate(({ isolate }) => {
+    const png = await page.evaluate(({ isolate, jpg }) => {
       const u = window.__ug, rr = u.composer.renderer, gl = rr.getContext(), restore = [];
       if (isolate) {
         for (const c of u.scene.children) if (c !== u.overground && !c.isLight) { restore.push([c, c.visible]); c.visible = false; }
@@ -74,10 +106,11 @@ if (process.argv[1]?.endsWith('capture-surface-rail.mjs')) {
       const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const cx = cv.getContext('2d'), img = cx.createImageData(W, H);
       for (let y = 0; y < H; y++) img.data.set(b.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
       cx.putImageData(img, 0, 0);
-      return cv.toDataURL('image/png');
-    }, { isolate });
-    await writeFile(`${outDir}/${tag}-${name}.png`, Buffer.from(png.split(',')[1], 'base64'));
-    console.log(`${tag}-${name}.png`);
+      return jpg ? cv.toDataURL('image/jpeg', 0.9) : cv.toDataURL('image/png');
+    }, { isolate, jpg });
+    const ext = jpg ? 'jpg' : 'png';
+    await writeFile(`${outDir}/${tag}-${name}.${ext}`, Buffer.from(png.split(',')[1], 'base64'));
+    console.log(`${tag}-${name}.${ext}`);
   }
   await browser.close();
 }

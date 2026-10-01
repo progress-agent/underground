@@ -14,6 +14,14 @@ import { createOvergroundFleet } from './overground-trains.js';
 // userData.part and group.userData.linePaths, which the Tube's shared-track
 // bands on Overground corridors are laid along.
 //
+// s01:R (sprint 01Oct26h, D-042 item 4): the viaducts get the decks and piers
+// they were always meant to have. The masonry pieces go through
+// normaliseForMerge before merging (the mix of indexed piers and non-indexed
+// deck strips made mergeGeometries return null), short viaduct runs get one
+// pier as on the DLR, and no deck or pier stands in the Thames (bridges.js
+// draws Kew and Battersea railway bridges). The stripe, ballast, earth and
+// cutting meshes are byte-identical to before (tests/surface-rail.spec.js).
+//
 // Geometry is merged per material per line (BufferGeometryUtils) — ~5k input
 // points build a handful of draw calls per line. All opaque, fog: true,
 // SURFACE_BRIDGE render tier (depth testing resolves visibility).
@@ -22,7 +30,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER } from './render-layers.js';
-import { MATS, buildPath, buildCorridor, stationOnRail, createStripeMaterial } from './surface-rail.js';
+import { MATS, buildPath, buildCorridor, stationOnRail, createStripeMaterial, normaliseForMerge } from './surface-rail.js';
+// s01:R: no viaduct deck or pier inside the Thames (bridges.js draws Kew and Battersea railway bridges).
+import { isInThames } from './thames-mask.js';
 
 const VE = VERTICAL_EXAGGERATION;
 
@@ -56,13 +66,22 @@ export async function createOverground({ getTerrainMeshSurfaceY, projectStation,
       if (path.length < 2) { byBranch.push(null); continue; }
       byBranch.push(path);
       paths.push(path);allPaths.push(path);
-      buildCorridor(path, out);
+      // s01:R (sprint 01Oct26h, D-042 item 4, D-043 item 4): short viaduct
+      // runs get a pier as on the DLR, and no deck or pier stands in the
+      // Thames, where bridges.js already draws the railway bridge.
+      buildCorridor(path, out, { pierShortRuns: true, structureClear: (x, z) => !isInThames(x, z) });
     }
     linePaths.set(line.id, byBranch);
     const addMerged = (geos, mat, part) => {
       if (!geos.length) return;
-      const merged = mergeGeometries(geos, false);
-      if (!merged) return;
+      // s01:R: the masonry list mixes non-indexed deck strips with indexed
+      // BoxGeometry piers (with uv), which mergeGeometries refuses (it logged
+      // an error and returned null, so no Overground viaduct had a deck or
+      // piers since a095a84). normaliseForMerge makes every piece position +
+      // normal, non-indexed. The other parts are strips only and are merged
+      // exactly as before (byte-identical, tests/surface-rail.spec.js).
+      const merged = mergeGeometries(part === 'masonry' ? geos.map(normaliseForMerge) : geos, false);
+      if (!merged) { console.warn(`overground: ${line.id} ${part} did not merge`); return; }
       const mesh = new THREE.Mesh(merged, mat);
       mesh.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
       mesh.userData = { type: 'overground-line', lineId: line.id, name: `${line.name} line (Overground)`, part };
