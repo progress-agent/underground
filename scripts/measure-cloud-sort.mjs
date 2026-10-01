@@ -6,13 +6,14 @@
 // Usage: node scripts/measure-cloud-sort.mjs <dev origin> [as-lived|weak|both] [seconds] [out.json]
 //
 // The camera flies level at about 1 km on the altimeter at Deity speed (about
-// 900 m/s, so the order changes and the 1,500 m jump rule fires often), west
-// to east across the map (18 km in 20 s), while the world clock runs, as in
-// use: a re-sort at least once a second. Every call of the cloud system's update() is timed (the re-sort runs
+// 900 m/s, so the order changes and the 1,500 m jump rule fires often), to
+// and fro across 24 km of the map, while the world clock runs, as in use. Every call of the cloud system's update() is timed (the re-sort runs
 // inside it), and so is every whole frame (the app's tick, which includes the
 // render and so the buffer upload). Frames are split into: no re-sort; a
 // re-sort that left the order as it was; a re-sort that re-packed the buffer
 // (and the frame after it, where the upload lands if the driver defers it).
+// Each re-sort frame is also compared with the five frames before it (paired),
+// which cancels the slow swings of a shared machine's load.
 // Setups as scripts/measure-setups.mjs: as-lived (DPR 2) and weak (DPR 1, CPU
 // throttled 4x through CDP); 1440x900, Automatic quality, headless ANGLE Metal.
 import { chromium } from '@playwright/test';
@@ -58,8 +59,9 @@ async function run(setup) {
     window.__frames.length = 0;
     window.__fly = ts => {
       t0 ??= ts;
-      const x = x0 + v * (ts - t0) / 1000;
-      u.camera.position.set(x, y, z0); u.controls.target.set(x + 1000, y, z0);
+      const s = (v * (ts - t0) / 1000) % 48000, back = s >= 24000;
+      const x = x0 + (back ? 48000 - s : s);
+      u.camera.position.set(x, y, z0); u.controls.target.set(x + (back ? -1000 : 1000), y, z0);
     };
     await sleep(seconds * 1000);
     window.__fly = null;
@@ -74,8 +76,24 @@ async function run(setup) {
   const none = F.filter(f => f[2] === 0), same = F.filter(f => f[2] > 0 && f[3] === 0), rewrite = F.filter(f => f[3] > 0);
   const after = F.filter((f, i) => i > 0 && F[i - 1][3] > 0 && f[2] === 0);
   const sum = (set, k) => ({ n: set.length, medMs: med(set.map(f => f[k])), p95Ms: p95(set.map(f => f[k])), maxMs: max(set.map(f => f[k])) });
+  // Paired: each re-sort frame (and the frame after a rewrite) against the
+  // median of the five frames before it, so slow drift in the load cancels.
+  const paired = (pick) => {
+    const d = [];
+    for (let i = 5; i < F.length; i++) {
+      if (!pick(F, i)) continue;
+      const prev = F.slice(i - 5, i).filter(f => f[2] === 0).map(f => f[0]);
+      if (prev.length >= 3) d.push(F[i][0] - med(prev));
+    }
+    return { n: d.length, medMs: med(d), p95Ms: p95(d), maxMs: max(d) };
+  };
   const res = {
     setup, frames: F.length, clouds: r.clouds, puffs: r.puffs, automaticAtEnd: r.level,
+    pairedTickExcess: {
+      sortRewrite: paired((F, i) => F[i][3] > 0),
+      frameAfterRewrite: paired((F, i) => F[i - 1][3] > 0 && F[i][2] === 0),
+      noSort: paired((F, i) => F[i][2] === 0 && F[i - 1][3] === 0),
+    },
     update: { noSort: sum(none, 1), sortSameOrder: sum(same, 1), sortRewrite: sum(rewrite, 1) },
     tick: { noSort: sum(none, 0), sortSameOrder: sum(same, 0), sortRewrite: sum(rewrite, 0), frameAfterRewrite: sum(after, 0) },
   };
@@ -83,6 +101,7 @@ async function run(setup) {
   console.log(setup.padEnd(9), `frames ${res.frames} clouds ${res.clouds} puffs ${res.puffs}`);
   console.log('  update()', f(res.update));
   console.log('  tick    ', f(res.tick));
+  console.log('  paired  ', f(res.pairedTickExcess));
   return res;
 }
 
