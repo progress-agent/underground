@@ -15,10 +15,14 @@
 //     view nor rumbles (fix round 2);
 //   * digit keys pick rows while the card is open, and switch modes when it is
 //     closed; opening the card releases pointer lock;
-//   * a portal ends the walk and offers the street;
+//   * sprint 01Oct26h (D-042 item 1): a tunnel mouth no longer ends the walk;
+//     it is a cut, and the walk carries on above ground to the end of the line
+//     (tests/pedestrian-open-air.spec.js walks every route);
 //   * at a tunnel mouth nothing but the interior is drawn in the bore, and the
-//     mouth is daylight (fix round 1);
-//   * another mode's picture at a reference pose is unchanged by a trip.
+//     mouth is daylight (fix round 1), the walker within 5 m of it when the
+//     cut comes;
+//   * another mode's picture at a reference pose is unchanged by a trip, an
+//     open-air leg included.
 // Pure logic (crossings at any frame length, portals, towards X, the key
 // capture) is pinned in tests/pedestrian-tunnel.test.mjs.
 
@@ -369,6 +373,9 @@ test.describe('in the tunnel', () => {
         for (const p of net.paths) {
           if (p.lineId !== t.userData.lineId) continue;
           for (const { s } of p.stops) for (const side of [1, -1]) {
+            // s01:P every station is a stop now (D-042 item 1), and a surface one is shown in the open, where the
+            // walker meets the line's surface trains instead: this test is about the tunnel trains, in the bore.
+            if ((p.open || []).some(([a, b]) => s >= a - 1e-6 && s <= b + 1e-6)) continue;
             const q = pointAt(p, s, {}, side);
             const d = Math.hypot(q.x - t.position.x, q.z - t.position.z);
             if (d < 60 && (!best || d < best.d)) best = { d, path: p.id, s, side, train: t, left, lineId: p.lineId };
@@ -410,64 +417,50 @@ test.describe('in the tunnel', () => {
     }
   });
 
-  test('a portal: where the line leaves its tunnel the walk ends and the card offers the street', async () => {
-    const at = await page.evaluate(() => {
-      const m = window.__ug.modes.registry.get('pedestrian');
-      const net = m.rebuildNetwork();
-      // The Northern at Golders Green: the Hampstead tunnel's northern mouth. Sprint 30Sep26w integration: the
-      // portals come from the drawn railway (Lane R's data), so a surface station's platform is a 10 m underground
-      // gap between two open intervals; that gap is not a tunnel mouth, so the mouth taken here has no platform at
-      // it and tunnel beyond it (round 2 took the first interval ending within 400 m of the station).
-      const mouthAt = (p, s, out) => !p.stops.some(st => Math.abs(st.s - s) < 25)
-        && !p.open.some(([a2, b2]) => Math.min(s, s + out) < b2 && Math.max(s, s + out) > a2);
-      for (const p of net.paths) {
-        if (p.lineId !== 'northern') continue;
-        const gg = p.stations.find(st => /Golders Green/.test(st.name));
-        if (!gg) continue;
-        const ends = p.open.map(([a, b]) => [a, b]).filter(([, b]) => Math.abs(gg.s - b) < 1500 && mouthAt(p, b, 250))
-          .sort((x, y) => Math.abs(gg.s - x[1]) - Math.abs(gg.s - y[1]));
-        if (ends.length) {
-          const [a, b] = ends[0];
-          m.placeInTunnel({ path: p.id, s: b + 250, dir: -1 });
-          return { path: p.id, a, b, stats: net.stats, fromStation: b - gg.s, source: net.openSource };
-        }
+  // Sprint 01Oct26h (D-042 item 1, Lane P): rewritten. The 30Sep26w pin ("where the line leaves its tunnel the
+  // walk ends and the card offers the street") is what Jordan overruled: "we should stop and be offered the
+  // street at stations only, not when a line leaves its tunnel." The mouth at Golders Green is now a cut: a
+  // daylight flare, the walk at full speed across it, and on to Edgware with every station arrived at.
+  test('a tunnel mouth is a cut: Hampstead to Golders Green and on to Edgware, never a portal card, the speed held across, a flare', async () => {
+    expect(await placeAt(page, 'northern', 'Hampstead', 'Golders Green')).not.toBeNull();
+    const r = await page.evaluate(async () => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const frame = () => new Promise(res => requestAnimationFrame(res));
+      const flare = document.getElementById('ug-portal-flare');
+      const a0 = m.debug().arrivals.length;
+      ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
+      const log = [];
+      const t0 = performance.now();
+      while (performance.now() - t0 < 60000) {
+        await frame();
+        const d = m.debug();
+        log.push({ regime: d.regime, speed: d.tunnel?.speed, card: d.card?.kind ?? null, flare: +getComputedStyle(flare).opacity, cut: d.openAir.cut?.kind ?? null,
+          hint: document.getElementById('ug-mode-hint')?.textContent ?? '', phase: d.phase });
+        if (d.phase !== 'tunnel' || d.arrivals.slice(a0).some(a => a.name === 'Edgware')) break;
       }
-      return null;
+      ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
+      const d = m.debug();
+      return { log, arrivals: d.arrivals.slice(a0).map(a => a.name), portal: d.portal ?? null };
     });
-    expect(at).not.toBeNull();
-    expect(at.source).toBe('track');
-    expect(at.stats.portals).toBeGreaterThan(10);
-    await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__ug.fpsControls.keys.add('shift'); });
-    await page.waitForFunction(() => !!window.__ug.modes.registry.get('pedestrian').debug().portal, null, { timeout: 60000 });
-    // Keep pressing on: the walk does not go past the mouth.
-    await page.waitForTimeout(1000);
-    const held = await dbg(page);
-    await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('shift'); });
-    expect(held.phase).toBe('tunnel');
-    expect(held.tunnel.path).toBe(at.path);
-    // Held 20 m inside the mouth (the lining runs on to the mouth itself).
-    expect(held.tunnel.s).toBeCloseTo(at.b + 20, 6);
-    expect(held.portal.mouthS).toBeCloseTo(at.b, 6);
-    expect(held.tunnel.speed).toBe(0);
-    expect(held.interior.portalAhead || held.interior.portalBehind).toBe(true);
-    expect(held.interior.isolated).toBe(true); // fix round 1: the lining alone, right up to the mouth
-    await expect(page.locator('#ug-mode-hint')).toContainText(/leaves its tunnel/);
-    const card = await dbg(page);
-    expect(card.card?.kind).toBe('portal');
-    expect(card.chooser.rows).toEqual(['Up to the street', 'Back into the tunnel']);
-    await page.keyboard.press('1');
-    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
-    const d = await dbg(page);
-    expect(d.state).toBe('ground');
-    const g = await page.evaluate(([x, z]) => window.__ug.modes.collision.groundHeightAt(x, z), [d.x, d.z]);
-    expect(d.y).toBeCloseTo(g, 3);
-    expect(Math.hypot(d.x - held.portal.x, d.z - held.portal.z)).toBeLessThan(1);
+    expect(r.arrivals).toEqual(['Golders Green', 'Brent Cross', 'Hendon Central', 'Colindale', 'Burnt Oak', 'Edgware']);
+    expect(r.log.every(f => f.card !== 'portal')).toBe(true);
+    expect(r.log.some(f => /leaves its tunnel/.test(f.hint))).toBe(false);
+    expect(r.portal).toBeNull();
+    const k = r.log.findIndex(f => f.regime === 'open');
+    expect(k).toBeGreaterThan(0);
+    expect(r.log[k - 1].speed).toBe(200);
+    expect(r.log[k].speed).toBe(200);   // held across the cut
+    expect(r.log[k].cut).toBe('flare');
+    expect(r.log[k].flare).toBeGreaterThan(0);
+    expect(r.log.at(-1).phase).toBe('tunnel');
   });
 
   // Sprint 30Sep26w integration: the Lane P verifier's blocking finding. The ground test found no portal on six lines
   // (the depth model draws most open-air Tube 7 to 32 m underground): Stratford to Leytonstone ended in a bore 28 m
-  // deep. The portals now come from the drawn railway (Lane R's data).
-  test('portals from the drawn railway: every line in the open has its mouths, and a walk out of a tunnel ends at the real one', async () => {
+  // deep. The portals now come from the drawn railway (Lane R's data). Sprint 01Oct26h (D-042 item 1): the coverage
+  // half is kept; the walks no longer end at the mouth, they arrive at the stations beyond it, and the first frame
+  // shown in the open is at the mouth on the drawn track, near one of Lane R's portal records.
+  test('portals from the drawn railway: every line in the open has its mouths, and a walk out of a tunnel comes out at the real one and arrives beyond it', async () => {
     const cover = await page.evaluate(async () => {
       const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
       const net = m.rebuildNetwork();
@@ -484,23 +477,39 @@ test.describe('in the tunnel', () => {
     }
     expect(cover.share.victoria).toBe(0);
     expect(cover.share['waterloo-city']).toBe(0);
-    for (const [lineId, from, toward, nearM] of [['central', 'Mile End', 'Stratford', 400], ['northern', 'Hampstead', 'Golders Green', 400],
-      ['jubilee', 'Swiss Cottage', 'Finchley Road', 400]]) {
+    for (const [lineId, from, toward] of [['central', 'Mile End', 'Stratford'], ['northern', 'Hampstead', 'Golders Green'],
+      ['jubilee', 'Swiss Cottage', 'Finchley Road']]) {
       expect(await placeAt(page, lineId, from, toward), `${from} toward ${toward}`).not.toBeNull();
-      await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__ug.fpsControls.keys.add('shift'); });
-      await page.waitForFunction((t) => { const d = window.__ug.modes.registry.get('pedestrian').debug();
-        return !!d.portal || d.arrivals.some(a => a.name.startsWith(t)); }, toward, { timeout: 60000 });
-      await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('shift'); });
-      const d = await dbg(page);
-      expect(d.portal, `${from} toward ${toward}: the walk ends at the mouth`).toBeTruthy();
-      expect(d.arrivals.some(a => a.name.startsWith(toward)), `${toward} is in the open: never arrived at`).toBe(false);
-      // The mouth (on the bore, a station-chord curve) is near one of Lane R's portal records for the line.
-      const near = await page.evaluate(([l, x, z]) => Math.min(...window.__s30portals[l].map(([px, pz]) => Math.hypot(px - x, pz - z))), [lineId, d.portal.x, d.portal.z]);
-      expect(near, `${from} toward ${toward}: mouth ${near.toFixed(0)} m from Lane R's portal`).toBeLessThan(nearM);
+      const r = await page.evaluate(async (toward) => {
+        const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+        const frame = () => new Promise(res => requestAnimationFrame(res));
+        const a0 = m.debug().arrivals.length;
+        ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
+        let first = null;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 60000) {
+          await frame();
+          const d = m.debug(), c = ug.camera.position;
+          if (!first && d.regime === 'open') first = { x: c.x, z: c.z };
+          if (d.arrivals.slice(a0).some(a => a.name === toward) || d.phase !== 'tunnel') break;
+        }
+        ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
+        const d = m.debug();
+        return { first, arrived: d.arrivals.slice(a0).map(a => a.name), portal: d.portal ?? null, phase: d.phase };
+      }, toward);
+      expect(r.arrived, `${from} toward ${toward}: the walk carries on and arrives`).toContain(toward);
+      expect(r.portal).toBeNull();
+      expect(r.first, `${from} toward ${toward}: shown in the open on the way`).not.toBeNull();
+      // The first open-air frame (the mouth, on the drawn track) is near one of Lane R's portal records for the line.
+      const near = await page.evaluate(([l, x, z]) => Math.min(...window.__s30portals[l].map(([px, pz]) => Math.hypot(px - x, pz - z))), [lineId, r.first.x, r.first.z]);
+      expect(near, `${from} toward ${toward}: first open frame ${near.toFixed(0)} m from Lane R's portal`).toBeLessThanOrEqual(50);
       await page.keyboard.press('Escape');
     }
   });
 
+  // Sprint 01Oct26h (D-042 item 1): kept. The mouth is picked from path.open, now the stretches the walker is
+  // shown on the drawn track (open-air-walk.js); the walker, held 20 m inside the mouth as before, sees the
+  // lining's daylight cap ahead. A last check walks out: when the cut comes, the cap was within 5 m.
   // Fix round 1. The verifier found the camera unisolated within a window of
   // a portal, so the model outside was drawn inside the bore: at the District's
   // portal by Putney Bridge, where every walk there ends, a building cut into
@@ -599,6 +608,30 @@ test.describe('in the tunnel', () => {
       expect(r.nonFinite, pick).toBe(0);
       expect(r.max, pick).toBeLessThanOrEqual(1.0);
     }
+    // s01:P the walk out of the Golders Green mouth at 60 m/s: the last frame in the bore is within 5 m of the cap.
+    expect(await mouth('northern', 'Golders Green')).not.toBeNull();
+    const flip = await page.evaluate(async () => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const frame = () => new Promise(res => requestAnimationFrame(res));
+      ug.fpsControls.keys.add('w');
+      let last = null, out = null;
+      const t0 = performance.now();
+      while (performance.now() - t0 < 20000) {
+        await frame();
+        const d = m.debug();
+        if (d.regime === 'bore') {
+          const wa = ug.modes.ctx.tubeInterior.walkerArc({ path: d.tunnel.path, s: d.tunnel.s });
+          const mo = d.interior.mouth, arc = mo.end ?? mo.start;
+          last = { toCap: arc === null || wa === null ? null : Math.abs(arc - wa), portal: d.interior.portalAhead || d.interior.portalBehind };
+        } else { out = { last, cut: d.openAir.cut?.kind ?? null }; break; }
+      }
+      ug.fpsControls.keys.delete('w');
+      return out;
+    });
+    expect(flip, 'the walk came out of the mouth').not.toBeNull();
+    expect(flip.last.portal).toBe(true);
+    expect(flip.last.toCap).toBeLessThanOrEqual(5);
+    expect(flip.cut).toBe('flare');
   });
 
   test('another mode\'s picture is unchanged: Deity at the reference pose, before and after a trip down the tunnel', async () => {
@@ -626,6 +659,14 @@ test.describe('in the tunnel', () => {
     await page.keyboard.press('e');
     await page.waitForTimeout(300);
     await page.keyboard.press('Escape');
+    // s01:P an open-air leg: out of the Hampstead tunnel onto the drawn track, a cut, a walk in the open.
+    expect(await placeAt(page, 'northern', 'Hampstead', 'Golders Green')).not.toBeNull();
+    await page.evaluate(() => { window.__ug.fpsControls.keys.add('w'); window.__ug.fpsControls.keys.add('shift'); });
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().arrivals.at(-1)?.name === 'Golders Green', null, { timeout: 60000 });
+    await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('shift'); });
+    expect((await dbg(page)).regime).toBe('open');
+    await page.waitForTimeout(600);
+    await page.keyboard.press('Escape');
     await page.keyboard.press('1');
     await page.waitForTimeout(300);
     // Nothing the tunnel drew is left for any other camera.
@@ -640,9 +681,10 @@ test.describe('in the tunnel', () => {
         if (/^train-batch/.test(o.name) || /^train-/.test(o.parent?.name ?? '')) lifted++;
       });
       return { mode: ug.modes.activeId, mask: ug.camera.layers.mask, lifted, shown,
-        card: document.getElementById('ug-platform-chooser').classList.contains('is-open') };
+        card: document.getElementById('ug-platform-chooser').classList.contains('is-open'),
+        flare: +getComputedStyle(document.getElementById('ug-portal-flare')).opacity };
     });
-    expect(left).toEqual({ mode: 'deity', mask: 1, lifted: 0, shown: 0, card: false });
+    expect(left).toEqual({ mode: 'deity', mask: 1, lifted: 0, shown: 0, card: false, flare: 0 });
     const r2 = await page.evaluate(async (pose) => {
       await window.__place(pose);
       const b = window.__grab();
