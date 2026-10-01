@@ -44,7 +44,9 @@ export const PEDESTRIAN_TUNABLES = Object.freeze([
   { key: 'jetControl', label: 'Jetpack steer', unit: 'm/s²', min: 0, max: 40, step: 0.5, default: 8 },
   { key: 'jetMaxRise', label: 'Jetpack max climb', unit: 'm/s', min: 2, max: 60, step: 1, default: 18 },
   { key: 'jetDelay', label: 'Jetpack hold delay', unit: 's', min: 0, max: 1, step: 0.05, default: 0.2 },
-  { key: 'tunnelSprint', label: 'Tunnel sprint', unit: 'm/s', min: 5, max: 60, step: 1, default: 20 },
+  // s30:P (D-041 item 5): the tunnel walk is 10x the 6 m/s run, Shift faster still.
+  { key: 'tunnelWalk', label: 'Tunnel walk', unit: 'm/s', min: 1, max: 120, step: 1, default: 60 },
+  { key: 'tunnelSprint', label: 'Tunnel sprint', unit: 'm/s', min: 5, max: 400, step: 1, default: 200 },
   { key: 'shaftSpeed', label: 'Shaft speed', unit: 'm/s', min: 1, max: 200, step: 1, default: 8 },
   { key: 'swimSpeed', label: 'Swim speed', unit: 'm/s', min: 0.3, max: 6, step: 0.1, default: 1.6 },
   { key: 'strokeUp', label: 'Stroke lift', unit: 'm/s', min: 0.5, max: 8, step: 0.1, default: 2.4 },

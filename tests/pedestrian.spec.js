@@ -204,6 +204,9 @@ test.describe('Pedestrian mode', () => {
     expect(d.y).toBeGreaterThan(setup.roofY - 0.01);
   });
 
+  // s30:P (D-041 item 4): E at a station opens the platform chooser and a row
+  // picks the platform; the facing pick is gone. This test picks the row for
+  // the platform facing would have chosen and pins everything as before.
   test('station: E descends the shaft to the platform at true depth; tunnel lock, sprint, E ascends', async ({ page }) => {
     await boot(page);
     await enter(page);
@@ -223,8 +226,11 @@ test.describe('Pedestrian mode', () => {
         markerY: marker.pos.y, markerSurfaceY: marker.surfaceY, markerDepthM: marker.depthM, stats: net.stats };
     });
     expect(st.stats.entrances).toBeGreaterThan(100);
-    await expect(page.locator('#ug-mode-hint')).toContainText(/E: down/);
+    await expect(page.locator('#ug-mode-hint')).toContainText(/E: choose a platform/);
     await page.keyboard.press('e');
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'shaft',
+      null, { timeout: 30000 });
+    await page.keyboard.press('1');
     await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'tunnel',
       null, { timeout: 30000 });
     let d = await dbg(page);
@@ -241,7 +247,7 @@ test.describe('Pedestrian mode', () => {
     expect(Math.hypot(cam.x - st.x, cam.z - st.z)).toBeCloseTo(cam.half, 3);
     expect(Math.abs(d.tunnel.side)).toBe(1);
     expect(d.tunnel.lineId).toBe(st.lineId);
-    await expect(page.locator('#ug-mode-hint')).toContainText(/E: up/);
+    await expect(page.locator('#ug-mode-hint')).toContainText(/E: exits and changes/);
 
     // Tunnel lock: hold W, then sprint; every frame the camera must be inside a
     // tunnel that is actually DRAWN. This measures against the rendered
@@ -314,7 +320,11 @@ test.describe('Pedestrian mode', () => {
     expect(walk.moved).toBeGreaterThan(1);
     expect(walk.sprintMoved).toBeGreaterThan(walk.moved);
     expect(walk.phase).toBe('tunnel');
-    expect(walk.sprint).toBeCloseTo(20, 1);
+    // D-041 item 5 (Jordan, D-040 item 5: "the speed of transit in tunnels
+    // should be 10x faster automatically"): the tunnel walk is 60 m/s (10x the
+    // 6 m/s run) and Shift sprints at 200 m/s, both on the Physics panel. The
+    // pin was 20 m/s, the old tunnelSprint default (sprint 23Sep26w).
+    expect(walk.sprint).toBeCloseTo(200, 1);
 
     // Back to a platform and up: E ascends to the street at eye height.
     await page.evaluate(() => {
@@ -330,9 +340,20 @@ test.describe('Pedestrian mode', () => {
       m.turn(Math.PI, 0);
       window.__ug.fpsControls.keys.add('w');
     });
-    await expect(page.locator('#ug-mode-hint')).toContainText(/E: up/, { timeout: 30000 });
+    await expect(page.locator('#ug-mode-hint')).toContainText(/E: exits and changes|choose \(1-9/, { timeout: 30000 });
     await page.evaluate(() => window.__ug.fpsControls.keys.delete('w'));
-    await page.keyboard.press('e');
+    // Coming to rest on a platform after arriving opens the card by itself
+    // (D-041 item 4); otherwise E opens it. "Up to the street" is row 1.
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().tunnel?.speed === 0, null, { timeout: 30000 });
+    if (!(await dbg(page)).card) await page.keyboard.press('e');
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'arrival',
+      null, { timeout: 30000 }).catch(async (err) => {
+      const d = await dbg(page);
+      throw new Error(`${err.message}\n${JSON.stringify({ tunnel: d.tunnel, card: d.card, arrived: d.arrived, arrivals: d.arrivals.slice(-3),
+        hint: await page.locator('#ug-mode-hint').textContent() })}`);
+    });
+    expect((await dbg(page)).chooser.rows[0]).toBe('Up to the street');
+    await page.keyboard.press('1');
     await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body',
       null, { timeout: 30000 });
     d = await dbg(page);
