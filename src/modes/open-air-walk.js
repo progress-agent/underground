@@ -69,6 +69,7 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
   let nextNetId = 1;
   const cache = new Map();                // key -> mapping
   const latest = new Map();               // signature -> the last mapping built for it (stale use while a rebuild waits)
+  const keyOfSig = new Map();             // signature -> the cache key of that mapping (one kept per centreline)
   const timing = new Map();               // lineId -> { paths, ms, max }
   const recordsByLine = new Map();
   let recordsFor = null;
@@ -115,7 +116,14 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
     const t = timing.get(path.lineId) || { paths: 0, ms: 0, max: 0 };
     t.paths++; t.ms += ms; t.max = Math.max(t.max, ms);
     timing.set(path.lineId, t);
-    if (m) { m.ms = ms; cache.set(k.key, m); latest.set(k.sig, m); }
+    if (m) {
+      m.ms = ms;
+      // One mapping kept per centreline: the DLR's key carries the structure ratio, and each Master value
+      // would otherwise leave one behind.
+      const old = keyOfSig.get(k.sig);
+      if (old && old !== k.key) cache.delete(old);
+      cache.set(k.key, m); latest.set(k.sig, m); keyOfSig.set(k.sig, k.key);
+    }
     return m;
   }
 
@@ -209,7 +217,7 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
     if (isOpen(path, s)) { const m = mappingOf(path); if (m) return m.drawnHeading(s, dir); }
     return headingAt(path, s, dir);
   }
-  /** The heading a branch is chosen on: in the open the drawn track's, read further on (open-air-map.js branchHeading). */
+  /** The heading a branch is chosen on: in the open the drawn track's averaged with the way to its next station (open-air-map.js branchHeading). */
   function branchHeadingOf(path, s, dir) {
     if (isOpen(path, s)) { const m = mappingOf(path); if (m) return m.branchHeading(s, dir); }
     return headingAt(path, s, dir);
