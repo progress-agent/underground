@@ -120,6 +120,9 @@ import { createUndergroundCull, isAboveGroundView } from './underground-cull.js'
 import { createTubeSurfaceRail, SURFACE_RAIL_TYPE } from './tube-surface-rail.js';
 import { dlrHeightLabel } from './dlr-profile.js';
 // ── /s30:R ──
+// ── s30:T ──
+import { createSurfaceTrains } from './surface-trains.js';
+// ── /s30:T ──
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
 import { setTrainEconomies, trainBatchStats } from './trains.js';
@@ -952,6 +955,19 @@ function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
   return `<b>${d.title}</b><div class="sub">${sub}</div>`;
 }
 // ── /s30:R ──
+// ── s30:T ── Surface trains (D-041 item 2): the underground timetable's own
+// trains drawn on the open-air track (src/surface-trains.js). Created once the
+// surface railway exists (its paths are the track); a top-level group, never
+// `line:`, so D-040's cull leaves it drawn above ground.
+let surfaceTrains = null;
+function updateSurfaceTrains() {
+  if (!surfaceTrains && surfaceRail) {
+    surfaceTrains = createSurfaceTrains({ scene, trainSystem, surfaceRail, overground: overgroundGroup, dlrProfile,
+      getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ, heightScale: getBuildingHeightScale() });
+  }
+  surfaceTrains?.update(camera);
+}
+// ── /s30:T ──
 
 const sim = {
   trains: [],
@@ -1096,6 +1112,9 @@ function deleteUrlParam(key) {
     // ── s30:R ── after the DLR profile has refreshed at this scale
     surfaceRail?.setHeightScale(value);
     // ── /s30:R ──
+    // ── s30:T ── the cars ride the rail as it is morphed (as the Overground's)
+    surfaceTrains?.setHeightScale(value);
+    // ── /s30:T ──
     // ── s25:integrate ── Lane E x Lane S: the District rides the Fulham and Kew
     // railway-bridge decks, whose height is a structure (true size, so its
     // canonical height follows 1 / Master). Re-seat it on the morphed decks.
@@ -4085,6 +4104,9 @@ function tick(frameTime) {
   // ── /s24:R ──
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
+  // ── s30:T ── the same trains on the open-air track, from the clock just advanced
+  updateSurfaceTrains();
+  // ── /s30:T ──
 
   // Overground trains (simple ping-pong runners, distance-culled)
   const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
@@ -4300,6 +4322,9 @@ if (import.meta.env.DEV) {
     // ── s30:R ──
     get surfaceRail() { return surfaceRail; },
     // ── /s30:R ──
+    // ── s30:T ──
+    get surfaceTrains() { return surfaceTrains; },
+    // ── /s30:T ──
     water: getWaterTuningSurface(),
     get waterParams() { return getWaterTuningSurface().params; },
     setWaterParams: (next) => getWaterTuningSurface().setWaterParams(next),
