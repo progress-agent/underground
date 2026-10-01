@@ -49,14 +49,19 @@
 //   5. Ends (fix round 2). A run ending at a station on open track carries on
 //      along the DRAWN track, never past it: up to RUN_END_EXTENSION_M along
 //      its end node's own piece, the way the run's last END_DIR_M head. Where
-//      the drawn track ends sooner (the stub at Epping, the Metropolitan short
-//      of Watford, Grange Hill where the Chigwell interval is refused), the end
-//      anchor is moved back along the run until the whole train fits on the
-//      drawn track (fitEnds: half the train plus END_CLEAR_M from the drawn
-//      end), the last interval compressed to match; so a train dwelling there
-//      stands on the track, short of the station's node, as at buffers. (Round
-//      1 carried on straight for whatever the drawn track lacked: trains ran up
-//      to 54 m past the end of the drawn track, about five at any moment.)
+//      the drawn track ends sooner (Watford's buffers, Grange Hill where the
+//      Chigwell interval was refused), the end anchor is moved back along the
+//      run until the whole train fits on the drawn track (fitEnds: half the
+//      train plus END_CLEAR_M from the drawn end), the last interval compressed
+//      to match; so a train dwelling there stands on the track, short of the
+//      station's node, as at buffers. (Round 1 carried on straight for whatever
+//      the drawn track lacked: trains ran up to 54 m past the end of the drawn
+//      track, about five at any moment.) Sprint 01Oct26h: a station's node is
+//      on open track where that lies within STATION_OPEN_PREFER_M of its
+//      nearest node (stationNode); the fit takes the open stretch the standing
+//      train is on, so a run ending in a covered stretch past an open station
+//      (Barking) is fitted too; a DLR curve whose last stretch leaves the drawn
+//      track carries on along the drawn piece (mapSnapCurve, TAIL_WALK_MAX_M).
 //
 // THE MAPPING (DLR). The DLR's curve is not a chord: it is built from the DLR
 // profile (dlr-profile.js buildBranch), which follows the mapped track node by
@@ -112,6 +117,19 @@ export const TRACK_ERROR_BOUND_M = { tube: 900, dlr: 60 };
 export const STATION_MATCH_M = 60;   // curve control point -> TfL stop of the line (Euston's two stop records are 35 to 45 m apart)
 export const STATION_TRACK_M = 300;  // station -> nearest node of the line's track (Lane R's surface flag uses the same reach)
 export const JOIN_M = 60;            // a piece's end joins the nearest node of another piece (twin collapse leaves junction gaps up to ~32 m)
+/**
+ * A piece's open end joins an open node of another piece rather than its
+ * nearest node when that is tunnel and the open one is at most this much
+ * further (sprint 01Oct26h). A parallel piece ending beside another's tunnel
+ * mouth joined the mouth's first tunnel node, so a route crossing there dipped
+ * into the tunnel for a few metres and out again: a car hidden under a bridge
+ * that is not there, and a pair of portal anchors 7 m apart whose speed-bound
+ * move no longer held at the train's lane (Dagenham Heathway, where the
+ * District's piece past the platforms ends 10 m from the tunnel's first node
+ * and 11.5 m from the last open one; Hammersmith, where a Piccadilly train
+ * standing at the platforms had a car hidden).
+ */
+export const JOIN_OPEN_PREFER_M = 12;
 export const ROUTE_RATIO_MAX = 1.6, ROUTE_RATIO_MIN = 0.6, ROUTE_SLACK_M = 300;
 /** At most this far a run's open end carries on along its end node's drawn piece (more than half the longest train, the S8's 66.8 m, plus END_CLEAR_M). */
 export const RUN_END_EXTENSION_M = 80;
@@ -120,6 +138,8 @@ export const END_DIR_M = 40;
 /** A train fitted onto the drawn track at a run's end (fitEnds) stops this far short of the drawn track's end. */
 export const END_CLEAR_M = 2;
 export const SNAP_STEP_M = 10, SNAP_MAX_M = 35;
+/** At most this long a DLR curve's undrawn last stretch is carried on along the drawn piece before it (mapSnapCurve; sprint 01Oct26h). */
+export const TAIL_WALK_MAX_M = 200;
 /**
  * DLR snapping is a map match over the whole curve (Viterbi), not sample by
  * sample: a step between consecutive samples costs the plan mismatch between
@@ -287,7 +307,7 @@ export { drawnOpenFlags } from './surface-rail.js';
 // (optional, parallel to pts; drawnOpenFlags) says which samples are drawn as
 // open track; without it every non-tunnel sample is (the Overground's own
 // corridors, which draw every class).
-export function buildNetwork(pieces, { joinM = JOIN_M, cell = 100 } = {}) {
+export function buildNetwork(pieces, { joinM = JOIN_M, cell = 100, joinOpenPreferM = JOIN_OPEN_PREFER_M } = {}) {
   let n = 0;
   for (const p of pieces) n += p.pts.length;
   const x = new Float64Array(n), z = new Float64Array(n), base = new Float64Array(n), y0 = new Float64Array(n);
@@ -308,14 +328,18 @@ export function buildNetwork(pieces, { joinM = JOIN_M, cell = 100 } = {}) {
   const grid = new Map(), key = (cx, cz) => `${cx},${cz}`;
   for (let i = 0; i < n; i++) { const g = key(Math.floor(x[i] / cell), Math.floor(z[i] / cell)); if (!grid.has(g)) grid.set(g, []); grid.get(g).push(i); }
   const net = { n, x, z, base, y0, morph, open, piece, slope, extra, adj, grid, cell, pieces: pieces.length, joins: 0 };
-  // Junctions: each piece end to the nearest node of every other piece within joinM.
+  // Junctions: each piece end to the nearest node of every other piece within joinM (an open end to an open
+  // node a little further, JOIN_OPEN_PREFER_M).
   for (const e of ends) {
-    const best = new Map(); // piece -> [node, d]
+    const best = new Map(), bestOpen = new Map(); // piece -> [node, d]
     forNear(net, x[e], z[e], joinM, i => {
       if (piece[i] === piece[e]) return;
       const d = Math.hypot(x[i] - x[e], z[i] - z[e]);
       if (d <= joinM && (!best.has(piece[i]) || d < best.get(piece[i])[1])) best.set(piece[i], [i, d]);
+      if (d <= joinM && open[i] && (!bestOpen.has(piece[i]) || d < bestOpen.get(piece[i])[1])) bestOpen.set(piece[i], [i, d]);
     });
+    // An open end joins an open node of the other piece within JOIN_OPEN_PREFER_M further than its nearest.
+    if (open[e]) for (const [pc, [i, d]] of best) { const o = bestOpen.get(pc); if (!open[i] && o && o[1] <= d + joinOpenPreferM) best.set(pc, o); }
     for (const [i, d] of best.values()) { adj[e].push(i, Math.max(d, 1e-3)); adj[i].push(e, Math.max(d, 1e-3)); net.joins++; }
   }
   net.hasOpen = open.some(v => v === 1);
@@ -332,6 +356,36 @@ export function nearestNode(net, px, pz, maxM) {
   let best = -1, bd = Infinity;
   forNear(net, px, pz, maxM, i => { const d = Math.hypot(net.x[i] - px, net.z[i] - pz); if (d < bd) { bd = d; best = i; } });
   return bd <= maxM ? best : -1;
+}
+
+/**
+ * A station's node on its line's track (sprint 01Oct26h, Lane T): the nearest
+ * node within maxM, unless an open, drawn node lies within preferM further than
+ * it, which is taken instead. A station whose nearest node is on a short tunnel
+ * piece beside its open platforms (the other running track's covered stretch,
+ * or a covered way the data keeps as tunnel) is placed on the open track: at
+ * West Hampstead the Jubilee's nearest node was on an undrawn 227 m tunnel stub
+ * 11 m away and the open track 18 m away, so every Jubilee train there was drawn
+ * as a stub of 1 to 3 cars for about 250 m and a lone car stood about a second
+ * before vanishing (Lane R has since removed the stub; this keeps it from
+ * mattering); at Earl's Court the District's nearest node was on a kept tunnel
+ * piece 6.9 m away, its open platform track 7.1 m away, so a train standing
+ * there was drawn as three cars, the rest past its run's end. Sixteen stations
+ * move this way (Kensal Green, Wembley Central, Aldgate and Paddington on the
+ * Circle, South Kensington, Sloane Square, Dagenham Heathway, Gunnersbury,
+ * Great Portland Street, Oakwood among them). A station really in tunnel has
+ * no open node that near and keeps its own.
+ */
+export const STATION_OPEN_PREFER_M = 30;
+export function stationNode(net, px, pz, maxM = STATION_TRACK_M, preferM = STATION_OPEN_PREFER_M) {
+  let best = -1, bd = Infinity, open = -1, od = Infinity;
+  forNear(net, px, pz, maxM, i => {
+    const d = Math.hypot(net.x[i] - px, net.z[i] - pz);
+    if (d < bd) { bd = d; best = i; }
+    if (net.open[i] && d < od) { od = d; open = i; }
+  });
+  if (!(bd <= maxM)) return -1;
+  return open >= 0 && od <= Math.min(maxM, bd + preferM) ? open : best;
 }
 
 /**
@@ -949,12 +1003,23 @@ function extendEnds(r, getY, len, net = null, ends = null, near = null) {
 
 /**
  * Fit a train standing at either end of a run onto the drawn track (fix round
- * 2). At an end whose last drawn vertex is open (open drawn track ends there),
- * the end anchor is moved to half the train plus END_CLEAR_M inside that
- * vertex, so a train dwelling there stands whole on the drawn track, short of
- * the station's node, as at buffers. At an end in tunnel nothing moves (the
- * cars past it are in the tunnel, and not drawn). The anchors before it give
- * way so no stretch runs slower than the speed bound allows:
+ * 2; sprint 01Oct26h). The train stands at the end anchor (its station); the
+ * open, drawn stretch it stands on is the run's vertices on open, drawn track
+ * around the one nearest that anchor. Where the train reaches past that
+ * stretch's outer end (towards the run's end), the end anchor is moved to half
+ * the train plus END_CLEAR_M inside it, so a train dwelling there stands whole
+ * on the drawn track: short of the station's node where the drawn track ends
+ * there, as at buffers; short of a covered stretch or a band's end where the
+ * run's last vertices are tunnel (sprint 01Oct26h: the Hammersmith & City's
+ * band at Barking ends under the bridge east of the platforms, 34 m from the
+ * station, and the train standing there reached 13 m past it, its end car
+ * drawn nowhere). Before, an end whose last vertex was tunnel was left alone,
+ * as if every car past it were in a tunnel. A station that is itself in a
+ * tunnel (or on undrawn track) is left alone: its drawn cars are the ones out
+ * of the mouth, the rest inside it. So is a train that reaches past the
+ * stretch's inner end only, into the tunnel it came out of (counted
+ * innerTunnel). The anchors before it give way so no stretch runs slower than
+ * the speed bound allows:
  *   * Tube runs (stations and portals, far apart): the end interval is
  *     compressed in proportion, from the anchor before it, widened an anchor
  *     at a time while any stretch in it would run slower than SPEED_RATIO_MIN,
@@ -979,11 +1044,18 @@ export function fitEnds(run, halfM, curveL, stats = null, { perStretch = false }
   if (!(halfM > 0) || n < 2 || k < 2) return run;
   const dr = run.drawn, au = run.au;
   const count = key => { if (stats) stats[key] = (stats[key] || 0) + 1; };
-  // The open, drawn stretch at each end of the run ([cum[0], cum[a]] and [cum[b], cum[n - 1]]): an end
-  // is fitted only when it is on open, drawn track and that stretch can hold the whole train.
+  // The open, drawn stretch a train standing at arc length sv stands on ([cum[lo], cum[hi]]), or null where
+  // the vertex nearest sv (the one sampleRun reads open and drawn from) is not on open, drawn track.
   const onTrack = i => !!run.open[i] && (!dr || !!dr[i]);
-  let a = 0; while (a < n - 1 && onTrack(a + 1)) a++;
-  let b = n - 1; while (b > 0 && onTrack(b - 1)) b--;
+  const stretchAt = sv => {
+    let lo = 0, hi = n - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (run.cum[m] <= sv) lo = m; else hi = m; }
+    const i = sv - run.cum[lo] <= run.cum[hi] - sv ? lo : hi;
+    if (!onTrack(i)) return null;
+    let a = i; while (a > 0 && onTrack(a - 1)) a--;
+    let b = i; while (b < n - 1 && onTrack(b + 1)) b++;
+    return [run.cum[a], run.cum[b]];
+  };
   const room = 2 * (halfM + END_CLEAR_M);
   const du = q => Math.max(1e-12, (au[q] - au[q - 1]) * curveL);
   // The lower speed bound a stretch is held to: SPEED_RATIO_MIN, or (Tube) its interval's own ratio where lower.
@@ -994,25 +1066,34 @@ export function fitEnds(run, halfM, curveL, stats = null, { perStretch = false }
     return Math.min(SPEED_RATIO_MIN, f * (A[s1] - A[s0]) / Math.max(1e-12, (au[s1] - au[s0]) * curveL));
   };
   const fitOne = atStart => {
-    const old = run.as;
-    const target = atStart ? run.cum[0] + halfM + END_CLEAR_M : run.cum[n - 1] - halfM - END_CLEAR_M;
-    if (!(atStart ? onTrack(0) : onTrack(n - 1))) return;
-    if (atStart ? !(old[0] < target - 1e-9) : !(old[k - 1] > target + 1e-9)) return;
-    if ((atStart ? run.cum[a] - run.cum[0] : run.cum[n - 1] - run.cum[b]) < room) { count('fitShort'); return; }
+    const old = run.as, sd = atStart ? old[0] : old[k - 1];
+    const O = stretchAt(sd);
+    if (!O) return; // the station in a tunnel, or on undrawn track
+    const target = atStart ? O[0] + halfM + END_CLEAR_M : O[1] - halfM - END_CLEAR_M;
+    if (atStart ? !(old[0] < target - 1e-9) : !(old[k - 1] > target + 1e-9)) {
+      // Clear of the outer end; past the inner end only: the cars there are in the tunnel it came out of.
+      if (atStart ? sd + halfM > O[1] + 1e-9 : sd - halfM < O[0] - 1e-9) count('innerTunnel');
+      return;
+    }
+    if (O[1] - O[0] < room) { count('fitShort'); return; }
     let as = Array.from(old);
     // A portal p the speed bound moved (flag 2) is justified by the stretch either side of it at the chord's
     // nearest approach (nearU) running outside the bound (as the portal test checks, with its 3% margins).
-    // A window ending on p leaves the stretch on its far side (side +1: after p) alone: p stays justified
-    // when that stretch breaks the bound, with its interval's ratio recomputed from t.
-    const farJustifies = (t, p, side) => {
+    // A window ending on p keeps p only while one of the two stretches, recomputed from t (the one inside
+    // the window has changed), still justifies it, with its interval's ratio recomputed from t too. (Fix
+    // round 2 asked it of the far side only; sprint 01Oct26h: at Earl's Court the portal after the start of
+    // the Kensington (Olympia) run was moved for the stretch before it, which the fit makes only a little
+    // slower, still past the bound at the chord's nearest approach; the fit was refused and the train stood
+    // with two cars past the open track.)
+    const justifies = (t, p) => {
       const un = run.nearU?.[p];
       if (!Number.isFinite(un) || p <= 0 || p >= k - 1) return false;
       let s0 = p - 1; while (s0 > 0 && !run.station[s0]) s0--;
       let s1 = p + 1; while (s1 < k - 1 && !run.station[s1]) s1++;
       const rInt = (t[s1] - t[s0]) / Math.max(1e-12, (au[s1] - au[s0]) * curveL);
       const rHi = Math.max(SPEED_RATIO_MAX, rInt), rLo = Math.min(SPEED_RATIO_MIN, rInt);
-      const r = side > 0 ? (t[p + 1] - t[p]) / Math.max(1e-12, (au[p + 1] - un) * curveL) : (t[p] - t[p - 1]) / Math.max(1e-12, (un - au[p - 1]) * curveL);
-      return !(r <= rHi * 0.97 && r >= rLo * 1.03);
+      const broke = r => !(r <= rHi * 0.97 && r >= rLo * 1.03);
+      return broke((t[p + 1] - t[p]) / Math.max(1e-12, (au[p + 1] - un) * curveL)) || broke((t[p] - t[p - 1]) / Math.max(1e-12, (un - au[p - 1]) * curveL));
     };
     // as with the anchors of [p, q] scaled about anchor `fix` by f, and whether every stretch in it keeps the bound.
     const scaled = (p, q, fix, f) => { const t = Array.from(as), sf = as[fix]; for (let i = p; i <= q; i++) t[i] = sf + (as[i] - sf) * f; return t; };
@@ -1026,13 +1107,13 @@ export function fitEnds(run, halfM, curveL, stats = null, { perStretch = false }
       // while the stretch beyond it, which the window leaves alone, still justifies the move.
       for (let j = 1; j < k; j++) {
         const f = (as[j] - target) / Math.max(1e-12, as[j] - as[0]);
-        if (f > 0) { const t = scaled(0, j, j, f); if (holds(t, 0, j) && (run.portal[j] !== 2 || farJustifies(t, j, +1))) { as = t; break; } }
+        if (f > 0) { const t = scaled(0, j, j, f); if (holds(t, 0, j) && (run.portal[j] !== 2 || justifies(t, j))) { as = t; break; } }
         if (run.portal[j]) break;
       }
     } else {
       for (let j = k - 2; j >= 0; j--) {
         const f = (target - as[j]) / Math.max(1e-12, as[k - 1] - as[j]);
-        if (f > 0) { const t = scaled(j, k - 1, j, f); if (holds(t, j, k - 1) && (run.portal[j] !== 2 || farJustifies(t, j, -1))) { as = t; break; } }
+        if (f > 0) { const t = scaled(j, k - 1, j, f); if (holds(t, j, k - 1) && (run.portal[j] !== 2 || justifies(t, j))) { as = t; break; } }
         if (run.portal[j]) break;
       }
     }
@@ -1078,7 +1159,7 @@ export function projectOnCurve(curve, px, pz, ua, ub, { stepM = 8, length = curv
  * Returns { runs, stats }.
  */
 export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = null, extendM = RUN_END_EXTENSION_M, halfTrainM = 0 }) {
-  const stats = { anchors: 0, intervals: 0, mapped: 0, tunnelOnly: 0, offTrack: 0, noRoute: 0, implausible: 0, reversed: 0, portals: 0, portalsDropped: 0, portalsMoved: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0 };
+  const stats = { anchors: 0, intervals: 0, mapped: 0, tunnelOnly: 0, offTrack: 0, noRoute: 0, implausible: 0, reversed: 0, portals: 0, portalsDropped: 0, portalsMoved: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0, innerTunnel: 0 };
   const runs = [];
   if (!net?.hasOpen || !curve?.points?.length) return { runs, stats };
   const L = curve.getLength();
@@ -1105,7 +1186,8 @@ export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = nu
   }
   stats.anchors = anchors.length;
   const nodeOf = st => {
-    if (!cache.stationNode.has(st.key)) cache.stationNode.set(st.key, nearestNode(net, st.x, st.z, STATION_TRACK_M));
+    // The nearest node, or an open one within STATION_OPEN_PREFER_M further (stationNode; sprint 01Oct26h).
+    if (!cache.stationNode.has(st.key)) cache.stationNode.set(st.key, stationNode(net, st.x, st.z, STATION_TRACK_M));
     return cache.stationNode.get(st.key);
   };
   let cur = null, curEnd = -1, curU = NaN, ends = null;
@@ -1242,7 +1324,7 @@ export function distanceToDrawn(net, index, px, pz, cap) {
 export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, stepM = SNAP_STEP_M, maxM = SNAP_MAX_M, ve = 5, extendM = RUN_END_EXTENSION_M, halfTrainM = 0 }) {
   const maxDy = SNAP_MAX_RISE_M * ve * ratio; // scene units at this structure scale
   const L = curve.getLength(), n = Math.max(2, Math.ceil(L / stepM) + 1);
-  const stats = { samples: n, snapped: 0, fallback: 0, maxSnapM: 0, sumSnapM: 0, switches: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0 };
+  const stats = { samples: n, snapped: 0, fallback: 0, maxSnapM: 0, sumSnapM: 0, switches: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0, innerTunnel: 0 };
   // Candidates per sample.
   const samples = [];
   for (let k = 0; k < n; k++) {
@@ -1305,11 +1387,48 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
     return walk ? walk.nodes.filter(w => ahead(w.i) > 0.5).map(w => w.i) : [];
   };
   const mDir = Math.min(n - 1, Math.max(1, Math.round(END_DIR_M / stepM)));
-  const startExt = endWalk(0, mDir), endExt = endWalk(n - 1, n - 1 - mDir);
+  // A curve whose last stretch (up to TAIL_WALK_MAX_M) has nothing drawn within reach, after a sample on open
+  // drawn track, carries on along that sample's drawn piece instead (sprint 01Oct26h; only with extendM, the
+  // renderer's call): the fallback samples become points along the piece at the curve's own pace, never past
+  // the piece's end, and the piece's next extendM metres are the end's extension. Canning Town to Stratford:
+  // the curve's last 120 m follow the eastern track into platforms 16 and 17, which Lane R does not draw; the
+  // DLR's colour is drawn on the Jubilee's corridor beside it, 40 to 55 m west, where the other direction's
+  // trains already stand. Every train arriving there was drawn car by car vanishing over bare ground, and stood
+  // at its last stop with no car drawn. A tail bounded by tunnel (Woolwich Arsenal) is left as it is.
+  const isFallback = k => !!samples[k].cands[pick[k]].fallback;
+  const tailWalk = atEnd => {
+    if (!(extendM > 0)) return null;
+    let m = 0; while (m < n && isFallback(atEnd ? n - 1 - m : m)) m++;
+    if (!m || m >= n - mDir || m * stepM > TAIL_WALK_MAX_M) return null;
+    const k0 = atEnd ? n - 1 - m : m, kd = atEnd ? k0 - mDir : k0 + mDir;
+    const c = samples[k0].cands[pick[k0]], cd = samples[kd].cands[pick[kd]];
+    if (cd.fallback || !(net.open[c.i] && net.open[c.j])) return null;
+    const ox = c.qx - cd.qx, oz = c.qz - cd.qz, l = Math.hypot(ox, oz);
+    if (!(l > 1e-6)) return null;
+    const dx = ox / l, dz = oz / l, ahead = i => (net.x[i] - c.qx) * dx + (net.z[i] - c.qz) * dz;
+    const walk = walkAlong(net, ahead(c.i) <= ahead(c.j) ? c.i : c.j, dx, dz, m * stepM + extendM);
+    const nodes = walk ? walk.nodes.filter(w => ahead(w.i) > 0.5).map(w => w.i) : [];
+    if (!nodes.length) return null;
+    return { m, k0, nodes };
+  };
+  const headT = tailWalk(false), tailT = tailWalk(true);
+  if (headT) { stats.tailWalks = (stats.tailWalks || 0) + 1; stats.tailWalkSamples = (stats.tailWalkSamples || 0) + headT.m; }
+  if (tailT) { stats.tailWalks = (stats.tailWalks || 0) + 1; stats.tailWalkSamples = (stats.tailWalkSamples || 0) + tailT.m; }
+  const kFirst = headT ? headT.k0 : 0, kLast = tailT ? tailT.k0 : n - 1;
+  const startExt = headT ? [] : endWalk(0, mDir), endExt = tailT ? [] : endWalk(n - 1, n - 1 - mDir);
   const r = new RunBuilder();
   for (const i of [...startExt].reverse()) r.vertex(...deckVert(i));
+  let walkedStart = false, walkedEnd = false;
+  if (headT) {
+    // The walked nodes, farthest first; then the head samples' anchors back from the first snapped sample.
+    for (const i of [...headT.nodes].reverse()) r.vertex(...deckVert(i));
+    const c = samples[headT.k0].cands[pick[headT.k0]], last = headT.nodes[0];
+    const s0 = r.length + Math.hypot(c.qx - net.x[last], c.qz - net.z[last]);
+    for (let k = 0; k < headT.k0; k++) r.anchor(samples[k].u, Math.max(0, s0 - Math.min((headT.k0 - k) * stepM, s0)), null);
+    walkedStart = s0 > headT.m * stepM + 0.5;
+  }
   let prevPiece = null;
-  for (let k = 0; k < n; k++) {
+  for (let k = kFirst; k <= kLast; k++) {
     const smp = samples[k], best = smp.cands[pick[k]];
     const sw = prevPiece !== null && best.piece !== prevPiece;
     if (sw) { stats.switches++; r.markJunction(); }
@@ -1332,6 +1451,13 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
     }
   }
   for (const i of endExt) r.vertex(...deckVert(i));
+  if (tailT) {
+    const sk = r.length;
+    for (const i of tailT.nodes) r.vertex(...deckVert(i));
+    const W = r.length - sk;
+    for (let j = 1; j <= tailT.m; j++) r.anchor(samples[tailT.k0 + j].u, sk + Math.min(j * stepM, W), null);
+    walkedEnd = W > tailT.m * stepM + 0.5;
+  }
   const fr = r.fair(getY, (x, z, cap) => distanceToDrawn(net, index, x, z, cap));
   stats.spurs = fr.spurs || 0; stats.kinks = fr.kinks || 0;
   // The speed bound, over the 10 m anchors (a lump left by a change of piece, or by a curve
@@ -1342,7 +1468,7 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
   // 8% grade limit does (dlr-profile.js refresh); a lift-based ramp, or one scaled by the
   // structure ratio, lifted whole decks over dips (Master 10, found 01Oct26h by
   // tests/surface-trains.spec.js and the unit test beside it).
-  const run = r.build({ extendedStart: startExt.length > 0, extendedEnd: endExt.length > 0 }, { ramp: 'absolute', unitsPerM: ve * ratio });
+  const run = r.build({ extendedStart: startExt.length > 0 || walkedStart, extendedEnd: endExt.length > 0 || walkedEnd, tailWalkStart: !!headT, tailWalkEnd: !!tailT }, { ramp: 'absolute', unitsPerM: ve * ratio });
   // A train standing at either end fits on the drawn deck, its approach held at SPEED_RATIO_MIN (fitEnds).
   if (halfTrainM > 0) fitEnds(run, halfTrainM, L, stats, { perStretch: true });
   const openAt = sv => { const i = segIndex(run.cum, sv), j = Math.min(i + 1, run.cum.length - 1), seg = run.cum[j] - run.cum[i]; return (seg > 0 && (sv - run.cum[i]) / seg >= 0.5) ? run.open[j] : run.open[i]; };

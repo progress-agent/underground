@@ -679,3 +679,150 @@ test('a lone open sample between tunnel samples is not drawn track: no car, no p
   const after = at504(mapTubeCurve({ curve, stationUs, stations: STATIONS, net: drawn, cache: fresh(drawn) }).runs[0]);
   assert.equal(after.open, 0); assert.equal(after.portals, 1);
 });
+
+// ── Sprint 01Oct26h (Lane T): station nodes on open track, trains standing at line ends whole ─────────
+test('a station prefers an open node within STATION_OPEN_PREFER_M of its nearest: West Hampstead\'s Jubilee is drawn whole, never as a stub', async () => {
+  const { stationNode, STATION_OPEN_PREFER_M, nearestNode: nearest } = await import('../src/surface-train-map.js');
+  assert.equal(STATION_OPEN_PREFER_M, 30);
+  // West Hampstead before Lane R removed the stub (sprint 01Oct26h): the open track 18 m south of the stop, the other
+  // running track's undrawn 227 m tunnel stub 11 m north of it. Stations P and Q 1.4 km either side, on the open track.
+  const open = straightPiece(-1500, 1500, 18);
+  const stub = straightPiece(-110, 118, -11, 12, () => 'tunnel');
+  const net = buildNetwork([open, stub]);
+  const WH = { key: 'WH', x: 0, z: 0 }, stations = [{ key: 'P', x: -1400, z: 18 }, WH, { key: 'Q', x: 1400, z: 18 }];
+  const iOpen = stationNode(net, 0, 0), iNear = nearest(net, 0, 0, 300);
+  assert.equal(net.open[iNear], 0); assert.ok(Math.abs(net.z[iNear] + 11) < 1e-9, 'the nearest node is on the stub');
+  assert.equal(net.open[iOpen], 1); assert.ok(Math.abs(net.z[iOpen] - 18) < 1e-9, 'the station is placed on the open track');
+  // Not past nearest + STATION_OPEN_PREFER_M: a station really in tunnel keeps its own node; nothing beyond maxM.
+  const far = buildNetwork([straightPiece(-200, 200, 45), straightPiece(-200, 200, -5, 12, () => 'tunnel')]);
+  assert.equal(far.open[stationNode(far, 0, 0)], 0, 'an open node 45 m away against a tunnel node 5 m away: the tunnel node');
+  assert.equal(stationNode(far, 0, 1000), -1);
+  // Where the nearest node is open it is taken, as before.
+  assert.equal(stationNode(net, 0, 30), nearest(net, 0, 30, 300));
+  // The mapping: a train standing at West Hampstead and passing it is drawn whole, every car on open, drawn track.
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-1400, -20, 0), new THREE.Vector3(0, -20, 0), new THREE.Vector3(1400, -20, 0)]);
+  const stationUs = [0, 0.5, 1], half = STOCK['1996'].trainM / 2, layout = carLayout(STOCK['1996']);
+  const carsOpen = (runs, uc) => { const run = runAt(runs, uc), pt = {}; if (!run) return -1; return layout.filter(c => { sampleRun(run, sAt(run, uc) + c.offset, 1, pt); return pt.inside && pt.open && pt.drawn; }).length; };
+  const now = mapTubeCurve({ curve, stationUs, stations, net, cache: fresh(net), halfTrainM: half });
+  // The same with the station placed on its nearest node, as before this sprint (the cache filled by hand).
+  const was = mapTubeCurve({ curve, stationUs, stations, net, cache: { routes: new Map(), stationNode: new Map([['P', nearest(net, -1400, 18, 300)], ['WH', iNear], ['Q', nearest(net, 1400, 18, 300)]]) }, halfTrainM: half });
+  let stubs = 0;
+  for (let uc = 0.5 - 300 / 2800; uc <= 0.5 + 300 / 2800; uc += 2 / 2800) {
+    assert.equal(carsOpen(now.runs, uc), layout.length, `a train centred ${((uc - 0.5) * 2800).toFixed(0)} m from West Hampstead is whole`);
+    const w = carsOpen(was.runs, uc); if (w >= 0 && w < layout.length) stubs++;
+  }
+  assert.ok(stubs > 100, `the fixture bites: before, the train was drawn in part at ${stubs} of 301 places`);
+  assert.equal(carsOpen(now.runs, 0.5), layout.length); // standing at the station
+});
+
+test('a train standing at an open station whose run ends in a covered stretch is fitted whole (Barking); one standing in a tunnel is left alone', () => {
+  // The Hammersmith & City at Barking: the band it runs on ends 34 m past the platforms, under a bridge (three
+  // tunnel samples); the run's start extension walked into them, and the S7 train standing at Barking reached 13 m
+  // past the open track, its end car drawn nowhere. Here: a terminus T at x = 40, tunnel samples at x < 0.
+  const half = STOCK.S7.trainM / 2;
+  const net = buildNetwork([straightPiece(-36, 3000, 0, 12, x => (x < 0 ? 'tunnel' : 'surface'))]);
+  const stations = [{ key: 'T', x: 40, z: 0 }, { key: 'E', x: 2950, z: 0 }];
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(40, -20, 6), new THREE.Vector3(1500, -20, 6), new THREE.Vector3(2950, -20, 6)]);
+  const L = curve.getLength();
+  const plain = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net) }).runs[0];
+  const { runs, stats } = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net), halfTrainM: half });
+  const run = runs[0], pt = {};
+  assert.equal(run.extendedStart, true); assert.equal(run.open[0], 0, 'the run starts on the covered stretch');
+  // Unfitted, the train standing at T reaches past the open track.
+  sampleRun(plain, plain.as[0] - half, 1, pt); assert.ok(!(pt.inside && pt.open), 'the case needs fitting');
+  assert.equal(stats.fitStart, 1); assert.equal(stats.innerTunnel ?? 0, 0);
+  // Fitted: the train's end 2 m inside the open track (x = 0), moved by at most half a train plus END_CLEAR_M.
+  sampleRun(run, run.as[0] - half, 1, pt); assert.ok(Math.abs(pt.x - END_CLEAR_M) < 1e-6, `train end at x ${pt.x}`);
+  assert.ok(run.as[0] - (plain.as[0] - plain.cum[0] + run.cum[0]) <= half + END_CLEAR_M + 1e-6);
+  for (const c of carLayout(STOCK.S7)) { sampleRun(run, run.as[0] + c.offset, 1, pt); assert.ok(pt.inside && pt.open && pt.drawn === 1, `car at ${c.offset}`); }
+  for (const q of ratios(run, L)) assert.ok(q >= SPEED_RATIO_MIN - 1e-9 && q <= SPEED_RATIO_MAX + 1e-9, `stretch ratio ${q}`);
+  // A terminus in the tunnel itself (x = -45, the open track 45 m off: more than STATION_OPEN_PREFER_M past its
+  // nearest node): nothing moves; its drawn cars are the ones out of the mouth.
+  const tnet = buildNetwork([straightPiece(-300, 3000, 0, 12, x => (x < 0 ? 'tunnel' : 'surface'))]);
+  const inT = [{ key: 'T', x: -45, z: 0 }, { key: 'E', x: 2950, z: 0 }];
+  const curve2 = new THREE.CatmullRomCurve3([new THREE.Vector3(-45, -20, 6), new THREE.Vector3(1500, -20, 6), new THREE.Vector3(2950, -20, 6)]);
+  const a = mapTubeCurve({ curve: curve2, stationUs: [0, 1], stations: inT, net: tnet, cache: fresh(tnet) }).runs[0];
+  const b = mapTubeCurve({ curve: curve2, stationUs: [0, 1], stations: inT, net: tnet, cache: fresh(tnet), halfTrainM: half });
+  sampleRun(a, a.as[0], 1, pt); assert.equal(pt.open, 0, 'the station is in the tunnel');
+  assert.equal(b.runs[0].as[0], a.as[0]); assert.equal(b.stats.fitStart, 0);
+});
+
+test('a train standing at the end of its run past the inner end of the open track only is left alone, counted (Earl\'s Court)', () => {
+  // The District from Upminster at Earl's Court: it comes out of the tunnel 5 m before the station's node and the
+  // drawn track runs on 82 m past it, shorter than the train either side: the rear two cars stay in the tunnel the
+  // train came out of. The front never reaches past the drawn track's end.
+  const half = STOCK.S7.trainM / 2;
+  const net = buildNetwork([straightPiece(0, 2064, 0, 12, x => (x < 1980 ? 'tunnel' : 'surface')), straightPiece(-1000, 0, 0, 12, () => 'surface')]);
+  const stations = [{ key: 'A', x: -900, z: 0 }, { key: 'EC', x: 1985, z: 0 }];
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-900, -20, 6), new THREE.Vector3(500, -20, 6), new THREE.Vector3(1985, -20, 6)]);
+  const plain = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net) }).runs[0];
+  const { runs, stats } = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net), halfTrainM: half });
+  assert.equal(stats.innerTunnel, 1); assert.equal(stats.fitEnd, 0);
+  assert.equal(runs[0].as.at(-1), plain.as.at(-1));
+  const pt = {};
+  sampleRun(runs[0], runs[0].as.at(-1) + half, 1, pt); assert.ok(pt.inside && pt.open, 'the front stands on the drawn track');
+  sampleRun(runs[0], runs[0].as.at(-1) - half, 1, pt); assert.ok(pt.inside && !pt.open, 'the rear is in the tunnel, on the run');
+});
+
+test('a fit window may end on a portal the speed bound moved while either stretch beside it still justifies the move (Kensington (Olympia))', () => {
+  // The portal was moved for the stretch before it (2.5 times the timetable's speed at the chord's nearest point);
+  // the fit only makes that stretch a little slower. Fix round 2 asked the stretch beyond it, which never broke the
+  // bound, and refused the fit: the train stood at Earl's Court with two cars in the tunnel.
+  const half = STOCK.S7.trainM / 2;
+  const mk = () => ({ cum: Float64Array.from([0, 12, 24, 36, 1150]), open: Uint8Array.from([0, 0, 1, 1, 1]), drawn: Uint8Array.from([1, 1, 1, 1, 1]), au: Float64Array.from([0, 0.2, 1]), as: Float64Array.from([80, 330, 1080]), station: Uint8Array.from([1, 0, 1]), portal: Uint8Array.from([0, 2, 0]), nearU: Float64Array.from([NaN, 0.1, NaN]) });
+  const r = mk(), st = {};
+  fitEnds(r, half, 1000, st);
+  assert.equal(st.fitStart, 1); assert.ok(Math.abs(r.as[0] - (24 + half + END_CLEAR_M)) < 1e-9); assert.equal(r.as[1], 330);
+  // Neither side justifying it (nearU where the stretch before keeps the bound): refused, as before.
+  const r2 = mk(); r2.nearU[1] = 0.17; const st2 = {};
+  fitEnds(r2, half, 1000, st2);
+  assert.equal(st2.fitSkipped, 1); assert.deepEqual([...r2.as], [80, 330, 1080]);
+});
+
+test('DLR: a curve whose last stretch leaves the drawn track carries on along the drawn piece it was on, and its train stands there whole (Stratford)', async () => {
+  const { TAIL_WALK_MAX_M } = await import('../src/surface-train-map.js');
+  // Canning Town to Stratford: the curve's last 120 m follow the eastern track into platforms 16 and 17, which is not
+  // drawn; the DLR's colour is drawn on the Jubilee's corridor beside it, 40 to 55 m west. Here the deck runs along
+  // z = 0 to x = 1300; the curve leaves it from x = 850 and ends 60 m north of it.
+  const half = STOCK.B07.trainM / 2;
+  const deck = { pts: Array.from({ length: 131 }, (_, i) => ({ x: i * 10, z: 0, terrainY: 0, y: 20, cls: 'viaduct' })), morph: false };
+  const net = buildNetwork([deck]), index = buildSegmentIndex(net);
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 20, 1), new THREE.Vector3(500, 20, 1), new THREE.Vector3(850, 20, -2), new THREE.Vector3(950, 20, -45), new THREE.Vector3(1010, 20, -62)]);
+  const fallback = (x, y) => ({ base: 0, y, open: true });
+  const pt = {}, wholeAt = (run, u) => { const sc = sAt(run, u); return carLayout(STOCK.B07).every(c => { sampleRun(run, sc + c.offset, 1, pt); return pt.inside && pt.open && pt.drawn === 1; }); };
+  const was = mapSnapCurve({ curve, net, index, ratio: 1, fallback, extendM: 0 }); // the Pedestrian's call: unchanged
+  assert.ok(was.stats.fallback > 5, `the fixture bites: ${was.stats.fallback} samples undrawn`);
+  const wr = was.runs[0]; sampleRun(wr, sAt(wr, 1), 1, pt); assert.equal(pt.drawn, 0);
+  const m = mapSnapCurve({ curve, net, index, ratio: 1, fallback, halfTrainM: half });
+  const run = m.runs[0];
+  assert.equal(m.stats.tailWalks, 1); assert.ok(m.stats.tailWalkSamples * 10 <= TAIL_WALK_MAX_M);
+  assert.equal(run.tailWalkEnd, true); assert.equal(run.tailWalkStart, false);
+  assert.ok(wholeAt(run, 1), 'whole, standing at the end of its curve');
+  for (let i = 0; i < run.x.length; i++) assert.ok(Math.abs(run.z[i]) < 1e-6 && run.x[i] <= 1300 + 1e-6, `vertex ${run.x[i]}, ${run.z[i]} on the deck`);
+  for (let s = 0; s <= run.length; s += 5) { sampleRun(run, s, 1, pt); assert.equal(pt.drawn, 1, `undrawn at ${s}`); }
+  for (let k = 1; k < run.as.length; k++) assert.ok(run.as[k] >= run.as[k - 1]);
+  // A tail bounded by tunnel is left as it is (Woolwich Arsenal).
+  const tdeck = { pts: deck.pts.map(p => ({ ...p, cls: p.x > 800 ? 'tunnel' : 'viaduct' })), morph: false };
+  const tnet = buildNetwork([tdeck]);
+  const t = mapSnapCurve({ curve, net: tnet, index: buildSegmentIndex(tnet), ratio: 1, fallback, halfTrainM: half });
+  assert.equal(t.stats.tailWalks ?? 0, 0);
+});
+
+test('a piece\'s open end joins an open node beside a tunnel mouth, so a route crossing there never dips into the tunnel (Dagenham Heathway)', async () => {
+  const { JOIN_OPEN_PREFER_M } = await import('../src/surface-train-map.js');
+  assert.equal(JOIN_OPEN_PREFER_M, 12);
+  // The main piece runs east to west, open east of x = 8 and tunnel west of it; a parallel open piece 10 m south runs
+  // west from x = 3, its east end 10.4 m from the mouth's first tunnel node and 13.5 m from the last open one. A
+  // route from the east onto the parallel piece crossed through the tunnel node: a car hidden for 7 m, two portals.
+  const main = straightPiece(-600, 1200, 0, 12, x => (x < 8 ? 'tunnel' : 'surface'));
+  const side = straightPiece(-597, 3, -10);
+  const stations = [{ key: 'E', x: 1150, z: 0 }, { key: 'DH', x: -300, z: -10 }];
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(1150, -20, 0), new THREE.Vector3(400, -20, -5), new THREE.Vector3(-300, -20, -10)]);
+  const runOf = net => mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net) });
+  const was = runOf(buildNetwork([main, side], { joinOpenPreferM: 0 })), now = runOf(buildNetwork([main, side]));
+  assert.ok(was.stats.portals >= 2, `the fixture bites: ${was.stats.portals} portals`);
+  assert.equal(now.stats.portals, 0); assert.equal(now.stats.mapped, 1);
+  const run = now.runs[0];
+  for (let i = 0; i < run.x.length; i++) assert.equal(run.open[i], 1, `vertex ${run.x[i]}, ${run.z[i]} open`);
+  assert.ok(sampleTurns(run).kink <= KINK_TURN_DEG);
+});
