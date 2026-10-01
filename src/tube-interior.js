@@ -32,6 +32,12 @@
 // DETERMINISM: the geometry is a pure function of the walker's position on the
 // tunnel network; the shading is a pure function of position and view.
 //
+// THE OPEN AIR (sprint 01Oct26h, D-042 item 1, Lane P): where the walker is
+// shown on the drawn track in the open, the lining is not drawn, but the same
+// map devices are hidden (hideDevicesOnly): a station marker is a 12 m ball
+// sized for the view from the sky, and at platform level the walker stood
+// between two of them at Golders Green. Labels are left to main.js.
+//
 // PLATFORMS AND PORTALS (sprint 30Sep26w, D-041, Lane P): every platform the
 // window reaches is drawn as the lit, true-size platform tunnel of
 // platform-tunnel.js (its walls, platform edge and roundel boards), and the
@@ -605,6 +611,15 @@ export function createTubeInterior({ scene, camera = null, lineColour = () => 0x
       restoreMapDevices();
       restoreView();
     },
+    // ── s01:P ──
+    /** The walker in the open: no lining and the camera unisolated, but the map devices hidden as in the bore. */
+    hideDevicesOnly() {
+      mesh.visible = false;
+      platformGroup.visible = false;
+      restoreView();
+      hideMapDevices();
+    },
+    // ── /s01:P ──
     get visible() { return mesh.visible; },
     /** The line whose bore is shown, or null when hidden. */
     get lineId() { return mesh.visible ? built?.lineId ?? null : null; },

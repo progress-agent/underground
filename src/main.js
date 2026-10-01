@@ -4344,6 +4344,15 @@ modeSystem.ctx.lineColour = (lineId) => lineColoursById.get(lineId);
 modeSystem.ctx.surfaceRail = () => surfaceRail;
 modeSystem.ctx.overgroundLinePaths = () => overgroundGroup?.userData?.linePaths ?? null;
 // ── /s30:integrate ──
+// ── s01:P ──
+// Pedestrian to the ends of the lines (D-042 item 1, D-043 item 4): in the open
+// the walker is shown on the drawn track through the surface trains' mapping
+// (src/surface-trains.js networkFor, placeAt, stockOf, ratio; run on the
+// walker's own paths, src/modes/open-air-map.js), surface trains pass through
+// it, and the walk holds at the M25 map edge.
+modeSystem.ctx.surfaceTrains = () => surfaceTrains;
+modeSystem.ctx.isInsideM25 = isInsideM25;
+// ── /s01:P ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map
@@ -4357,12 +4366,15 @@ modeSystem.ctx.tubeInterior = createTubeInterior({
     .concat([...lineShaftLayers.values()].map(l => l.stationsLayer?.mesh).filter(Boolean))
     .concat(unifiedShaftLayer?.group ? [unifiedShaftLayer.group] : []),
 });
-// Station labels are HTML overlays, never occluded: inside the lining only the
-// walker's own line keeps them (its next stations ahead), exactly as the
+// Station labels are HTML overlays, never occluded: inside the lining none is
+// shown (s01:P; before, the walker's own line kept its own), exactly as the
 // submerged shell hides them all (hideForWater below).
 function s25InteriorHidesLabels(lineId) {
   const lid = modeSystem?.ctx.tubeInterior?.lineId;
-  return !!lid && lid !== lineId;
+  // ── s01:P ── every line's labels, the walker's own too: its own line's names
+  // floated at the far end of the bore, drawn over the lining (sprint 30Sep26w report).
+  return !!lid;
+  // ── /s01:P ──
 }
 // ── /s25:P ──
 // ── s30:P ──

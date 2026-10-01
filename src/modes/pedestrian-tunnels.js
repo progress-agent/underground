@@ -56,9 +56,22 @@
 //   markOpenSections(net, { groundY, isWater, VE }) -> finds each Tube line's portals geometrically
 //   markOpenSectionsFromTrack(net, { classAt })  -> sprint 30Sep26w integration: portals from the drawn
 //                                             railway (Lane R's data), preferred wherever it exists
+//
+// Sprint 01Oct26h (D-042 item 1, D-043 item 4, Lane P): the walk rides on to the ends of the lines, above
+// ground too, and stops only at stations.
+//   * every station vertex is a stop, surface and elevated stations included (stop.shallow marks one
+//     shallower than MIN_PLATFORM_DEPTH_M, which used to be skipped); platforms are no longer forced
+//     underground inside an open run;
+//   * advance(net, pos, dist, want, { holdAtPortals, headingOf }): holdAtPortals (default true) keeps the
+//     old hold at the mouth of an open interval, which the bore's lining (tube-interior.js
+//     sampleBoreWindow) needs to draw its daylight cap; the walk passes false and crosses the mouth.
+//     headingOf(path, s, dir) replaces headingAt for the direction of travel and the branch choice (the
+//     open-air walk passes the drawn track's heading, open-air-map.js drawnHeading);
+//   * path.edge [[s0, s1]]: stretches beyond the M25 map edge (markMapEdge); advance() always holds at
+//     their start, whatever holdAtPortals, and reports { edge: true }.
 
 export const SAMPLE_STEP_M = 10;
-export const MIN_PLATFORM_DEPTH_M = 3;   // shallower "stations" (elevated DLR, surface Met) have no shaft
+export const MIN_PLATFORM_DEPTH_M = 3;   // shallower stations (elevated DLR, surface Met) are stops marked `shallow` (s01:P)
 export const HEADING_PROBE_M = 6;
 const STATION_SNAP_M = 3;                // a station's position vs its branch vertex (both come from the same registry)
 const ENTRANCE_MERGE_M = 40;             // stops closer than this share one entrance (interchanges)
@@ -139,6 +152,7 @@ function samplePath(THREE, lineId, pts, VE, id, sampleStep, halfSpacing) {
     stops: [],       // [{ s, stop }]
     stations: [],    // [{ s, id, name }] every station vertex (s30:P), platform or not
     open: [],        // [[s0, s1]] in-the-open arc intervals (s30:P, markOpenSections)
+    edge: [],        // [[s0, s1]] beyond the map edge (s01:P, markMapEdge): the walk holds at s0
   };
 }
 
@@ -196,10 +210,12 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
           const surfaceY = Number.isFinite(st.surfaceY) ? st.surfaceY : null;
           const depthM = surfaceY !== null ? (surfaceY - platformY) / VE
             : (Number.isFinite(st.depthM) ? st.depthM : null);
-          if (depthM === null || depthM < minDepthM) continue;
+          // s01:P every station is a stop (D-042 item 1: "only possible to exit them at stations"),
+          // surface and elevated ones too; `shallow` marks those that used to be skipped here.
           if (p.stops.some(x => Math.abs(x.s - p.vertexS[i]) < 1e-6)) continue;
+          const shallow = depthM === null || depthM < minDepthM;
           const stop = { path: p.id, s: p.vertexS[i], lineId, name: st.name ?? st.id ?? '', id: st.id ?? null,
-            x: v.x, z: v.z, platformY, surfaceY, depthM };
+            x: v.x, z: v.z, platformY, surfaceY, depthM: depthM ?? 0, shallow };
           p.stops.push({ s: stop.s, stop });
           stops.push(stop);
         }
@@ -207,6 +223,7 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
     }
   }
   for (const p of paths) { p.stops.sort((a, b) => a.s - b.s); p.stations.sort((a, b) => a.s - b.s); }
+  const links = linkStations(paths, junctionAt);
 
   const entrances = [];
   for (const stop of stops) {
@@ -218,7 +235,68 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
     e.stops.push(stop);
   }
   return { paths, entrances, junctionAt, VE, halfSpacing: hs, stats: { paths: paths.length, stops: stops.length, entrances: entrances.length,
-    junctions: [...byKey.values()].filter(x => x.length > 1).length } };
+    junctions: [...byKey.values()].filter(x => x.length > 1).length, links } };
+}
+
+/** s01:P a path end at a station joins the same station on another path of its line within this (plan metres). */
+export const STATION_LINK_M = 100;
+
+/**
+ * Station links (s01:P). The DLR's branches are resolved node by node from its
+ * profile, so one station can sit at a different node on each piece that
+ * reaches it (Westferry 86 m apart, West India Quay 58 m, Poplar 10 m, Canning
+ * Town 31 m, Stratford 86 m), and pieces that meet only there share no vertex:
+ * the walk dead-ended at Westferry on the way from Bank to Lewisham, a stretch
+ * the 30Sep26w walk never reached because it stopped at Shadwell's mouth. A
+ * path end that is a station and no junction is joined, as a junction, to the
+ * same station (by name) on every other path of the line within
+ * STATION_LINK_M; advance() then chooses there as at any junction. A different
+ * station near a terminus (Tower Gateway beside the Bank branch) is not joined.
+ * Returns the number of links made.
+ */
+function linkStations(paths, junctionAt) {
+  const byLine = new Map();
+  for (const p of paths) { if (!byLine.has(p.lineId)) byLine.set(p.lineId, []); byLine.get(p.lineId).push(p); }
+  const vertexAt = (p, s) => { const i = p.vertexS.findIndex(v => Math.abs(v - s) < 1e-6); return i >= 0 ? p.vertices[i] : null; };
+  const pairs = [];
+  for (const P of byLine.values()) {
+    if (P.length < 2) continue;
+    for (const a of P) {
+      for (const endS of [0, a.length]) {
+        if (a.junctions.some(j => Math.abs(j - endS) < 1e-6)) continue;
+        const st = a.stations.find(x => Math.abs(x.s - endS) < 1e-6);
+        const va = st && vertexAt(a, st.s);
+        if (!va) continue;
+        const name = cleanName(st.name);
+        for (const b of P) {
+          if (b === a) continue;
+          for (const sb of b.stations) {
+            if (cleanName(sb.name) !== name) continue;
+            const vb = vertexAt(b, sb.s);
+            if (vb && Math.hypot(vb.x - va.x, vb.z - va.z) <= STATION_LINK_M) pairs.push([{ path: a.id, s: endS }, { path: b.id, s: sb.s }]);
+          }
+        }
+      }
+    }
+  }
+  if (!pairs.length) return 0;
+  // Merge into junction groups: every member of a group lists all of it.
+  const groupOf = new Map();
+  const keyOf = (e) => `${e.path}:${e.s}`;
+  const group = (e) => groupOf.get(keyOf(e)) || (() => { const g = (junctionAt.get(keyOf(e)) || [e]).slice(); for (const x of g) groupOf.set(keyOf(x), g); return g; })();
+  for (const [a, b] of pairs) {
+    const ga = group(a), gb = group(b);
+    if (ga === gb) continue;
+    for (const x of gb) if (!ga.some(y => y.path === x.path && Math.abs(y.s - x.s) < 1e-6)) ga.push(x);
+    for (const x of ga) groupOf.set(keyOf(x), ga);
+  }
+  for (const [k, g] of groupOf) {
+    junctionAt.set(k, g);
+    const [pid, ss] = [Number(k.slice(0, k.indexOf(':'))), Number(k.slice(k.indexOf(':') + 1))];
+    const p = paths[pid];
+    if (!p.junctions.some(j => Math.abs(j - ss) < 1e-6)) { p.junctions.push(ss); p.junctions.sort((x, y) => x - y); }
+  }
+  return pairs.length;
 }
 
 export function cleanName(name) {
@@ -260,9 +338,9 @@ export function headingAt(path, s, dir) {
   return len > 1e-9 ? { x: x / len, z: z / len } : { x: 0, z: 0 };
 }
 
-/** +1 / -1 along the path that best matches a desired horizontal direction. */
-export function travelDir(path, s, want, prevDir = 1) {
-  const h = headingAt(path, s, 1);
+/** +1 / -1 along the path that best matches a desired horizontal direction (s01:P headingOf: see advance). */
+export function travelDir(path, s, want, prevDir = 1, headingOf = headingAt) {
+  const h = headingOf(path, s, 1);
   const d = h.x * want.x + h.z * want.z;
   if (Math.abs(d) < 0.05) return prevDir || 1;
   return d > 0 ? 1 : -1;
@@ -278,22 +356,27 @@ function nextJunction(path, s, dir, limit) {
   return null;
 }
 
-/** Pick the continuation at a junction that best matches `want`. */
-export function chooseAt(net, pathId, s, dir, want) {
+/**
+ * Pick the continuation at a junction that best matches `want`. s01:P
+ * `headingOf` (default headingAt, the chord) is how each continuation heads:
+ * the open-air walk passes the drawn track's heading, so a fork in the open is
+ * taken by the railway the walker sees, not by the station chords.
+ */
+export function chooseAt(net, pathId, s, dir, want, headingOf = headingAt) {
   const entries = net.junctionAt.get(`${pathId}:${s}`);
   const here = net.paths[pathId];
   const current = { path: pathId, s, dir };
   const canGo = (p, ss, d) => (d > 0 ? ss < p.length - 1e-6 : ss > 1e-6);
-  const score = (p, ss, d) => { const h = headingAt(p, ss, d); return h.x * want.x + h.z * want.z; };
+  const score = (p, ss, d) => { const h = headingOf(p, ss, d); return h.x * want.x + h.z * want.z; };
   if (!entries) return current;
-  const back = headingAt(here, s, -dir); // where we came from
+  const back = headingOf(here, s, -dir); // where we came from
   let best = null, bestScore = -Infinity;
   const curScore = canGo(here, s, dir) ? score(here, s, dir) : -Infinity;
   for (const e of entries) {
     const p = net.paths[e.path];
     for (const d of [1, -1]) {
       if (!canGo(p, e.s, d)) continue;
-      const h = headingAt(p, e.s, d);
+      const h = headingOf(p, e.s, d);
       if (h.x * back.x + h.z * back.z > 0.9) continue; // straight back the way we came
       const sc = h.x * want.x + h.z * want.z;
       if (sc > bestScore) { bestScore = sc; best = { path: e.path, s: e.s, dir: d }; }
@@ -345,27 +428,69 @@ function portalAhead(p, from, dir, limit, inset = 0) {
 }
 
 /**
- * Move `pos` ({ path, s, dir }) `dist` metres toward the desired horizontal
- * direction `want`. Mutates pos. Returns { stopped, crossed, portal }:
- * stopped at a line end or a portal; crossed = platforms passed [{ stop, at }];
- * portal = { path, s, mouth } when the move was held `portalInset` metres
- * short of the mouth of a tunnel (mouth = the mouth's own arc).
+ * Where a move from `from` toward `limit` in direction `dir` is held at the
+ * map edge (s01:P): the start of the first edge interval ahead (path.edge,
+ * markMapEdge), or null. A walker already beyond it (placed there) is held
+ * where it is, except walking back toward the map.
  */
-export function advance(net, pos, dist, want, { portalInset = 0 } = {}) {
+function edgeAhead(p, from, dir, limit) {
+  const E = p.edge;
+  if (!E || !E.length) return null;
+  let best = null;
+  for (const [a, b] of E) {
+    if (from > a + 1e-9 && from < b - 1e-9) {
+      // Beyond the hold already: only the way back to the map is open.
+      const back = a > 1e-6 ? -1 : 1;   // an edge at the path's start opens the other way
+      if (dir === back) continue;
+      return from;
+    }
+    const hold = dir > 0 ? a : b;
+    if (dir > 0 ? hold < from - 1e-9 : hold > from + 1e-9) continue;   // behind the walker
+    if (dir > 0 ? hold > limit : hold < limit) continue;               // beyond this move
+    if (best === null || (dir > 0 ? hold < best : hold > best)) best = hold;
+  }
+  return best;
+}
+
+/**
+ * Move `pos` ({ path, s, dir }) `dist` metres toward the desired horizontal
+ * direction `want`. Mutates pos. Returns { stopped, crossed, portal, edge }:
+ * stopped at a line end, a portal or the map edge; crossed = platforms passed
+ * [{ stop, at }]; portal = { path, s, mouth } when the move was held
+ * `portalInset` metres short of the mouth of a tunnel (mouth = the mouth's own
+ * arc); edge = true when it was held at the map edge (s01:P).
+ * s01:P options: holdAtPortals (default true: the bore's lining relies on the
+ * hold to draw its daylight cap; the open-air walk passes false and walks on
+ * out of the tunnel), headingOf(path, s, dir) (default headingAt) for the
+ * direction of travel, branchHeadingOf (default headingOf) for the choice at
+ * junctions.
+ */
+export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals = true, headingOf = headingAt, branchHeadingOf = headingOf } = {}) {
   let remaining = Math.max(0, dist);
   let stopped = false;
   let guard = 0;
   let travelled = 0;
   let portal = null;
+  let edge = false;
   const crossed = [];
   const path0 = net.paths[pos.path];
-  pos.dir = travelDir(path0, pos.s, want, pos.dir);
+  pos.dir = travelDir(path0, pos.s, want, pos.dir, headingOf);
   while (remaining > 1e-9 && guard++ < 64) {
     const p = net.paths[pos.path];
     const target = pos.s + pos.dir * remaining;
     const j = nextJunction(p, pos.s, pos.dir, target);
-    const reach = j === null ? Math.min(p.length, Math.max(0, target)) : j;
-    const held = portalAhead(p, pos.s, pos.dir, reach, portalInset);
+    let reach = j === null ? Math.min(p.length, Math.max(0, target)) : j;
+    // s01:P the map edge holds every walk, whatever holdAtPortals.
+    const e = edgeAhead(p, pos.s, pos.dir, reach);
+    if (e !== null) {
+      crossedOn(p, pos.s, e, travelled, crossed);
+      travelled += Math.abs(e - pos.s);
+      pos.s = e;
+      stopped = true;
+      edge = true;
+      break;
+    }
+    const held = holdAtPortals ? portalAhead(p, pos.s, pos.dir, reach, portalInset) : null;
     if (held !== null) {
       crossedOn(p, pos.s, held.hold, travelled, crossed);
       travelled += Math.abs(held.hold - pos.s);
@@ -387,14 +512,14 @@ export function advance(net, pos, dist, want, { portalInset = 0 } = {}) {
     travelled += Math.abs(j - pos.s);
     remaining -= Math.abs(j - pos.s);
     pos.s = j;
-    const next = chooseAt(net, pos.path, j, pos.dir, want);
+    const next = chooseAt(net, pos.path, j, pos.dir, want, branchHeadingOf);
     // The bore side is relative to each path's own orientation; carry it over
     // by travel sense (side x dir), so a branch drawn the other way round keeps
     // the walker in the same physical bore.
     if (pos.side && next.path !== pos.path) pos.side = pos.side * pos.dir * next.dir;
     pos.path = next.path; pos.s = next.s; pos.dir = next.dir;
   }
-  return { stopped, crossed, portal };
+  return { stopped, crossed, portal, edge };
 }
 
 /** The next station along `path` from `s` in direction `dir` (s30:P), or null. */
@@ -465,17 +590,13 @@ export function markOpenSections(net, { groundY, isWater = null, waterY = null, 
 
 /**
  * path.open from per-sample in-the-open flags (shared by both portal finders):
- * platforms are underground by definition, never inside an open run; each run
- * of open samples at least minRunM long becomes an interval, its boundaries
- * half-way between an underground sample and an open one. Returns the number
- * of portals (interval ends inside the path).
+ * each run of open samples at least minRunM long becomes an interval, its
+ * boundaries half-way between an underground sample and an open one. Returns
+ * the number of portals (interval ends inside the path). (s01:P: platforms are
+ * no longer forced underground: a surface station is a stop inside its open
+ * run, D-042 item 1.)
  */
 function setOpenIntervals(p, flags, minRunM) {
-  for (const { s } of p.stops) {
-    let j = 0;
-    while (j < p.n - 1 && p.s[j + 1] <= s) j++;
-    flags[j] = false; if (j + 1 < p.n && Math.abs(p.s[j + 1] - s) < 1e-6) flags[j + 1] = false;
-  }
   const open = [];
   let start = null;
   for (let j = 0; j <= p.n; j++) {
@@ -556,6 +677,81 @@ export function markOpenSectionsFromTrack(net, { classAt, reachM = TRACK_MATCH_M
   net.stats.unmatchedPaths = unmatched;
   net.stats.openShare = Object.fromEntries(Object.entries(share).map(([l, v]) => [l, v.length ? v.open / v.length : 0]));
   return portals;
+}
+
+// ── s01:P the map edge ───────────────────────────────────────────────────────
+export const EDGE_HOLD_M = 150;   // the walk holds this far (arc) inside where its line leaves the map
+const EDGE_STEP_M = 10;
+
+/**
+ * The M25 map edge (s01:P; D-043 item 4: "the walk stops at the M25 edge. The
+ * Central's last stop is Theydon Bois and the Metropolitan's is Rickmansworth").
+ * `inside(x, z)` says whether a point is on the map (main.js isInsideM25; call
+ * this only once it is loaded, isInsideM25(1e6, 1e6) === false). Each stretch
+ * of a path whose point is off the map becomes path.edge [s0, s1], s0 holdM of
+ * arc inside the first point off it, so advance() holds the walk there. Stops
+ * in an edge stretch are dropped (Epping, Chorleywood): from path.stops, from
+ * their entrance, and the entrance itself when it has none left; path.stations
+ * is untouched, so "towards Epping" still reads as TfL names it.
+ * `positionsAt(path, s)` (optional) returns more points to test at s (the
+ * open-air walk adds the drawn track it shows there): off the map if any is.
+ * `only` (optional Set of path ids): mark just those paths (the others keep theirs).
+ * Returns the number of stops dropped, or -1 when `inside` is missing.
+ */
+export function markMapEdge(net, { inside, holdM = EDGE_HOLD_M, stepM = EDGE_STEP_M, positionsAt = null, only = null } = {}) {
+  if (!net || typeof inside !== 'function') return -1;
+  const tmp = {};
+  const offAt = (p, s) => {
+    pointAt(p, s, tmp, 0);
+    if (!inside(tmp.x, tmp.z)) return true;
+    for (const q of positionsAt ? (positionsAt(p, s) || []) : []) if (q && !inside(q.x, q.z)) return true;
+    return false;
+  };
+  let dropped = 0;
+  const gone = new Set();
+  for (const p of net.paths) {
+    if (only && !only.has(p.id)) { if (!p.edge) p.edge = []; continue; }
+    const n = Math.max(2, Math.ceil(p.length / stepM) + 1);
+    const S = (k) => (p.length * k) / (n - 1);
+    const runs = [];
+    let start = null;
+    for (let k = 0; k <= n; k++) {
+      const off = k < n && offAt(p, S(k));
+      if (off && start === null) start = k;
+      if (!off && start !== null) { runs.push([start, k - 1]); start = null; }
+    }
+    // Refine each boundary to a metre by bisection between an on-map and an off-map sample.
+    const refine = (lo, hi) => { let a = S(lo), b = S(hi); const offA = offAt(p, a);
+      for (let i = 0; i < 12 && Math.abs(b - a) > 1; i++) { const m = (a + b) / 2; if (offAt(p, m) === offA) a = m; else b = m; } return b; };
+    const edge = [];
+    for (const [k0, k1] of runs) {
+      const a = k0 > 0 ? refine(k0 - 1, k0) : 0;
+      const b = k1 < n - 1 ? refine(k1 + 1, k1) : p.length;
+      edge.push([Math.max(0, a - (k0 > 0 ? holdM : 0)), Math.min(p.length, b + (k1 < n - 1 ? holdM : 0))]);
+    }
+    // Merge overlapping stretches.
+    edge.sort((x, y) => x[0] - y[0]);
+    const merged = [];
+    for (const e of edge) { const last = merged.at(-1); if (last && e[0] <= last[1]) last[1] = Math.max(last[1], e[1]); else merged.push(e.slice()); }
+    p.edge = merged;
+    const keep = [];
+    for (const x of p.stops) {
+      // Off the map itself, or inside the stretch held back from it (a stop at the path's very end included).
+      const beyond = offAt(p, x.s) || merged.some(([a, b]) => (x.s > a + 1e-6 || a <= 1e-6) && (x.s < b - 1e-6 || b >= p.length - 1e-6));
+      if (beyond) { gone.add(x.stop); dropped++; }
+      else keep.push(x);
+    }
+    p.stops = keep;
+  }
+  if (gone.size) {
+    for (const e of net.entrances) e.stops = e.stops.filter(st => !gone.has(st));
+    net.entrances = net.entrances.filter(e => e.stops.length);
+    net.stats.stops -= gone.size;
+    net.stats.entrances = net.entrances.length;
+  }
+  net.edgeMarked = true;
+  net.stats.edgeStops = dropped;
+  return dropped;
 }
 
 export function nearestEntrance(net, x, z, maxR) {
