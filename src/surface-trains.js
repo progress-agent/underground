@@ -55,7 +55,7 @@ import { BODY_GREY } from './overground-trains.js';
 import { pathRange } from './tube-surface-rail.js';
 import { BASE_LIFT } from './surface-rail.js';
 import {
-  PROFILES, STOCK, LINE_STOCK, carLayout, buildNetwork, buildSegmentIndex, mapTubeCurve, mapSnapCurve,
+  PROFILES, STOCK, LINE_STOCK, carLayout, buildNetwork, buildSegmentIndex, mapTubeCurve, mapSnapCurve, drawnOpenFlags,
   runAt, sAt, sampleRun, laneOffset, laneDistance, computeCrossSlopes, profileGeometries, TRACK_ERROR_BOUND_M, LANE_SPACING_M,
 } from './surface-train-map.js';
 
@@ -68,11 +68,16 @@ export const TRAIN_SPHERE_MARGIN_M = 25; // lanes, body height and a curve's sag
 // ── Networks (from Lane R's built paths) ─────────────────────────────────────
 function canonicalOverground(p) { return { x: p.x, z: p.z, terrainY: p.terrainY, y: p.terrainY + p.liftM * VE, cls: p.cls }; }
 
-/** Track pieces of `lineId`: its own corridors and every shared-track stretch of another owner its colour is on. */
+/**
+ * Track pieces of `lineId`: its own corridors and every shared-track stretch of another owner its colour is on.
+ * Tube and DLR pieces carry `drawnOpen` (surface-train-map.js drawnOpenFlags, computed on the owner's whole path
+ * before a band is sliced from it), so a lone open sample Lane R does not draw carries no car (sprint 30Sep26w
+ * integration: the round-2 verifier found lone cars over bare ground at Aldgate, Victoria and Gloucester Road).
+ */
 export function linePieces({ lineId, data, ownerPaths, overground }) {
   const pieces = [];
   const isDlr = lineId === 'dlr';
-  for (const path of ownerPaths.get(lineId) || []) if (path && path.length >= 2) pieces.push({ pts: path, morph: !isDlr, own: true });
+  for (const path of ownerPaths.get(lineId) || []) if (path && path.length >= 2) pieces.push({ pts: path, morph: !isDlr, own: true, drawnOpen: drawnOpenFlags(path) });
   for (const line of data.lines) {
     if (line.id === lineId) continue;
     const paths = ownerPaths.get(line.id) || [];
@@ -81,7 +86,7 @@ export function linePieces({ lineId, data, ownerPaths, overground }) {
         if (!band.lines.includes(lineId) || !paths[bi]) continue;
         const r = pathRange(paths[bi], band.j0, band.j1);
         // A Tube owner's corridor: this line runs outside the owner's lanes, one LANE_SPACING_M per band (surface-train-map.js).
-        if (r) pieces.push({ pts: paths[bi].slice(r[0], r[1] + 1), morph: line.id !== 'dlr', owner: line.id, laneExtra: LANE_SPACING_M * Math.max(1, band.lines.indexOf(lineId)) });
+        if (r) pieces.push({ pts: paths[bi].slice(r[0], r[1] + 1), morph: line.id !== 'dlr', owner: line.id, laneExtra: LANE_SPACING_M * Math.max(1, band.lines.indexOf(lineId)), drawnOpen: drawnOpenFlags(paths[bi]).slice(r[0], r[1] + 1) });
       }
     });
   }

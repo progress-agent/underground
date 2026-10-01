@@ -359,6 +359,10 @@ test.describe('in one load', () => {
     // carried straight on past the end of the drawn track (Epping, Watford, Richmond, Stanmore, Kensington (Olympia));
     // the rest on the DLR's undrawn stretches and a blend cutting its curve at Canning Town; every DLR train dwelling at
     // the end of its curve was drawn as half a train.
+    // Sprint 30Sep26w integration: "drawn" means a segment whose two nodes are both drawn open track (Lane R draws no
+    // Tube tunnel segment, and no lone open sample between tunnel ones: surface-train-map.js drawnOpenFlags). Round 2
+    // measured to every segment, tunnel ones included, so lone cars over bare ground at Aldgate, Victoria and Gloucester
+    // Road (277 m from any drawn segment) passed it; the round-2 verifier's audit found them.
     const r = await page.evaluate(async () => {
       const u = window.__ug, st = u.surfaceTrains;
       const { trainStateAt } = await import('/src/trains.js');
@@ -377,7 +381,7 @@ test.describe('in one load', () => {
             const x = c.m[12], z = c.m[14]; let best = Infinity, ex = 0;
             const cs = net.cell, cx = Math.floor(x / cs), cz = Math.floor(z / cs);
             for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (const i of net.grid.get(`${cx + a},${cz + b}`) || []) for (const j of [i - 1, i + 1]) {
-              if (j < 0 || j >= net.n || net.piece[j] !== net.piece[i]) continue;
+              if (j < 0 || j >= net.n || net.piece[j] !== net.piece[i] || !net.open[i] || !net.open[j]) continue;
               const d = segDist(x, z, net.x[i], net.z[i], net.x[j], net.z[j]); if (d < best) { best = d; ex = net.extra[i]; }
             }
             const off = Math.max(0, best - (map.LANE_OFFSET_M + ex) - 1.5);
@@ -394,11 +398,11 @@ test.describe('in one load', () => {
     });
     console.log('ontrack', JSON.stringify(r));
     expect(r.cars).toBeGreaterThan(50000);
-    // No train standing at the end of its run is drawn off the drawn track, and nearly all are drawn whole (01Oct26h:
-    // 708 of 729; the rest stand partly in a tunnel mouth, or by Lane R's undrawn 100 m at Stratford's DLR).
+    // No train standing at the end of its run is drawn off the drawn track, and nearly all are drawn whole (01Oct26h,
+    // integration: 711 of 724; the rest stand partly in a tunnel mouth, or by Lane R's undrawn 100 m at Stratford's DLR).
     expect(r.off10AtEnds).toBe(0);
     expect(r.dwellWhole / r.dwellAtEnds).toBeGreaterThan(0.95);
-    // Nothing far off. What is left (01Oct26h: 23 cars, at most 21 m) crosses between drawn pieces at junctions Lane R's
+    // Nothing far off. What is left (01Oct26h, integration: 18 cars, at most 21.1 m) crosses between drawn pieces at junctions Lane R's
     // data leaves 20 to 40 m apart (Chalfont & Latimer, Abbey Road, Poplar): a train crossing a gap in the drawing.
     expect(r.off40).toBe(0);
     expect(r.max).toBeLessThan(25);

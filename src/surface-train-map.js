@@ -75,7 +75,10 @@
 // WHAT IS DRAWN. A car is drawn only where its centre is on open, drawn track
 // (sampleRun's `open` and `drawn`); everywhere else its underground twin, or
 // nothing, is. Every Tube run vertex is a node of the drawn track (or a fairing
-// of a junction between two drawn pieces), so for the Tube `drawn` is always 1.
+// of a junction between two drawn pieces), so for the Tube `drawn` is always 1;
+// `open` is 1 only where Lane R draws the node as open track (sprint 30Sep26w
+// integration: a lone open sample between tunnel ones is not drawn, so it is
+// tunnel here: surface-rail.js drawnOpenFlags, carried on each piece).
 //
 // THE ERROR BOUND (metres, plan, both train positions as drawn, lanes
 // included): measured by mappingErrors() (src/surface-trains.js) over every
@@ -273,10 +276,17 @@ export function profileGeometries(profile) {
 }
 
 // ── Track network ───────────────────────────────────────────────────────────
-// pieces: [{ pts: [{x, z, terrainY, y, cls}], morph }]. `y` is canonical (VE5
+// drawnOpenFlags (which samples of a Tube or DLR corridor Lane R draws as open
+// track) lives beside buildCorridor in surface-rail.js; re-exported here.
+export { drawnOpenFlags } from './surface-rail.js';
+
+// pieces: [{ pts: [{x, z, terrainY, y, cls}], morph, drawnOpen? }]. `y` is canonical (VE5
 // lifts, drawn through the rail morph: y' = base + (y - base) x ratio above
 // the terrain, untouched below it) when morph is true, or already at the
-// current structure scale when false (the DLR's own corridors).
+// current structure scale when false (the DLR's own corridors). `drawnOpen`
+// (optional, parallel to pts; drawnOpenFlags) says which samples are drawn as
+// open track; without it every non-tunnel sample is (the Overground's own
+// corridors, which draw every class).
 export function buildNetwork(pieces, { joinM = JOIN_M, cell = 100 } = {}) {
   let n = 0;
   for (const p of pieces) n += p.pts.length;
@@ -289,7 +299,7 @@ export function buildNetwork(pieces, { joinM = JOIN_M, cell = 100 } = {}) {
     const first = k;
     for (const s of p.pts) {
       x[k] = s.x; z[k] = s.z; base[k] = s.terrainY; y0[k] = s.y; morph[k] = p.morph ? 1 : 0;
-      open[k] = s.cls === 'tunnel' ? 0 : 1; piece[k] = pi; extra[k] = p.laneExtra || 0;
+      open[k] = p.drawnOpen ? (p.drawnOpen[k - first] ? 1 : 0) : (s.cls === 'tunnel' ? 0 : 1); piece[k] = pi; extra[k] = p.laneExtra || 0;
       if (k > first) { const d = Math.hypot(x[k] - x[k - 1], z[k] - z[k - 1]); adj[k].push(k - 1, d); adj[k - 1].push(k, d); }
       k++;
     }

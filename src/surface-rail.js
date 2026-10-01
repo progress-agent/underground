@@ -235,6 +235,24 @@ export function offsetBand(path, i0, i1, offA, offB, yFn) {
   return { a, b };
 }
 
+/**
+ * Which samples of a Tube or DLR corridor Lane R actually draws above ground
+ * (sprint 30Sep26w integration). buildCorridor below, with the
+ * skipTunnel option the Tube and DLR use, draws an open run only when it has
+ * two or more samples: a non-tunnel sample is drawn when at least one of its
+ * neighbours on the path is non-tunnel too. A lone 'surface' or 'cutting'
+ * sample with tunnel on both sides (nine of them in the data: Aldgate,
+ * Victoria, Great Portland Street, Gloucester Road, between Sloane Square and
+ * South Kensington) is not drawn, so no car may stand on it. Returns a
+ * Uint8Array, 1 where the sample is drawn open track.
+ */
+export function drawnOpenFlags(path) {
+  const n = path?.length || 0, f = new Uint8Array(n);
+  const open = i => path[i].cls !== 'tunnel';
+  for (let i = 0; i < n; i++) if (open(i) && ((i > 0 && open(i - 1)) || (i + 1 < n && open(i + 1)))) f[i] = 1;
+  return f;
+}
+
 // pierShortRuns (s30:R fix round 2; the DLR only, the Overground never passes
 // it): a viaduct run shorter than the pier spacing, which the spacing rule
 // leaves without a pier, stands on one at its middle sample.

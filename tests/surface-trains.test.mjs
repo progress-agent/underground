@@ -648,3 +648,34 @@ test('vertical fairing: a change between decks at different heights is a vertica
   // Away from the step each deck keeps its own height.
   assert.ok(Math.abs(yAt(100) - 20) < 1e-6 && Math.abs(yAt(run.length - 100) - 33) < 1e-6);
 });
+
+// ── Sprint 30Sep26w integration: only what Lane R draws carries a car ─────────
+test('a lone open sample between tunnel samples is not drawn track: no car, no portal (Lane R draws open runs of 2+ samples)', async () => {
+  const { drawnOpenFlags } = await import('../src/surface-train-map.js');
+  const { buildCorridor } = await import('../src/surface-rail.js');
+  const P = cls => cls.map((c, i) => ({ x: i * 12, z: 0, y: 20, terrainY: 20, cls: c }));
+  // surface-rail.js buildCorridor with skipTunnel (the Tube and DLR): a stripe for each open run of 2 or more samples.
+  const cls = ['tunnel', 'surface', 'tunnel', 'tunnel', 'cutting', 'surface', 'tunnel', 'surface'];
+  assert.deepEqual([...drawnOpenFlags(P(cls))], [0, 0, 0, 0, 1, 1, 0, 0]);
+  assert.deepEqual([...drawnOpenFlags(P(['surface']))], [0]);
+  assert.deepEqual([...drawnOpenFlags(P(['surface', 'viaduct', 'tunnel']))], [1, 1, 0]);
+  // Agreement with the renderer itself: the drawn stripe covers exactly the flagged samples.
+  for (const c of [cls, ['surface', 'tunnel', 'surface', 'surface'], ['tunnel', 'embankment', 'cutting', 'tunnel', 'surface', 'tunnel']]) {
+    const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
+    buildCorridor(P(c), out, { skipTunnel: true });
+    const covered = new Set();
+    for (const g of out.stripe) { const p = g.attributes.position; for (let i = 0; i < p.count; i++) covered.add(Math.round(p.getX(i) / 12)); }
+    const flags = drawnOpenFlags(P(c));
+    for (let i = 0; i < c.length; i++) assert.equal(covered.has(i), !!flags[i], `${c.join(',')} sample ${i}`);
+  }
+  // The mapping: an island at x = 504 inside the synthetic line's tunnel (west of x = 1000).
+  const island = () => { const pieces = track(); for (const p of pieces) for (const s of p.pts) if (s.x === 504) { s.cls = 'surface'; s.y = s.terrainY + 5; } return pieces; };
+  const { curve, stationUs } = chord();
+  const at504 = run => { const k = [...run.x].findIndex(x => Math.abs(x - 504) < 1e-6); assert.ok(k >= 0, 'the route passes the island'); const pt = {}; sampleRun(run, run.cum[k], 1, pt); return { open: pt.open, portals: [...run.portal].filter(Boolean).length }; };
+  const asBefore = buildNetwork(island());
+  const before = at504(mapTubeCurve({ curve, stationUs, stations: STATIONS, net: asBefore, cache: fresh(asBefore) }).runs[0]);
+  assert.equal(before.open, 1); assert.equal(before.portals, 3); // the fixture bites: round 2 drew a car there
+  const drawn = buildNetwork(island().map(p => ({ ...p, drawnOpen: drawnOpenFlags(p.pts) })));
+  const after = at504(mapTubeCurve({ curve, stationUs, stations: STATIONS, net: drawn, cache: fresh(drawn) }).runs[0]);
+  assert.equal(after.open, 0); assert.equal(after.portals, 1);
+});

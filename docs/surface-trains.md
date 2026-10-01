@@ -20,7 +20,7 @@ Every surface train is a tube train of `trains.js` (`trainSystem.allTrains`): it
 - a train advances while offscreen, and the shared pause and speed apply (the clock is `trainSystem.simTime`, which `updateTrains` advances by the frame's elapsed time times the speed, and not at all when paused);
 - a train leaving a portal carries on along the surface, and one entering a tunnel carries on in its bore.
 
-A car is drawn only where its centre is on open track (the drawn track's own class); in a tunnel the underground train, in its `line:` group, is the one drawn.
+A car is drawn only where its centre is on open track that Lane R draws; in a tunnel the underground train, in its `line:` group, is the one drawn. "Drawn" follows the renderer exactly (sprint 30Sep26w integration): `buildCorridor` draws a Tube or DLR open run only when it has two or more samples, so a lone `surface` or `cutting` sample with tunnel on both sides (nine in the data: Aldgate, Victoria twice, Great Portland Street, Gloucester Road, between Sloane Square and South Kensington) is not drawn, and the network treats it as tunnel (`drawnOpenFlags`, `surface-rail.js`). Before this, lone cars stood on bare ground there for whole dwells, up to 277 m from any drawn segment (the round 2 verifier's finding).
 
 ## The mapping
 
@@ -51,24 +51,26 @@ Measured in the app over 60 moments (every surface train, bundled routes), befor
 
 What fairing cannot remove is a junction where Lane R's drawn pieces do not meet: there the train crosses the gap as a crossover would, briefly over bare ground (the Central's Hainault loop joining the main line at Woodford, a Metropolitan junction by Harrow; captures F2 and F5). It no longer breaks apart there. The gaps themselves are the surface railway's to close; how far off the drawn track the trains run is measured below.
 
-### Off the drawn track (fix round 2)
+### Off the drawn track (fix round 2, and the integration)
 
 Round 1 said its fix added no off-track running, and put the off-track cars down to Lane R's junction gaps. The round 1 verifier measured it properly and found otherwise: most of the off-track running, and the worst of it, was this lane's own. Their audit, kept as the spec "cars ride the drawn track": over 40 moments (simulation time 640 s, then every 173 s), each drawn car's plan distance from the nearest drawn segment of its line's network, beyond its lane and a 1.5 m half-body. Bundled routes, Master 1.1, 01Oct26h; round 2's figures are the same in the verifier's load and in the spec's.
 
-| | Round 1 (`dfaeb96`) | Round 2 |
-|---|---|---|
-| Cars more than 10 m off | 705 of 68,065 | 18 of 68,690 |
-| of which in trains dwelling at their curve's first or last stop | 471 | 0 |
-| Cars more than 40 m off | 198 | 0 |
-| Furthest | 53.7 m | 21.1 m |
-| Trains dwelling at their curve's first or last stop drawn whole | 484 of 731 | 711 of 729 |
+| | Round 1 (`dfaeb96`) | Round 2 | Integration (drawn segments only) |
+|---|---|---|---|
+| Cars more than 10 m off | 705 of 68,065 | 18 of 68,690 | 18 of 68,673 |
+| of which in trains dwelling at their curve's first or last stop | 471 | 0 | 0 |
+| Cars more than 40 m off | 198 | 0 | 0 |
+| Furthest | 53.7 m | 21.1 m | 21.1 m |
+| Trains dwelling at their curve's first or last stop drawn whole | 484 of 731 | 711 of 729 | 711 of 724 |
+
+Round 2's figures measured each car against every segment of its line's network, tunnel segments included, and Lane R draws no Tube tunnel segment, so they were not a measure against the drawn track. The round 2 verifier measured against drawn segments only (both nodes drawn open) and found 28 car positions over 40 m, up to 277 m: lone cars at the nine isolated open samples above. The integration column is that measure, after the fix; the verifier's own 60-moment audit (simulation time 333 s, then every 211 s) gives 33 of 103,570 car centres more than 10 m off, none more than 40 m, worst 20.2 m, identical whether it counts every segment or drawn segments only.
 
 The three causes and their fixes:
 - **Termini and refused intervals** (471 of the 705): the end extension carried on straight past the drawn track. It now follows drawn track only, and a train standing there is fitted onto it (step 6 above).
 - **The DLR's undrawn stretches** (Lane R draws no DLR track within 35 m of the curve by Stratford and Abbey Road; 120 of 7,616 samples): the curve point carried the train and its cars were drawn there, up to 57 m from any drawn track. Such samples are now marked undrawn: the train keeps its progress through them, but no car is drawn whose centre is there.
 - **A fairing blend cutting a curve** (Canning Town, up to 43 m): blends now keep to the drawn track (Fairing, item 2).
 
-Every DLR train dwelling at the end of its curve was drawn as half a train, the half past the curve's end never drawn, though at most such stations the deck carries on. DLR runs now extend along the drawn deck and fit as the Tube's do (holding the approach at the speed bound's 0.6 instead of compressing). The 18 still drawn in part stand at an end of the drawn track that is tunnel (Aldgate, Earl's Court, Barking), where the cars past it are in the tunnel, or by Lane R's undrawn 100 m before Stratford's DLR platforms.
+Every DLR train dwelling at the end of its curve was drawn as half a train, the half past the curve's end never drawn, though at most such stations the deck carries on. DLR runs now extend along the drawn deck and fit as the Tube's do (holding the approach at the speed bound's 0.6 instead of compressing). The 13 still drawn in part (integration measure; 18 in round 2) stand at an end of the drawn track that is tunnel (Earl's Court, Barking), where the cars past it are in the tunnel, or by Lane R's undrawn 100 m before Stratford's DLR platforms. (Round 2 counted Aldgate here too, saying the missing cars were in the tunnel; in fact the one car drawn for each Metropolitan train there stood on a lone open sample with no drawn track under it. No car is drawn at Aldgate now.)
 
 What is left (18 cars at 10 places, the furthest 21 m) is all crossing between drawn pieces that Lane R's data leaves 20 to 40 m apart at junctions: the DLR by Abbey Road and east of Canning Town, the Metropolitan's Chesham branch at Chalfont & Latimer (its drawn piece stops about 30 m short of the main line) and by Harrow, and single cars elsewhere. Hiding those cars would break the train in two as it crosses; connecting the pieces is the surface railway's data to fix.
 
@@ -89,7 +91,7 @@ Remeasured after fix round 1 (01Oct26h). The pinned bounds (`PORTAL_ERROR_BOUND_
 
 For the Tube the portal figure is the chord curve's own distance from the tunnel mouth: the underground train is on the chord, so no mapping onto the drawn track can remove it. From above ground it never shows, because only the surface train is drawn there (D-040). From below ground both are drawn: the underground train runs on in its bore while its surface twin runs on the track. Moving the underground trains onto the real alignment would mean redrawing the bores, which is outside this lane.
 
-Per line (portal max / open-track p95 / open-track max, metres): Bakerloo 114 / 89 / 187; Central 271 / 167 / 280; Circle 140 / 90 / 142; District 451 / 345 / 628; Hammersmith & City 143 / 446 / 630; Jubilee 142 / 438 / 704; Metropolitan 490 / 643 / 847; Northern 254 / 155 / 275; Piccadilly 343 / 286 / 458; DLR 20 / 23 / 49. (The Circle's figures fell from 171 / 94 / 303 because its reversing Paddington to Bayswater route is now refused.)
+Per line (portal max / open-track p95 / open-track max, metres): Bakerloo 114 / 89 / 187; Central 271 / 167 / 312 (round 2's spec measures 311.9 m; 280 m was round 1's); Circle 140 / 90 / 142; District 451 / 345 / 628; Hammersmith & City 143 / 446 / 630; Jubilee 142 / 438 / 704; Metropolitan 490 / 643 / 847; Northern 254 / 155 / 275; Piccadilly 343 / 286 / 458; DLR 20 / 23 / 49. (The Circle's figures fell from 171 / 94 / 303 because its reversing Paddington to Bayswater route is now refused.)
 
 ### Shared track
 
