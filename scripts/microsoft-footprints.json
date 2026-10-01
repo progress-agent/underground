@@ -1,0 +1,90 @@
+{
+  "source": {
+    "name": "Microsoft Building Footprints (GlobalMLBuildingFootprints)",
+    "repository": "https://github.com/microsoft/GlobalMLBuildingFootprints",
+    "licence": "ODbL 1.0 (Open Data Commons Open Database License)",
+    "licenceUrl": "https://opendatacommons.org/licenses/odbl/",
+    "location": "UnitedKingdom",
+    "quadkey": "031313131",
+    "url": "https://minedbuildings.z5.web.core.windows.net/global-buildings/2026-02-03/global-buildings.geojsonl/RegionName=UnitedKingdom/quadkey=031313131/part-00024-4feead82-d499-422b-94cb-c036c212127a.c000.csv.gz",
+    "uploadDate": "2026-02-23",
+    "size": "113.1MB",
+    "sha256": "8b2700688908cbb81bf4521dd73b62e8f9bd45e6a308e65ed819e445a245965e",
+    "featuresInQuadkey": 968414
+  },
+  "rule": "Added only where no OpenStreetMap building (target tile or its eight neighbours) overlaps the footprint: exact intersection area > 1e-6 m2, or a proper edge crossing or a vertex strictly inside the other ring. Touching edges are not an overlap.",
+  "heightRule": "Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across the target tiles (heightBands); 10 m only for a band with no given heights.",
+  "heightBands": [
+    {
+      "fromM2": 20,
+      "toM2": 40,
+      "medianM": 3.6
+    },
+    {
+      "fromM2": 40,
+      "toM2": 80,
+      "medianM": 4.1
+    },
+    {
+      "fromM2": 80,
+      "toM2": 150,
+      "medianM": 5.5
+    },
+    {
+      "fromM2": 150,
+      "toM2": 400,
+      "medianM": 5.5
+    },
+    {
+      "fromM2": 400,
+      "toM2": 1500,
+      "medianM": 6.1
+    },
+    {
+      "fromM2": 1500,
+      "toM2": null,
+      "medianM": 7.6
+    }
+  ],
+  "assignment": "Tile whose lat/lon bounds hold the mean of the footprint ring vertices (south and west edges inclusive).",
+  "tiles": {
+    "tile_10_13.json": {
+      "osmBuildings": 858,
+      "candidates": 2306,
+      "belowFloor": 94,
+      "overlapOsm": 561,
+      "overlapOsmSliverUnder5pct": 6,
+      "added": 1651,
+      "heightGiven": 1387,
+      "heightFromBand": 264,
+      "buildingsAfter": 2509,
+      "medianAddedAreaM2": 131,
+      "medianAddedHeightM": 5.2,
+      "bytesBefore": 543390,
+      "bytesAfter": 1396645,
+      "sha256Before": "499a6ea246190a92279f784e24993ada880cc1dbd6ed4ee10b370349448cde67",
+      "sha256After": "db3f1e1b3f7ef9b3626a3d2e556e75fbac7c2dd872f86d10ca1301c651c3b95c"
+    },
+    "tile_10_14.json": {
+      "osmBuildings": 828,
+      "candidates": 2910,
+      "belowFloor": 186,
+      "overlapOsm": 531,
+      "overlapOsmSliverUnder5pct": 12,
+      "added": 2193,
+      "heightGiven": 1526,
+      "heightFromBand": 667,
+      "buildingsAfter": 3021,
+      "medianAddedAreaM2": 123,
+      "medianAddedHeightM": 4.9,
+      "bytesBefore": 473873,
+      "bytesAfter": 1618778,
+      "sha256Before": "a61862d23df7cb797b9f4cffa0e88b654afc20de538196496073b5ed7c754725",
+      "sha256After": "d2cc9624fc1553016079e9b62259113b7f8d86f18928a1b8800821e071de1dbf"
+    }
+  },
+  "totals": {
+    "added": 3844,
+    "manifestBuildings": 1428372
+  }
+}
