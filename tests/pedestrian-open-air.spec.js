@@ -84,7 +84,10 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 58000, via 
     const net = m.network, st = ug.surfaceTrains;
     const tn = st.networkFor(lineId), idx = tn.index || buildSegmentIndex(tn.net);
     const flare = document.getElementById('ug-portal-flare');
-    const a0 = m.debug().arrivals.length;
+    // Arrivals since the ride began, by the mode clock: the arrivals log keeps the last 64 only, so an index
+    // taken from its length stops counting once a long serial run has filled it (fix round 2: the fork test).
+    const c0 = m.debug().clock;
+    const since = (d) => d.arrivals.filter(a => a.at > c0);
     // A station's name without a parenthetical ("Cutty Sark (for Maritime Greenwich)"), matched whole
     // ("Upminster" is not "Upminster Bridge").
     const is = (name, want) => name === want || name.replace(/\s*\(.*\)$/, '') === want;
@@ -98,7 +101,7 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 58000, via 
       while (performance.now() - t0 < maxMs) {
         if (via) {
           const d0 = m.debug(), c = ug.camera.position;
-          while (vi < via.length && d0.arrivals.slice(a0).some(a => is(a.name, via[vi]))) vi++;
+          while (vi < via.length && since(d0).some(a => is(a.name, via[vi]))) vi++;
           let e = null;
           for (let k = vi; k < via.length && !e; k++) {
             const best = posOf(via[k]).sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
@@ -112,7 +115,7 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 58000, via 
           speed: d.tunnel?.speed ?? null, x: c.x, y: c.y, z: c.z, g: ug.modes.ctx.getTerrainY(c.x, c.z),
           inside: sampleM25Insideness(c.x, c.z), above: ug.aboveGroundView, cut: d.openAir.cut?.kind ?? null,
           flare: +getComputedStyle(flare).opacity, card: d.card?.kind ?? null, edge: d.atEdge, interior: d.interior.visible,
-          hint: document.getElementById('ug-mode-hint')?.textContent ?? '', arrivals: d.arrivals.length - a0 };
+          hint: document.getElementById('ug-mode-hint')?.textContent ?? '', arrivals: since(d).length };
         if (d.regime === 'open' && d.shown) {
           f.extra = d.shown.extra; f.lane = d.shown.lane; f.bridged = !!d.shown.bridged;
           f.dTrack = distanceToDrawn(tn.net, idx, c.x, c.z, 200);
@@ -122,14 +125,14 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 58000, via 
         }
         frames.push(f);
         if (d.phase !== 'tunnel') break;
-        if (until && d.arrivals.slice(a0).some(a => is(a.name, until))) break;
+        if (until && since(d).some(a => is(a.name, until))) break;
         if (stopAtEdge && d.atEdge && d.tunnel.speed === 0) break;
       }
     } finally {
       for (const k of keys) ug.fpsControls.keys.delete(k);
     }
     const d = m.debug();
-    return { frames, arrivals: d.arrivals.slice(a0), cuts: d.openAir.cuts, ratio: st.ratio, end: { tunnel: d.tunnel, regime: d.regime, atEdge: d.atEdge,
+    return { frames, arrivals: since(d), cuts: d.openAir.cuts, ratio: st.ratio, end: { tunnel: d.tunnel, regime: d.regime, atEdge: d.atEdge,
       edge: d.edge, hint: document.getElementById('ug-mode-hint')?.textContent ?? '' } };
   }, { lineId, until, keys, maxMs, via, stopAtEdge });
 }
@@ -499,7 +502,7 @@ test('the street only at the station: E pressed past a surface stop at 200 m/s b
     const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
     const frame = () => new Promise(res => requestAnimationFrame(res));
     const hintNow = () => document.getElementById('ug-mode-hint')?.textContent ?? '';
-    const a0 = m.debug().arrivals.length;
+    const c0 = m.debug().clock;   // arrivals by the clock, not the capped log's length
     ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
     let arr = null, d;
     const log = [];
@@ -507,7 +510,7 @@ test('the street only at the station: E pressed past a surface stop at 200 m/s b
     try {
       while (performance.now() - t0 < 30000) {
         await frame(); d = m.debug();
-        if (!arr && d.arrivals.length > a0) arr = { ...d.arrivals.at(-1) };
+        if (!arr && d.arrivals.at(-1)?.at > c0) arr = { ...d.arrivals.at(-1) };
         if (arr && d.clock - arr.at >= 0.5) break;
       }
       // Still moving at full speed, W and Shift held: E.
@@ -625,14 +628,14 @@ test('the overshoot: released 0.25 s after an arrival at 200 m/s, the walker sto
     const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
     const frame = () => new Promise(res => requestAnimationFrame(res));
     ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
-    const n0 = m.debug().arrivals.length;
+    const c0 = m.debug().clock;   // arrivals by the clock, not the capped log's length
     let arrClock = null, releaseS = null;
     const log = [];
     const t0 = performance.now();
     while (performance.now() - t0 < 30000) {
       await frame();
       const d = m.debug();
-      if (arrClock === null && d.arrivals.length > n0) arrClock = d.clock;
+      if (arrClock === null && d.arrivals.at(-1)?.at > c0) arrClock = d.clock;
       if (arrClock !== null && releaseS === null && d.clock - arrClock >= 0.25) {
         ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift'); releaseS = d.tunnel.s;
       }
@@ -650,6 +653,95 @@ test('the overshoot: released 0.25 s after an arrival at 200 m/s, the walker sto
   expect(Math.abs(r.end - r.stop.s), 'back at the stop').toBeLessThan(0.5);
   expect(r.card?.kind).toBe('arrival');
   expect(r.rows[0]).toBe('Up to the street');
+  await page.keyboard.press('Escape');
+});
+
+// Fix round 2 (the verifier: District, Elm Park toward Hornchurch at 200 m/s, E pressed 25 to 55 m past the stop,
+// inside its platform zone and still at speed, the natural press in reaction to the arrival banner: the card
+// opened at once, the braking carried the walker out of the zone, the card closed, and the walker came to rest
+// 77 to 106 m past with no card and the arrival marked as seen; Warren Street in the bore the same). E on the
+// platform at speed now stops the walker at the station: brake to rest, then the card on the platform, or the
+// glide back where the braking left it and then the card. Covered: the window the verifier found at 200 m/s
+// and at 60 m/s, W held and W released, the press on the approach, a stop in the bore, and the press just past
+// the stop where the walker comes to rest inside the zone (the control, where the card already stayed).
+test('E on the platform at speed stops the walker at the station: at rest the card opens there, after the glide back if the braking carried it off the platform', async () => {
+  // Presses are set from the zone's end (63 m today): braking takes 50 m from 200 m/s and 15 m from 60 m/s, so
+  // the first three and the last come to rest beyond the zone, where the card was lost.
+  const z = Math.round(K.zone);
+  const cases = [
+    { lineId: 'district', from: 'Elm Park', to: 'Hornchurch', press: z - 38, sprint: true, release: false },
+    { lineId: 'district', from: 'Elm Park', to: 'Hornchurch', press: z - 18, sprint: true, release: true },
+    { lineId: 'district', from: 'Elm Park', to: 'Hornchurch', press: z - 11, sprint: false, release: false },
+    { lineId: 'district', from: 'Elm Park', to: 'Hornchurch', press: -30, sprint: true, release: false },
+    { lineId: 'district', from: 'Elm Park', to: 'Hornchurch', press: 5, sprint: true, release: false },
+    { lineId: 'victoria', from: 'Oxford Circus', to: 'Warren Street', press: z - 23, sprint: true, release: false },
+  ];
+  const lines = [], beyond = [];
+  for (const c of cases) {
+    const at = await placeAt(c.lineId, c.from, c.to);
+    expect(at, `${c.lineId} ${c.from}`).not.toBeNull();
+    const r = await page.evaluate(async ({ c, at }) => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const frame = () => new Promise(res => requestAnimationFrame(res));
+      const hintNow = () => document.getElementById('ug-mode-hint')?.textContent ?? '';
+      const net = m.network, p = net.paths[at.path];
+      const st = p.stops.find(x => x.stop.name.startsWith(c.to) && (x.s - at.s) * at.dir > 0);
+      // Start 600 m short of the stop (still between the two stations), so each case is a few seconds' walk.
+      const s0 = Math.abs(st.s - at.s) > 700 ? st.s - at.dir * 600 : at.s;
+      m.placeInTunnel({ path: at.path, s: s0, dir: at.dir });
+      for (let i = 0; i < 3; i++) await frame();
+      const keys = c.sprint ? ['w', 'shift'] : ['w'];
+      for (const k of keys) ug.fpsControls.keys.add(k);
+      const signed = (d) => (d.tunnel.s - st.s) * at.dir;   // + past the stop, - short of it
+      let d, pressed = null;
+      const log = [];
+      const t0 = performance.now();
+      try {
+        while (performance.now() - t0 < 20000) {
+          await frame(); d = m.debug();
+          if (d.phase !== 'tunnel') break;
+          if (signed(d) >= c.press) break;
+        }
+        pressed = { past: signed(d), speed: d.tunnel.speed, phase: d.phase };
+        m.press('use');
+        if (c.release) { await frame(); for (const k of keys) ug.fpsControls.keys.delete(k); }
+        const t1 = performance.now();
+        while (performance.now() - t1 < 5000) {
+          await frame(); d = m.debug();
+          log.push({ past: signed(d), v: d.tunnel?.speed ?? null, card: d.card?.kind ?? null, glide: !!d.glide, halt: d.halt, hint: hintNow() });
+          if (d.card?.kind === 'arrival' && d.tunnel?.speed === 0 && !d.glide) break;   // settled with the card
+        }
+      } finally { for (const k of keys) ug.fpsControls.keys.delete(k); }
+      const rest = log.find(f => f.v === 0) ?? null;   // the first frame at rest (the glide, if any, begins on it)
+      return { stop: st.stop.name, pressed, rest, end: log.at(-1), glided: log.some(f => f.glide), n: log.length,
+        cardOff: log.filter(f => f.card === 'arrival' && Math.abs(f.past) > 0).map(f => f.past),
+        firstHints: log.slice(0, 3).map(f => f.hint), rows: m.debug().chooser.rows };
+    }, { c, at });
+    const label = `${c.to} at ${c.sprint ? 200 : 60} m/s, E ${c.press} m ${c.press < 0 ? 'short of' : 'past'} the stop${c.release ? ', W released' : ''}`;
+    // The case is the one meant: E pressed on the platform, at full speed.
+    expect(r.pressed.phase, label).toBe('tunnel');
+    expect(Math.abs(r.pressed.past), `${label}: pressed on the platform`).toBeLessThanOrEqual(K.zone);
+    expect(r.pressed.speed, `${label}: pressed at speed`).toBeGreaterThan((c.sprint ? 200 : 60) * 0.95);
+    // The end: the walker at rest at the station with its card, never left past it without one.
+    expect(r.end.card, `${label}: the card opens (${JSON.stringify(r.end)})`).toBe('arrival');
+    expect(r.end.v, label).toBe(0);
+    expect(Math.abs(r.end.past), `${label}: the card on the platform`).toBeLessThanOrEqual(K.zone);
+    expect(r.rows[0]).toBe('Up to the street');
+    // Where the braking left the platform: the glide back, and the card at the stop.
+    expect(r.rest, `${label}: came to rest`).not.toBeNull();
+    if (Math.abs(r.rest.past) > K.zone) {
+      beyond.push(`${c.to} ${c.sprint ? 200 : 60}`);
+      expect(r.glided, `${label}: rest ${r.rest.past.toFixed(0)} m past, then the glide back`).toBe(true);
+      expect(Math.abs(r.end.past), `${label}: back at the stop`).toBeLessThan(0.5);
+    }
+    for (const x of r.cardOff) expect(Math.abs(x), `${label}: the card only on the platform`).toBeLessThanOrEqual(K.zone);
+    // Stopping, said at once (the hint is written before the press is read, so it follows a frame later).
+    expect(r.firstHints.some(h => new RegExp(`^(Stopping at|Back to) ${c.to}`).test(h)), `${label}: ${r.firstHints.join(' | ')}`).toBe(true);
+    lines.push(`${label}: rest ${r.rest.past.toFixed(0)} m, card at ${r.end.past.toFixed(1)} m${r.glided ? ' after the glide back' : ''}`);
+  }
+  test.info().annotations.push({ type: 'E at speed', description: lines.join('; ') });
+  // The window the verifier found was exercised: at rest past the zone at 200 m/s, at 60 m/s and in the bore.
+  expect(beyond, 'cases that came to rest beyond the platform zone').toEqual(expect.arrayContaining(['Hornchurch 200', 'Hornchurch 60', 'Warren Street 200']));
   await page.keyboard.press('Escape');
 });
 

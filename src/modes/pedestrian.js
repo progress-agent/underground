@@ -96,7 +96,10 @@
 //     possible to exit them at stations"): the arrival card is on offer on
 //     the station's platform and closes when the walker walks off it; off the
 //     platform after an arrival, E brings the walker back (brake to rest, the
-//     glide, then the card). "Up to the street" is taken from the station, not
+//     glide, then the card); on the platform at speed (fix round 2), E stops
+//     the walker at the station (brake to rest, then the card, after the glide
+//     back where the braking carried it off the platform), and at rest it
+//     opens the card at once. "Up to the street" is taken from the station, not
 //     from where the walker stands, and where the station is shown in the
 //     other regime (a covered box with open air inside its platform zone, or
 //     the reverse) a cut takes the walker there first. A W or S held as a
@@ -210,9 +213,10 @@ export function createPedestrianMode(ctx) {
   let atEdge = false;                     // held at the map edge
   let brakeFrom = null;                   // the speed braking began at (the rate is held at its start)
   // Fix round 1: the street is on offer at the station only. Off the platform after an arrival, E brings
-  // the walker back (`halt`: brake to rest, then the glide, then the card). A W or S held when a halt, a
-  // glide or the card began does not walk on (`latch`); a fresh press does.
-  let halt = null;                        // { holdM } braking for the glide back to the stop arrived at
+  // the walker back (`halt`: brake to rest, then the glide, then the card); fix round 2: so does E on the
+  // platform at speed (brake to rest, then the card, after the glide if the braking left the platform).
+  // A W or S held when a halt, a glide or the card began does not walk on (`latch`); a fresh press does.
+  let halt = null;                        // { holdM } braking to rest, for the card or the glide back to the stop
   let latch = null;                       // the held W/S (+1 / -1) that is ignored until released
   let lastForward = 0;                    // W/S as read this frame (the latch takes it)
   // ── /s01:P ──
@@ -709,13 +713,25 @@ export function createPedestrianMode(ctx) {
     if (stop) {
       const name = cleanLabel(stop.name);
       if (card?.kind === 'arrival') hint(`${name}: choose (1-9 or click) · W/S walk on · Esc to stay`);
+      else if (onPlatform && halt) hint(`Stopping at ${name} · W/S walk on`);   // s01:P fix round 2
       else if (onPlatform) hint(`E: exits and changes at ${name} · W/S walk · Shift sprint`);
       else if (glide || halt) hint(`Back to ${name} · W/S walk on`);
       else hint(`E: back to ${name} · W/S walk on · Shift sprint`);
       if (use) {
         if (card?.kind === 'arrival') closeCard();
-        else if (onPlatform) { glide = null; halt = null; openArrivalCard(onPlatform); }
-        else if (!glide && !halt) {
+        else if (onPlatform && tunnelSpeed < REST_MPS) { glide = null; halt = null; openArrivalCard(onPlatform); }
+        else if (onPlatform) {
+          // s01:P fix round 2: E on the platform at speed (the natural press, in reaction to the arrival
+          // banner) stops the walker at this station: brake to rest, then the card where it stands on the
+          // platform, or, where the braking carried it off the platform, the glide back and then the card.
+          // The card used to open at once and was closed again as the braking took the walker out of the
+          // zone, leaving it at rest past the station with no card and the arrival marked as seen.
+          glide = null;
+          if (!arrived) arrived = { stop: onPlatform, dismissed: false };   // on approach, or after a change
+          halt = { holdM: Math.max(ARRIVAL_HOLD_M, arrivalDistance(onPlatform) + tunnelSpeed * 0.3 + 5) };
+          latch = lastForward !== 0 ? lastForward : null;
+          arrived.dismissed = false;
+        } else if (!glide && !halt) {
           // s01:P off the platform E brings the walker back: brake to rest, glide back to the stop, then
           // the card there (the street is never offered away from the station). The arrival is kept for
           // as long as the braking takes.
