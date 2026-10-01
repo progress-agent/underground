@@ -347,18 +347,21 @@ for (const [leg, from, toward, until] of [[1, 'Swiss Cottage', 'Finchley Road', 
     expect(r.arrivals.map(a => a.name)).toContain(until);
     checkOpenFrames(r, `Jubilee leg ${leg}`);
     if (leg === 1) {
-      // Lane R removes the Jubilee's 227 m stub beside West Hampstead (sprint 01Oct26h); once it is gone from
-      // the data, nothing between Finchley Road and Kilburn is in the bore.
+      // Lane R removed the Jubilee's 227 m stub beside West Hampstead (sprint 01Oct26h): West Hampstead is an
+      // open-air station in the data, and nothing between Finchley Road and Kilburn is in the bore. Made
+      // unconditional at integration, now that lane R's data is merged.
       const fixed = await page.evaluate(() => {
         const L = window.__ug.surfaceRail.data.lines.find(l => l.id === 'jubilee');
         const wh = L.stations.find(s => /West Hampstead/.test(s.name));
         return !!wh && (wh.surface === true || wh.trackClass !== 'tunnel');
       });
+      expect(fixed, 'West Hampstead is open-air in the surface data (lane R dropped the stub)').toBe(true);
       const i0 = r.arrivals.findIndex(a => a.name === 'Finchley Road') + 1, i1 = r.arrivals.findIndex(a => a.name === 'Kilburn') + 1;
       expect(i0).toBeGreaterThan(0); expect(i1).toBeGreaterThan(i0);
       const between = r.frames.filter(f => f.arrivals >= i0 && f.arrivals < i1);
-      test.info().annotations.push({ type: 'West Hampstead stub', description: fixed ? 'fixed in the data: no bore frames allowed' : `still in the data: ${between.filter(f => f.regime === 'bore').length} bore frames` });
-      if (fixed) expect(between.filter(f => f.regime === 'bore').length).toBe(0);
+      expect(between.length, 'frames walked between Finchley Road and Kilburn').toBeGreaterThan(0);
+      expect(r.arrivals.map(a => a.name), 'West Hampstead arrived at between them').toContain('West Hampstead');
+      expect(between.filter(f => f.regime === 'bore').length, 'no bore frame between Finchley Road and Kilburn').toBe(0);
     }
   });
 }
