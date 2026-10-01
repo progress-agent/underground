@@ -25,19 +25,12 @@ function harness(){
 }
 const pixels=q=>q.scale*q.scale;
 const levelOf=(scale,samples)=>QUALITY_LEVELS.findIndex(q=>q.scale===scale&&q.samples===samples&&!q.shadows);
-// D-040: what the clouds cost in these models (level 1 thins them before
-// level 2 drops shadows). Sprint 25Sep26f's clouds on the M5 as lived: full
-// clouds 1.5ms over thinned ones at street, 0.8ms at the river. D-041's clouds
-// (half the cover; fewer, larger puffs lit as one body) drew their sprites for
-// about two thirds of the old cost on the Mac Studio's M2 Max (street 0.28
-// against 0.41ms, river 0.17 against 0.26ms; 30Sep26w, measure-cloud-cost.mjs),
-// so these models scale the M5 figures by that. PROVISIONAL: measured on an M2
-// Max, not the M5; re-measure on the M5 before promotion.
-const CLOUD_COST_SCALE=0.67;
-const CLOUDS_FULL_OVER_THIN=1.5*CLOUD_COST_SCALE; // street, ~1.0ms
-const CLOUDS_THIN_SAVES=0.8*CLOUD_COST_SCALE;     // river, ~0.54ms
-// The rung that thins the clouds and keeps shadows, by meaning.
-const THIN_WITH_SHADOWS=QUALITY_LEVELS.findIndex(q=>q.shadows&&q.clouds==='thin');
+// D-043 (01Oct26h): every cloud inside the map is always drawn, at every rung.
+// What the clouds cost is therefore the same at every rung of these models: a
+// constant in the frame time, never something a drop can shed. (From D-040 to
+// D-043 a rung between full quality and shadows-off thinned the clouds; these
+// models then charged ~1ms more for full clouds than thinned ones.)
+const CLOUDS_MS=1.0;
 
 test('sustained whole-city overload lowers quality, bounded at the floor',()=>{
  // GPU-bound: 200ms at full quality, only the 35% floor fits the budget.
@@ -68,30 +61,35 @@ test('a failed upward probe restores the sustainable level and backs off',()=>{
  assert.ok(h.changes.length-before<=6,`changes in 60s: ${h.changes.length-before}`);
 });
 
-test('clouds thin first, then shadows go, and no lower rung brings either back',()=>{
+test('shadows are the first thing to go, no lower rung brings them back, and no rung touches the clouds',()=>{
  const h=harness();h.sim(model({cpu:6,gpu:30}),6000);
- const pick=c=>({scale:c.scale,samples:c.samples,shadows:c.shadows,clouds:c.clouds});
- assert.deepEqual(pick(h.changes[1]),{scale:1,samples:4,shadows:true,clouds:'thin'});
- assert.deepEqual(pick(h.changes[2]),{scale:1,samples:4,shadows:false,clouds:'thin'});
- assert.deepEqual(QUALITY_LEVELS[0],{scale:1,samples:4,shadows:true,clouds:'full'});
- assert.equal(FIRST_UNSHADOWED,2);
- for(const q of QUALITY_LEVELS.slice(1))assert.equal(q.clouds,'thin');
+ const pick=c=>({scale:c.scale,samples:c.samples,shadows:c.shadows});
+ assert.deepEqual(pick(h.changes[1]),{scale:1,samples:4,shadows:false});
+ assert.deepEqual(QUALITY_LEVELS[0],{scale:1,samples:4,shadows:true});
+ // The no-shadow rung is the very next one after full quality (D-043 removed
+ // D-040's thinned-clouds rung between them; the ladder is 15 rungs again).
+ assert.equal(FIRST_UNSHADOWED,1);
+ assert.deepEqual(QUALITY_LEVELS[FIRST_UNSHADOWED],{scale:1,samples:4,shadows:false});
+ assert.equal(QUALITY_LEVELS.length,15);
  for(const q of QUALITY_LEVELS.slice(FIRST_UNSHADOWED))assert.equal(q.shadows,false);
+ // A rung is resolution, edge smoothing and shadows; nothing else, so no rung can thin a cloud.
+ for(const q of QUALITY_LEVELS)assert.deepEqual(Object.keys(q).sort(),['samples','scale','shadows']);
 });
-test('a view that fits with thin clouds keeps its shadows, and does not bounce',()=>{
- // Full clouds push the frame to 19.6ms (past the 19ms shadow line); thinned
- // clouds bring it to 18.6ms, inside it. Shadows stay; the clouds stay thin.
- // (D-041: base 17.4ms with ~1.0ms of full clouds; 17ms with 1.5ms before.)
- const h=harness();const cost=(q,k)=>17.4+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05);
- h.sim(cost,20000);assert.deepEqual(h.controller.get(),{level:THIN_WITH_SHADOWS,...QUALITY_LEVELS[THIN_WITH_SHADOWS]});
+test('every cloud drawn at every rung: a view that cannot afford its shadows drops them and holds',()=>{
+ // Clouds ~1ms at every rung, shadows 1.2ms: 19.1ms with shadows (past the
+ // 19ms shadow line), 17.9ms without (inside the band). Shadows go, the clouds
+ // stay, and it holds at the no-shadow rung without bouncing.
+ const cost=(q,k)=>16.9+CLOUDS_MS+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05);
+ const h=harness();h.sim(cost,20000);
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
  const settle=h.changes.length;h.sim(cost,90000);
- assert.equal(h.controller.get().level,THIN_WITH_SHADOWS);
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
  assert.ok(h.changes.length-settle<=6,`changes in 90s: ${h.changes.length-settle}`);
 });
-test('full clouds come back once the view is light again',()=>{
- const h=harness();h.sim((q,k)=>17.4+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),20000);
- assert.equal(h.controller.get().level,THIN_WITH_SHADOWS);
- h.sim((q,k)=>13+(q.clouds==='full'?CLOUDS_FULL_OVER_THIN:0)+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),30000);
+test('every cloud drawn at every rung: shadows come back once the view is light again',()=>{
+ const h=harness();h.sim((q,k)=>16.9+CLOUDS_MS+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),20000);
+ assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
+ h.sim((q,k)=>13+CLOUDS_MS+(q.shadows?1.2:0)+0.2*Math.sin(k*0.05),30000);
  assert.equal(h.controller.get().level,0);
 });
 test('rungs are fine: no step removes more than a quarter of the pixels',()=>{
@@ -148,7 +146,6 @@ test('uncapped fast display with ample headroom does not bounce between rungs',(
 // 17.7 to 18ms with shadows on the M5, and its window means wander above the
 // 1.10 band (18.3ms). The e367efd controller (p75 over 19ms) kept shadows
 // there in every run; the shadows rung must be at least as tolerant.
-// Clouds were not in the view these tests model; the thin rung saves nothing here.
 const riverLike=(base)=>(q,k)=>(q.shadows?base:base-1.5)+0.7*Math.sin(k*0.02);
 test('a ~56 fps view with shadows (river at Greenwich) keeps them',()=>{
  for(const base of [17.7,17.9,18.1]){
@@ -159,13 +156,14 @@ test('a ~56 fps view with shadows (river at Greenwich) keeps them',()=>{
 });
 test('a probe back up to shadows at ~56 fps holds',()=>{
  // Pushed off shadows by a heavy moment, then back at the river view.
- const h=harness();h.sim(()=>24,6000);assert.ok(h.controller.get().level>=FIRST_UNSHADOWED);
+ // (4s as before D-040; D-040's extra cloud rung needed 6s to get past it.)
+ const h=harness();h.sim(()=>24,4000);assert.ok(h.controller.get().level>=FIRST_UNSHADOWED);
  h.sim(riverLike(17.9),90000);
  assert.equal(h.controller.get().shadows,true,JSON.stringify(h.controller.state().history.slice(-6)));
 });
-test('shadows go straight after the clouds once a view is clearly below ~52 fps',()=>{
+test('shadows still go first once a view is clearly below ~52 fps',()=>{
  const h=harness();h.sim((q,k)=>(q.shadows?20.5:17)+0.3*Math.sin(k*0.02),10000);
- assert.equal(h.changes[1].clouds,'thin');assert.equal(h.changes[2].shadows,false);
+ assert.equal(h.changes[1].shadows,false);assert.equal(h.changes[1].scale,1);
  assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
 });
 test('arriving at a ~56 fps view without shadows probes back up to them',()=>{
@@ -173,8 +171,9 @@ test('arriving at a ~56 fps view without shadows probes back up to them',()=>{
  // line (17.17ms), below the old controller's 17.5ms. Shadows cost ~0.8ms more.
  for(const base of [17.1,17.3]){
   // A heavy moment with shadows on (21ms) pushes it off shadows and no further.
-  const h=harness();h.sim(q=>q.shadows?21:base,6000);assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
-  h.sim((q,k)=>(q.shadows?base+0.8:base)+(q.clouds==='full'?CLOUDS_THIN_SAVES:0)+0.1*Math.sin(k*0.02),40000);
+  // (4s and 30s as before D-040; its extra cloud rung needed 6s and 40s.)
+  const h=harness();h.sim(q=>q.shadows?21:base,4000);assert.equal(h.controller.get().level,FIRST_UNSHADOWED);
+  h.sim((q,k)=>(q.shadows?base+0.8:base)+0.1*Math.sin(k*0.02),30000);
   assert.equal(h.controller.get().shadows,true,`base ${base}: ${JSON.stringify(h.controller.state().history.slice(-4))}`);
  }
 });

@@ -14,6 +14,7 @@
 // sprint; integration measures shadows on versus off serially.
 
 import { test, expect } from '@playwright/test';
+import { FIRST_UNSHADOWED } from '../src/adaptive-quality.js';
 
 async function boot(page, url = '/?fast=1&buildings=baked') {
   await page.goto(url);
@@ -146,13 +147,15 @@ test('Automatic quality drops shadows first, before resolution', async ({ page }
   expect(await page.evaluate(() => window.__ug.adaptiveQuality.get().shadows)).toBe(true);
   expect(await page.evaluate(() => window.__ugSun.status.active)).toBe(true);
   await page.evaluate(() => { window.__slowFrameProbe = true; });
-  // First observation without shadows (level 2; level 1 only thins the
-  // clouds, D-040): resolution is still full.
+  // First observation without shadows: the no-shadow rung, straight after full
+  // quality (D-043 removed D-040's thinned-clouds rung between them), with
+  // resolution and edge smoothing still full.
   const first = await (await page.waitForFunction(() => {
     const u = window.__ug, a = u.adaptiveQuality.get();
-    return a.shadows === false ? { level: a.level, shadows: a.shadows, clouds: a.clouds, scale: u.renderQuality.get().scale, samples: u.renderQuality.get().samples } : false;
+    return a.shadows === false ? { level: a.level, shadows: a.shadows, scale: u.renderQuality.get().scale, samples: u.renderQuality.get().samples } : false;
   }, null, { timeout: 20000, polling: 'raf' })).jsonValue();
-  expect(first).toEqual({ level: 2, shadows: false, clouds: 'thin', scale: 1, samples: 4 });
+  expect(first).toEqual({ level: FIRST_UNSHADOWED, shadows: false, scale: 1, samples: 4 });
+  expect(FIRST_UNSHADOWED).toBe(1);
   await page.waitForFunction(() => window.__ugSun.status.adaptiveShadows === false && window.__ugSun.status.active === false);
   // The user's toggle is untouched: Automatic only suspends shadows.
   expect(await page.evaluate(() => window.__ugSun.shadowsEnabled)).toBe(true);

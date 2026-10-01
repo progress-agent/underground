@@ -9,7 +9,7 @@ import {
   applyShadowPolicy, buildingDepthMaterial,
 } from '../src/sun.js';
 import { createAtmosphere, updateLighting, updateEnvironment, setAirSun, LEGACY_SUN_POSITION } from '../src/environment.js';
-import { QUALITY_LEVELS, createAdaptiveQuality } from '../src/adaptive-quality.js';
+import { QUALITY_LEVELS, FIRST_UNSHADOWED, createAdaptiveQuality } from '../src/adaptive-quality.js';
 import { getBuildingMaterial } from '../src/surface-geometry.js';
 
 const DEG = Math.PI / 180;
@@ -190,18 +190,18 @@ test('shadow policy: buildings, landmarks and bridges cast; terrain receives; un
   assert.deepEqual([lm.castShadow, lm.receiveShadow], [true, true]);
 });
 
-test('Automatic ladder thins the clouds, then drops shadows, before any resolution or smoothing', () => {
-  // D-040 (Jordan's answer (c), 26Sep26s): clouds thin before shadows go.
-  assert.deepEqual(QUALITY_LEVELS[0], { scale: 1, samples: 4, shadows: true, clouds: 'full' });
-  assert.deepEqual(QUALITY_LEVELS[1], { scale: 1, samples: 4, shadows: true, clouds: 'thin' });
-  assert.deepEqual(QUALITY_LEVELS[2], { scale: 1, samples: 4, shadows: false, clouds: 'thin' });
-  assert.ok(QUALITY_LEVELS.slice(2).every(l => l.shadows === false), 'no lower rung restores shadows');
-  // Moderate overload (25ms frames): clouds thin, then shadows go, resolution untouched.
+test('Automatic ladder drops shadows first, before any resolution or smoothing', () => {
+  // D-043 (01Oct26h) removed D-040's thinned-clouds rung: every cloud is always
+  // drawn, so shadows are again the first thing Automatic gives up.
+  assert.deepEqual(QUALITY_LEVELS[0], { scale: 1, samples: 4, shadows: true });
+  assert.deepEqual(QUALITY_LEVELS[FIRST_UNSHADOWED], { scale: 1, samples: 4, shadows: false });
+  assert.equal(FIRST_UNSHADOWED, 1, 'the rung straight after full quality');
+  assert.ok(QUALITY_LEVELS.slice(FIRST_UNSHADOWED).every(l => l.shadows === false), 'no lower rung restores shadows');
+  // Moderate overload (25ms frames): the first change is shadows only.
   let now = 0; const changes = [];
   const c = createAdaptiveQuality({ apply: q => changes.push({ ...q }) });
   c.start(now);
-  while (changes.length < 3) { now += 25; c.update(25, now); }
-  assert.deepEqual(changes[1], { scale: 1, samples: 4, shadows: true, clouds: 'thin' });
-  assert.deepEqual(changes[2], { scale: 1, samples: 4, shadows: false, clouds: 'thin' });
-  assert.equal(c.get().level, 2);
+  while (changes.length < 2) { now += 25; c.update(25, now); }
+  assert.deepEqual(changes[1], { scale: 1, samples: 4, shadows: false });
+  assert.equal(c.get().level, FIRST_UNSHADOWED);
 });
