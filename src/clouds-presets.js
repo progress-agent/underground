@@ -50,8 +50,9 @@ export const CLOUD_PRESETS = Object.freeze({
     shadowSkyShare: 0.65,
     // Shadows and the low-sun fade (degrees of solar elevation).
     shadowSunFadeDeg: [3, 9],
-    // Above the clouds the layer thins to about a third (Jordan, answer 2).
-    thinAbove: 1 / 3,
+    // (Above the clouds the layer thins to about a third, Jordan's answer 2:
+    // that is how any sky is drawn, so it lives in clouds.js CLOUD_CONFIG.above,
+    // not here. The unused `thinAbove` field went in D-043.)
     // Fade out towards the M25 edge: signed distance inside the map edge, in
     // metres, over which clouds and their shadows fade to nothing.
     edgeFadeM: [600, 7000],
