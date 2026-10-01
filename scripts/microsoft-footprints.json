@@ -13,42 +13,95 @@
     "featuresInQuadkey": 968414
   },
   "rule": "Added only where no OpenStreetMap building (target tile or its eight neighbours) overlaps the footprint: exact intersection area > 1e-6 m2, or a proper edge crossing or a vertex strictly inside the other ring. Touching edges are not an overlap.",
-  "heightRule": "Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across the target tiles (heightBands); 10 m only for a band with no given heights.",
-  "heightBands": [
+  "heightRule": "Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band within the tile's height pool (heightPools: the tiles merged together in one sprint), never across pools, so adding a pool leaves earlier tiles byte-identical; 10 m only for a band with no given heights.",
+  "heightPools": [
     {
-      "fromM2": 20,
-      "toM2": 40,
-      "medianM": 3.6
+      "pool": "30Sep26w",
+      "decision": "D-041",
+      "areas": "Park Royal and West Acton",
+      "tiles": [
+        "tile_10_13.json",
+        "tile_10_14.json"
+      ],
+      "heightBands": [
+        {
+          "fromM2": 20,
+          "toM2": 40,
+          "medianM": 3.6
+        },
+        {
+          "fromM2": 40,
+          "toM2": 80,
+          "medianM": 4.1
+        },
+        {
+          "fromM2": 80,
+          "toM2": 150,
+          "medianM": 5.5
+        },
+        {
+          "fromM2": 150,
+          "toM2": 400,
+          "medianM": 5.5
+        },
+        {
+          "fromM2": 400,
+          "toM2": 1500,
+          "medianM": 6.1
+        },
+        {
+          "fromM2": 1500,
+          "toM2": null,
+          "medianM": 7.6
+        }
+      ]
     },
     {
-      "fromM2": 40,
-      "toM2": 80,
-      "medianM": 4.1
-    },
-    {
-      "fromM2": 80,
-      "toM2": 150,
-      "medianM": 5.5
-    },
-    {
-      "fromM2": 150,
-      "toM2": 400,
-      "medianM": 5.5
-    },
-    {
-      "fromM2": 400,
-      "toM2": 1500,
-      "medianM": 6.1
-    },
-    {
-      "fromM2": 1500,
-      "toM2": null,
-      "medianM": 7.6
+      "pool": "01Oct26h",
+      "decision": "D-043",
+      "areas": "North Acton, East Acton, Harlesden and Willesden Junction",
+      "tiles": [
+        "tile_11_13.json",
+        "tile_11_14.json"
+      ],
+      "heightBands": [
+        {
+          "fromM2": 20,
+          "toM2": 40,
+          "medianM": 4.3
+        },
+        {
+          "fromM2": 40,
+          "toM2": 80,
+          "medianM": 5.2
+        },
+        {
+          "fromM2": 80,
+          "toM2": 150,
+          "medianM": 5.6
+        },
+        {
+          "fromM2": 150,
+          "toM2": 400,
+          "medianM": 5.9
+        },
+        {
+          "fromM2": 400,
+          "toM2": 1500,
+          "medianM": 6.4
+        },
+        {
+          "fromM2": 1500,
+          "toM2": null,
+          "medianM": 7.4
+        }
+      ]
     }
   ],
-  "assignment": "Tile whose lat/lon bounds hold the mean of the footprint ring vertices (south and west edges inclusive).",
+  "assignment": "Tile whose lat/lon bounds hold the mean of the footprint ring vertices (south and west edges inclusive; the first target tile in order on a shared edge).",
   "tiles": {
     "tile_10_13.json": {
+      "pool": "30Sep26w",
       "osmBuildings": 858,
       "candidates": 2306,
       "belowFloor": 94,
@@ -66,6 +119,7 @@
       "sha256After": "db3f1e1b3f7ef9b3626a3d2e556e75fbac7c2dd872f86d10ca1301c651c3b95c"
     },
     "tile_10_14.json": {
+      "pool": "30Sep26w",
       "osmBuildings": 828,
       "candidates": 2910,
       "belowFloor": 186,
@@ -81,10 +135,46 @@
       "bytesAfter": 1618778,
       "sha256Before": "a61862d23df7cb797b9f4cffa0e88b654afc20de538196496073b5ed7c754725",
       "sha256After": "d2cc9624fc1553016079e9b62259113b7f8d86f18928a1b8800821e071de1dbf"
+    },
+    "tile_11_13.json": {
+      "pool": "01Oct26h",
+      "osmBuildings": 1428,
+      "candidates": 1508,
+      "belowFloor": 75,
+      "overlapOsm": 688,
+      "overlapOsmSliverUnder5pct": 4,
+      "added": 745,
+      "heightGiven": 539,
+      "heightFromBand": 206,
+      "buildingsAfter": 2173,
+      "medianAddedAreaM2": 137,
+      "medianAddedHeightM": 5.1,
+      "bytesBefore": 1028318,
+      "bytesAfter": 1438189,
+      "sha256Before": "63e24deacb89f90431c3d10aa1c41259134ada03d6eb4926fe7bcd4391ae68ad",
+      "sha256After": "f7117747d4ad369443eadeb02565f9816295b01f096631200f5e3a4f31877730"
+    },
+    "tile_11_14.json": {
+      "pool": "01Oct26h",
+      "osmBuildings": 1644,
+      "candidates": 2547,
+      "belowFloor": 120,
+      "overlapOsm": 840,
+      "overlapOsmSliverUnder5pct": 20,
+      "added": 1587,
+      "heightGiven": 1438,
+      "heightFromBand": 149,
+      "buildingsAfter": 3231,
+      "medianAddedAreaM2": 168,
+      "medianAddedHeightM": 5.7,
+      "bytesBefore": 973178,
+      "bytesAfter": 2014117,
+      "sha256Before": "13124d97746eba52ed9b5fac4dc2d8c354d6cf833f01a326ab59b2480ce8fa43",
+      "sha256After": "fd4391d1e1f0a886db228dd1635d44973a764996af9c43f66e1ed35f6f9616a0"
     }
   },
   "totals": {
-    "added": 3844,
-    "manifestBuildings": 1428372
+    "added": 6176,
+    "manifestBuildings": 1430704
   }
 }

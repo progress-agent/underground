@@ -7,6 +7,12 @@
 // FILE was a link, so they rewrote the store's tiles, manifest and baked
 // payload. These tests rebuild that layout in a temp directory (a fake store,
 // never the real one) and prove each write path now refuses or stays local.
+//
+// Sprint 01Oct26h Lane M (D-043): the overlay grows to seven files (the two
+// North/East Acton and Harlesden/Willesden Junction tiles), and the two bakes,
+// which wrote baked/ with a plain writeFile, get the same guard
+// (assertBakeOutput): a bare `npm run bake` in a linked worktree refuses
+// before any work, and in the main checkout it needs --promote.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -19,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertLocalDir, writeLocal, overlayProblems, prepareOverlay, applyOverlay, OverlayError, LANE_M_FILES, SURFACE_REL,
-  findMainRoot,
+  findMainRoot, assertBakeOutput,
 } from '../scripts/surface-overlay.mjs';
 import { main as mergeMain } from '../scripts/merge-microsoft-footprints.mjs';
 
@@ -40,7 +46,7 @@ async function hashTree(dir) {
 /**
  * A fake main checkout with a store, a worktree whose public/data/surface is
  * a symlink to it (the other lanes' layout), and a lane checkout holding a
- * real overlay of Lane M's five files with different bytes.
+ * real overlay of Lane M's seven files with different bytes.
  */
 async function scene() {
   const base = await realpath(await mkdtemp(path.join(os.tmpdir(), 'ug-overlay-')));
@@ -48,7 +54,7 @@ async function scene() {
   const store = path.join(main, SURFACE_REL);
   await mkdir(path.join(store, 'tiles'), { recursive: true });
   await mkdir(path.join(store, 'baked'), { recursive: true });
-  for (const f of ['tile_10_13.json', 'tile_10_14.json', 'tile_00_00.json', 'manifest.json'])
+  for (const f of ['tile_10_13.json', 'tile_10_14.json', 'tile_11_13.json', 'tile_11_14.json', 'tile_00_00.json', 'manifest.json'])
     await writeFile(path.join(store, 'tiles', f), `store ${f}\n`);
   for (const f of ['buildings.bin', 'meta.json', 'ground.bin', 'ground-meta.json', 'landmark-footprints.json'])
     await writeFile(path.join(store, 'baked', f), `store ${f}\n`);
@@ -157,7 +163,8 @@ test('apply: into a linked worktree (the integrator\'s case) copies the overlay 
   const s = await scene();
   try {
     const record = await applyOverlay({ from: s.lane, to: s.wt, mainRoot: s.main, backupDir: path.join(s.base, 'bk') });
-    assert.deepEqual(record.map((r) => r.was), ['symlink', 'symlink', 'symlink', 'file', 'file']);
+    // Four tiles and the manifest were links into the store; baked/ is prepare's real copy.
+    assert.deepEqual(record.map((r) => r.was), ['symlink', 'symlink', 'symlink', 'symlink', 'symlink', 'file', 'file']);
     for (const rel of LANE_M_FILES) {
       const d = path.join(s.wt, SURFACE_REL, rel);
       assert.equal(await readFile(d, 'utf8'), `lane ${rel}\n`);
@@ -204,4 +211,93 @@ test('this checkout: the main checkout is found through git, and the lane overla
       assert.ok(st.isFile() && !st.isSymbolicLink(), `${rel} is a real file in this checkout`);
     }
   }
+});
+
+// ── The bakes (sprint 01Oct26h) ─────────────────────────────────────────────
+
+const BAKES = { surface: { script: 'bake-surface.mjs', files: ['buildings.bin', 'landmark-footprints.json', 'meta.json'] },
+                ground: { script: 'bake-ground.mjs', files: ['ground.bin', 'ground-meta.json'] } };
+
+test('bake guard: refuses a linked worktree\'s baked/, the main store without --promote, and leaf links; allows a local overlay', async () => {
+  const s = await scene();
+  try {
+    const wtBaked = path.join(s.wt, SURFACE_REL, 'baked');
+    for (const { files } of Object.values(BAKES)) {
+      await assert.rejects(assertBakeOutput(wtBaked, files, { root: s.wt, mainRoot: s.main }), /outside this checkout/);
+      await assert.rejects(assertBakeOutput(wtBaked, files, { root: s.wt, mainRoot: s.main, promote: true }), /outside this checkout/, '--promote never opens the store to a worktree');
+      await assert.rejects(assertBakeOutput(wtBaked, files, { root: s.wt, mainRoot: null }), /outside this checkout/, 'containment alone, without git');
+    }
+    // An --out that does not exist yet is judged by the nearest part of it that does.
+    await assert.rejects(assertBakeOutput(path.join(wtBaked, 'new/deeper'), ['x'], { root: s.wt, mainRoot: s.main }), /outside this checkout/);
+    assert.equal(await assertBakeOutput(path.join(s.wt, 'scratch/baked'), ['x'], { root: s.wt, mainRoot: s.main }), s.wt);
+    // The main checkout's store: only with --promote.
+    const mainBaked = path.join(s.store, 'baked');
+    await assert.rejects(assertBakeOutput(mainBaked, BAKES.surface.files, { root: s.main, mainRoot: s.main }), /--promote/);
+    assert.equal(await assertBakeOutput(mainBaked, BAKES.surface.files, { root: s.main, mainRoot: s.main, promote: true }), mainBaked);
+    // After prepare the worktree's baked/ is its own; a leaf link back into the store is refused.
+    await prepareOverlay({ root: s.wt, mainRoot: s.main });
+    assert.equal(await assertBakeOutput(wtBaked, BAKES.surface.files, { root: s.wt, mainRoot: s.main }), wtBaked);
+    await rm(path.join(wtBaked, 'ground.bin'));
+    await symlink(path.join(s.store, 'baked/ground.bin'), path.join(wtBaked, 'ground.bin'));
+    await rm(path.join(wtBaked, 'meta.json'));
+    await link(path.join(s.store, 'baked/meta.json'), path.join(wtBaked, 'meta.json'));
+    await assert.rejects(assertBakeOutput(wtBaked, BAKES.ground.files, { root: s.wt, mainRoot: s.main }), /ground\.bin is a symlink/);
+    await assert.rejects(assertBakeOutput(wtBaked, BAKES.surface.files, { root: s.wt, mainRoot: s.main }), /meta\.json is a hard link/);
+    assert.deepEqual(await hashTree(s.store), s.before);
+  } finally { await s.cleanup(); }
+});
+
+/**
+ * A runnable copy of this checkout's code (scripts/ and src/, node_modules
+ * linked) at `dir`, whose public/data/surface is `surface` (a link or a real
+ * directory). Module paths resolve to the copy, so the bakes' ROOT is `dir`.
+ */
+async function runnableCheckout(dir, surface) {
+  const { cp } = await import('node:fs/promises');
+  await mkdir(path.join(dir, 'public/data'), { recursive: true });
+  await cp(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'), { recursive: true, filter: (p) => !p.includes(`${path.sep}.cache`) });
+  await cp(path.join(ROOT, 'src'), path.join(dir, 'src'), { recursive: true });
+  await symlink(await realpath(path.join(ROOT, 'node_modules')), path.join(dir, 'node_modules'));
+  if (surface.link) await symlink(surface.link, path.join(dir, SURFACE_REL));
+}
+const runBake = (dir, script, args = []) => spawnSync(process.execPath, [path.join(dir, 'scripts', script), ...args],
+  { encoding: 'utf8', timeout: 60000 });
+
+test('both bake scripts refuse, before any work, to write through a symlinked store; the store is untouched', async () => {
+  const s = await scene();
+  try {
+    const wt = path.join(s.base, 'linked');
+    await runnableCheckout(wt, { link: s.store });
+    for (const { script } of Object.values(BAKES)) {
+      for (const args of [[], ['--promote'], ['--out', 'public/data/surface/baked']]) {
+        const r = runBake(wt, script, args);
+        assert.equal(r.status, 1, `${script} ${args.join(' ')}: ${r.stderr}`);
+        assert.match(r.stderr, /refusing to write in .*outside this checkout/);
+        assert.match(r.stderr, /surface-overlay\.mjs prepare/, 'names the remedy');
+        assert.doesNotMatch(r.stdout, /terrain \+ masks ready|ground: \d+|"rgbaSha256"/, 'refused before the bake started');
+      }
+    }
+    assert.deepEqual(await hashTree(s.store), s.before);
+  } finally { await s.cleanup(); }
+});
+
+test('in the main checkout both bakes need --promote; with it the guard lets the run through', async () => {
+  const s = await scene();
+  try {
+    await runnableCheckout(s.main, {});
+    execFileSync('git', ['init', '-q', s.main]);
+    for (const { script } of Object.values(BAKES)) {
+      const r = runBake(s.main, script);
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /main checkout's public\/data\/surface.*pass --promote/s);
+      // With --promote the guard passes; this fake checkout has no real terrain,
+      // river or tile data, so the bake then stops on its first data read
+      // (a missing file, or the fake manifest's text), writing nothing.
+      const p = runBake(s.main, script, ['--promote']);
+      assert.notEqual(p.status, 0);
+      assert.doesNotMatch(p.stderr, /refusing/);
+      assert.match(p.stderr, /ENOENT|is not valid JSON/);
+    }
+    assert.deepEqual(await hashTree(s.store), s.before);
+  } finally { await s.cleanup(); }
 });

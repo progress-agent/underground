@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * merge-microsoft-footprints.mjs: fill Park Royal and West Acton with
- * Microsoft's open building footprints where OpenStreetMap maps no building.
+ * merge-microsoft-footprints.mjs: fill Park Royal and West Acton (sprint
+ * 30Sep26w), and North Acton, East Acton, Harlesden and Willesden Junction
+ * (sprint 01Oct26h, D-042 item 5, D-043), with Microsoft's open building
+ * footprints where OpenStreetMap maps no building.
  *
  * Sprint 30Sep26w Lane M (D-040 item 3, D-041). OSM itself is thin in these
  * two 2 km tiles (962 and 853 buildings on a live Overpass count, against
@@ -32,11 +34,22 @@
  * 0.1 m as OSM heights are. Where it is not given (Microsoft writes -1, or the
  * value is missing, non-finite or not positive) the record takes the MEDIAN
  * Microsoft-given height of footprints in the same size band (HEIGHT_BANDS_M2)
- * among all candidates in the target tiles. Not the pipeline's flat 10 m OSM
- * default: 84% of the height-less candidates here are under 80 m2 (garden
- * sheds and garages, given-height median 3.6 to 4.1 m), and 10 m would stand
- * each of them up as a pillar. A band with no given heights falls back to
- * 10 m (DEFAULT_BUILDING_HEIGHT in fetch-surface-tiles.mjs).
+ * among all candidates in the tile's GROUP (TILE_GROUPS). Not the pipeline's
+ * flat 10 m OSM default: 84% of the height-less candidates in Park Royal and
+ * West Acton are under 80 m2 (garden sheds and garages, given-height median
+ * 3.6 to 4.1 m), and 10 m would stand each of them up as a pillar. A band with
+ * no given heights falls back to 10 m (DEFAULT_BUILDING_HEIGHT in
+ * fetch-surface-tiles.mjs).
+ *
+ * HEIGHT POOLS (sprint 01Oct26h). Each group of tiles, the ones merged together
+ * in one sprint, pools its own medians and never another group's. So adding
+ * North/East Acton and Harlesden/Willesden Junction leaves Park Royal and West
+ * Acton byte-identical (D-043: their medians are not re-pooled), and the new
+ * pair's missing heights come from their own streets rather than borrowed
+ * from Park Royal's. Every group is scanned on every run, and a footprint's
+ * tile is chosen among ALL target tiles, so a tile's bytes never depend on
+ * which --tiles were asked for; --tiles only chooses which files are written.
+ * The tracked summary always describes all target tiles.
  *
  * TILE ASSIGNMENT: a footprint belongs to the tile whose lat/lon bounds hold
  * the mean of its ring's vertices (south and west edges inclusive), so each
@@ -62,8 +75,9 @@
  *
  * Usage:
  *   node scripts/surface-overlay.mjs prepare      (once per worktree)
- *   node scripts/merge-microsoft-footprints.mjs [--tiles tile_10_13.json,tile_10_14.json]
+ *   node scripts/merge-microsoft-footprints.mjs [--tiles tile_11_13.json,tile_11_14.json]
  *     [--dry-run] [--report <path>] [--root <checkout>] [--promote]
+ *   (default: every target tile; each --tiles entry must be in TILE_GROUPS)
  *   npm run bake && npm run bake:verify
  * Download cache: scripts/.cache/microsoft-footprints/ (fetched when absent;
  * in a worktree scripts/.cache is the orchestrator's link to the shared
@@ -92,7 +106,23 @@ export const SUMMARY_PATH = pathsFor(ROOT).summary;
 export const DATASET_LINKS = 'https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv';
 export const LOCATION = 'UnitedKingdom';
 export const QUADKEY = '031313131';
-export const TARGET_TILES = ['tile_10_13.json', 'tile_10_14.json'];
+/**
+ * The tiles merged, one group per sprint, in merge order. A group pools its
+ * own missing-height medians (HEIGHT POOLS above). `heightRule` is written
+ * into each of its tiles' provenance blocks, so it is part of their bytes:
+ * the 30Sep26w text is frozen exactly as that run wrote it, and must never be
+ * edited, or Park Royal and West Acton stop being byte-identical.
+ */
+export const TILE_GROUPS = [
+  { pool: '30Sep26w', decision: 'D-041', areas: 'Park Royal and West Acton',
+    tiles: ['tile_10_13.json', 'tile_10_14.json'],
+    heightRule: 'Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across the target tiles (heightBands); 10 m only for a band with no given heights.' },
+  { pool: '01Oct26h', decision: 'D-043', areas: 'North Acton, East Acton, Harlesden and Willesden Junction',
+    tiles: ['tile_11_13.json', 'tile_11_14.json'],
+    heightRule: 'Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across this pool only, tile_11_13 and tile_11_14 (heightBands); never pooled with another sprint\'s tiles; 10 m only for a band with no given heights.' },
+];
+export const TARGET_TILES = TILE_GROUPS.flatMap((g) => g.tiles);
+export const groupOf = (file) => TILE_GROUPS.find((g) => g.tiles.includes(file)) || null;
 export const SOURCE = {
   name: 'Microsoft Building Footprints (GlobalMLBuildingFootprints)',
   repository: 'https://github.com/microsoft/GlobalMLBuildingFootprints',
@@ -372,6 +402,7 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
   const { tileDir: TILE_DIR, cache: CACHE, summary: SUMMARY } = pathsFor(root);
   const readTile = async (file) => JSON.parse(await readFile(path.join(TILE_DIR, file), 'utf8'));
   const targets = arg('--tiles') ? arg('--tiles').split(',') : TARGET_TILES;
+  for (const f of targets) if (!groupOf(f)) throw new Error(`${f} is not in TILE_GROUPS: add it to a group (its height pool) first`);
   // Before any download or write: this checkout's tiles/ and baked/ must be
   // its own (see DATA SAFETY above). A dry run writes no data and skips it.
   if (!dry) await assertOverlayWritable(guard);
@@ -379,21 +410,24 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
   const manifestPath = path.join(TILE_DIR, 'manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const entries = new Map(manifest.tiles.map((t) => [t.file, t]));
-  for (const f of targets) if (!entries.has(f)) throw new Error(`${f} not in manifest`);
+  // Every group is computed on every run (HEIGHT POOLS above); `targets` only
+  // chooses which tiles are written.
+  for (const f of TARGET_TILES) if (!entries.has(f)) throw new Error(`${f} not in manifest`);
 
   // OSM baselines: every target tile and its neighbours, Microsoft records stripped.
   const osm = new Map();
-  for (const f of new Set(targets.flatMap(neighbourFiles))) {
+  for (const f of new Set(TARGET_TILES.flatMap(neighbourFiles))) {
     if (!entries.has(f)) continue;
     const t = await readTile(f);
     osm.set(f, (t.buildings || []).filter((b) => !isMicrosoft(b)));
   }
 
-  // Region filter: the union of the target tiles' bounds.
-  const boxes = targets.map((f) => { const b = entries.get(f).bounds; return { file: f, s: b.sw[0], w: b.sw[1], n: b.ne[0], e: b.ne[1] }; });
+  // Region filter: the union of the target tiles' bounds. A footprint belongs
+  // to the first target tile (in TARGET_TILES order) whose bounds hold it.
+  const boxes = TARGET_TILES.map((f) => { const b = entries.get(f).bounds; return { file: f, s: b.sw[0], w: b.sw[1], n: b.ne[0], e: b.ne[1] }; });
   const region = { s: Math.min(...boxes.map((b) => b.s)), w: Math.min(...boxes.map((b) => b.w)),
                    n: Math.max(...boxes.map((b) => b.n)), e: Math.max(...boxes.map((b) => b.e)) };
-  const perTile = new Map(targets.map((f) => [f, { features: [], scanned: 0 }]));
+  const perTile = new Map(TARGET_TILES.map((f) => [f, { features: [], scanned: 0 }]));
   const rl = createInterface({ input: createReadStream(src.file).pipe(createGunzip()), crlfDelay: Infinity });
   let lines = 0;
   for await (const line of rl) {
@@ -412,28 +446,32 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
     if (box) perTile.get(box.file).features.push(f);
   }
 
-  // Records for every candidate first: the missing-height rule needs the
-  // given heights of the whole neighbourhood (both target tiles pooled).
-  const candidates = new Map(targets.map((f) => [f, perTile.get(f).features.map(featureToRecord)]));
-  const medians = bandMedians([...candidates.values()].flat().filter(Boolean));
-  const bandTable = HEIGHT_BANDS_M2.map((lo, i) => ({ fromM2: lo, toM2: HEIGHT_BANDS_M2[i + 1] ?? null, medianM: medians[i] }));
+  // Records for every candidate first: the missing-height rule needs the given
+  // heights of the tile's whole group (its pool), and of no other group.
+  const candidates = new Map(TARGET_TILES.map((f) => [f, perTile.get(f).features.map(featureToRecord)]));
+  const pools = TILE_GROUPS.map((g) => {
+    const medians = bandMedians(g.tiles.flatMap((f) => candidates.get(f)).filter(Boolean));
+    return { ...g, medians, bandTable: HEIGHT_BANDS_M2.map((lo, i) => ({ fromM2: lo, toM2: HEIGHT_BANDS_M2[i + 1] ?? null, medianM: medians[i] })) };
+  });
+  const poolOf = (file) => pools.find((p) => p.tiles.includes(file));
 
   const summary = { source: { ...SOURCE, location: LOCATION, quadkey: QUADKEY, url: src.url, uploadDate: src.uploadDate,
                                size: src.size, sha256: src.sha256, featuresInQuadkey: lines },
     rule: 'Added only where no OpenStreetMap building (target tile or its eight neighbours) overlaps the footprint: exact intersection area > 1e-6 m2, or a proper edge crossing or a vertex strictly inside the other ring. Touching edges are not an overlap.',
-    heightRule: 'Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band across the target tiles (heightBands); 10 m only for a band with no given heights.',
-    heightBands: bandTable,
-    assignment: 'Tile whose lat/lon bounds hold the mean of the footprint ring vertices (south and west edges inclusive).',
+    heightRule: 'Microsoft height where given (rounded to 0.1 m). Where Microsoft gives none (-1), the median Microsoft-given height of candidates in the same footprint-area band within the tile\'s height pool (heightPools: the tiles merged together in one sprint), never across pools, so adding a pool leaves earlier tiles byte-identical; 10 m only for a band with no given heights.',
+    heightPools: pools.map((p) => ({ pool: p.pool, decision: p.decision, areas: p.areas, tiles: p.tiles, heightBands: p.bandTable })),
+    assignment: 'Tile whose lat/lon bounds hold the mean of the footprint ring vertices (south and west edges inclusive; the first target tile in order on a shared edge).',
     tiles: {} };
 
   let manifestChanged = false;
-  for (const file of targets) {
+  for (const file of TARGET_TILES) {
     const tilePath = path.join(TILE_DIR, file);
     const tile = await readTile(file);
     const base = osm.get(file);
     const neighbours = neighbourFiles(file).filter((f) => osm.has(f)).flatMap((f) => osm.get(f));
     const index = createFootprintIndex(neighbours);
     const recs = candidates.get(file);
+    const pool = poolOf(file);
     let small = 0, overlap = 0, overlapSliver = 0, heightGiven = 0, heightFromBand = 0;
     const added = [];
     for (const rec of recs) {
@@ -448,7 +486,7 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
         continue;
       }
       if (rec._heightGiven) heightGiven++;
-      else { rec.height = medians[heightBand(rec.area)]; heightFromBand++; }
+      else { rec.height = pool.medians[heightBand(rec.area)]; heightFromBand++; }
       delete rec._heightGiven;
       added.push(rec);
     }
@@ -460,13 +498,13 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
     const next = { ...osmOnly, buildings: [...base, ...added], microsoft: {
       by: 'scripts/merge-microsoft-footprints.mjs', source: SOURCE.name, licence: SOURCE.licence,
       url: src.url, uploadDate: src.uploadDate, sha256: src.sha256,
-      rule: summary.rule, heightRule: summary.heightRule, heightBands: bandTable,
+      rule: summary.rule, heightRule: pool.heightRule, heightBands: pool.bandTable,
       osmBuildings: base.length, candidates: recs.length, belowFloor: small, overlapOsm: overlap,
       added: added.length, heightGiven, heightFromBand } };
     const text = JSON.stringify(next, null, 2);
     const before = baseText.length;
     const heights = added.map((b) => b.height).sort((x, y) => x - y);
-    summary.tiles[file] = { osmBuildings: base.length, candidates: recs.length, belowFloor: small, overlapOsm: overlap,
+    summary.tiles[file] = { pool: pool.pool, osmBuildings: base.length, candidates: recs.length, belowFloor: small, overlapOsm: overlap,
       overlapOsmSliverUnder5pct: overlapSliver,
       added: added.length, heightGiven, heightFromBand, buildingsAfter: base.length + added.length,
       medianAddedAreaM2: added.length ? [...added.map((b) => b.area)].sort((x, y) => x - y)[added.length >> 1] : null,
@@ -474,8 +512,9 @@ export async function main(argv = process.argv.slice(2), { mainRoot } = {}) {
       bytesBefore: before, bytesAfter: text.length,
       sha256Before: createHash('sha256').update(baseText).digest('hex'),
       sha256After: createHash('sha256').update(text).digest('hex') };
-    console.log(`${file}: OSM ${base.length}, Microsoft candidates ${recs.length}, below 20 m2 ${small}, overlap OSM ${overlap} (${overlapSliver} slivers), added ${added.length} (height given ${heightGiven}, band median ${heightFromBand}); ${before} -> ${text.length} bytes`);
-    if (!dry) {
+    const write = targets.includes(file);
+    console.log(`${file}${write ? '' : ' (computed, not written)'}: OSM ${base.length}, Microsoft candidates ${recs.length}, below 20 m2 ${small}, overlap OSM ${overlap} (${overlapSliver} slivers), added ${added.length} (height given ${heightGiven}, band median ${heightFromBand}); ${before} -> ${text.length} bytes`);
+    if (!dry && write) {
       await writeLocal(tilePath, text, guard);
       const e = entries.get(file);
       e.counts = { ...e.counts, buildings: next.buildings.length };

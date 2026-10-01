@@ -90,7 +90,10 @@ function assembler() {
     const c = av.add(bv).multiplyScalar(.5); add(g, mat, c.x, c.y, c.z);
   };
   return { add, box, cyl, rod, frame, mesh, finish(group) {
-    group.add(...extras);
+    // Object3D.add() with no argument logs "object not an instance of
+    // THREE.Object3D" and adds nothing: 124 console errors, one per building
+    // without separate meshes (sprint 01Oct26h, D-043).
+    if (extras.length) group.add(...extras);
     for (const [key, geos] of parts) {
       const merged = mergeGeometries(geos, false);
       for (const g of geos) g.dispose();

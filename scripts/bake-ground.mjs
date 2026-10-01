@@ -1,6 +1,13 @@
 // Build the unchanged ground shader's masks with the live rasteriser. No
 // Canvas/Image decoding: transparent park/road channels must retain their bytes.
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+//
+// Usage: node scripts/bake-ground.mjs [--out public/data/surface/baked] [--promote]
+// DATA SAFETY (sprint 01Oct26h, D-043): as scripts/bake-surface.mjs, it refuses
+// before any work an output directory outside this checkout or in the main
+// checkout's shared store (there it needs --promote), or a file there that is
+// a link it would write through; the remedy is
+// `node scripts/surface-overlay.mjs prepare`. Files are written by temp-and-rename.
+import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -8,10 +15,23 @@ import { installNodeEnv, ROOT } from './bake-node-env.mjs';
 import { createSurfaceTexture, rasteriseTile } from '../src/surface-texture.js';
 import { GROUND_HEADER, GROUND_MAGIC } from '../src/baked-ground.js';
 import { initThamesMask } from '../src/thames-mask.js';
+import { assertBakeOutput, writeLocal, OverlayError } from './surface-overlay.mjs';
 
 installNodeEnv();
 const dir = path.join(ROOT, 'public/data/surface/tiles');
-const out = path.join(ROOT, 'public/data/surface/baked');
+const out = (() => {
+  const i = process.argv.indexOf('--out');
+  return path.join(ROOT, i > -1 ? process.argv[i + 1] : 'public/data/surface/baked');
+})();
+// The guard (DATA SAFETY above), before any of the work below.
+const GUARD = { root: ROOT, promote: process.argv.includes('--promote') };
+try {
+  await assertBakeOutput(out, ['ground.bin', 'ground-meta.json'], GUARD);
+} catch (e) {
+  if (!(e instanceof OverlayError)) throw e;
+  console.error(e.message);
+  process.exit(1);
+}
 const manifest = JSON.parse(await readFile(path.join(dir, 'manifest.json'), 'utf8'));
 const thames = JSON.parse(await readFile(path.join(ROOT, 'public/data/thames.json'), 'utf8'));
 initThamesMask(thames.points);
@@ -47,6 +67,6 @@ const meta = {
   note: 'Roads B / greenery A, lossless binary masks. Rebuild when source tiles, Thames mask or rasteriser change. Lighting remains dynamic.',
 };
 await mkdir(out, { recursive: true });
-await writeFile(path.join(out, 'ground.bin'), compressed);
-await writeFile(path.join(out, 'ground-meta.json'), JSON.stringify(meta, null, 2));
+await writeLocal(path.join(out, 'ground.bin'), compressed, GUARD);
+await writeLocal(path.join(out, 'ground-meta.json'), JSON.stringify(meta, null, 2), GUARD);
 console.log(JSON.stringify(meta, null, 2));
