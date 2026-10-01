@@ -48,6 +48,9 @@
 //                                stretch that short dropped); everywhere else the walker is in the bore
 //   drawnHeading(s, dir)         the drawn track's heading ahead of s, from the point shown to the run
 //                                point min(HEADING_PROBE_M, half the open stretch) along it
+//   branchHeading(s, dir)        what a branch is chosen on: drawnHeading averaged with the direction to
+//                                the branch's next station as shown (branches that share a formation
+//                                for a while part later than any short probe reaches)
 //   refused                      the stretches between stations the railway draws in the open but the
 //                                mapping refused (stats keys offTrack, noRoute, implausible, reversed):
 //                                the bore there, by rule; `unmapped` adds the stretches wholly in tunnel
@@ -61,6 +64,11 @@ import { mapTubeCurve, mapSnapCurve, sampleRun, sAt, runAt, laneOffset, laneDist
 export const MIN_OPEN_M = 20;
 /** How far along the drawn track its heading is read (shared trunks diverge some way past a station). */
 export const HEADING_PROBE_M = 200;
+/**
+ * A branch is chosen on the drawn heading averaged with the direction to the branch's next station as
+ * shown on its track: at Turnham Green the Richmond and Ealing branches share one formation for more
+ * than 600 m, so the drawn heading alone read both the same and facing one could not choose it.
+ */
 
 /**
  * The chord adapter of a network path: u is mapTubeCurve's frac (cumulative
@@ -243,13 +251,17 @@ export function createOpenAirMap({ path, tnet, records = null, ratio = 1, getY =
   }
 
   const ha = {}, hb = {};
-  function drawnHeading(s, dir) {
+  /** probeM: how far along (default HEADING_PROBE_M; never more than half the open stretch, nor under 10 m). */
+  function drawnHeading(s, dir, probeM = HEADING_PROBE_M) {
     const sign = dir >= 0 ? 1 : -1;
     const u = A.uOfS(s);
     const run = runs.length ? runAt(runs, u) : null;
     if (!run) return headingAt(path, s, sign);
     const iv = intervalAt(s);
-    const probe = Math.max(10, Math.min(HEADING_PROBE_M, iv ? (iv[1] - iv[0]) / 2 : HEADING_PROBE_M));
+    // The brief's probe: min(HEADING_PROBE_M, half the open stretch). A longer probe (the branch choice)
+    // is capped at the whole stretch instead.
+    const span = iv ? iv[1] - iv[0] : Infinity;
+    const probe = Math.max(10, Math.min(probeM, probeM > HEADING_PROBE_M ? span : span / 2));
     const ts = sAt(run, u), k = run.as.length;
     const clampT = (t) => Math.min(run.as[k - 1], Math.max(run.as[0], t));
     const t1 = clampT(ts + sign * probe);
@@ -263,6 +275,28 @@ export function createOpenAirMap({ path, tnet, records = null, ratio = 1, getY =
     const len = Math.hypot(x, z);
     if (!(len > 1e-6)) return headingAt(path, s, sign);
     return { x: x / len, z: z / len };
+  }
+  /**
+   * The heading a branch is chosen on: the drawn heading (the track in front of the walker) averaged with
+   * the direction from the point shown to the branch's next station as shown (where the branch goes).
+   */
+  const bq = {}, bn = {};
+  function branchHeading(s, dir) {
+    const a = drawnHeading(s, dir);
+    const sign = dir >= 0 ? 1 : -1;
+    const S = path.stations || [];
+    let next = null;
+    if (sign > 0) { for (const st of S) if (st.s > s + 1) { next = st; break; } }
+    else { for (let i = S.length - 1; i >= 0; i--) if (S[i].s < s - 1) { next = S[i]; break; } }
+    if (!next) return a;
+    const p0 = presentAt(s, 0, bq), p1 = presentAt(next.s, 0, bn);
+    if (!p0.mapped || !p1.mapped) return a;
+    let x = p1.x - p0.x, z = p1.z - p0.z;
+    const l = Math.hypot(x, z);
+    if (!(l > 1)) return a;
+    x = a.x + x / l; z = a.z + z / l;
+    const len = Math.hypot(x, z);
+    return len > 1e-6 ? { x: x / len, z: z / len } : a;
   }
 
   // Stretches between stations no run covers (in chord arc): the bore there. Those the railway draws in
@@ -281,5 +315,5 @@ export function createOpenAirMap({ path, tnet, records = null, ratio = 1, getY =
     }
   }
 
-  return { lineId, path, runs, stats, ratio, adapter: A, presentAt, trackToChord, openIntervals, drawnHeading, intervalAt, refused, unmapped };
+  return { lineId, path, runs, stats, ratio, adapter: A, presentAt, trackToChord, openIntervals, drawnHeading, branchHeading, intervalAt, refused, unmapped };
 }

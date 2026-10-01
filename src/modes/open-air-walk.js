@@ -209,6 +209,11 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
     if (isOpen(path, s)) { const m = mappingOf(path); if (m) return m.drawnHeading(s, dir); }
     return headingAt(path, s, dir);
   }
+  /** The heading a branch is chosen on: in the open the drawn track's, read further on (open-air-map.js branchHeading). */
+  function branchHeadingOf(path, s, dir) {
+    if (isOpen(path, s)) { const m = mappingOf(path); if (m) return m.branchHeading(s, dir); }
+    return headingAt(path, s, dir);
+  }
   /** Chord arc reached by `d` metres along what is shown (the drawn track in the open, the chord in the bore). */
   function chordDistance(path, s, dir, d) {
     if (!isOpen(path, s)) return d;
@@ -327,7 +332,7 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
   }
 
   return {
-    attach, apply, sync, ensureLine, pump, mappingOf, isOpen, present, headingOf, chordDistance, markEdge,
+    attach, apply, sync, ensureLine, pump, mappingOf, isOpen, present, headingOf, branchHeadingOf, chordDistance, markEdge,
     surfacePass, resetPasses, startCut, stepCut, clearCut, debug,
     get overlay() { return overlay; },
     get cutting() { return cut; },

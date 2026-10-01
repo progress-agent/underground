@@ -618,7 +618,7 @@ export function createPedestrianMode(ctx) {
         // along the drawn track (60 and 200 m/s are track speeds), in the bore along the chord.
         tunnel.dir = travelDir(path0, tunnel.s, tunnel.want, tunnel.dir, headingOf);
         const d = openAir.chordDistance(path0, tunnel.s, tunnel.dir, tunnelSpeed * dt);
-        const r = advance(n, tunnel, d, tunnel.want, { holdAtPortals: false, headingOf });
+        const r = advance(n, tunnel, d, tunnel.want, { holdAtPortals: false, headingOf, branchHeadingOf: openAir.branchHeadingOf });
         crossed = r.crossed || [];
         atEdge = !!r.edge;
         if (r.stopped) tunnelSpeed = 0;

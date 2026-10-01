@@ -462,9 +462,10 @@ function edgeAhead(p, from, dir, limit) {
  * s01:P options: holdAtPortals (default true: the bore's lining relies on the
  * hold to draw its daylight cap; the open-air walk passes false and walks on
  * out of the tunnel), headingOf(path, s, dir) (default headingAt) for the
- * direction of travel and the choice at junctions.
+ * direction of travel, branchHeadingOf (default headingOf) for the choice at
+ * junctions.
  */
-export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals = true, headingOf = headingAt } = {}) {
+export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals = true, headingOf = headingAt, branchHeadingOf = headingOf } = {}) {
   let remaining = Math.max(0, dist);
   let stopped = false;
   let guard = 0;
@@ -511,7 +512,7 @@ export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals =
     travelled += Math.abs(j - pos.s);
     remaining -= Math.abs(j - pos.s);
     pos.s = j;
-    const next = chooseAt(net, pos.path, j, pos.dir, want, headingOf);
+    const next = chooseAt(net, pos.path, j, pos.dir, want, branchHeadingOf);
     // The bore side is relative to each path's own orientation; carry it over
     // by travel sense (side x dir), so a branch drawn the other way round keeps
     // the walker in the same physical bore.
