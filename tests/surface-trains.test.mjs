@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import {
   STOCK, PROFILES, LINE_STOCK, carLayout, CAR_GAP_M, buildNetwork, nearestNode, route, mapTubeCurve, mapSnapCurve,
   buildSegmentIndex, runAt, sAt, sampleRun, laneOffset, drawnY, JOIN_M, LANE_OFFSET_M, RUN_END_EXTENSION_M, computeCrossSlopes, profileGeometries, LANE_SPACING_M, LANE_EASE, RUN_MAX_LIFT_GRADE,
+  turnAt, kinkWindows, fairPolyline, remapAnchors, boundAnchorSpeed, KINK_TURN_DEG, KINK_SCALE_M, FAIR_TURN_DEG, FAIR_STEP_M, SPUR_CLOSE_M, SPEED_RATIO_MAX, SPEED_RATIO_MIN, VFAIR_GRADE_STEP,
 } from '../src/surface-train-map.js';
 
 // ── Stock ─────────────────────────────────────────────────────────────────────
@@ -344,4 +345,163 @@ test('the DLR ramp never lifts a deck graded as the profile grades it, at any Ma
     const run = mapSnapCurve({ curve, net, index: buildSegmentIndex(net), ratio, fallback: () => { throw new Error('no fallback'); } }).runs[0];
     for (let k = 0; k < run.y0.length; k++) assert.ok(Math.abs(run.y0[k] - 30) < 1e-9, `ratio ${ratio}: deck moved to ${run.y0[k]} at ${run.x[k]}`);
   }
+});
+
+// ── Fix round 1 (01Oct26h): trains held together, at a believable speed ──────
+// The fix-round verifier found cars standing at right angles to their
+// neighbours or metres apart at 60 fixed places (route hops across junction
+// gaps, a station node on a spur, DLR snaps alternating between parallel
+// decks), and trains at up to 105 m/s where a portal anchor packed 770 m of
+// track into 88 m of chord. These pin each cause on a synthetic network.
+const sampleTurns = (run, step = FAIR_STEP_M) => {
+  // The run's largest turn between consecutive `step` chords, and at the 8 m kink scale.
+  const P = { x: run.x, z: run.z, cum: run.cum }, L = run.cum[run.cum.length - 1];
+  let perStep = 0, kink = 0;
+  for (let s = step; s + step <= L; s += step) perStep = Math.max(perStep, turnAt(P, s, step));
+  for (let s = KINK_SCALE_M; s + KINK_SCALE_M <= L; s += 2) kink = Math.max(kink, turnAt(P, s, KINK_SCALE_M));
+  return { perStep, kink };
+};
+const ratios = (run, L) => { const out = []; for (let k = 1; k < run.au.length; k++) out.push((run.as[k] - run.as[k - 1]) / ((run.au[k] - run.au[k - 1]) * L)); return out; };
+const straightPiece = (x0, x1, z, step = 12, cls = () => 'surface') => ({ pts: Array.from({ length: Math.round((x1 - x0) / step) + 1 }, (_, i) => ({ x: x0 + i * step, z, terrainY: 0, y: 5, cls: cls(x0 + i * step) })), morph: true });
+
+test('a sideways junction hop is faired into a crossover: never a kink, and the drawn track is kept away from it', () => {
+  // Two parallel pieces 24 m apart; the route hops from one to the other at x = 1500 (within JOIN_M).
+  const net = buildNetwork([straightPiece(0, 1500, 0), straightPiece(1500, 3000, 24)]);
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, -20, 0), new THREE.Vector3(1500, -20, 12), new THREE.Vector3(3000, -20, 24)]);
+  const stations = [{ key: 'P', x: 0, z: 0 }, { key: 'Q', x: 1400, z: 0 }, { key: 'R', x: 3000, z: 24 }];
+  const cum = [0, 1400.05, 3000.1];
+  const { runs, stats } = mapTubeCurve({ curve, stationUs: [0, 0.4667, 1], stations, net, cache: fresh(net), extendM: 0 });
+  assert.equal(runs.length, 1); assert.ok(stats.kinks >= 1, `kinks ${stats.kinks}`);
+  const run = runs[0], t = sampleTurns(run);
+  assert.ok(t.kink <= KINK_TURN_DEG, `kink scale turn ${t.kink}`);
+  assert.ok(t.perStep <= FAIR_TURN_DEG + 0.5, `turn per ${FAIR_STEP_M} m ${t.perStep}`);
+  // On the drawn track away from the hop; across the gap within the two pieces' band.
+  for (let i = 0; i < run.x.length; i++) {
+    if (run.x[i] < 1300) assert.ok(Math.abs(run.z[i]) < 1e-6, `at x ${run.x[i]}: z ${run.z[i]}`);
+    if (run.x[i] > 1700) assert.ok(Math.abs(run.z[i] - 24) < 1e-6, `at x ${run.x[i]}: z ${run.z[i]}`);
+    assert.ok(run.z[i] > -1e-6 && run.z[i] < 24 + 1e-6);
+  }
+  for (let k = 1; k < run.as.length; k++) assert.ok(run.as[k] >= run.as[k - 1] && run.au[k] > run.au[k - 1]);
+  void cum;
+});
+
+test('a station node on a spur: the out-and-back is cut, the train never reverses', () => {
+  // Main line along z = 0; a spur north from x = 2000. The middle station's nearest node is up the spur.
+  const spur = { pts: Array.from({ length: 25 }, (_, i) => ({ x: 2000, z: -12 - i * 12, terrainY: 0, y: 5, cls: 'surface' })), morph: true };
+  const net = buildNetwork([straightPiece(0, 4008, 0), spur]);
+  const stations = [{ key: 'A', x: 0, z: 0 }, { key: 'B', x: 2000, z: -200 }, { key: 'C', x: 4008, z: 0 }];
+  const pts = [new THREE.Vector3(0, -20, 0), new THREE.Vector3(2000, -20, -200), new THREE.Vector3(4008, -20, 0)];
+  const cumP = [0, pts[1].distanceTo(pts[0])]; cumP.push(cumP[1] + pts[2].distanceTo(pts[1]));
+  const { runs, stats } = mapTubeCurve({ curve: new THREE.CatmullRomCurve3(pts), stationUs: cumP.map(c => c / cumP[2]), stations, net, cache: fresh(net), extendM: 0 });
+  assert.equal(stats.mapped, 2); assert.equal(runs.length, 1); assert.ok(stats.spurs >= 1, `spurs ${stats.spurs}`);
+  const run = runs[0];
+  // Never up the spur: the run stays on (or by) the main line.
+  for (let i = 0; i < run.z.length; i++) assert.ok(run.z[i] > -SPUR_CLOSE_M, `up the spur at ${run.x[i]}, ${run.z[i]}`);
+  // Progress along x never goes back (the train does not reverse).
+  for (let i = 1; i < run.x.length; i++) assert.ok(run.x[i] >= run.x[i - 1] - 1e-6, `reverses at ${run.x[i]}`);
+  // B's stop lands by the spur's foot.
+  const kB = [...run.station].map((v, k) => v ? k : -1).filter(k => k >= 0)[1], pt = {};
+  sampleRun(run, run.as[kB], 1, pt);
+  assert.ok(Math.hypot(pt.x - 2000, pt.z) < SPUR_CLOSE_M + 12, `B at ${pt.x}, ${pt.z}`);
+  assert.ok(sampleTurns(run).kink <= KINK_TURN_DEG);
+});
+
+test('DLR: between two parallel decks the map match stays on one; it never alternates', () => {
+  const deck = z => ({ pts: Array.from({ length: 101 }, (_, i) => ({ x: i * 12, z, terrainY: 0, y: 20, cls: 'viaduct' })), morph: false });
+  const net = buildNetwork([deck(0), deck(6)]);
+  // The curve wavers about the middle (z 2.6 to 3.4 every 10 m): nearest-per-sample snapping alternated.
+  const pts = []; for (let x = 0; x <= 1200; x += 10) pts.push(new THREE.Vector3(x, 20, 3 + ((x / 10) % 2 ? 0.4 : -0.4)));
+  const m = mapSnapCurve({ curve: new THREE.CatmullRomCurve3(pts), net, index: buildSegmentIndex(net), ratio: 1, fallback: () => { throw new Error('no fallback'); } });
+  assert.equal(m.stats.switches, 0);
+  const run = m.runs[0], z0 = run.z[0];
+  assert.ok(z0 === 0 || z0 === 6);
+  for (let i = 0; i < run.z.length; i++) assert.ok(Math.abs(run.z[i] - z0) < 1e-6, `left its deck at ${run.x[i]}: ${run.z[i]}`);
+  // The curve leaves the near deck for the far one: one change of piece, faired, never a step.
+  const pts2 = []; for (let x = 0; x <= 1200; x += 10) pts2.push(new THREE.Vector3(x, 20, x < 600 ? 0.5 : 5.5));
+  const m2 = mapSnapCurve({ curve: new THREE.CatmullRomCurve3(pts2), net, index: buildSegmentIndex(net), ratio: 1, fallback: () => { throw new Error('no fallback'); } });
+  assert.equal(m2.stats.switches, 1);
+  assert.ok(sampleTurns(m2.runs[0]).kink <= KINK_TURN_DEG);
+  for (const r of ratios(m2.runs[0], m2.runs[0].length)) assert.ok(r <= SPEED_RATIO_MAX + 1e-9 && r >= SPEED_RATIO_MIN - 1e-9, `ratio ${r}`);
+});
+
+test('speed bound: a portal anchor that would pack the track into a short stretch of chord is moved, and flagged', () => {
+  // From A the track loops 1.5 km north and back before its tunnel mouth at x ~ 420, 420 m along the chord.
+  const pts = [], add = (x, z) => pts.push({ x, z });
+  for (let z = 0; z >= -500; z -= 1) add(0, z);
+  for (let a = Math.PI; a <= 2 * Math.PI; a += 0.002) add(150 + 150 * Math.cos(a), -500 + 150 * Math.sin(a));
+  for (let z = -500; z <= -100; z += 1) add(300, z);
+  for (let a = Math.PI; a >= Math.PI / 2; a -= 0.005) add(400 + 100 * Math.cos(a), -100 + 100 * Math.sin(a));
+  for (let x = 400; x <= 2000; x += 1) add(x, 0);
+  const track = []; let acc = 12;
+  for (let i = 0; i < pts.length; i++) { if (i) acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z); if (acc >= 12 || i === pts.length - 1) { track.push({ ...pts[i], terrainY: 0, y: pts[i].x > 420 && pts[i].z === 0 ? -100 : 5, cls: pts[i].x > 420 && pts[i].z === 0 ? 'tunnel' : 'surface' }); acc = 0; } }
+  const net = buildNetwork([{ pts: track, morph: true }]);
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, -20, 0), new THREE.Vector3(1000, -20, 0), new THREE.Vector3(2000, -20, 0)]);
+  const stations = [{ key: 'A', x: 0, z: 0 }, { key: 'B', x: 2000, z: 0 }];
+  const { runs, stats } = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net), extendM: 0 });
+  assert.equal(stats.mapped, 1); assert.equal(stats.portals, 1); assert.equal(stats.portalsMoved, 1); assert.equal(stats.portalsDropped, 0);
+  const run = runs[0], L = curve.getLength();
+  assert.equal([...run.portal].filter(v => v === 2).length, 1);
+  // At the chord's nearest point the first stretch would run at about 3.7 times the timetable's speed.
+  for (const r of ratios(run, L)) assert.ok(r <= SPEED_RATIO_MAX + 1e-6 && r >= SPEED_RATIO_MIN - 1e-6, `stretch ratio ${r}`);
+});
+
+test('a terminus extension heads the way the run does, never along a sideways first step', () => {
+  // The terminus T sits on a 4 m stub; the route steps 10 m north onto the main line, then runs east.
+  const stub = { pts: [{ x: 0, z: 10, terrainY: 0, y: 5, cls: 'surface' }, { x: 0, z: 6, terrainY: 0, y: 5, cls: 'surface' }], morph: true };
+  const net = buildNetwork([stub, straightPiece(0, 3000, -4)]);
+  const stations = [{ key: 'T', x: 0, z: 10 }, { key: 'E', x: 3000, z: -4 }];
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, -20, 10), new THREE.Vector3(1500, -20, 3), new THREE.Vector3(3000, -20, -4)]);
+  const { runs } = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net) });
+  const run = runs[0];
+  assert.equal(run.extendedStart, true);
+  // The extension (before the first anchor) heads west, the way the run comes from: not south.
+  const pt = {};
+  sampleRun(run, run.as[0] - RUN_END_EXTENSION_M + 1, 1, pt);
+  const a = {}; sampleRun(run, run.as[0], 1, a);
+  const dx = pt.x - a.x, dz = pt.z - a.z;
+  assert.ok(dx < 0 && Math.abs(dz) < Math.abs(dx) * Math.tan(30 * Math.PI / 180), `extension heads (${dx.toFixed(1)}, ${dz.toFixed(1)})`);
+  assert.ok(sampleTurns(run).kink <= KINK_TURN_DEG);
+});
+
+test('fairing primitives: windows replace only what they cover; anchors re-placed evenly in u inside them', () => {
+  // A straight run with one 20 m sideways step at x = 500.
+  const xs = [], zs = []; for (let x = 0; x <= 1000; x += 10) { xs.push(x); zs.push(x < 500 ? 0 : 20); }
+  const cumA = [0]; for (let i = 1; i < xs.length; i++) cumA.push(cumA[i - 1] + Math.hypot(xs[i] - xs[i - 1], zs[i] - zs[i - 1]));
+  const n = xs.length, P = { x: xs, z: zs, cum: cumA, base: new Array(n).fill(0), y0: new Array(n).fill(5), morph: new Array(n).fill(1), open: new Array(n).fill(1), slope: new Array(n).fill(0), extra: new Array(n).fill(0) };
+  const w = kinkWindows(P);
+  assert.equal(w.length, 1);
+  assert.ok(w[0].w0 > 300 && w[0].w1 < 750, `window ${w[0].w0} to ${w[0].w1}`);
+  const r = fairPolyline(P);
+  // Anchors every vertex at u = x / 1000: re-placed, they are monotone and even through the window.
+  const au = xs.map(x => x / 1000), as = cumA.slice();
+  let out = as; for (const pass of r.passes) out = remapAnchors(au, out, pass);
+  for (let k = 1; k < out.length; k++) assert.ok(out[k] >= out[k - 1]);
+  const inWin = au.map((u, k) => [u, out[k]]).filter(([, s]) => s > w[0].w0 + 1 && s < w[0].w1 - 30);
+  const steps = inWin.slice(1).map(([u, s], k) => (s - inWin[k][1]) / (u - inWin[k][0]));
+  assert.ok(Math.max(...steps) - Math.min(...steps) < 1e-6 * Math.max(...steps), 'even in u through the window');
+  // Speed bound on a lumpy table: every stretch within the bounds, the ends kept.
+  const lumpy = [0, 10, 20, 60, 70, 80, 90, 100], uu = lumpy.map((_, k) => k / 7);
+  const bounded = boundAnchorSpeed(uu, lumpy, 70, SPEED_RATIO_MIN, SPEED_RATIO_MAX);
+  for (let k = 1; k < bounded.length; k++) { const q = (bounded[k] - bounded[k - 1]) / ((uu[k] - uu[k - 1]) * 70); assert.ok(q <= SPEED_RATIO_MAX + 1e-9 && q >= SPEED_RATIO_MIN - 1e-9, `ratio ${q}`); }
+  assert.ok(Math.abs(bounded[0] - 0) < 15 && Math.abs(bounded[7] - 100) < 15);
+});
+
+test('vertical fairing: a change between decks at different heights is a vertical curve, never a car pitched against its neighbours', () => {
+  // Two DLR decks in line, the second 2.6 m higher (13 canonical units at structure scale 1): the run steps up at x = 600.
+  const deck = (x0, x1, y) => ({ pts: Array.from({ length: Math.round((x1 - x0) / 10) + 1 }, (_, i) => ({ x: x0 + i * 10, z: 0, terrainY: 0, y, cls: 'viaduct' })), morph: false });
+  const net = buildNetwork([deck(0, 600, 20), deck(610, 1200, 33)]);
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 20, 0), new THREE.Vector3(590, 20, 0), new THREE.Vector3(620, 33, 0), new THREE.Vector3(1200, 33, 0)]);
+  const ve = 5, ratio = 1, unitsPerM = ve * ratio;
+  const run = mapSnapCurve({ curve, net, index: buildSegmentIndex(net), ratio, ve, fallback: () => { throw new Error('no fallback'); } }).runs[0];
+  assert.ok(run.verticalFaired >= 1, `vertical windows ${run.verticalFaired}`);
+  // Neighbouring DLR sections (13.5 m) pitch at most 2.3 degrees apart (a 4% change of grade between consecutive
+  // 13.5 m chords; the grade limit alone left 12% ramps meeting level decks: 6.8 degrees).
+  const yAt = s => { let i = 0; while (i + 2 < run.cum.length && run.cum[i + 1] < s) i++; const t = Math.max(0, Math.min(1, (s - run.cum[i]) / ((run.cum[i + 1] - run.cum[i]) || 1))); return run.y0[i] + (run.y0[i + 1] - run.y0[i]) * t; };
+  const sec = 13.5, gradeAt = s => (yAt(s + sec) - yAt(s)) / sec / unitsPerM;
+  let worst = 0;
+  for (let s = 0; s + 2 * sec <= run.length; s += 1) worst = Math.max(worst, Math.abs(gradeAt(s + sec) - gradeAt(s)));
+  assert.ok(worst <= 0.04, `neighbouring sections' grades differ by ${worst}`);
+  assert.ok(VFAIR_GRADE_STEP * sec / FAIR_STEP_M < 0.04);
+  // Away from the step each deck keeps its own height.
+  assert.ok(Math.abs(yAt(100) - 20) < 1e-6 && Math.abs(yAt(run.length - 100) - 33) < 1e-6);
 });

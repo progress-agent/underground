@@ -135,11 +135,17 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
     p.capacity = capacity;
   }
 
-  // Stock per line, with its car layout and its scale against its profile.
+  // Stock per line, with its car layout and its scale against its profile. The
+  // joints are where the cars couple (the middle of each gap) and the train's two
+  // ends, along the train as the layout's offsets are: car c lies between joints
+  // c and c + 1.
   const stockOf = new Map();
   for (const [lineId, key] of Object.entries(LINE_STOCK)) {
-    const s = STOCK[key], prof = PROFILES[s.profile];
-    stockOf.set(lineId, { key, ...s, layout: carLayout(s), sx: s.widthM / prof.widthM, sy: s.heightM / prof.heightM });
+    const s = STOCK[key], prof = PROFILES[s.profile], layout = carLayout(s);
+    const joints = [layout[0].offset - layout[0].length / 2];
+    for (let c = 1; c < layout.length; c++) joints.push((layout[c - 1].offset + layout[c - 1].length / 2 + layout[c].offset - layout[c].length / 2) / 2);
+    joints.push(layout[layout.length - 1].offset + layout[layout.length - 1].length / 2);
+    stockOf.set(lineId, { key, ...s, layout, joints, sx: s.widthM / prof.widthM, sy: s.heightM / prof.heightM });
   }
 
   // ── Networks and mappings ──────────────────────────────────────────────────
@@ -169,7 +175,7 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
     const { net, cache, index } = networkFor(lineId);
     const t0 = performance.now();
     const m = lineId === 'dlr'
-      ? mapSnapCurve({ curve: ud.curve, net, index, ratio, fallback: dlrFallback, ve: VE })
+      ? mapSnapCurve({ curve: ud.curve, net, index, ratio, fallback: dlrFallback, getY: getTerrainMeshSurfaceY, ve: VE })
       : mapTubeCurve({ curve: ud.curve, stationUs: ud.stationUs, stations: stationsOf.get(lineId) || [], net, cache, getY: getTerrainMeshSurfaceY });
     m.lineId = lineId; m.ratio = ratio; m.net = net;
     pendingStats.built++; pendingStats.buildMs += performance.now() - t0;
@@ -197,6 +203,9 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
 
   // ── Placement (pure in simT) ───────────────────────────────────────────────
   const pt = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, inside: false, extra: 0, run: null, seg: -1 };
+  const pj = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, inside: false, extra: 0, run: null, seg: -1 };
+  const jointXYZ = new Float64Array(3 * 16), jointDone = new Int32Array(16), jointOpen = new Uint8Array(16);
+  let jointGen = 0;
   const dir = new THREE.Vector3(), basis = { side: new THREE.Vector3(), up: new THREE.Vector3(), forward: new THREE.Vector3() };
   /** The train's place on the surface at simT: { run, s, u, sign } or null (underground, unmapped, or no stock). */
   function placeAt(train, simT, budgetEnd) {
@@ -209,11 +218,38 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
     if (!run) return null;
     return { run, s: sAt(run, u), u, sign: ud.dir > 0 ? 1 : -1, stock: stockOf.get(ud.lineId) };
   }
-  /** Each car's pose: calls fn(carIndex, matrixElements16) for cars on open track (or writes them at `write`, a slot writer). */
+  /**
+   * A joint's place: the run at arc length sq, in the train's lane; beyond the
+   * run's ends, carried straight on along its end segment (a car whose centre is
+   * on the run may reach past it).
+   */
+  function jointAt(run, sq, sign, c) {
+    if (jointDone[c] === jointGen) return;
+    jointDone[c] = jointGen;
+    sampleRun(run, sq, ratio, pj, 0, -sign);
+    const { ox, oz } = laneOffset(pj, sign);
+    let x = pj.x + ox, z = pj.z + oz;
+    if (!pj.inside) {
+      const n = run.cum.length, over = sq < run.cum[0] ? sq - run.cum[0] : sq - run.cum[n - 1], h = Math.hypot(pj.dx, pj.dz) || 1;
+      x += pj.dx / h * over; z += pj.dz / h * over;
+    }
+    jointXYZ[3 * c] = x; jointXYZ[3 * c + 1] = pj.y; jointXYZ[3 * c + 2] = z; jointOpen[c] = pj.open ? 1 : 0;
+  }
+  /**
+   * Each car's pose: calls fn(carIndex, matrixElements16) for cars on open track.
+   * A car stands on the rail at its centre (in its lane) and points along the
+   * chord between its two joints, which it shares with its neighbours, so
+   * adjacent cars always meet end to end and turn together on a curve, as
+   * coupled cars do. (Fix round 1: each car used to take the heading of the one
+   * track segment under its centre, so a car centred on a junction hop stood at
+   * right angles to its neighbours.)
+   */
   const els = new Float64Array(16);
   function forEachCar(place, fn) {
     const { run, s, sign, stock } = place;
     const k = VE * ratio; // canonical vertical factor of one real metre (5 / Master), as the Overground
+    const J = stock.joints;
+    if (++jointGen > 1e9) { jointGen = 1; jointDone.fill(0); }
     for (let c = 0; c < stock.layout.length; c++) {
       const car = stock.layout[c];
       // The lane is left of travel (north when heading east); offsetRails' "left" normal, which
@@ -221,7 +257,15 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
       sampleRun(run, s + sign * car.offset, ratio, pt, 0, -sign);
       if (!pt.inside || !pt.open) continue;
       const { ox, oz } = laneOffset(pt, sign);
-      dir.set(pt.dx * sign, pt.dy * sign, pt.dz * sign);
+      // Joints c (behind, in travel) and c + 1 (ahead): offsets grow in the direction of travel.
+      jointAt(run, s + sign * J[c], sign, c); jointAt(run, s + sign * J[c + 1], sign, c + 1);
+      const a = 3 * c, b = 3 * (c + 1);
+      dir.set(jointXYZ[b] - jointXYZ[a], jointXYZ[b + 1] - jointXYZ[a + 1], jointXYZ[b + 2] - jointXYZ[a + 2]);
+      const hd = Math.hypot(dir.x, dir.z);
+      if (hd < 0.25 * (J[c + 1] - J[c])) dir.set(pt.dx * sign, pt.dy * sign, pt.dz * sign); // a degenerate chord
+      // A joint inside a tunnel mouth is at the tunnel's depth: the car's pitch is then its centre's
+      // segment's (level across the mouth, as the open track is drawn), never a dive into the bore.
+      else if (!jointOpen[c] || !jointOpen[c + 1]) { const h = Math.hypot(pt.dx, pt.dz); dir.y = h > 1e-9 ? sign * pt.dy / h * hd : 0; }
       trueHeadingBasis(dir, k, basis);
       const sd = basis.side, up = basis.up, fw = basis.forward, L = car.length;
       els[0] = sd.x * stock.sx; els[1] = sd.y * stock.sx; els[2] = sd.z * stock.sx; els[3] = 0;

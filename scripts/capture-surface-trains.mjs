@@ -23,7 +23,8 @@ export const SHOTS = {
   'T1-northern-golders-green-portal': portalShot('northern-3', 'northern', 1, 150, 110),
   'T1b-piccadilly-arnos-grove-portal': portalShot('piccadilly-13', 'piccadilly', 1, 150, 110),
   'T1c-central-white-city-portal': portalShot('central-6', 'central', 1, 150, 110),
-  'T2-district-piccadilly-profiles': { kind: 'pair', lines: ['district', 'piccadilly'], near: [-9000, 1300], radius: 2500, close: 40, low: true },
+  // The first round's Chiswick Park pose, kept fixed; the moment is sought within it (fix round 1).
+  'T2-district-piccadilly-profiles': { kind: 'pair', lines: ['district', 'piccadilly'], near: [-9540, 1684], radius: 90, close: 40, cam: [-9665.2, 147.2, 1647.9], target: [-9556.5, 84.6, 1682.8] },
   'T3-dlr-west-india-quay-viaduct': { kind: 'cluster', lineId: 'dlr', cam: [7682.2, 192.7, -342.8], target: [7448, 24.5, -110.1], near: [7520, -200], radius: 380, min: 3 },
   'T4-dlr-canning-town-flyover': { kind: 'cluster', lineId: 'dlr', cam: [9590, 230, -790], target: [9414, 45, -965], near: [9430, -950], radius: 260, min: 2 },
   'T4b-dlr-poplar-flyover': { kind: 'cluster', lineId: 'dlr', cam: [7600, 200, -80], target: [7440, 80, -235], near: [7450, -230], radius: 260, min: 2 },
@@ -36,6 +37,7 @@ if (process.argv[1]?.endsWith('capture-surface-trains.mjs')) {
   if (!origin || !outDir) throw new Error('usage: capture-surface-trains.mjs <origin> <outDir> [--shots a,b]');
   const arg = (k, d) => process.argv.includes(k) ? process.argv[process.argv.indexOf(k) + 1] : d;
   const names = arg('--shots', Object.keys(SHOTS).join(',')).split(',');
+  if (process.argv.includes('--from')) for (const n of names) SHOTS[n].from = +arg('--from');
   await mkdir(outDir, { recursive: true });
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
@@ -95,17 +97,32 @@ if (process.argv[1]?.endsWith('capture-surface-trains.mjs')) {
         simT = best.t; note = `${best.n} DLR trains within ${shot.radius} m`;
       } else if (shot.kind === 'pair') {
         // Two lines' trains side by side (within shot.close metres, both whole), seen from beside them.
-        for (let t = 600; t < 600 + 3 * 3600 && simT === null; t += 1) {
+        for (let t = shot.from ?? 600; t < 600 + 3 * 3600 && simT === null; t += 1) {
           const A = Object.values(st.snapshot(t, { lineId: shot.lines[0] })), B = Object.values(st.snapshot(t, { lineId: shot.lines[1] }));
           for (const a of A) {
             if (a.cars.length !== st.stockOf.get(shot.lines[0]).layout.length) continue;
             const ca = a.cars[a.cars.length >> 1];
             if (Math.hypot(ca.m[12] - shot.near[0], ca.m[14] - shot.near[1]) > shot.radius) continue;
-            const b = B.find(b => b.cars.length === st.stockOf.get(shot.lines[1]).layout.length && b.cars.some(cb => Math.hypot(cb.m[12] - ca.m[12], cb.m[14] - ca.m[14]) < shot.close));
+            // Side by side means parallel and clear of each other: every pair of cars closer than a car's length
+            // is at least half their two widths apart sideways, or one is a full car height above the other
+            // (a flyover). (Fix round 1: at a faired junction crossing a District train cut through a Piccadilly
+            // train's lane, and the looser test took that moment.)
+            const k = u.masterHeight.ratio, wA = st.stockOf.get(shot.lines[0]).widthM, wB = st.stockOf.get(shot.lines[1]).widthM;
+            const clear = b => a.cars.every(x => b.cars.every(y => {
+              const dx = y.m[12] - x.m[12], dz = y.m[14] - x.m[14], d = Math.hypot(dx, dz);
+              if (d > 20) return true;
+              const fx = x.m[8], fz = x.m[10], fl = Math.hypot(fx, fz) || 1, gx = y.m[8], gz = y.m[10], gl = Math.hypot(gx, gz) || 1;
+              if (Math.abs(fx * gz - fz * gx) / (fl * gl) > Math.sin(10 * Math.PI / 180)) return false; // not parallel
+              if (Math.abs(y.m[13] - x.m[13]) * k > 4) return true;
+              return Math.abs(dx * fz - dz * fx) / fl >= (wA + wB) / 2 + 0.2;
+            }));
+            const mid = b => b.cars[b.cars.length >> 1];
+            const b = B.find(b => b.cars.length === st.stockOf.get(shot.lines[1]).layout.length && b.cars.some(cb => Math.hypot(cb.m[12] - ca.m[12], cb.m[14] - ca.m[14]) < shot.close)
+              && (!shot.cam || Math.hypot(mid(b).m[12] - shot.near[0], mid(b).m[14] - shot.near[1]) <= shot.radius) && clear(b));
             if (!b) continue;
             simT = t;
-            const cb = b.cars[b.cars.length >> 1];
-            ({ cam, target } = aimAt(ca, [cb.m[12], cb.m[13], cb.m[14]], shot.low));
+            const cb = mid(b);
+            if (shot.cam) { cam = shot.cam; target = shot.target; } else ({ cam, target } = aimAt(ca, [cb.m[12], cb.m[13], cb.m[14]], shot.low));
             note = `${shot.lines[0]} and ${shot.lines[1]} trains side by side`;
             break;
           }

@@ -82,7 +82,7 @@ test.describe('in one load', () => {
     const r = await page.evaluate(async () => {
       const u = window.__ug, st = u.surfaceTrains, T = window.__ugTHREE;
       const map = await import('/src/surface-train-map.js');
-      const P = new T.Vector3(), pt = {}, out = { tube: [], dlr: [], notNearest: 0, portals: 0, bounds: map.PORTAL_ERROR_BOUND_M };
+      const P = new T.Vector3(), pt = {}, out = { tube: [], dlr: [], notNearest: 0, moved: 0, movedUnjustified: [], portals: 0, bounds: map.PORTAL_ERROR_BOUND_M };
       const seen = new Set();
       for (const train of u.trainSystem.allTrains) {
         const ud = train.userData;
@@ -97,8 +97,22 @@ test.describe('in one load', () => {
           // The underground train is where trainStateAt puts it at u: on its own curve.
           (ud.lineId === 'dlr' ? out.dlr : out.tube).push({ line: ud.lineId, d: d(up) });
           out.portals++;
-          // Tube portals are anchored at the chord's nearest approach (no along-track jump).
-          if (ud.lineId !== 'dlr') { const du = 15 / L; if (d(up) > Math.min(d(up - du), d(up + du)) + 3) out.notNearest++; }
+          // Tube portals are anchored at the chord's nearest approach (no along-track jump),
+          // unless the speed bound moved them (flag 2, fix round 1): then the nearest approach
+          // would have run a stretch beside it outside the bound (SPEED_RATIO_MIN/MAX, or the
+          // interval's own ratio between its stations where that is outside them).
+          if (ud.lineId === 'dlr') continue;
+          if (run.portal[k] === 1) { const du = 15 / L; if (d(up) > Math.min(d(up - du), d(up + du)) + 3) out.notNearest++; continue; }
+          out.moved++;
+          let a = k - 1; while (a > 0 && !run.station[a]) a--;
+          let b = k + 1; while (b < run.au.length - 1 && !run.station[b]) b++;
+          const rInt = (run.as[b] - run.as[a]) / ((run.au[b] - run.au[a]) * L);
+          const rHi = Math.max(map.SPEED_RATIO_MAX, rInt), rLo = Math.min(map.SPEED_RATIO_MIN, rInt);
+          let un = run.au[k - 1], best = Infinity;
+          for (let q = 1; q < 400; q++) { const v = run.au[k - 1] + (run.au[k + 1] - run.au[k - 1]) * q / 400, dv = d(v); if (dv < best) { best = dv; un = v; } }
+          const r1 = (run.as[k] - run.as[k - 1]) / ((un - run.au[k - 1]) * L), r2 = (run.as[k + 1] - run.as[k]) / ((run.au[k + 1] - un) * L);
+          const broke = q => !(q <= rHi * 0.97 && q >= rLo * 1.03);
+          if (!broke(r1) && !broke(r2)) out.movedUnjustified.push({ line: ud.lineId, r1, r2, rHi, rLo });
         }
       }
       // A real crossing: a Northern line train out of the Hampstead tunnel at Golders Green.
@@ -130,6 +144,8 @@ test.describe('in one load', () => {
     expect(r.tube.max).toBeLessThanOrEqual(r.bounds.tube);
     expect(r.dlr.max).toBeLessThanOrEqual(r.bounds.dlr);
     expect(r.notNearest).toBe(0);
+    expect(r.moved).toBeGreaterThan(0);
+    expect(r.movedUnjustified).toEqual([]);
     // The first car out sits at the mouth, and the underground train is within the bound of it.
     expect(r.crossing).not.toBeNull();
     expect(r.crossing.firstCarFromMouth).toBeLessThan(60);
@@ -249,6 +265,91 @@ test.describe('in one load', () => {
       expect(gaps.length, `${row.stock} over its rail at Master ${row.m}`).toBeGreaterThan(row.gaps.length / 2);
       for (const g of gaps) { expect(g, `${row.stock} at Master ${row.m}: gaps ${JSON.stringify(row.gaps)}`).toBeGreaterThan(-0.5); expect(g).toBeLessThan(1.5); }
     }
+  });
+
+  test('trains hold together: adjacent cars meet end to end and turn together, everywhere, at any moment', async () => {
+    // Fix round 1 (01Oct26h): the verifier found 140 of 43,429 adjacent car pairs more than 5 m apart and
+    // 127 bent more than 60 degrees, about 4 broken trains on screen at any moment, at 60 fixed places
+    // (junction hops, a station on a spur, DLR snaps alternating between parallel decks).
+    const r = await page.evaluate(() => {
+      const u = window.__ug, st = u.surfaceTrains, T = window.__ugTHREE, R = u.masterHeight.ratio;
+      const out = { trains: 0, pairs: 0, maxGap: 0, maxYaw: 0, worst: null, broken: 0 };
+      for (let k = 0; k < 40; k++) {
+        const t = 500 + k * 77;
+        for (const [id, tr] of Object.entries(st.snapshot(t))) {
+          out.trains++;
+          // Real metres (y scaled back from canonical by the Master ratio).
+          const cars = tr.cars.map(c => { const e = new T.Matrix4().makeScale(1, R, 1).multiply(new T.Matrix4().fromArray(c.m)).elements; const f = new T.Vector3(e[8], e[9], e[10]), L = f.length(); f.normalize(); const p = new T.Vector3(e[12], e[13], e[14]); return { c: c.c, f, a: p.clone().addScaledVector(f, -L / 2), b: p.clone().addScaledVector(f, L / 2), p }; });
+          let bad = false;
+          for (let i = 0; i + 1 < cars.length; i++) {
+            const A = cars[i], B = cars[i + 1];
+            if (B.c !== A.c + 1) continue;
+            out.pairs++;
+            const gap = Math.min(A.a.distanceTo(B.a), A.a.distanceTo(B.b), A.b.distanceTo(B.a), A.b.distanceTo(B.b));
+            const yaw = Math.acos(Math.max(-1, Math.min(1, (A.f.x * B.f.x + A.f.z * B.f.z) / (Math.hypot(A.f.x, A.f.z) * Math.hypot(B.f.x, B.f.z))))) * 180 / Math.PI;
+            if (gap > out.maxGap) { out.maxGap = gap; out.worst = { t, id, gap, yaw, at: [A.p.x, A.p.z] }; }
+            out.maxYaw = Math.max(out.maxYaw, yaw);
+            if (gap > 5 || yaw > 60) bad = true;
+          }
+          if (bad) out.broken++;
+        }
+      }
+      return out;
+    });
+    console.log('coupling', JSON.stringify(r));
+    expect(r.trains).toBeGreaterThan(5000);
+    expect(r.pairs).toBeGreaterThan(30000);
+    expect(r.broken).toBe(0);
+    // Measured 01Oct26h after fix round 1: largest gap 2.45 m (cars 0.6 m apart over couplers, on a curve and
+    // a cross-slope); largest turn between neighbours 18 degrees, a DLR section on one of its real 40 to 45 m
+    // radius curves (the Tube's largest, 16, where a junction gap is faired). Before: 140 pairs over 5 m, 127 over 60 degrees.
+    expect(r.maxGap).toBeLessThan(3);
+    expect(r.maxYaw).toBeLessThan(22);
+  });
+
+  test('speed: no surface train runs faster than the speed bound allows, on screen or between anchors', async () => {
+    // Fix round 1 (01Oct26h): Circle trains by Paddington ran at 105 m/s on screen (a portal anchor put 770 m
+    // of track into 88 m of chord), District trains at 55 m/s, DLR trains at up to three times their speed.
+    const r = await page.evaluate(async () => {
+      const u = window.__ug, st = u.surfaceTrains, R = u.masterHeight.ratio;
+      const map = await import('/src/surface-train-map.js');
+      const byId = new Map(u.trainSystem.allTrains.map(t => [t.userData.id, t.userData]));
+      // 1. Drawn cars, 1 s apart, same car of the same train, no timetable wrap: metres per second against cruise.
+      let prev = null, pairs = 0, maxRatio = 0, worst = null;
+      for (let t = 700; t <= 1300; t += 1) {
+        const snap = st.snapshot(t);
+        if (prev) for (const [id, tr] of Object.entries(snap)) {
+          const p = prev[id]; if (!p || Math.abs(tr.u - p.u) > 0.5) continue;
+          const pc = new Map(p.cars.map(c => [c.c, c.m]));
+          for (const c of tr.cars) { const m0 = pc.get(c.c); if (!m0) continue; const v = Math.hypot(c.m[12] - m0[12], (c.m[13] - m0[13]) * R, c.m[14] - m0[14]); pairs++; const q = v / byId.get(id).cruiseMps; if (q > maxRatio) { maxRatio = q; worst = { t, id, v }; } }
+        }
+        prev = snap;
+      }
+      // 2. Every stretch between anchors: track metres per metre of curve.
+      const seen = new Set(), over = [];
+      for (const train of u.trainSystem.allTrains) {
+        const ud = train.userData; if (!st.stockOf.has(ud.lineId) || seen.has(ud.curve)) continue; seen.add(ud.curve);
+        const m = st.mappingOf(ud), L = ud.curve.getLength();
+        for (const run of m.runs) {
+          for (let k = 1; k < run.au.length; k++) {
+            const q = (run.as[k] - run.as[k - 1]) / ((run.au[k] - run.au[k - 1]) * L);
+            let hi = map.SPEED_RATIO_MAX, lo = map.SPEED_RATIO_MIN;
+            if (ud.lineId !== 'dlr') { // the interval's own ratio, between its stations, where it is outside the bound
+              let a = k - 1; while (a > 0 && !run.station[a]) a--;
+              let b = k; while (b < run.au.length - 1 && !run.station[b]) b++;
+              const ri = (run.as[b] - run.as[a]) / ((run.au[b] - run.au[a]) * L); hi = Math.max(hi, ri); lo = Math.min(lo, ri);
+            }
+            if (q > hi * 1.05 || q < lo * 0.95 - 1e-9) over.push({ line: ud.lineId, q: +q.toFixed(2), hi: +hi.toFixed(2), lo: +lo.toFixed(2) });
+          }
+        }
+      }
+      return { pairs, maxRatio, worst, over: over.slice(0, 20), overN: over.length };
+    });
+    console.log('speed', JSON.stringify(r));
+    expect(r.pairs).toBeGreaterThan(50000);
+    // Measured 01Oct26h after fix round 1: at most 1.69 x cruise (20.3 m/s, a Hammersmith & City interval whose track is that much longer than its chord).
+    expect(r.maxRatio).toBeLessThan(2);
+    expect(r.overN).toBe(0);
   });
 
   test('the cull still hides the underground trains from above; the surface trains stay drawn and never below ground', async () => {
