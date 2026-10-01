@@ -45,9 +45,18 @@
 //      track per metre of chord (or the interval's own ratio), as near the
 //      chord's nearest point as that allows (flagged: portal 2).
 //   Adjacent intervals join into runs (a continuous polyline with its anchor
-//   table), faired (spurs cut, kinks blended: see "Fairing a run"); a run ending
-//   at a station on open track is extended by RUN_END_EXTENSION_M the way its
-//   own last END_DIR_M head, so a train dwelling at a terminus is drawn whole.
+//   table), faired (spurs cut, kinks blended: see "Fairing a run").
+//   5. Ends (fix round 2). A run ending at a station on open track carries on
+//      along the DRAWN track, never past it: up to RUN_END_EXTENSION_M along
+//      its end node's own piece, the way the run's last END_DIR_M head. Where
+//      the drawn track ends sooner (the stub at Epping, the Metropolitan short
+//      of Watford, Grange Hill where the Chigwell interval is refused), the end
+//      anchor is moved back along the run until the whole train fits on the
+//      drawn track (fitEnds: half the train plus END_CLEAR_M from the drawn
+//      end), the last interval compressed to match; so a train dwelling there
+//      stands on the track, short of the station's node, as at buffers. (Round
+//      1 carried on straight for whatever the drawn track lacked: trains ran up
+//      to 54 m past the end of the drawn track, about five at any moment.)
 //
 // THE MAPPING (DLR). The DLR's curve is not a chord: it is built from the DLR
 // profile (dlr-profile.js buildBranch), which follows the mapped track node by
@@ -57,12 +66,22 @@
 // and the track beneath it are told apart), as one map match over the whole
 // curve (mapSnapCurve: Viterbi, SNAP_SWITCH_M to change piece), so a train
 // keeps to one of two parallel decks. Where nothing is drawn within SNAP_MAX_M,
-// the curve point itself is used. The run is faired, and its anchors held to
-// the speed bound (boundAnchorSpeed).
+// the curve point itself carries the train's progress but is marked undrawn
+// (`drawn` 0): no car is drawn whose centre is there (fix round 2; round 1 drew
+// them, up to 57 m from any drawn track, by Stratford, Abbey Road and Canning
+// Town). The run is faired, and its anchors held to the speed bound
+// (boundAnchorSpeed).
+//
+// WHAT IS DRAWN. A car is drawn only where its centre is on open, drawn track
+// (sampleRun's `open` and `drawn`); everywhere else its underground twin, or
+// nothing, is. Every Tube run vertex is a node of the drawn track (or a fairing
+// of a junction between two drawn pieces), so for the Tube `drawn` is always 1.
 //
 // THE ERROR BOUND (metres, plan, both train positions as drawn, lanes
 // included): measured by mappingErrors() (src/surface-trains.js) over every
-// curve of the app, 01Oct26h after fix round 1, bundled route data; the figures
+// curve of the app, 01Oct26h after fix round 1 and again after fix round 2
+// (unchanged: a fitted end moves a train at most half its length), bundled
+// route data; tests/surface-trains.spec.js holds both bounds; the figures
 // per line are in docs/surface-trains.md and pinned in
 // tests/surface-trains.spec.js.
 //   * At a portal, the moment a train's centre reaches the mouth: Tube at
@@ -91,9 +110,12 @@ export const STATION_MATCH_M = 60;   // curve control point -> TfL stop of the l
 export const STATION_TRACK_M = 300;  // station -> nearest node of the line's track (Lane R's surface flag uses the same reach)
 export const JOIN_M = 60;            // a piece's end joins the nearest node of another piece (twin collapse leaves junction gaps up to ~32 m)
 export const ROUTE_RATIO_MAX = 1.6, ROUTE_RATIO_MIN = 0.6, ROUTE_SLACK_M = 300;
+/** At most this far a run's open end carries on along its end node's drawn piece (more than half the longest train, the S8's 66.8 m, plus END_CLEAR_M). */
 export const RUN_END_EXTENSION_M = 80;
 /** A run's end extension heads the way the run's own last END_DIR_M head (a single end segment can be a sideways junction hop: Woodford, found by the fix-round verifier 01Oct26h). */
 export const END_DIR_M = 40;
+/** A train fitted onto the drawn track at a run's end (fitEnds) stops this far short of the drawn track's end. */
+export const END_CLEAR_M = 2;
 export const SNAP_STEP_M = 10, SNAP_MAX_M = 35;
 /**
  * DLR snapping is a map match over the whole curve (Viterbi), not sample by
@@ -379,7 +401,14 @@ export function drawnY(y0, base, morph, ratio) { return morph && y0 >= base ? ba
 //      smallest margin in FAIR_MARGINS_M that achieves it, is replaced by a
 //      cubic Hermite blend between the run's own directions outside it, turning
 //      at most FAIR_TURN_DEG every FAIR_STEP_M (a radius of about 65 m): a
-//      junction gap is crossed as a crossover is, not as a step.
+//      junction gap is crossed as a crossover is, not as a step. A blend must
+//      also keep to the drawn track: at each point it may stray from it (plan)
+//      at most FAIR_MAX_DEV_M further than the run it replaces does nearest
+//      that point, or as far as the run strays over the cluster itself (half a
+//      junction hop); the gentlest blend within that is taken, and where none
+//      keeps within it, the one straying least. (Fix round 2: a window widened
+//      to the run's free end at Canning Town, its blend cutting the DLR's curve
+//      north of the station by 43 m, over open ground.)
 // Heights and the other attributes along a replaced stretch are the original
 // run's at the proportional arc length; above the ground the height above the
 // terrain is kept (the terrain is resampled under the new plan position).
@@ -388,6 +417,12 @@ export function drawnY(y0, base, morph, ratio) { return morph && y0 >= base ? ba
 export const KINK_TURN_DEG = 20, KINK_SCALE_M = 8, KINK_CLUSTER_M = 40;
 export const FAIR_TURN_DEG = 3.5, FAIR_STEP_M = 4, FAIR_TANGENT_M = 12;
 export const FAIR_MARGINS_M = [10, 20, 30, 45, 60, 80, 100, 130, 160, 200];
+/**
+ * How much further (plan metres) a fairing blend may stray from the drawn track than the run it replaces. A
+ * 90 degree turn off a stub (a terminus node beside the main line, Woodford) needs a 23 m fillet to keep
+ * within KINK_TURN_DEG, which strays 7 m; 10 m keeps a car in its lane within 10 m of the drawn track beyond it.
+ */
+export const FAIR_MAX_DEV_M = 10;
 export const SPUR_TURN_DEG = 120, SPUR_SCALE_M = 25, SPUR_CLOSE_M = 40, SPUR_MAX_M = 500;
 
 /** Segment [i, i + 1] of a polyline holding arc length s (cum ascending, clamped to the ends). */
@@ -427,7 +462,7 @@ function attrsAt(P, s) {
   const lerp = a => a[i] + (a[j] - a[i]) * t;
   let base, y0;
   if (P.open[i] === P.open[j]) { base = lerp(P.base); y0 = lerp(P.y0); } else { const k = P.open[i] ? i : j; base = P.base[k]; y0 = P.y0[k]; }
-  return { base, y0, morph: P.morph[near], open: P.open[near], slope: lerp(P.slope), extra: lerp(P.extra), vj: 0 };
+  return { base, y0, morph: P.morph[near], open: P.open[near], slope: lerp(P.slope), extra: lerp(P.extra), vj: 0, drawn: P.drawn ? P.drawn[near] : 1 };
 }
 
 /** Cubic Hermite between A and B with unit tangents tA, tB (scaled by the chord): m + 1 points. */
@@ -465,8 +500,46 @@ function hermiteWindow(P, w0, w1) {
   return { w0, w1, pts, maxTurn };
 }
 
+/**
+ * How far a window's blend strays beyond what it is allowed (plan metres; at most 0 when it keeps to the drawn
+ * track): at each blend point, its distance from the drawn track less the larger of clusterLim and the run's
+ * own distance from it at the run's point nearest the blend point, plus FAIR_MAX_DEV_M. (Nearest, not at the
+ * same arc length: a sideways hop adds its own length to the run, which would pair the blend with the wrong
+ * place.) Over a stretch the run itself has no drawn track near (a DLR gap), the blend is as free as it.
+ */
+function blendExcess(P, w, near, clusterLim) {
+  const n = P.cum.length, i0 = Math.max(0, segIndex(P.cum, w.w0) - 1), i1 = Math.min(n - 2, segIndex(P.cum, w.w1) + 1);
+  const o = { x: 0, z: 0 };
+  let worst = -Infinity;
+  for (const p of w.pts) {
+    let bd = Infinity;
+    for (let i = i0; i <= i1; i++) {
+      const ax = P.x[i], az = P.z[i], vx = P.x[i + 1] - ax, vz = P.z[i + 1] - az, l2 = vx * vx + vz * vz;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - ax) * vx + (p.z - az) * vz) / l2)) : 0;
+      const qx = ax + vx * t, qz = az + vz * t, d = Math.hypot(p.x - qx, p.z - qz);
+      if (d < bd) { bd = d; o.x = qx; o.z = qz; }
+    }
+    const allowed = Math.max(near(o.x, o.z, 200) + FAIR_MAX_DEV_M, clusterLim);
+    worst = Math.max(worst, near(p.x, p.z, allowed + 1) - allowed);
+  }
+  return worst;
+}
+
+/** The most that points along a polyline [s0, s1] (every FAIR_STEP_M), or a list of points, lie from the drawn track (`near`, capped at cap). */
+function strayFromDrawn(pts, near, cap) {
+  let worst = 0;
+  for (const p of pts) { const d = near(p.x, p.z, cap); if (d > worst) { worst = d; if (worst >= cap) break; } }
+  return worst;
+}
+function stretchPoints(P, s0, s1) {
+  const out = [];
+  for (let s = s0; s < s1; s += FAIR_STEP_M) out.push(polylineAt(P, s, {}));
+  out.push(polylineAt(P, s1, {}));
+  return out;
+}
+
 /** Kink clusters and their Hermite replacements (sorted, not overlapping). */
-export function kinkWindows(P) {
+export function kinkWindows(P, near = null) {
   const n = P.cum.length, L = P.cum[n - 1];
   if (n < 3 || !(L > 0)) return [];
   const kinks = [];
@@ -475,14 +548,23 @@ export function kinkWindows(P) {
     if (d >= 0.5 && turnAt(P, s, d) > KINK_TURN_DEG) kinks.push(s);
   }
   const windows = [];
+  // The smallest margin whose blend turns gently enough and keeps to the drawn track (near: plan distance
+  // to it); else the gentlest that keeps to it; else (none does) the one straying least. Without `near`
+  // (a bare polyline), the smallest margin that turns gently enough.
   const fair = (a, b) => {
-    let best = null;
+    const clusterLim = near ? strayFromDrawn(stretchPoints(P, a, b), near, 200) + 1 : Infinity;
+    let gentlest = null, closest = null;
     for (const e of FAIR_MARGINS_M) {
       const w = hermiteWindow(P, Math.max(0, a - e), Math.min(L, b + e));
-      if (!best || w.maxTurn < best.maxTurn - 1e-9) best = w;
-      if (w.maxTurn <= FAIR_TURN_DEG || (w.w0 === 0 && w.w1 === L)) break;
+      w.excess = near ? blendExcess(P, w, near, clusterLim) : -Infinity;
+      if (!closest || w.excess < closest.excess - 1e-9) closest = w;
+      if (w.excess <= 0) {
+        if (!gentlest || w.maxTurn < gentlest.maxTurn - 1e-9) gentlest = w;
+        if (w.maxTurn <= FAIR_TURN_DEG) break;
+      }
+      if (w.w0 === 0 && w.w1 === L) break;
     }
-    return best;
+    return gentlest ?? closest;
   };
   let a = NaN, b = NaN;
   const close = () => {
@@ -531,10 +613,11 @@ export function spurWindows(P) {
  */
 export function applyWindows(P, windows, getY = null) {
   // vj: the vertex is at a change of drawn piece, or on a faired stretch (where vertical fairing may act).
-  const keys = ['x', 'z', 'base', 'y0', 'morph', 'open', 'slope', 'extra', 'vj'];
+  // drawn: the vertex is on drawn track (0 for a DLR sample with nothing drawn within reach).
+  const keys = ['x', 'z', 'base', 'y0', 'morph', 'open', 'slope', 'extra', 'vj', 'drawn'];
   const out = Object.fromEntries(keys.map(k => [k, []]));
-  const pushV = (x, z, a) => { out.x.push(x); out.z.push(z); out.base.push(a.base); out.y0.push(a.y0); out.morph.push(a.morph); out.open.push(a.open); out.slope.push(a.slope); out.extra.push(a.extra); out.vj.push(a.vj); };
-  const vert = i => ({ base: P.base[i], y0: P.y0[i], morph: P.morph[i], open: P.open[i], slope: P.slope[i], extra: P.extra[i], vj: P.vj ? P.vj[i] : 0 });
+  const pushV = (x, z, a) => { out.x.push(x); out.z.push(z); out.base.push(a.base); out.y0.push(a.y0); out.morph.push(a.morph); out.open.push(a.open); out.slope.push(a.slope); out.extra.push(a.extra); out.vj.push(a.vj); out.drawn.push(a.drawn ?? 1); };
+  const vert = i => ({ base: P.base[i], y0: P.y0[i], morph: P.morph[i], open: P.open[i], slope: P.slope[i], extra: P.extra[i], vj: P.vj ? P.vj[i] : 0, drawn: P.drawn ? P.drawn[i] : 1 });
   const n = P.cum.length, marks = [];
   let i = 0;
   for (const w of windows) {
@@ -589,12 +672,12 @@ export function applyWindows(P, windows, getY = null) {
   return { P: out, map };
 }
 
-/** Spurs then kinks (see above): the passes, each { windows, P, map } in its own input's arc length. */
-export function fairPolyline(P, getY = null) {
+/** Spurs then kinks (see above): the passes, each { windows, P, map } in its own input's arc length. near(x, z, cap): plan distance to the drawn track (optional). */
+export function fairPolyline(P, getY = null, near = null) {
   const passes = [];
   let cur = P;
   for (const find of [spurWindows, kinkWindows]) {
-    const windows = find(cur);
+    const windows = find(cur, near);
     if (!windows.length) { passes.push({ windows, P: cur, map: s => s }); continue; }
     const r = applyWindows(cur, windows, getY);
     passes.push({ windows, P: r.P, map: r.map });
@@ -717,31 +800,32 @@ export function verticalFair(Y, cum, open, unitsPerM, eligible = null) {
 }
 
 class RunBuilder {
-  constructor() { this.x = []; this.z = []; this.base = []; this.y0 = []; this.morph = []; this.open = []; this.slope = []; this.extra = []; this.vj = []; this.cum = []; this.au = []; this.as = []; this.portal = []; this.station = []; }
+  constructor() { this.x = []; this.z = []; this.base = []; this.y0 = []; this.morph = []; this.open = []; this.slope = []; this.extra = []; this.vj = []; this.drawn = []; this.cum = []; this.au = []; this.as = []; this.portal = []; this.station = []; this.nearU = []; }
   get length() { return this.cum.length ? this.cum[this.cum.length - 1] : 0; }
-  vertex(x, z, base, y0, morph, open, slope = 0, extra = 0, vj = 0) {
+  vertex(x, z, base, y0, morph, open, slope = 0, extra = 0, vj = 0, drawn = 1) {
     const n = this.x.length;
     const s = n ? this.cum[n - 1] + Math.hypot(x - this.x[n - 1], z - this.z[n - 1]) : 0;
-    this.x.push(x); this.z.push(z); this.base.push(base); this.y0.push(y0); this.morph.push(morph); this.open.push(open); this.slope.push(slope); this.extra.push(extra); this.vj.push(vj); this.cum.push(s);
+    this.x.push(x); this.z.push(z); this.base.push(base); this.y0.push(y0); this.morph.push(morph); this.open.push(open); this.slope.push(slope); this.extra.push(extra); this.vj.push(vj); this.drawn.push(drawn); this.cum.push(s);
     return s;
   }
   /** Mark the last vertex as at a change of drawn piece (vertical fairing may act near it). */
   markJunction() { if (this.vj.length) this.vj[this.vj.length - 1] = 1; }
   /** A network node; `along` is +1 where the route runs the way its piece does, -1 against (the piece's left is then the run's right). */
   node(net, i, along = 1, vj = 0) { return this.vertex(net.x[i], net.z[i], net.base[i], net.y0[i], net.morph[i], net.open[i], net.slope[i] * along, net.extra[i], vj); }
-  anchor(u, s, kind) {
+  /** nearU: for a portal, the curve parameter where the chord passes nearest its mouth (fitEnds keeps a moved portal justified). */
+  anchor(u, s, kind, nearU = NaN) {
     const k = this.au.length;
     if (k && !(u > this.au[k - 1] && s >= this.as[k - 1])) { if (u === this.au[k - 1] && s === this.as[k - 1]) return true; return false; }
-    this.au.push(u); this.as.push(s); this.portal.push(kind === 'portal' ? 1 : kind === 'portal-moved' ? 2 : 0); this.station.push(kind === 'station' ? 1 : 0);
+    this.au.push(u); this.as.push(s); this.portal.push(kind === 'portal' ? 1 : kind === 'portal-moved' ? 2 : 0); this.station.push(kind === 'station' ? 1 : 0); this.nearU.push(nearU);
     return true;
   }
-  /** Fair the polyline (spurs, kinks: see fairPolyline) and re-place the anchors with it (remapAnchors). */
-  fair(getY = null) {
+  /** Fair the polyline (spurs, kinks: see fairPolyline; near keeps the blends to the drawn track) and re-place the anchors with it (remapAnchors). */
+  fair(getY = null, near = null) {
     if (this.x.length < 3) return { spurs: 0, kinks: 0 };
-    const r = fairPolyline({ x: this.x, z: this.z, base: this.base, y0: this.y0, morph: this.morph, open: this.open, slope: this.slope, extra: this.extra, vj: this.vj, cum: this.cum }, getY);
+    const r = fairPolyline({ x: this.x, z: this.z, base: this.base, y0: this.y0, morph: this.morph, open: this.open, slope: this.slope, extra: this.extra, vj: this.vj, drawn: this.drawn, cum: this.cum }, getY, near);
     if (!r.spurs && !r.kinks) return r;
     const P = r.P;
-    this.x = P.x; this.z = P.z; this.base = P.base; this.y0 = P.y0; this.morph = P.morph; this.open = P.open; this.slope = P.slope; this.extra = P.extra; this.vj = P.vj; this.cum = P.cum;
+    this.x = P.x; this.z = P.z; this.base = P.base; this.y0 = P.y0; this.morph = P.morph; this.open = P.open; this.slope = P.slope; this.extra = P.extra; this.vj = P.vj; this.drawn = P.drawn; this.cum = P.cum;
     for (const pass of r.passes) this.as = remapAnchors(this.au, this.as, pass);
     const L = P.cum[P.cum.length - 1];
     this.as = this.as.map(s => Math.max(0, Math.min(L, s)));
@@ -777,7 +861,7 @@ class RunBuilder {
     for (let i = 1; i < e.length; i++) e[i] = Math.max(e[i], e[i - 1] - LANE_EASE * (c[i] - c[i - 1]));
     for (let i = e.length - 2; i >= 0; i--) e[i] = Math.max(e[i], e[i + 1] - LANE_EASE * (c[i + 1] - c[i]));
     return { x: f(this.x), z: f(this.z), base: f(this.base), y0, morph: b(this.morph), open: b(this.open), slope: f(this.slope), extra: e, cum: f(this.cum),
-      vj: b(this.vj), au: f(this.au), as: f(this.as), portal: b(this.portal), station: b(this.station), u0: this.au[0], u1: this.au[this.au.length - 1], length: this.length, verticalFaired: vf, ...meta };
+      vj: b(this.vj), drawn: b(this.drawn), au: f(this.au), as: f(this.as), nearU: f(this.nearU), portal: b(this.portal), station: b(this.station), u0: this.au[0], u1: this.au[this.au.length - 1], length: this.length, verticalFaired: vf, ...meta };
   }
 }
 
@@ -811,57 +895,152 @@ function walkAlong(net, from, dx, dz, len) {
 
 /**
  * Extend a run's ends that are stations on open track (a terminus, or a
- * station whose next interval is not mapped), so a train dwelling there is
- * drawn whole. The extension heads the way the run's own last END_DIR_M head:
- * along the drawn track where its end node's piece carries on that way, straight
- * on for whatever is left. (Fix round 1: it used to carry on from the run's
- * last segment, which at Woodford was a sideways junction hop, so a dwelling
- * Central train stood at right angles to its own track.) The extended run is
- * faired again, so the join is smooth.
+ * station whose next interval is not mapped) along the DRAWN track: up to
+ * `len` metres along its end node's own piece, the way the run's own last
+ * END_DIR_M head (fix round 1: at Woodford the last segment was a sideways
+ * junction hop, so a dwelling Central train stood at right angles to its own
+ * track), and never past the end of the drawn piece. (Fix round 2: round 1
+ * carried on straight for whatever the piece lacked, and trains dwelling at
+ * Epping, Watford, Richmond, Stanmore, Kensington (Olympia) and Grange Hill
+ * were drawn up to 54 m past the end of the drawn track.) Where the piece does
+ * not carry on that way nothing is added, and fitEnds moves the end anchor
+ * back instead. The extended run is faired again, so the join is smooth.
  */
-function extendEnds(r, getY, len, net = null, ends = null) {
-  const n = r.x.length; if (n < 2) return r;
+function extendEnds(r, getY, len, net = null, ends = null, near = null) {
+  const n = r.x.length; if (n < 2 || !net) return r;
   const L = r.cum[n - 1];
   const vert = (i, along = 1) => ({ x: net.x[i], z: net.z[i], base: net.base[i], y0: net.y0[i], morph: net.morph[i], open: net.open[i], slope: net.slope[i] * along, extra: net.extra[i] });
-  const straight = (from, dir, dist) => { // from vertex `from` (a {x,z,...}) along unit dir, dist metres
-    const x = from.x + dir.x * dist, z = from.z + dir.z * dist;
-    const base = getY ? getY({ x, z }) : from.base;
-    const b = Number.isFinite(base) ? base : from.base;
-    return { x, z, base: b, y0: b + (from.y0 - from.base), morph: from.morph, open: from.open, slope: from.slope, extra: from.extra };
-  };
-  const runVert = i => ({ x: r.x[i], z: r.z[i], base: r.base[i], y0: r.y0[i], morph: r.morph[i], open: r.open[i], slope: r.slope?.[i] ?? 0, extra: r.extra?.[i] ?? 0 });
   const away = atStart => {
     const p0 = polylineAt(r, atStart ? 0 : L, {}), p1 = polylineAt(r, atStart ? Math.min(L, END_DIR_M) : Math.max(0, L - END_DIR_M), {});
     return unit(p0.x - p1.x, p0.z - p1.z);
   };
-  const extension = (endIdx, nodes, atStart) => { // vertices beyond the end, nearest first
+  const extension = (nodes, atStart) => { // drawn nodes beyond the end, nearest first
     const out = [], dir0 = away(atStart);
-    if (!dir0) return out;
-    let last = runVert(endIdx), dir = dir0, done = 0;
-    const walk = net && nodes ? walkAlong(net, nodes[0], dir0.x, dir0.z, len) : null;
-    if (walk) {
-      // Appended at the end the run follows the walk's order through the piece; prepended at
-      // the start it runs against it (the cross-slope's sign follows).
-      const along = walk.step * (atStart ? -1 : 1);
-      for (const w of walk.nodes) {
-        const v = vert(w.i, along);
-        dir = unit(v.x - last.x, v.z - last.z) ?? dir;
-        last = v; out.push(v); done = w.d;
-      }
-    }
-    if (done < len - 1e-6) out.push(straight(last, dir, len - done));
+    if (!dir0 || !nodes) return out;
+    const walk = walkAlong(net, nodes[0], dir0.x, dir0.z, len);
+    if (!walk) return out;
+    // Appended at the end the run follows the walk's order through the piece; prepended at
+    // the start it runs against it (the cross-slope's sign follows).
+    const along = walk.step * (atStart ? -1 : 1);
+    for (const w of walk.nodes) out.push(vert(w.i, along));
     return out;
   };
   const out = new RunBuilder();
-  const startExt = r.open[0] && r.station[0] ? extension(0, ends?.first, true) : [];
-  const endExt = r.open[n - 1] && r.station[r.station.length - 1] ? extension(n - 1, ends?.last, false) : [];
+  const startExt = r.open[0] && r.station[0] ? extension(ends?.first, true) : [];
+  const endExt = r.open[n - 1] && r.station[r.station.length - 1] ? extension(ends?.last, false) : [];
   for (const v of [...startExt].reverse()) out.vertex(v.x, v.z, v.base, v.y0, v.morph, v.open, v.slope, v.extra);
   let shift = 0; // where the run's own first vertex lands, past the start extension
-  for (let i = 0; i < n; i++) { const sv = out.vertex(r.x[i], r.z[i], r.base[i], r.y0[i], r.morph[i], r.open[i], r.slope?.[i] ?? 0, r.extra?.[i] ?? 0, r.vj?.[i] ?? 0); if (i === 0) shift = sv; }
+  for (let i = 0; i < n; i++) { const sv = out.vertex(r.x[i], r.z[i], r.base[i], r.y0[i], r.morph[i], r.open[i], r.slope?.[i] ?? 0, r.extra?.[i] ?? 0, r.vj?.[i] ?? 0, r.drawn?.[i] ?? 1); if (i === 0) shift = sv; }
   for (const v of endExt) out.vertex(v.x, v.z, v.base, v.y0, v.morph, v.open, v.slope, v.extra);
-  for (let k = 0; k < r.au.length; k++) out.anchor(r.au[k], r.as[k] + shift, r.portal[k] === 2 ? 'portal-moved' : r.portal[k] ? 'portal' : r.station[k] ? 'station' : null);
-  if (startExt.length || endExt.length) out.fair(getY);
+  for (let k = 0; k < r.au.length; k++) out.anchor(r.au[k], r.as[k] + shift, r.portal[k] === 2 ? 'portal-moved' : r.portal[k] ? 'portal' : r.station[k] ? 'station' : null, r.nearU?.[k] ?? NaN);
+  if (startExt.length || endExt.length) out.fair(getY, near);
   return out.build({ extendedStart: startExt.length > 0, extendedEnd: endExt.length > 0, ...(r.fairing ? { fairing: r.fairing } : {}) });
+}
+
+/**
+ * Fit a train standing at either end of a run onto the drawn track (fix round
+ * 2). At an end whose last drawn vertex is open (open drawn track ends there),
+ * the end anchor is moved to half the train plus END_CLEAR_M inside that
+ * vertex, so a train dwelling there stands whole on the drawn track, short of
+ * the station's node, as at buffers. At an end in tunnel nothing moves (the
+ * cars past it are in the tunnel, and not drawn). The anchors before it give
+ * way so no stretch runs slower than the speed bound allows:
+ *   * Tube runs (stations and portals, far apart): the end interval is
+ *     compressed in proportion, from the anchor before it, widened an anchor
+ *     at a time while any stretch in it would run slower than SPEED_RATIO_MIN,
+ *     or its interval's own ratio where that is lower (as
+ *     tests/surface-trains.spec.js checks), with 3% to spare; never over a
+ *     portal anchor, which stays where the chord passes nearest its mouth
+ *     (step 4; it may be the window's fixed end, unless the speed bound moved
+ *     it, whose neighbours justify it);
+ *   * `perStretch` (the DLR's anchors every SNAP_STEP_M): the anchors next to
+ *     the end are pushed along at SPEED_RATIO_MIN, the train arriving at a
+ *     steady slower pace, until they meet the timetable's own.
+ * An end off drawn track (a DLR curve ending past the drawn deck), an open
+ * stretch at the end too short to hold the train, or a fit that would still run
+ * a stretch slower than that, is left unfitted (counted): the cars past the
+ * run's end are not drawn, so the train is drawn in part, never off the drawn
+ * track, and no stop is moved more than half a train from its place.
+ * Changes run.as in place (monotone, within the run); curveL: the curve's
+ * length in metres (metres of curve per unit of u).
+ */
+export function fitEnds(run, halfM, curveL, stats = null, { perStretch = false } = {}) {
+  const n = run.cum.length, k = run.as.length;
+  if (!(halfM > 0) || n < 2 || k < 2) return run;
+  const dr = run.drawn, au = run.au;
+  const count = key => { if (stats) stats[key] = (stats[key] || 0) + 1; };
+  // The open, drawn stretch at each end of the run ([cum[0], cum[a]] and [cum[b], cum[n - 1]]): an end
+  // is fitted only when it is on open, drawn track and that stretch can hold the whole train.
+  const onTrack = i => !!run.open[i] && (!dr || !!dr[i]);
+  let a = 0; while (a < n - 1 && onTrack(a + 1)) a++;
+  let b = n - 1; while (b > 0 && onTrack(b - 1)) b--;
+  const room = 2 * (halfM + END_CLEAR_M);
+  const du = q => Math.max(1e-12, (au[q] - au[q - 1]) * curveL);
+  // The lower speed bound a stretch is held to: SPEED_RATIO_MIN, or (Tube) its interval's own ratio where lower.
+  const floorOf = (A, q, f = 1) => {
+    if (perStretch) return SPEED_RATIO_MIN;
+    let s0 = q - 1; while (s0 > 0 && !run.station[s0]) s0--;
+    let s1 = q; while (s1 < k - 1 && !run.station[s1]) s1++;
+    return Math.min(SPEED_RATIO_MIN, f * (A[s1] - A[s0]) / Math.max(1e-12, (au[s1] - au[s0]) * curveL));
+  };
+  const fitOne = atStart => {
+    const old = run.as;
+    const target = atStart ? run.cum[0] + halfM + END_CLEAR_M : run.cum[n - 1] - halfM - END_CLEAR_M;
+    if (!(atStart ? onTrack(0) : onTrack(n - 1))) return;
+    if (atStart ? !(old[0] < target - 1e-9) : !(old[k - 1] > target + 1e-9)) return;
+    if ((atStart ? run.cum[a] - run.cum[0] : run.cum[n - 1] - run.cum[b]) < room) { count('fitShort'); return; }
+    let as = Array.from(old);
+    // A portal p the speed bound moved (flag 2) is justified by the stretch either side of it at the chord's
+    // nearest approach (nearU) running outside the bound (as the portal test checks, with its 3% margins).
+    // A window ending on p leaves the stretch on its far side (side +1: after p) alone: p stays justified
+    // when that stretch breaks the bound, with its interval's ratio recomputed from t.
+    const farJustifies = (t, p, side) => {
+      const un = run.nearU?.[p];
+      if (!Number.isFinite(un) || p <= 0 || p >= k - 1) return false;
+      let s0 = p - 1; while (s0 > 0 && !run.station[s0]) s0--;
+      let s1 = p + 1; while (s1 < k - 1 && !run.station[s1]) s1++;
+      const rInt = (t[s1] - t[s0]) / Math.max(1e-12, (au[s1] - au[s0]) * curveL);
+      const rHi = Math.max(SPEED_RATIO_MAX, rInt), rLo = Math.min(SPEED_RATIO_MIN, rInt);
+      const r = side > 0 ? (t[p + 1] - t[p]) / Math.max(1e-12, (au[p + 1] - un) * curveL) : (t[p] - t[p - 1]) / Math.max(1e-12, (un - au[p - 1]) * curveL);
+      return !(r <= rHi * 0.97 && r >= rLo * 1.03);
+    };
+    // as with the anchors of [p, q] scaled about anchor `fix` by f, and whether every stretch in it keeps the bound.
+    const scaled = (p, q, fix, f) => { const t = Array.from(as), sf = as[fix]; for (let i = p; i <= q; i++) t[i] = sf + (as[i] - sf) * f; return t; };
+    const holds = (t, p, q) => { for (let i = p + 1; i <= q; i++) if ((t[i] - t[i - 1]) / du(i) < 0.97 * floorOf(t, i) - 1e-12) return false; return true; };
+    if (perStretch) {
+      if (atStart) { as[0] = target; for (let q = 1; q < k; q++) { const m = as[q - 1] + SPEED_RATIO_MIN * du(q); if (as[q] >= m) break; as[q] = m; } }
+      else { as[k - 1] = target; for (let q = k - 2; q >= 0; q--) { const m = as[q + 1] - SPEED_RATIO_MIN * du(q + 1); if (as[q] <= m) break; as[q] = m; } }
+    } else if (atStart) {
+      // The window [0, j] is widened an anchor at a time. It never holds a portal anchor inside it: a portal
+      // stays where the chord passes nearest its mouth. It may end on one; one the speed bound moved only
+      // while the stretch beyond it, which the window leaves alone, still justifies the move.
+      for (let j = 1; j < k; j++) {
+        const f = (as[j] - target) / Math.max(1e-12, as[j] - as[0]);
+        if (f > 0) { const t = scaled(0, j, j, f); if (holds(t, 0, j) && (run.portal[j] !== 2 || farJustifies(t, j, +1))) { as = t; break; } }
+        if (run.portal[j]) break;
+      }
+    } else {
+      for (let j = k - 2; j >= 0; j--) {
+        const f = (target - as[j]) / Math.max(1e-12, as[k - 1] - as[j]);
+        if (f > 0) { const t = scaled(j, k - 1, j, f); if (holds(t, j, k - 1) && (run.portal[j] !== 2 || farJustifies(t, j, -1))) { as = t; break; } }
+        if (run.portal[j]) break;
+      }
+    }
+    // Keep the fit only if it did what it is for and every stretch it slowed keeps the bound.
+    let ok = (atStart ? as[0] >= target - 1e-6 : as[k - 1] <= target + 1e-6) && as[0] >= run.cum[0] - 1e-6 && as[k - 1] <= run.cum[n - 1] + 1e-6;
+    for (let q = 1; q < k && ok; q++) {
+      if (as[q] < as[q - 1] - 1e-9) ok = false;
+      const r = (as[q] - as[q - 1]) / du(q), r0 = (old[q] - old[q - 1]) / du(q);
+      if (r < r0 - 1e-9 && r < 0.97 * floorOf(as, q) - 1e-12) ok = false;
+    }
+    if (!ok) { count('fitSkipped'); return; }
+    if (stats) stats.fitMaxM = Math.max(stats.fitMaxM || 0, Math.abs(atStart ? target - old[0] : old[k - 1] - target));
+    count(atStart ? 'fitStart' : 'fitEnd');
+    for (let q = 0; q < k; q++) run.as[q] = as[q];
+  };
+  fitOne(true);
+  fitOne(false);
+  return run;
 }
 
 /** Nearest curve parameter in [ua, ub] to plan point (px, pz): sampled every ~stepM then refined on the bracketing chords. */
@@ -885,10 +1064,11 @@ export function projectOnCurve(curve, px, pz, ua, ub, { stepM = 8, length = curv
  * Map one Tube curve onto its line's track network.
  * stations: [{key, x, z}] of the line (TfL stops, scene metres).
  * cache: per network {routes: Map, stationNode: Map} shared by every curve of the line.
+ * halfTrainM: half the line's train (fitEnds); 0 leaves the ends' anchors at their stations.
  * Returns { runs, stats }.
  */
-export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = null, extendM = RUN_END_EXTENSION_M }) {
-  const stats = { anchors: 0, intervals: 0, mapped: 0, tunnelOnly: 0, offTrack: 0, noRoute: 0, implausible: 0, reversed: 0, portals: 0, portalsDropped: 0, portalsMoved: 0, spurs: 0, kinks: 0 };
+export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = null, extendM = RUN_END_EXTENSION_M, halfTrainM = 0 }) {
+  const stats = { anchors: 0, intervals: 0, mapped: 0, tunnelOnly: 0, offTrack: 0, noRoute: 0, implausible: 0, reversed: 0, portals: 0, portalsDropped: 0, portalsMoved: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0 };
   const runs = [];
   if (!net?.hasOpen || !curve?.points?.length) return { runs, stats };
   const L = curve.getLength();
@@ -919,12 +1099,17 @@ export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = nu
     return cache.stationNode.get(st.key);
   };
   let cur = null, curEnd = -1, curU = NaN, ends = null;
+  cache.index ??= buildSegmentIndex(net);
+  const near = (x, z, cap) => distanceToDrawn(net, cache.index, x, z, cap);
   const flush = () => {
     if (cur && cur.au.length >= 2) {
-      const f = cur.fair(getY);
+      const f = cur.fair(getY, near);
       stats.spurs += f.spurs || 0; stats.kinks += f.kinks || 0;
-      const built = cur.build();
-      runs.push(extendM > 0 ? extendEnds(built, getY, extendM, net, ends) : built);
+      let built = cur.build();
+      if (extendM > 0) built = extendEnds(built, getY, extendM, net, ends, near);
+      // A train standing at either end fits on the drawn track (step 5 of the header).
+      if (halfTrainM > 0) fitEnds(built, halfTrainM, L, stats);
+      runs.push(built);
     }
     cur = null; curEnd = -1; ends = null;
   };
@@ -971,7 +1156,7 @@ export function mapTubeCurve({ curve, stationUs, stations, net, cache, getY = nu
         const lo = Math.max(uPrev + d1 / (rHi * L), B.u - d2 / (rLo * L)), hi = Math.min(uPrev + d1 / (rLo * L), B.u - d2 / (rHi * L));
         let up = pu.u, kind = 'portal';
         if (lo <= hi + 1e-12) { const c = Math.max(lo, Math.min(hi, up)); if (c !== up) { stats.portalsMoved++; up = c; kind = 'portal-moved'; } } else up = NaN;
-        if (!(up > A.u && up < B.u) || !cur.anchor(up, sp, kind)) stats.portalsDropped++;
+        if (!(up > A.u && up < B.u) || !cur.anchor(up, sp, kind, pu.u)) stats.portalsDropped++;
       }
       const hop = net.piece[a] !== net.piece[b];
       if (hop) cur.markJunction();
@@ -1014,6 +1199,20 @@ export function buildSegmentIndex(net, cell = 50) {
   return { grid, segs, cell };
 }
 
+/** Plan distance from (px, pz) to the nearest drawn segment of a network (index: buildSegmentIndex), or cap where none is nearer. */
+export function distanceToDrawn(net, index, px, pz, cap) {
+  const c = index.cell, x0 = Math.floor((px - cap) / c), x1 = Math.floor((px + cap) / c), z0 = Math.floor((pz - cap) / c), z1 = Math.floor((pz + cap) / c);
+  let best = cap;
+  for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) for (const sk of index.grid.get(`${cx},${cz}`) || []) {
+    const i = index.segs[sk], j = i + 1;
+    const vx = net.x[j] - net.x[i], vz = net.z[j] - net.z[i], l2 = vx * vx + vz * vz;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - net.x[i]) * vx + (pz - net.z[i]) * vz) / l2)) : 0;
+    const d = Math.hypot(px - net.x[i] - vx * t, pz - net.z[i] - vz * t);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 /**
  * Map one DLR curve onto the drawn DLR track by snapping (see the header).
  * ratio: the structure scale the network's morphed pieces are drawn at.
@@ -1030,10 +1229,10 @@ export function buildSegmentIndex(net, cell = 50) {
  * one deck through a stretch of parallel decks and changes piece once, where
  * the curve does. The run is then faired (fairPolyline).
  */
-export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, stepM = SNAP_STEP_M, maxM = SNAP_MAX_M, ve = 5 }) {
+export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, stepM = SNAP_STEP_M, maxM = SNAP_MAX_M, ve = 5, extendM = RUN_END_EXTENSION_M, halfTrainM = 0 }) {
   const maxDy = SNAP_MAX_RISE_M * ve * ratio; // scene units at this structure scale
   const L = curve.getLength(), n = Math.max(2, Math.ceil(L / stepM) + 1);
-  const stats = { samples: n, snapped: 0, fallback: 0, maxSnapM: 0, sumSnapM: 0, switches: 0, spurs: 0, kinks: 0 };
+  const stats = { samples: n, snapped: 0, fallback: 0, maxSnapM: 0, sumSnapM: 0, switches: 0, spurs: 0, kinks: 0, fitStart: 0, fitEnd: 0, fitMaxM: 0, fitShort: 0, fitSkipped: 0 };
   // Candidates per sample.
   const samples = [];
   for (let k = 0; k < n; k++) {
@@ -1082,8 +1281,23 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
   const pick = new Int32Array(n);
   let arg = 0; for (let b = 1; b < cost.length; b++) if (cost[b] < cost[arg]) arg = b;
   for (let k = n - 1; k >= 0; k--) { pick[k] = arg; if (k > 0) arg = back[k][arg]; }
-  // The run through the chosen candidates.
+  // The run through the chosen candidates. Each open end carries on along the drawn deck it is on, up to
+  // extendM and never past the deck's end (the Tube's extendEnds; fix round 2: every DLR train dwelling at
+  // the end of its curve was drawn as half a train, though the deck carries on at most such stations).
+  const deckVert = i => [net.x[i], net.z[i], net.base[i], drawnY(net.y0[i], net.base[i], net.morph[i], ratio), 0, net.open[i], 0, net.extra[i], 0, 1];
+  const endWalk = (k, k2) => { // deck nodes past sample k, away from sample k2, nearest first
+    const c = samples[k].cands[pick[k]];
+    if (c.fallback || !(extendM > 0) || !(net.open[c.i] && net.open[c.j])) return [];
+    const ox = samples[k].x - samples[k2].x, oz = samples[k].z - samples[k2].z, l = Math.hypot(ox, oz);
+    if (!(l > 1e-6)) return [];
+    const dx = ox / l, dz = oz / l, ahead = i => (net.x[i] - c.qx) * dx + (net.z[i] - c.qz) * dz;
+    const walk = walkAlong(net, ahead(c.i) <= ahead(c.j) ? c.i : c.j, dx, dz, extendM);
+    return walk ? walk.nodes.filter(w => ahead(w.i) > 0.5).map(w => w.i) : [];
+  };
+  const mDir = Math.min(n - 1, Math.max(1, Math.round(END_DIR_M / stepM)));
+  const startExt = endWalk(0, mDir), endExt = endWalk(n - 1, n - 1 - mDir);
   const r = new RunBuilder();
+  for (const i of [...startExt].reverse()) r.vertex(...deckVert(i));
   let prevPiece = null;
   for (let k = 0; k < n; k++) {
     const smp = samples[k], best = smp.cands[pick[k]];
@@ -1101,12 +1315,14 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
       stats.snapped++; stats.maxSnapM = Math.max(stats.maxSnapM, best.d); stats.sumSnapM += best.d;
     } else {
       const f = fallback(smp.x, smp.y, smp.z);
-      const sv = r.vertex(smp.x, smp.z, f.base, f.y, 0, f.open ? 1 : 0, 0, 0, sw ? 1 : 0);
+      // Nothing drawn within reach: the curve point carries the train's progress, undrawn (no car is drawn here).
+      const sv = r.vertex(smp.x, smp.z, f.base, f.y, 0, f.open ? 1 : 0, 0, 0, sw ? 1 : 0, 0);
       r.anchor(smp.u, sv, null);
       stats.fallback++;
     }
   }
-  const fr = r.fair(getY);
+  for (const i of endExt) r.vertex(...deckVert(i));
+  const fr = r.fair(getY, (x, z, cap) => distanceToDrawn(net, index, x, z, cap));
   stats.spurs = fr.spurs || 0; stats.kinks = fr.kinks || 0;
   // The speed bound, over the 10 m anchors (a lump left by a change of piece, or by a curve
   // cutting inside the drawn track, spread over the stretches either side).
@@ -1116,7 +1332,9 @@ export function mapSnapCurve({ curve, net, index, ratio, fallback, getY = null, 
   // 8% grade limit does (dlr-profile.js refresh); a lift-based ramp, or one scaled by the
   // structure ratio, lifted whole decks over dips (Master 10, found 01Oct26h by
   // tests/surface-trains.spec.js and the unit test beside it).
-  const run = r.build({}, { ramp: 'absolute', unitsPerM: ve * ratio });
+  const run = r.build({ extendedStart: startExt.length > 0, extendedEnd: endExt.length > 0 }, { ramp: 'absolute', unitsPerM: ve * ratio });
+  // A train standing at either end fits on the drawn deck, its approach held at SPEED_RATIO_MIN (fitEnds).
+  if (halfTrainM > 0) fitEnds(run, halfTrainM, L, stats, { perStretch: true });
   const openAt = sv => { const i = segIndex(run.cum, sv), j = Math.min(i + 1, run.cum.length - 1), seg = run.cum[j] - run.cum[i]; return (seg > 0 && (sv - run.cum[i]) / seg >= 0.5) ? run.open[j] : run.open[i]; };
   for (let k = 1; k < run.au.length; k++) if (openAt(run.as[k]) !== openAt(run.as[k - 1])) run.portal[k] = 1;
   return { runs: run.au.length >= 2 ? [run] : [], stats };
@@ -1142,9 +1360,10 @@ export function sAt(run, u) {
   return as[lo] + (u - au[lo]) / (au[hi] - au[lo]) * (as[hi] - as[lo]);
 }
 /**
- * Point on a run at arc length s, drawn at structure ratio: writes out.{x, y, z, dx, dy, dz, open, inside}.
+ * Point on a run at arc length s, drawn at structure ratio: writes out.{x, y, z, dx, dy, dz, open, drawn, inside}.
  * Across a tunnel/open boundary the height is the open vertex's (nothing is
- * drawn dipping into the ground at a portal); `open` is the nearer vertex's.
+ * drawn dipping into the ground at a portal); `open` and `drawn` are the nearer
+ * vertex's.
  */
 export function sampleRun(run, s, ratio, out, lateral = 0, laneSign = 0) {
   const cum = run.cum, n = cum.length;
@@ -1173,6 +1392,7 @@ export function sampleRun(run, s, ratio, out, lateral = 0, laneSign = 0) {
   out.z = run.z[lo] + (run.z[hi] - run.z[lo]) * t;
   out.y = oa === ob ? ya + (yb - ya) * t : (oa ? ya : yb);
   out.open = t < 0.5 ? oa : ob;
+  out.drawn = run.drawn ? (t < 0.5 ? run.drawn[lo] : run.drawn[hi]) : 1;
   out.dx = run.x[hi] - run.x[lo]; out.dz = run.z[hi] - run.z[lo]; out.dy = oa === ob ? yb - ya : 0;
   return out;
 }

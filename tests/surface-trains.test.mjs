@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import {
   STOCK, PROFILES, LINE_STOCK, carLayout, CAR_GAP_M, buildNetwork, nearestNode, route, mapTubeCurve, mapSnapCurve,
   buildSegmentIndex, runAt, sAt, sampleRun, laneOffset, drawnY, JOIN_M, LANE_OFFSET_M, RUN_END_EXTENSION_M, computeCrossSlopes, profileGeometries, LANE_SPACING_M, LANE_EASE, RUN_MAX_LIFT_GRADE,
+  fitEnds, END_CLEAR_M, distanceToDrawn, FAIR_MAX_DEV_M,
   turnAt, kinkWindows, fairPolyline, remapAnchors, boundAnchorSpeed, KINK_TURN_DEG, KINK_SCALE_M, FAIR_TURN_DEG, FAIR_STEP_M, SPUR_CLOSE_M, SPEED_RATIO_MAX, SPEED_RATIO_MIN, VFAIR_GRADE_STEP,
 } from '../src/surface-train-map.js';
 
@@ -109,14 +110,14 @@ test('stations anchor the run; progress is linear in u between anchors; a portal
   // In the tunnel, closed; in the open, open.
   sampleRun(run, sAt(run, stationUs[0] + 0.01), 1, pt); assert.equal(pt.open, 0);
   sampleRun(run, sAt(run, stationUs[1]), 1, pt); assert.equal(pt.open, 1);
-  // A terminus on open track is extended so a dwelling train is drawn whole; a station in tunnel is not.
+  // A terminus on open track is extended along the drawn track; a station in tunnel is not.
   assert.equal(run.extendedEnd, true); assert.equal(run.extendedStart, false);
-  // Along the drawn track while it carries on (to x = 4056 here), then straight: at least the
-  // extension, at most one 12 m sample more (the walk stops at the first node past it).
+  // Along the drawn track while it carries on (to x = 4056 here, 48 to 60 m past C's node) and
+  // never past its end. (Fix round 2: round 1 carried on straight for the rest of
+  // RUN_END_EXTENSION_M, and trains dwelling at termini stood up to 54 m off the drawn track.)
   const ext = run.length - run.as.at(-1);
-  assert.ok(ext >= RUN_END_EXTENSION_M - 1e-6 && ext < RUN_END_EXTENSION_M + 12.5, `extension ${ext}`);
-  sampleRun(run, run.as.at(-1) + 40, 1, pt);
-  assert.ok(Math.abs(pt.z - bow(pt.x)) < 1e-6 || pt.x > 4056, 'on the drawn track while it lasts');
+  assert.ok(ext > 40 && ext <= 60.01 && ext < RUN_END_EXTENSION_M, `extension ${ext}`);
+  for (let i = 0; i < run.x.length; i++) assert.ok(run.x[i] <= 4056 + 1e-6 && Math.abs(run.z[i] - bow(run.x[i])) < 1e-6, `run vertex ${run.x[i]}, ${run.z[i]} off the drawn track`);
   // runAt finds the run for any u it covers, and nothing outside.
   assert.equal(runAt(runs, stationUs[1]), run);
   assert.equal(runAt([{ u0: 0.2, u1: 0.4 }, { u0: 0.6, u1: 0.8 }], 0.5), null);
@@ -445,22 +446,164 @@ test('speed bound: a portal anchor that would pack the track into a short stretc
   for (const r of ratios(run, L)) assert.ok(r <= SPEED_RATIO_MAX + 1e-6 && r >= SPEED_RATIO_MIN - 1e-6, `stretch ratio ${r}`);
 });
 
-test('a terminus extension heads the way the run does, never along a sideways first step', () => {
+test('a terminus on a stub: nothing is added past the drawn track, never along a sideways first step', () => {
   // The terminus T sits on a 4 m stub; the route steps 10 m north onto the main line, then runs east.
+  // Fix round 1 found the extension heading south along that first step (Woodford), and pinned it heading
+  // west; fix round 2 found the westward part drawn over bare ground (no track is drawn west of T), so an
+  // end carries on only along drawn track: here, none.
   const stub = { pts: [{ x: 0, z: 10, terrainY: 0, y: 5, cls: 'surface' }, { x: 0, z: 6, terrainY: 0, y: 5, cls: 'surface' }], morph: true };
   const net = buildNetwork([stub, straightPiece(0, 3000, -4)]);
   const stations = [{ key: 'T', x: 0, z: 10 }, { key: 'E', x: 3000, z: -4 }];
   const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, -20, 10), new THREE.Vector3(1500, -20, 3), new THREE.Vector3(3000, -20, -4)]);
   const { runs } = mapTubeCurve({ curve, stationUs: [0, 1], stations, net, cache: fresh(net) });
   const run = runs[0];
-  assert.equal(run.extendedStart, true);
-  // The extension (before the first anchor) heads west, the way the run comes from: not south.
-  const pt = {};
-  sampleRun(run, run.as[0] - RUN_END_EXTENSION_M + 1, 1, pt);
-  const a = {}; sampleRun(run, run.as[0], 1, a);
-  const dx = pt.x - a.x, dz = pt.z - a.z;
-  assert.ok(dx < 0 && Math.abs(dz) < Math.abs(dx) * Math.tan(30 * Math.PI / 180), `extension heads (${dx.toFixed(1)}, ${dz.toFixed(1)})`);
+  assert.equal(run.extendedStart, false);
+  // Every vertex of the run is on the drawn track (the stub, or the main line at z = -4, or the faired step between).
+  for (let i = 0; i < run.x.length; i++) assert.ok(run.x[i] >= -1e-6 && run.z[i] <= 10 + 1e-6 && run.z[i] >= -4 - 1e-6, `vertex ${run.x[i]}, ${run.z[i]}`);
   assert.ok(sampleTurns(run).kink <= KINK_TURN_DEG);
+});
+
+test('a train standing where the drawn track ends is fitted onto it, at a terminus and where the next interval is refused', () => {
+  // A straight line, drawn from x = 0 to x = 3000; stations A (x = 0) and B (x = 1500); C at x = 4500 has no
+  // track within reach (the Chigwell interval from Grange Hill). With an S8's half length, a train dwelling at
+  // A or at B (the end of the run, the B -> C interval refused) must stand wholly on the drawn track.
+  const half = STOCK.S8.trainM / 2;
+  const net = buildNetwork([straightPiece(0, 1560, 0)]); // the drawn track ends 60 m past B: less than half a train
+  const stations = [{ key: 'A', x: 0, z: 0 }, { key: 'B', x: 1500, z: 0 }, { key: 'C', x: 4500, z: 0 }];
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, -20, 6), new THREE.Vector3(1500, -20, 6), new THREE.Vector3(4500, -20, 6)]);
+  const cumP = [0, 1500, 4500].map(x => x / 4500), L = curve.getLength();
+  const plain = mapTubeCurve({ curve, stationUs: cumP, stations, net, cache: fresh(net) });
+  const { runs, stats } = mapTubeCurve({ curve, stationUs: cumP, stations, net, cache: fresh(net), halfTrainM: half });
+  assert.equal(stats.offTrack, 1); assert.equal(stats.mapped, 1); assert.equal(runs.length, 1);
+  assert.equal(stats.fitStart, 1); assert.equal(stats.fitEnd, 1);
+  const run = runs[0], ref = plain.runs[0];
+  // The run is the drawn track and no more: 0 to 1560 (the end extension walked the 60 m left, then stopped).
+  assert.ok(Math.abs(run.length - 1560) < 1e-6, `run length ${run.length}`);
+  assert.equal(run.extendedEnd, true);
+  // Unfitted, the train at B stands 60 m from the drawn end, so its front 7 m are past it; at A its rear half is.
+  assert.ok(ref.as.at(-1) + half > ref.length, 'the case needs fitting');
+  // Fitted: the end anchors leave half a train plus END_CLEAR_M of drawn track, at each end.
+  assert.ok(Math.abs(run.as[0] - (half + END_CLEAR_M)) < 1e-6, `start anchor ${run.as[0]}`);
+  assert.ok(Math.abs(run.as.at(-1) - (run.length - half - END_CLEAR_M)) < 1e-6, `end anchor ${run.as.at(-1)}`);
+  // Monotone, within the run, and the compressed stretch still keeps the speed bound.
+  for (let k = 1; k < run.as.length; k++) assert.ok(run.as[k] >= run.as[k - 1] && run.au[k] > run.au[k - 1]);
+  for (const r of ratios(run, L)) assert.ok(r >= SPEED_RATIO_MIN && r <= SPEED_RATIO_MAX, `stretch ratio ${r}`);
+  // Every car centre and both ends of a dwelling train are on the run, open and drawn, at both ends.
+  const pt = {};
+  for (const u of [run.u0, run.u1]) {
+    const s = sAt(run, u);
+    for (const off of [-half, -half / 2, 0, half / 2, half]) {
+      sampleRun(run, s + off, 1, pt);
+      assert.ok(pt.inside && pt.open && pt.drawn === 1, `at u ${u}, offset ${off}: inside ${pt.inside} open ${pt.open} drawn ${pt.drawn}`);
+    }
+  }
+});
+
+test('fitting leaves alone an end in tunnel, an end off the drawn track, and a run too short for the train', () => {
+  const half = STOCK.S8.trainM / 2;
+  // A station in tunnel at x = 0 (the track is tunnel west of 1000), the run's other end on open track with 400 m beyond.
+  const net = buildNetwork(track());
+  const { curve, stationUs } = chord();
+  const run = mapTubeCurve({ curve, stationUs, stations: STATIONS, net, cache: fresh(net), halfTrainM: half }).runs[0];
+  const ref = mapTubeCurve({ curve, stationUs, stations: STATIONS, net, cache: fresh(net) }).runs[0];
+  assert.equal(run.as[0], ref.as[0]); // the tunnel end: unchanged
+  // A portal 200 m short of the terminus (Morden, Cockfosters): the fit compresses only the stretch from the
+  // portal anchor on, which stays where the chord passes nearest the mouth; the train still fits.
+  const net2 = buildNetwork(track({ tunnelBefore: 3800 }));
+  const fit2 = mapTubeCurve({ curve, stationUs, stations: STATIONS, net: net2, cache: fresh(net2), halfTrainM: half });
+  const ref2 = mapTubeCurve({ curve, stationUs, stations: STATIONS, net: net2, cache: fresh(net2) }).runs[0];
+  const run2 = fit2.runs[0];
+  assert.ok(fit2.stats.portals >= 1 && [...ref2.portal].some(v => v === 1));
+  assert.equal(fit2.stats.fitShort, 0); assert.equal(fit2.stats.fitEnd, 1);
+  for (let k = 0; k < ref2.as.length; k++) if (ref2.portal[k]) assert.equal(run2.as[k], ref2.as[k]);
+  assert.ok(Math.abs(run2.as.at(-1) - (run2.length - half - END_CLEAR_M)) < 1e-6);
+  // A portal moved by the speed bound (flag 2) is justified by a stretch beside it running outside the bound at the
+  // chord's nearest approach (nearU): a window may end on it only while the stretch it leaves alone still does
+  // (Cockfosters). Without that (no nearU here), it is refused; with the far stretch breaking the bound, it is taken.
+  const mk = nearU => ({ cum: Float64Array.from([0, 400, 600]), open: Uint8Array.from([0, 1, 1]), drawn: Uint8Array.from([1, 1, 1]), au: Float64Array.from([0, 0.67, 1]), as: Float64Array.from([0, 400, 590]), station: Uint8Array.from([1, 0, 1]), portal: Uint8Array.from([0, 2, 0]), nearU: Float64Array.from([NaN, nearU, NaN]) });
+  const r3 = mk(NaN), st3 = {};
+  fitEnds(r3, half, 600, st3);
+  assert.equal(st3.fitSkipped, 1); assert.deepEqual([...r3.as], [0, 400, 590]);
+  const r4 = mk(0.4), st4 = {}; // 400 m of track into 240 m of chord before the portal: 1.67, beyond the bound
+  fitEnds(r4, half, 600, st4);
+  assert.equal(st4.fitEnd, 1); assert.equal(r4.as[1], 400); assert.ok(Math.abs(r4.as[2] - (600 - half - END_CLEAR_M)) < 1e-9);
+  // Direct: a 100 m drawn run can hold no 133.7 m train; it is left as it is (its cars past the ends are not drawn).
+  const r = { cum: Float64Array.from([0, 50, 100]), open: Uint8Array.from([1, 1, 1]), drawn: Uint8Array.from([1, 1, 1]), au: Float64Array.from([0, 0.5, 1]), as: Float64Array.from([0, 50, 100]), station: Uint8Array.from([1, 0, 1]) };
+  const st = {};
+  fitEnds(r, half, 100, st);
+  assert.equal(st.fitShort, 2);
+  assert.deepEqual([...r.as], [0, 50, 100]);
+  // An end off the drawn track (a DLR curve ending past the deck) is not fitted either.
+  const r2 = { cum: Float64Array.from([0, 100, 400]), open: Uint8Array.from([1, 1, 1]), drawn: Uint8Array.from([1, 1, 0]), au: Float64Array.from([0, 0.25, 1]), as: Float64Array.from([0, 100, 400]), station: Uint8Array.from([0, 0, 0]) };
+  const st2 = {};
+  fitEnds(r2, 42, 400, st2, { perStretch: true });
+  assert.equal(st2.fitEnd ?? 0, 0); assert.equal(r2.as[2], 400);
+  assert.equal(st2.fitStart, 1); assert.ok(Math.abs(r2.as[0] - 44) < 1e-9);
+});
+
+test('DLR: where no track is drawn within reach the train keeps its progress, but no car is drawn there', () => {
+  // Drawn deck from x = 0 to 600 and again from 900 to 1500: the 300 m between is undrawn (Abbey Road, Stratford).
+  const deck = (x0, x1) => ({ pts: Array.from({ length: Math.round((x1 - x0) / 12) + 1 }, (_, i) => ({ x: x0 + i * 12, z: 0, terrainY: 0, y: 20, cls: 'viaduct' })), morph: false });
+  const net = buildNetwork([deck(0, 600), deck(900, 1500)]);
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 20, 0.5), new THREE.Vector3(750, 20, 0.5), new THREE.Vector3(1500, 20, 0.5)]);
+  const m = mapSnapCurve({ curve, net, index: buildSegmentIndex(net), ratio: 1, fallback: (x, y) => ({ base: 0, y, open: true }) });
+  const run = m.runs[0], pt = {};
+  assert.ok(m.stats.fallback > 20, `fallback ${m.stats.fallback}`);
+  for (let s = 0; s <= run.length; s += 5) {
+    sampleRun(run, s, 1, pt);
+    // The 35 m snap reach and the 10 m piece-end rule: undrawn from about x = 610 to 890.
+    if (pt.x > 650 && pt.x < 850) assert.equal(pt.drawn, 0, `drawn at x ${pt.x}`);
+    if (pt.x < 590 || pt.x > 910) assert.equal(pt.drawn, 1, `undrawn at x ${pt.x}`);
+    if (pt.drawn) assert.ok(Math.abs(pt.z) < 0.6 && (pt.x <= 611 || pt.x >= 889), `a drawn sample off the deck at ${pt.x}, ${pt.z}`);
+  }
+  // Progress is still monotone through the gap (the train runs on, unseen, and reappears in step).
+  for (let k = 1; k < run.as.length; k++) assert.ok(run.as[k] > run.as[k - 1]);
+});
+
+test('DLR: a train standing at either end of its curve is drawn whole, on the deck carrying on past the stop or fitted where it ends', () => {
+  // Fix round 2: every DLR train dwelling at the end of its curve was drawn as half a train (the half past the curve's end).
+  const half = STOCK.B07.trainM / 2;
+  const deck = (x0, x1) => ({ pts: Array.from({ length: Math.round((x1 - x0) / 10) + 1 }, (_, i) => ({ x: x0 + i * 10, z: 0, terrainY: 0, y: 20, cls: 'viaduct' })), morph: false });
+  const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 20, 1), new THREE.Vector3(500, 20, 1), new THREE.Vector3(1000, 20, 1)]);
+  const L = curve.getLength(), pt = {};
+  const wholeAt = (run, u) => { const sc = sAt(run, u); return [-half, -half / 2, 0, half / 2, half].every(o => { sampleRun(run, sc + o, 1, pt); return pt.inside && pt.open && pt.drawn === 1; }); };
+  for (const [x0, x1, extended] of [[-200, 1200, true], [0, 1000, false]]) {
+    const net = buildNetwork([deck(x0, x1)]);
+    const m = mapSnapCurve({ curve, net, index: buildSegmentIndex(net), ratio: 1, fallback: () => { throw new Error('no fallback'); }, halfTrainM: half });
+    const run = m.runs[0];
+    assert.equal(run.extendedStart, extended); assert.equal(run.extendedEnd, extended);
+    if (extended) { assert.ok(run.as[0] >= RUN_END_EXTENSION_M - 1e-6, `start anchor ${run.as[0]}`); assert.equal(m.stats.fitStart, 0); }
+    else { assert.equal(m.stats.fitStart, 1); assert.equal(m.stats.fitEnd, 1); assert.ok(m.stats.fitMaxM <= half + END_CLEAR_M + 1e-6); }
+    assert.ok(wholeAt(run, 0) && wholeAt(run, 1), `whole at both ends (deck ${x0} to ${x1})`);
+    // Never past the deck; the approach never slower than the speed bound.
+    for (let i = 0; i < run.x.length; i++) assert.ok(run.x[i] >= x0 - 1e-6 && run.x[i] <= x1 + 1e-6);
+    for (const q of ratios(run, L)) assert.ok(q >= SPEED_RATIO_MIN - 1e-9 && q <= SPEED_RATIO_MAX + 1e-9, `stretch ratio ${q}`);
+  }
+});
+
+test('fairing keeps to the drawn track: a jump between parallel pieces on a bend is never faired by cutting the bend', () => {
+  // Fix round 2, Canning Town: the DLR curves 100 degrees north of the station on a radius of about 90 m, drawn as
+  // two parallel pieces 7 m apart; the run starts (a free end) on the inner piece and jumps to the outer 30 m in.
+  // Widened until it turned gently enough, the jump's window reached the free start and its blend cut the whole
+  // bend: 29.5 m from the drawn track here, 43 m in the app.
+  const R = 90, A = 100 * Math.PI / 180, pt = (r, a) => ({ x: r * Math.sin(a), z: R - r * Math.cos(a) });
+  const arcPts = r => { const out = []; for (let s = 0; s <= r * A; s += 12) out.push({ ...pt(r, s / r), terrainY: 0, y: 5, cls: 'surface' }); return out; };
+  const net = buildNetwork([{ pts: arcPts(R), morph: false }, { pts: arcPts(R + 7), morph: false }]);
+  const index = buildSegmentIndex(net), near = (x, z, cap) => distanceToDrawn(net, index, x, z, cap);
+  const xs = [], zs = [];
+  for (let s = 0; s <= 30; s += 4) { const p = pt(R, s / R); xs.push(p.x); zs.push(p.z); }
+  for (let s = (R + 7) * 30 / R + 4; s <= (R + 7) * A; s += 4) { const p = pt(R + 7, s / (R + 7)); xs.push(p.x); zs.push(p.z); }
+  const n = xs.length, cum = [0]; for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], zs[i] - zs[i - 1]));
+  const fill = v => new Array(n).fill(v);
+  const P = { x: xs, z: zs, cum, base: fill(0), y0: fill(5), morph: fill(0), open: fill(1), slope: fill(0), extra: fill(0), vj: fill(0), drawn: fill(1) };
+  const stray = Q => Math.max(...Q.x.map((x, i) => near(x, Q.z[i], 500)));
+  const kink = Q => { let k = 0; for (let s = KINK_SCALE_M; s + KINK_SCALE_M <= Q.cum.at(-1); s += 2) k = Math.max(k, turnAt(Q, s, KINK_SCALE_M)); return k; };
+  const bare = fairPolyline(P), kept = fairPolyline(P, null, near);
+  assert.ok(stray(bare.P) > 20, `the case: a blend free of the drawn track cuts the bend (${stray(bare.P)})`);
+  assert.equal(kept.kinks, 1);
+  assert.ok(stray(kept.P) <= 5, `strays ${stray(kept.P)} m from the drawn track`); // the jump itself strays 3.5 m
+  assert.ok(FAIR_MAX_DEV_M <= 10);
+  assert.ok(kink(kept.P) <= KINK_TURN_DEG, `kink ${kink(kept.P)}`);
 });
 
 test('fairing primitives: windows replace only what they cover; anchors re-placed evenly in u inside them', () => {

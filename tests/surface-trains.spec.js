@@ -352,6 +352,60 @@ test.describe('in one load', () => {
     expect(r.overN).toBe(0);
   });
 
+  test('cars ride the drawn track: a train standing at the end of its run stands on it, and no car is drawn far from it', async () => {
+    // Fix round 2 (01Oct26h). The verifier's own audit: over 40 moments, each drawn car's distance from the nearest
+    // drawn segment of its line's network, beyond its lane and a 1.5 m half-body. Before: 705 of 68,065 cars more than
+    // 10 m off and 198 more than 40 m (to 53.7 m), 471 of them in trains dwelling at their curve's first or last stop,
+    // carried straight on past the end of the drawn track (Epping, Watford, Richmond, Stanmore, Kensington (Olympia));
+    // the rest on the DLR's undrawn stretches and a blend cutting its curve at Canning Town; every DLR train dwelling at
+    // the end of its curve was drawn as half a train.
+    const r = await page.evaluate(async () => {
+      const u = window.__ug, st = u.surfaceTrains;
+      const { trainStateAt } = await import('/src/trains.js');
+      const map = await import('/src/surface-train-map.js');
+      const segDist = (px, pz, ax, az, bx, bz) => { const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz; const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2)) : 0; return Math.hypot(px - ax - dx * t, pz - az - dz * t); };
+      const byId = new Map(u.trainSystem.allTrains.map(t => [t.userData.id, t]));
+      const out = { cars: 0, off10: 0, off40: 0, max: 0, off10AtEnds: 0, dwellAtEnds: 0, dwellWhole: 0, places: {} };
+      for (let k = 0; k < 40; k++) {
+        const t = 640 + k * 173;
+        for (const [id, tr] of Object.entries(st.snapshot(t))) {
+          const ud = byId.get(id).userData, s = trainStateAt(ud, t), su = ud.stationUs;
+          const atEnd = s.pausedLeft > 0 && (Math.abs(s.t - Math.min(...su)) < 1e-6 || Math.abs(s.t - Math.max(...su)) < 1e-6);
+          if (atEnd) { out.dwellAtEnds++; if (tr.cars.length === st.stockOf.get(tr.lineId).layout.length) out.dwellWhole++; }
+          const { net } = st.networkFor(tr.lineId);
+          for (const c of tr.cars) {
+            const x = c.m[12], z = c.m[14]; let best = Infinity, ex = 0;
+            const cs = net.cell, cx = Math.floor(x / cs), cz = Math.floor(z / cs);
+            for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (const i of net.grid.get(`${cx + a},${cz + b}`) || []) for (const j of [i - 1, i + 1]) {
+              if (j < 0 || j >= net.n || net.piece[j] !== net.piece[i]) continue;
+              const d = segDist(x, z, net.x[i], net.z[i], net.x[j], net.z[j]); if (d < best) { best = d; ex = net.extra[i]; }
+            }
+            const off = Math.max(0, best - (map.LANE_OFFSET_M + ex) - 1.5);
+            out.cars++; out.max = Math.max(out.max, off);
+            if (off > 10) { out.off10++; if (atEnd) out.off10AtEnds++; const key = `${tr.lineId}@${Math.round(x / 250) * 250},${Math.round(z / 250) * 250}`; out.places[key] = Math.max(out.places[key] || 0, +off.toFixed(1)); }
+            if (off > 40) out.off40++;
+          }
+        }
+      }
+      // The renderer's pre-cull relies on every surface train lying within TRACK_ERROR_BOUND_M of its underground twin.
+      const e = st.mappingErrors(), track = {};
+      for (const [l, v] of Object.entries(e)) if (v.track) track[l] = +v.track.max.toFixed(1);
+      return { ...out, track, bounds: map.TRACK_ERROR_BOUND_M };
+    });
+    console.log('ontrack', JSON.stringify(r));
+    expect(r.cars).toBeGreaterThan(50000);
+    // No train standing at the end of its run is drawn off the drawn track, and nearly all are drawn whole (01Oct26h:
+    // 708 of 729; the rest stand partly in a tunnel mouth, or by Lane R's undrawn 100 m at Stratford's DLR).
+    expect(r.off10AtEnds).toBe(0);
+    expect(r.dwellWhole / r.dwellAtEnds).toBeGreaterThan(0.95);
+    // Nothing far off. What is left (01Oct26h: 23 cars, at most 21 m) crosses between drawn pieces at junctions Lane R's
+    // data leaves 20 to 40 m apart (Chalfont & Latimer, Abbey Road, Poplar): a train crossing a gap in the drawing.
+    expect(r.off40).toBe(0);
+    expect(r.max).toBeLessThan(25);
+    expect(r.off10 / r.cars).toBeLessThan(0.001);
+    for (const [l, m] of Object.entries(r.track)) expect(m, l).toBeLessThanOrEqual(l === 'dlr' ? r.bounds.dlr : r.bounds.tube);
+  });
+
   test('the cull still hides the underground trains from above; the surface trains stay drawn and never below ground', async () => {
     const r = await page.evaluate(async () => {
       const u = window.__ug;

@@ -31,7 +31,10 @@
 // One TOP-LEVEL group, `surface-trains`, never `line:` (D-040's cull hides
 // every `line:*` group from above-ground cameras; the underground trains stay
 // in theirs and stay hidden from above). A car is drawn only where its centre
-// is on open track: in a tunnel the underground train is the one drawn.
+// is on open, drawn track: in a tunnel the underground train is the one drawn,
+// and where no track is drawn (a gap in the DLR's drawn deck) nothing is. A
+// train standing at the end of its run is fitted onto the drawn track
+// (surface-train-map.js fitEnds), never drawn past it.
 //
 // Economies (as overground-trains.js with every economy on, always): live cars
 // are written to the front of each mesh and only that range is uploaded; trains
@@ -175,8 +178,8 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
     const { net, cache, index } = networkFor(lineId);
     const t0 = performance.now();
     const m = lineId === 'dlr'
-      ? mapSnapCurve({ curve: ud.curve, net, index, ratio, fallback: dlrFallback, getY: getTerrainMeshSurfaceY, ve: VE })
-      : mapTubeCurve({ curve: ud.curve, stationUs: ud.stationUs, stations: stationsOf.get(lineId) || [], net, cache, getY: getTerrainMeshSurfaceY });
+      ? mapSnapCurve({ curve: ud.curve, net, index, ratio, fallback: dlrFallback, getY: getTerrainMeshSurfaceY, ve: VE, halfTrainM: stockOf.get(lineId).trainM / 2 })
+      : mapTubeCurve({ curve: ud.curve, stationUs: ud.stationUs, stations: stationsOf.get(lineId) || [], net, cache, getY: getTerrainMeshSurfaceY, halfTrainM: stockOf.get(lineId).trainM / 2 });
     m.lineId = lineId; m.ratio = ratio; m.net = net;
     pendingStats.built++; pendingStats.buildMs += performance.now() - t0;
     mappings.set(ud.curve, m);
@@ -202,8 +205,8 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
   }
 
   // ── Placement (pure in simT) ───────────────────────────────────────────────
-  const pt = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, inside: false, extra: 0, run: null, seg: -1 };
-  const pj = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, inside: false, extra: 0, run: null, seg: -1 };
+  const pt = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, drawn: 1, inside: false, extra: 0, run: null, seg: -1 };
+  const pj = { x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, open: 0, drawn: 1, inside: false, extra: 0, run: null, seg: -1 };
   const jointXYZ = new Float64Array(3 * 16), jointDone = new Int32Array(16), jointOpen = new Uint8Array(16);
   let jointGen = 0;
   const dir = new THREE.Vector3(), basis = { side: new THREE.Vector3(), up: new THREE.Vector3(), forward: new THREE.Vector3() };
@@ -236,7 +239,7 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
     jointXYZ[3 * c] = x; jointXYZ[3 * c + 1] = pj.y; jointXYZ[3 * c + 2] = z; jointOpen[c] = pj.open ? 1 : 0;
   }
   /**
-   * Each car's pose: calls fn(carIndex, matrixElements16) for cars on open track.
+   * Each car's pose: calls fn(carIndex, matrixElements16) for cars on open, drawn track.
    * A car stands on the rail at its centre (in its lane) and points along the
    * chord between its two joints, which it shares with its neighbours, so
    * adjacent cars always meet end to end and turn together on a curve, as
@@ -255,7 +258,7 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
       // The lane is left of travel (north when heading east); offsetRails' "left" normal, which
       // the cross-slopes use, is (-dz, dx), south when heading east: so the lane lies at -sign x lane on it.
       sampleRun(run, s + sign * car.offset, ratio, pt, 0, -sign);
-      if (!pt.inside || !pt.open) continue;
+      if (!pt.inside || !pt.open || !pt.drawn) continue;
       const { ox, oz } = laneOffset(pt, sign);
       // Joints c (behind, in travel) and c + 1 (ahead): offsets grow in the direction of travel.
       jointAt(run, s + sign * J[c], sign, c); jointAt(run, s + sign * J[c + 1], sign, c + 1);
@@ -389,7 +392,7 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
         for (let i = 0; i <= n; i++) {
           const u = run.u0 + (run.u1 - run.u0) * i / n;
           sampleRun(run, sAt(run, u), ratio, pt);
-          if (!pt.open) continue;
+          if (!pt.open || !pt.drawn) continue;
           ud.curve.getPointAt(u, P);
           const { ox, oz } = laneOffset(pt, sign);
           r.track.push(Math.hypot(P.x - pt.x - ox, P.z - pt.z - oz));
