@@ -160,7 +160,58 @@ export function resolveProfile(samples, adj) {
   });
 }
 
-export async function build({ data, cacheDir = path.join(ROOT, 'scripts/.cache/ea-lidar-dlr'), log = () => {}, debug = null }) {
+/**
+ * s01:R (sprint 01Oct26h): a ROOF OVER A TERMINUS. The occlusion step bridges
+ * a roof between the measured deck either side; at the end of a line there is
+ * no deck beyond, and the roof is read as the deck. Tower Gateway: the DSM over
+ * the last ~100 m reads the station canopy at 12.4 to 12.9 m above the ground,
+ * while the deck it covers is about 9 m (8.6 m measured where the canopy
+ * begins, OSM node 1536019913, on a ramp rising at about 3% from 6.8 m), so
+ * the line, its trains and markers stood the canopy's height, 12.4 to 12.7 m,
+ * over the last 80 m (sprint 30Sep26w report). The DSM
+ * shows the deck through the canopy's openings, so under a listed canopy the
+ * deck is a CANOPY-FREE reading: the CANOPY_QUANTILE lower percentile of the
+ * on-structure DSM within CANOPY_CENTRE_M of the track's centre line over the
+ * whole covered stretch (the platform is level); see CANOPY_QUANTILE for the
+ * percentile. Source lidar (a measurement),
+ * with `canopy` naming the record and rawDeckOD the roof reading it replaces.
+ */
+export const CANOPIES = [
+  { name: 'Tower Gateway canopy', bufferNode: 1536019947, lengthM: 95,
+    note: 'Station canopy over the platform to the buffers (OSM ways 700443383 and 700443384); the DSM reads the roof at 12.4 to 12.9 m; the deck is read through its openings.' },
+];
+// A DSM reading through an opening can stand on the deck or on whatever is
+// above it (the roof's edge, platform furniture, a train), never below it, so
+// the deck is the lowest reading; the 2nd percentile drops single-pixel noise.
+// At Tower Gateway it gives 21.97 m OD, 9.0 m above the ground, continuing the
+// measured ramp (21.3 m OD where the canopy begins, rising about 3%); the 10th
+// percentile already mixes in the roof's edges (23.2 m OD).
+export const CANOPY_CENTRE_M = 2, CANOPY_QUANTILE = 0.02;
+export function applyCanopies(data, samples, adj, nodeSample, profile, canopies = CANOPIES) {
+  const out = [];
+  for (const c of canopies) {
+    const node = data.nodes.findIndex(n => n.id === c.bufferNode), si = nodeSample.get(node);
+    if (si === undefined) continue;
+    const stretch = neighbourhood(adj, si, c.lengthM);
+    const readings = [];
+    for (const i of stretch) {
+      const g = profile[i].ground, sec = samples[i].section; if (!Number.isFinite(g) || !sec) continue;
+      sec.forEach((v, k) => { if (Math.abs(DECK_OFFSETS_M[k]) <= CANOPY_CENTRE_M && Number.isFinite(v) && v >= g + ON_STRUCTURE_M) readings.push(v); });
+    }
+    const deck = quantile(readings, CANOPY_QUANTILE);
+    if (!Number.isFinite(deck)) continue;
+    for (const i of stretch) {
+      const r = profile[i]; if (!Number.isFinite(r.ground)) continue;
+      const roof = Number.isFinite(r.rawDeck) ? r.rawDeck : r.deck;
+      profile[i] = { source: 'lidar', deck, ground: r.ground, canopy: c.name, ...(Number.isFinite(roof) && roof !== deck ? { rawDeck: roof } : {}) };
+    }
+    const q = f => +quantile(readings, f).toFixed(2);
+    out.push({ ...c, deckOD: +deck.toFixed(2), samples: stretch.length, readings: readings.length, quantilesOD: { q02: q(0.02), q05: q(0.05), q10: q(0.1), q25: q(0.25), q50: q(0.5) } });
+  }
+  return out;
+}
+
+export async function build({ data, cacheDir = path.join(ROOT, 'scripts/.cache/ea-lidar-dlr'), log = () => {}, debug = null, canopyList = CANOPIES }) {
   const xy = data.nodes.map(nd => proj4('EPSG:4326', 'EPSG:27700', [nd.lon, nd.lat]));
   const { samples, adj, nodeSample } = denseGraph(data, xy);
   const tiles = new Map();
@@ -184,6 +235,7 @@ export async function build({ data, cacheDir = path.join(ROOT, 'scripts/.cache/e
     log(`tile ${++done}/${tiles.size} ${key}: ${ids.length} samples`);
   }
   const profile = resolveProfile(samples, adj);
+  const canopies = applyCanopies(data, samples, adj, nodeSample, profile, canopyList); // s01:R
   if (debug) debug.push(...samples.map((s, i) => ({ e: +s.p[0].toFixed(1), n: +s.p[1].toFixed(1), node: s.node, section: s.section, ground: profile[i].ground, deck: profile[i].deck, raw: profile[i].rawDeck ?? profile[i].deck, source: profile[i].source, nb: adj[i].map(([j]) => j) })));
   const model = data.heightModel, nodes = {};
   for (const [node, si] of nodeSample) {
@@ -194,7 +246,7 @@ export async function build({ data, cacheDir = path.join(ROOT, 'scripts/.cache/e
     nodes[data.nodes[node].id] = {
       kind, m: +Math.max(0, h).toFixed(2), source: r.source,
       ...(r.reason ? { reason: r.reason } : {}), ...(h < 0 ? { atGrade: true } : {}),
-      ...(r.filtered ? { filtered: true } : {}),
+      ...(r.filtered ? { filtered: true } : {}), ...(r.canopy ? { canopy: r.canopy } : {}),
       deckOD: +r.deck.toFixed(2), groundOD: +r.ground.toFixed(2), ...(Number.isFinite(r.rawDeck) && r.rawDeck !== r.deck ? { rawDeckOD: +r.rawDeck.toFixed(2) } : {}),
     };
   }
@@ -210,7 +262,9 @@ export async function build({ data, cacheDir = path.join(ROOT, 'scripts/.cache/e
       occlusion: `a deck ${OCCLUDED_M} m above the lower envelope of its neighbours at grade ${MAX_GRADE} is occluded; occluded samples take the mean of the grade-limited lower and upper envelopes of the unoccluded deck`,
       height: 'deck minus ground, clamped at 0 (atGrade: read below the ground, drawn at grade, D-024)',
       fallback: `no data in reach: heightModel ${model.elevatedM} m elevated / ${model.embankmentM} m embankment`,
+      canopies: `a roof over a terminus has no deck beyond to bridge from: under each listed canopy the deck is the ${CANOPY_QUANTILE * 100}th percentile of the on-structure DSM within ${CANOPY_CENTRE_M} m of the centre line over the covered stretch (read through its openings); nodes carry canopy and rawDeckOD (the roof)`,
     },
+    canopies: canopies.map(c => ({ name: c.name, bufferNode: c.bufferNode, lengthM: c.lengthM, deckOD: c.deckOD, readings: c.readings, quantilesOD: c.quantilesOD, note: c.note })),
     samples: { total: samples.length, ...counts },
     sources: {
       dsm: { label: COVERAGES.dsm.label, coverageId: COVERAGES.dsm.id, endpoint: COVERAGES.dsm.endpoint, example: coverageUrl('dsm', provenance[0]?.bounds ?? [0, 0, 1, 1]) },
