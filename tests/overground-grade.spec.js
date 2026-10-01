@@ -21,9 +21,13 @@
 
 import { test, expect } from '@playwright/test';
 
-// Dressing materials — ballast, earth, masonry, cut-shadow, train body, train
-// windows. Everything else on an overground line group is an identity stripe.
-const DRESSING = new Set(['4c4741', '5d5142', '8d8778', '272320', '22252a', 'ffb14e']);
+// The census reads the identity stripe. It used to find it by elimination
+// (not a dressing colour) behind an `emissiveIntensity === .35` filter, which
+// went stale when 9990a5c (13Sep26u) muted the stripe to 0.07: from then on
+// the filter matched nothing, `total` read 0 and the spec failed its own
+// `total > 20000` floor (sprint 30Sep26w, Lane R). The meshes now carry their
+// part (surface-rail.js); the stripe is selected by it, and the bounds are
+// unchanged.
 
 test('no non-tunnel overground track renders below the terrain', async ({ page }) => {
   await page.goto('/?fast=1');
@@ -33,14 +37,11 @@ test('no non-tunnel overground track renders below the terrain', async ({ page }
     { timeout: 120000 });
   await page.waitForTimeout(4000);
 
-  const out = await page.evaluate((dressing) => {
+  const out = await page.evaluate(() => {
     const ug = window.__ug, VE = ug.VERTICAL_EXAGGERATION;
-    const DRESS = new Set(dressing);
     let total = 0, buried = 0, shallowBuried = 0, grazing = 0;
     ug.overground.traverse(o => {
-      if (!o.isMesh || o.userData.type !== 'overground-line' || o.material.emissiveIntensity !== .35) return;
-      const hex = o.material?.color?.getHexString?.();
-      if (!hex || DRESS.has(hex)) return;
+      if (!o.isMesh || o.userData.type !== 'overground-line' || o.userData.part !== 'stripe') return;
       const pos = o.geometry?.attributes?.position; if (!pos) return;
       for (let i = 0; i < pos.count; i++) {
         const tY = ug.getTerrainMeshSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
@@ -57,7 +58,7 @@ test('no non-tunnel overground track renders below the terrain', async ({ page }
       }
     });
     return { total, buried, shallowBuried, grazing };
-  }, [...DRESSING]);
+  });
 
   console.log(`stripe verts ${out.total} | buried ${(100*out.buried/out.total).toFixed(1)}% ` +
     `| shallow-buried ${(100*out.shallowBuried/out.total).toFixed(2)}% | grazing ${(100*out.grazing/out.total).toFixed(2)}%`);
