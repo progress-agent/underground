@@ -499,14 +499,21 @@ test('a train standing where the drawn track ends is fitted onto it, at a termin
   }
 });
 
-test('fitting leaves alone an end in tunnel, an end off the drawn track, and a run too short for the train', () => {
+test('fitting leaves alone a station in a tunnel, an end off the drawn track, and a stretch too short for the train', () => {
+  // Re-pinned for sprint 01Oct26h (Lane T): fitEnds now takes the open, drawn stretch around the standing train, not
+  // the one at the run's end vertex (so an open station whose run ends in a covered stretch is fitted: Barking, below
+  // in this file), and counts a train past the stretch's inner end only as innerTunnel. Every pin here is re-derived
+  // under that rule and holds as it was: a station in a tunnel, a too-short stretch and an end off the drawn deck are
+  // still left alone; the portal cases keep their counts. innerTunnel is pinned at 0 for each.
   const half = STOCK.S8.trainM / 2;
-  // A station in tunnel at x = 0 (the track is tunnel west of 1000), the run's other end on open track with 400 m beyond.
+  // A station in tunnel at x = 0 (the track is tunnel west of 1000, so no open node within STATION_OPEN_PREFER_M of
+  // it), the run's other end on open track with 60 m beyond.
   const net = buildNetwork(track());
   const { curve, stationUs } = chord();
-  const run = mapTubeCurve({ curve, stationUs, stations: STATIONS, net, cache: fresh(net), halfTrainM: half }).runs[0];
+  const fit1 = mapTubeCurve({ curve, stationUs, stations: STATIONS, net, cache: fresh(net), halfTrainM: half }), run = fit1.runs[0];
   const ref = mapTubeCurve({ curve, stationUs, stations: STATIONS, net, cache: fresh(net) }).runs[0];
-  assert.equal(run.as[0], ref.as[0]); // the tunnel end: unchanged
+  assert.equal(run.as[0], ref.as[0]); // the station in the tunnel: unchanged
+  assert.equal(fit1.stats.fitStart, 0); assert.equal(fit1.stats.fitEnd, 1); assert.equal(fit1.stats.innerTunnel, 0);
   // A portal 200 m short of the terminus (Morden, Cockfosters): the fit compresses only the stretch from the
   // portal anchor on, which stays where the chord passes nearest the mouth; the train still fits.
   const net2 = buildNetwork(track({ tunnelBefore: 3800 }));
@@ -514,31 +521,33 @@ test('fitting leaves alone an end in tunnel, an end off the drawn track, and a r
   const ref2 = mapTubeCurve({ curve, stationUs, stations: STATIONS, net: net2, cache: fresh(net2) }).runs[0];
   const run2 = fit2.runs[0];
   assert.ok(fit2.stats.portals >= 1 && [...ref2.portal].some(v => v === 1));
-  assert.equal(fit2.stats.fitShort, 0); assert.equal(fit2.stats.fitEnd, 1);
+  assert.equal(fit2.stats.fitShort, 0); assert.equal(fit2.stats.fitEnd, 1); assert.equal(fit2.stats.innerTunnel, 0);
   for (let k = 0; k < ref2.as.length; k++) if (ref2.portal[k]) assert.equal(run2.as[k], ref2.as[k]);
   assert.ok(Math.abs(run2.as.at(-1) - (run2.length - half - END_CLEAR_M)) < 1e-6);
   // A portal moved by the speed bound (flag 2) is justified by a stretch beside it running outside the bound at the
-  // chord's nearest approach (nearU): a window may end on it only while the stretch it leaves alone still does
-  // (Cockfosters). Without that (no nearU here), it is refused; with the far stretch breaking the bound, it is taken.
+  // chord's nearest approach (nearU): a window may end on it only while a stretch beside it, recomputed, still does
+  // (Cockfosters; before sprint 01Oct26h only the stretch the window leaves alone counted: the near-side case is
+  // the Kensington (Olympia) test below). Without that (no nearU here), it is refused; with the far stretch breaking
+  // the bound, it is taken.
   const mk = nearU => ({ cum: Float64Array.from([0, 400, 600]), open: Uint8Array.from([0, 1, 1]), drawn: Uint8Array.from([1, 1, 1]), au: Float64Array.from([0, 0.67, 1]), as: Float64Array.from([0, 400, 590]), station: Uint8Array.from([1, 0, 1]), portal: Uint8Array.from([0, 2, 0]), nearU: Float64Array.from([NaN, nearU, NaN]) });
   const r3 = mk(NaN), st3 = {};
   fitEnds(r3, half, 600, st3);
-  assert.equal(st3.fitSkipped, 1); assert.deepEqual([...r3.as], [0, 400, 590]);
+  assert.equal(st3.fitSkipped, 1); assert.deepEqual([...r3.as], [0, 400, 590]); assert.equal(st3.innerTunnel ?? 0, 0);
   const r4 = mk(0.4), st4 = {}; // 400 m of track into 240 m of chord before the portal: 1.67, beyond the bound
   fitEnds(r4, half, 600, st4);
   assert.equal(st4.fitEnd, 1); assert.equal(r4.as[1], 400); assert.ok(Math.abs(r4.as[2] - (600 - half - END_CLEAR_M)) < 1e-9);
-  // Direct: a 100 m drawn run can hold no 133.7 m train; it is left as it is (its cars past the ends are not drawn).
+  // Direct: a 100 m drawn stretch can hold no 133.7 m train; it is left as it is (its cars past the ends are not drawn).
   const r = { cum: Float64Array.from([0, 50, 100]), open: Uint8Array.from([1, 1, 1]), drawn: Uint8Array.from([1, 1, 1]), au: Float64Array.from([0, 0.5, 1]), as: Float64Array.from([0, 50, 100]), station: Uint8Array.from([1, 0, 1]) };
   const st = {};
   fitEnds(r, half, 100, st);
-  assert.equal(st.fitShort, 2);
+  assert.equal(st.fitShort, 2); assert.equal(st.innerTunnel ?? 0, 0);
   assert.deepEqual([...r.as], [0, 50, 100]);
   // An end off the drawn track (a DLR curve ending past the deck) is not fitted either.
   const r2 = { cum: Float64Array.from([0, 100, 400]), open: Uint8Array.from([1, 1, 1]), drawn: Uint8Array.from([1, 1, 0]), au: Float64Array.from([0, 0.25, 1]), as: Float64Array.from([0, 100, 400]), station: Uint8Array.from([0, 0, 0]) };
   const st2 = {};
   fitEnds(r2, 42, 400, st2, { perStretch: true });
   assert.equal(st2.fitEnd ?? 0, 0); assert.equal(r2.as[2], 400);
-  assert.equal(st2.fitStart, 1); assert.ok(Math.abs(r2.as[0] - 44) < 1e-9);
+  assert.equal(st2.fitStart, 1); assert.ok(Math.abs(r2.as[0] - 44) < 1e-9); assert.equal(st2.innerTunnel ?? 0, 0);
 });
 
 test('DLR: where no track is drawn within reach the train keeps its progress, but no car is drawn there', () => {
