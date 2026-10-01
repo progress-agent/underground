@@ -92,6 +92,15 @@
 //   * Small fixes: no line's labels in the bore (main.js); after an arrival
 //     at speed a 0.6 s glide back to the stop, then the card; every ease is
 //     clamped above the terrain. The portal card is gone.
+//   * The street at the station only (fix round 1, D-042 item 1: "only
+//     possible to exit them at stations"): the arrival card is on offer on
+//     the station's platform and closes when the walker walks off it; off the
+//     platform after an arrival, E brings the walker back (brake to rest, the
+//     glide, then the card). "Up to the street" is taken from the station, not
+//     from where the walker stands, and where the station is shown in the
+//     other regime (a covered box with open air inside its platform zone, or
+//     the reverse) a cut takes the walker there first. A W or S held as a
+//     halt, a glide or the card begins is ignored until it is let go.
 
 import { PEDESTRIAN_TUNABLES, BODY, createBody, stepBody } from './pedestrian-body.js';
 import { createScaleEase } from './pedestrian-scale.js';
@@ -200,6 +209,12 @@ export function createPedestrianMode(ctx) {
   let step = null;                        // { kind: 'exit' | 'entry', from, to, fromYaw, toYaw, t, ... } a surface stop's ease
   let atEdge = false;                     // held at the map edge
   let brakeFrom = null;                   // the speed braking began at (the rate is held at its start)
+  // Fix round 1: the street is on offer at the station only. Off the platform after an arrival, E brings
+  // the walker back (`halt`: brake to rest, then the glide, then the card). A W or S held when a halt, a
+  // glide or the card began does not walk on (`latch`); a fresh press does.
+  let halt = null;                        // { holdM } braking for the glide back to the stop arrived at
+  let latch = null;                       // the held W/S (+1 / -1) that is ignored until released
+  let lastForward = 0;                    // W/S as read this frame (the latch takes it)
   // ── /s01:P ──
 
   // Edge-triggered keys are latched from keydown, so a tap shorter than a
@@ -428,7 +443,7 @@ export function createPedestrianMode(ctx) {
       passage: { x0: c.x, y0: c.y, z0: c.z, x1: stop.x, y1: stop.platformY, z1: stop.z, t: 0 } };
     phase = 'shaft';
     tunnel = null;
-    arrived = null; glide = null; // s30:P s01:P
+    arrived = null; glide = null; halt = null; latch = null; // s30:P s01:P
     hint(`Up to the street at ${cleanLabel(stop.name)}`);
   }
 
@@ -493,7 +508,7 @@ export function createPedestrianMode(ctx) {
     hint(null);
     // s30:P on the chosen platform, facing the way its trains run; no card until E or the next station.
     arrived = null;
-    glide = null; trackYaw = null;
+    glide = null; trackYaw = null; halt = null; latch = null;
     regime = 'bore'; // s01:P a shaft leads to a platform in the bore; a cut follows if the stop is shown in the open
     shaft = { ...shaft, done: true };
   }
@@ -587,11 +602,15 @@ export function createPedestrianMode(ctx) {
     const n = net;
     if (!n || !n.paths[tunnel.path]) { phase = 'body'; settleAt(ctx.camera.position.x, ctx.camera.position.z, -Infinity); return; }
     const m = readMove();
+    // s01:P fix round 1: a W or S held since a halt, a glide or the card began is ignored until let go.
+    lastForward = m.forward;
+    if (latch !== null && m.forward !== latch) latch = null;
+    const fwd = latch !== null ? 0 : m.forward;
     const want = facing();
     const headingOf = openAir.headingOf;
     let crossed = [];
     atEdge = false;
-    if (glide && m.forward !== 0) glide = null;   // W or S cancels the glide back
+    if (fwd !== 0) { glide = null; halt = null; }   // W or S cancels the glide back, or the halt before it
     if (glide) {
       // s01:P back to the stop after an arrival at speed, then the card.
       glide.t += dt;
@@ -602,7 +621,7 @@ export function createPedestrianMode(ctx) {
       if (k >= 1) { const stop = glide.stop; glide = null; if (!card) openArrivalCard(stop); }
     } else {
       // s30:P the tunnel walk (10x the run) and Shift sprint, both Physics tunables.
-      const target = m.forward === 0 ? 0 : (m.sprint ? P.tunnelSprint : P.tunnelWalk);
+      const target = fwd === 0 ? 0 : (m.sprint ? P.tunnelSprint : P.tunnelWalk);
       // Reach the walk or the sprint in about half a second, and stop from either
       // in half a second: s01:P the braking rate is held at the one it began at
       // (from 200 m/s, 0.5 s and 50 m, as the overshoot fix assumes), where it
@@ -615,9 +634,9 @@ export function createPedestrianMode(ctx) {
       tunnelSpeed += Math.sign(dv) * Math.min(Math.abs(dv), accel * dt);
       const path0 = n.paths[tunnel.path];
       if (tunnelSpeed > 0.001) {
-        const dirWant = m.forward >= 0 ? want : { x: -want.x, z: -want.z };
+        const dirWant = fwd >= 0 ? want : { x: -want.x, z: -want.z };
         // Keep the last intent while coasting to a stop.
-        tunnel.want = m.forward !== 0 ? dirWant : (tunnel.want || dirWant);
+        tunnel.want = fwd !== 0 ? dirWant : (tunnel.want || dirWant);
         // s01:P the direction first, so the distance is measured the way the walker goes: in the open
         // along the drawn track (60 and 200 m/s are track speeds), in the bore along the chord.
         tunnel.dir = travelDir(path0, tunnel.s, tunnel.want, tunnel.dir, headingOf);
@@ -669,32 +688,58 @@ export function createPedestrianMode(ctx) {
 
     const lineName = routesOf(pathNow.lineId)?.lineName || pathNow.lineId;
     const onPlatform = nearestStopOnPath(n, tunnel.path, tunnel.s, PLATFORM_ZONE_M);
-    // Well past the station arrived at (or on another's platform): forget the arrival and close its card.
-    if (arrived && ((onPlatform && !sameStation(onPlatform, arrived.stop)) || arrivalDistance(arrived.stop) > ARRIVAL_HOLD_M)) {
+    // s01:P fix round 1: off the platform, the stop arrived at as it lies on the walker's own path (a
+    // junction station is a stop of each of its branches); if it is not on it, it cannot be walked back to.
+    let back = null;
+    if (arrived && !onPlatform) {
+      back = arrived.stop.path === tunnel.path ? arrived.stop
+        : pathNow.stops.find(x => sameStation(x.stop, arrived.stop))?.stop ?? null;
+    }
+    // Well past the station arrived at (or on another's platform, or off its path): forget the arrival and close its card.
+    if (arrived && ((onPlatform && !sameStation(onPlatform, arrived.stop)) || (!onPlatform && !back)
+      || arrivalDistance(back ?? arrived.stop) > (halt ? halt.holdM : ARRIVAL_HOLD_M))) {
       if (card?.kind === 'arrival') closeCard();
-      arrived = null;
+      arrived = null; back = null;
       glide = null;
     }
-    const stop = onPlatform ?? arrived?.stop ?? null;
+    // s01:P fix round 1 (D-042 item 1, "only possible to exit them at stations"): the card, and with it the
+    // street, is on offer at the station only. Walking off the platform closes it.
+    if (card?.kind === 'arrival' && !onPlatform && !glide) closeCard();
+    const stop = onPlatform ?? back;
     if (stop) {
-      if (card?.kind === 'arrival') hint(`${cleanLabel(stop.name)}: choose (1-9 or click) · W/S walk on · Esc to stay`);
-      else hint(`E: exits and changes at ${cleanLabel(stop.name)} · W/S walk · Shift sprint`);
+      const name = cleanLabel(stop.name);
+      if (card?.kind === 'arrival') hint(`${name}: choose (1-9 or click) · W/S walk on · Esc to stay`);
+      else if (onPlatform) hint(`E: exits and changes at ${name} · W/S walk · Shift sprint`);
+      else if (glide || halt) hint(`Back to ${name} · W/S walk on`);
+      else hint(`E: back to ${name} · W/S walk on · Shift sprint`);
       if (use) {
         if (card?.kind === 'arrival') closeCard();
-        else { glide = null; openArrivalCard(stop); }
-      } else if (!card && !glide && arrived && !arrived.dismissed && tunnelSpeed < REST_MPS) {
-        // s01:P at rest past the platform after an arrival at speed: glide back to the stop, then the card.
-        if (!onPlatform && arrived.stop.path === tunnel.path && Math.abs(tunnel.s - arrived.stop.s) > 0.5) {
-          glide = { from: tunnel.s, to: arrived.stop.s, t: 0, stop: arrived.stop };
+        else if (onPlatform) { glide = null; halt = null; openArrivalCard(onPlatform); }
+        else if (!glide && !halt) {
+          // s01:P off the platform E brings the walker back: brake to rest, glide back to the stop, then
+          // the card there (the street is never offered away from the station). The arrival is kept for
+          // as long as the braking takes.
+          halt = { holdM: Math.max(ARRIVAL_HOLD_M, arrivalDistance(back) + tunnelSpeed * 0.3 + 5) };
+          latch = lastForward !== 0 ? lastForward : null;
+          arrived.dismissed = false;
+        }
+      } else if (!card && !glide && arrived && (halt || !arrived.dismissed) && tunnelSpeed < REST_MPS) {
+        // s01:P at rest past the platform after an arrival at speed (or after E there): glide back to the
+        // stop, then the card; on the platform, the card.
+        if (!onPlatform) {
+          glide = { from: tunnel.s, to: back.s, t: 0, stop: back };
+          latch = lastForward !== 0 ? lastForward : null;
         } else {
           openArrivalCard(stop);
         }
+        halt = null;
       }
     } else if (atEdge) {
       hint(EDGE_HINT); // s01:P
     } else {
       hint(`${lineName} · W/S walk · Shift sprint · face a branch to take it`);
     }
+    if (halt && !arrived && tunnelSpeed < REST_MPS) halt = null;   // at rest with nothing to go back to
   }
 
   /** How far the walker is from a stop it arrived at: along the path when on it, else in plan (s01:P). */
@@ -782,6 +827,7 @@ export function createPedestrianMode(ctx) {
       .concat(changes.map(r => ({ ...r, kind: 'change', section: 'Change without surfacing' })));
     openCard('arrival', { kicker: 'Arrived', title: cleanLabel(stop.name), rows, extra: { stop } });
     if (arrived) arrived.dismissed = true; // once shown, it does not reopen until the next arrival
+    latch = lastForward !== 0 ? lastForward : null; // s01:P a W held as it opens does not walk the walker off it
     return true;
   }
 
@@ -793,9 +839,7 @@ export function createPedestrianMode(ctx) {
         startDescent(extra.entrance, { stop: row.stop, dir: row.dir });
       }
     } else if (kind === 'arrival' && row.kind === 'street') {
-      // s01:P at a surface stop, aside to the street; underground, up the shaft.
-      if (regime === 'open' && tunnel && surfaceStop(extra.stop)) startSurfaceExit(extra.stop);
-      else startAscent(extra.stop);
+      exitAt(extra.stop); // s01:P
     } else if (kind === 'arrival' && row.kind === 'change') {
       startTransfer(row);
     }
@@ -817,7 +861,7 @@ export function createPedestrianMode(ctx) {
       tunnel = { path: row.stop.path, s: row.stop.s, dir: row.dir, side };
       tunnelSpeed = 0;
       yaw = yawFor(heading); trackYaw = null;
-      arrived = null; glide = null;
+      arrived = null; glide = null; halt = null; latch = null;
       regime = toOpen ? 'open' : 'bore';
       openAir.resetPasses();
       openAir.startCut(toOpen ? 'flare' : 'dip', { colour: toOpen ? flareColour() : null, at: clock,
@@ -864,19 +908,45 @@ export function createPedestrianMode(ctx) {
 
   // ── s01:P a surface stop: aside to the street, or from the street onto the track ──
   /**
+   * "Up to the street": from the station arrived at, wherever on its platform
+   * the walker stands (fix round 1: it was taken from the walker's own point,
+   * up to 250 m past the station). A surface stop steps aside, a stop in the
+   * bore goes up its shaft; where the station is shown in the other regime
+   * from the walker (a covered box with the open air inside its platform zone,
+   * or the reverse), a cut takes the walker there first, never an ease through
+   * the ground.
+   */
+  function exitAt(stop) {
+    const surface = surfaceStop(stop);
+    if (tunnel && net?.paths[stop.path] && surface !== (regime === 'open')) {
+      tunnel = { ...tunnel, path: stop.path, s: stop.s };
+      tunnelSpeed = 0;
+      cutTo(surface, 'exit');
+      const p = walkerPoint(tunnel);
+      placeCamera(p.x, p.y, p.z);
+      if (!surface) lastBore = { path: tunnel.path, s: tunnel.s, dir: tunnel.dir, side: tunnel.side };
+    }
+    if (surface) startSurfaceExit(stop);
+    else startAscent(stop);
+  }
+
+  /**
    * "Up to the street" at a surface stop: a STEP_S ease to the station's point
    * on the drawn track, offset STEP_ASIDE_M to either side of it; the first
    * offset on the ground, out of the water and not under a roof wins (the
-   * walker ends on the ground, never in a shaft or on a roof).
+   * walker ends on the ground, never in a shaft or on a roof). At each offset
+   * the side toward the station's entrance is tried first.
    */
   function startSurfaceExit(stop) {
-    const path = net.paths[tunnel.path];
-    const q = openAir.present(path, tunnel.s, 0, {});
+    const path = net.paths[stop.path];
+    const q = path ? openAir.present(path, stop.s, 0, {}) : { mapped: false };
     if (!q.mapped) { startAscent(stop); return false; }
     const nx = -q.hz, nz = q.hx;   // across the track
+    const ent = entranceOf(stop) ?? stop;
+    const toward = Math.sign(nx * (ent.x - q.x) + nz * (ent.z - q.z)) || 1;
     let best = null;
     for (const off of STEP_ASIDE_M) {
-      for (const sg of [1, -1]) {
+      for (const sg of [toward, -toward]) {
         const x = q.x + nx * off * sg, z = q.z + nz * off * sg;
         const g = ctx.collision.groundHeightAt(x, z);
         if (g === null || g === undefined) continue;
@@ -890,13 +960,14 @@ export function createPedestrianMode(ctx) {
     }
     if (!best) {
       // Nowhere clear within 30 m: the nearest ground beside the track.
-      const x = q.x + nx * STEP_ASIDE_M[0], z = q.z + nz * STEP_ASIDE_M[0];
-      best = { x, z, g: ctx.collision.groundHeightAt(x, z) ?? ctx.getTerrainY(x, z) ?? ctx.camera.position.y - P.eye * VE, off: STEP_ASIDE_M[0], fallback: true };
+      const x = q.x + nx * STEP_ASIDE_M[0] * toward, z = q.z + nz * STEP_ASIDE_M[0] * toward;
+      best = { x, z, g: ctx.collision.groundHeightAt(x, z) ?? ctx.getTerrainY(x, z) ?? ctx.camera.position.y - P.eye * VE, off: STEP_ASIDE_M[0] * toward, fallback: true };
     }
     step = { kind: 'exit', from: ctx.camera.position.clone(), to: { x: best.x, y: best.g + P.eye * VE, z: best.z },
-      fromYaw: yaw, toYaw: yaw, t: 0, stop, ground: best.g, off: best.off, fallback: !!best.fallback };
+      fromYaw: yaw, toYaw: yaw, t: 0, stop, ground: best.g, off: best.off, fallback: !!best.fallback,
+      station: { x: q.x, z: q.z } };   // the station's point on the drawn track (tests)
     phase = 'step';
-    tunnel = null; arrived = null; glide = null;
+    tunnel = null; arrived = null; glide = null; halt = null; latch = null;
     regime = 'bore';
     hint(`Out to the street at ${cleanLabel(stop.name)}`);
     return true;
@@ -966,7 +1037,7 @@ export function createPedestrianMode(ctx) {
       lastBore = null;
       // s30:P
       card = null; chooser.close(); arrived = null; transfer = null; shake = 0; passT = null; lastPass = null;
-      glide = null; step = null; regime = 'bore'; atEdge = false; openAir.clearCut(); openAir.resetPasses(); // s01:P
+      glide = null; halt = null; latch = null; step = null; regime = 'bore'; atEdge = false; openAir.clearCut(); openAir.resetPasses(); // s01:P
       ctx.collision.sync();
       ease.begin();
       const cam = ctx.camera;
@@ -992,7 +1063,7 @@ export function createPedestrianMode(ctx) {
       // s30:P the card, the banner and the trains' interior layer go with the mode.
       card = null; chooser.close(); chooser.hideBanner(); trains.hide();
       arrived = null; transfer = null; shake = 0; passT = null;
-      glide = null; step = null; regime = 'bore'; openAir.clearCut(); openAir.resetPasses(); // s01:P
+      glide = null; halt = null; latch = null; step = null; regime = 'bore'; openAir.clearCut(); openAir.resetPasses(); // s01:P
       if (savedNear !== null) setNear(savedNear);
       savedNear = null;
       ease.restore();
@@ -1066,7 +1137,9 @@ export function createPedestrianMode(ctx) {
         edge: n && tunnel ? (n.paths[tunnel.path]?.edge || []).map(iv => iv.slice()) : null,
         atEdge,
         glide: glide ? { from: glide.from, to: glide.to, t: glide.t } : null,
-        step: step ? { kind: step.kind, t: step.t, to: { ...step.to }, off: step.off ?? null, fallback: !!step.fallback } : null,
+        halt: !!halt, latch,
+        step: step ? { kind: step.kind, t: step.t, to: { ...step.to }, off: step.off ?? null, fallback: !!step.fallback,
+          station: step.station ? { ...step.station } : null, stop: step.stop ? { name: cleanLabel(step.stop.name), path: step.stop.path, s: step.stop.s } : null } : null,
         openAir: openAir.debug(),
         lastPass: lastPass ? { inside: !!lastPass.inside, insideSpeed: lastPass.insideSpeed ?? 0, rush: lastPass.rush ?? 0, rumble: lastPass.rumble ?? 0 } : null,
         // ── /s01:P ──
@@ -1078,7 +1151,7 @@ export function createPedestrianMode(ctx) {
       yaw = y; pitch = p;
       enter = null; shaft = null; tunnel = null;
       card = null; chooser.close(); arrived = null; transfer = null; // s30:P
-      glide = null; step = null; regime = 'bore'; openAir.clearCut(); // s01:P
+      glide = null; halt = null; latch = null; step = null; regime = 'bore'; openAir.clearCut(); // s01:P
       settleAt(x, z, Infinity);
       phase = 'body';
       placeCamera(body.x, body.y + P.eye * VE, body.z);
@@ -1095,7 +1168,7 @@ export function createPedestrianMode(ctx) {
       shake = 0; passT = null;   // at rest, and no pass carried over from where the walker was
       // s01:P the walker's line is mapped now; shown on the drawn track where that is open.
       openAir.ensureLine(n, n.paths[path].lineId);
-      glide = null; step = null; trackYaw = null; openAir.clearCut(); openAir.resetPasses();
+      glide = null; halt = null; latch = null; step = null; trackYaw = null; openAir.clearCut(); openAir.resetPasses();
       const sd = side ?? (n.halfSpacing > 0 ? dir : 0);
       tunnel = { path, s, dir, side: sd };
       tunnelSpeed = 0;

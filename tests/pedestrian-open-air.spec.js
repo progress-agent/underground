@@ -29,6 +29,9 @@ test.describe.configure({ mode: 'serial' });
 test.setTimeout(150000);
 
 const VE = 5;
+// pedestrian.js's own constants, read from the page in beforeAll: the platform zone (where the arrival card
+// is on offer), the radius at which the street offers a station's platforms, the offsets of the step aside.
+let K = null;
 // Lane T's runs stray from the drawn track where they are faired (surface-train-map.js FAIR_MAX_DEV_M, 10 m
 // beyond the run they replace) or hop a junction gap between two drawn pieces (Lane R's twin collapse leaves
 // gaps up to about 32 m, some 50 m): the walker follows the run, as the trains do. Measured 01Oct26h over every
@@ -193,6 +196,8 @@ function regimes(r, minM = 150) {
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   await boot();
+  K = await page.evaluate(async () => { const P = await import('/src/modes/pedestrian.js');
+    return { zone: P.PLATFORM_ZONE_M, entrance: P.ENTRANCE_RADIUS_M, aside: P.STEP_ASIDE_M, hold: P.ARRIVAL_HOLD_M }; });
 });
 test.afterAll(async () => { await page?.close(); });
 
@@ -434,12 +439,16 @@ test('a surface stop: the card offers the street, which is a step aside to the g
     const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
     const frame = () => new Promise(r => requestAnimationFrame(r));
     const log = [];
-    for (let i = 0; i < 300; i++) { await frame(); const d = m.debug(), c = ug.camera.position; log.push({ phase: d.phase, y: c.y, g: ug.modes.ctx.getTerrainY(c.x, c.z), near: d.near }); if (d.phase === 'body') break; }
+    for (let i = 0; i < 300; i++) { await frame(); const d = m.debug(), c = ug.camera.position; log.push({ phase: d.phase, y: c.y, g: ug.modes.ctx.getTerrainY(c.x, c.z), near: d.near, step: d.step }); if (d.phase === 'body') break; }
     return log;
   });
   expect(seen.some(f => f.phase === 'step')).toBe(true);
   expect(seen.at(-1).phase).toBe('body');
   for (const f of seen) expect(f.y).toBeGreaterThanOrEqual(f.g + 1 * VE - 1e-6);   // the ease is above the terrain
+  // Fix round 1: the step is aside from the station's own point on the drawn track, not from the walker's.
+  const st = seen.find(f => f.step)?.step;
+  expect(st.stop.name).toBe('Upminster');
+  if (!st.fallback) expect(K.aside.some(o => Math.abs(Math.hypot(st.to.x - st.station.x, st.to.z - st.station.z) - o) < 0.01)).toBe(true);
   const d = await dbg();
   expect(d.state).toBe('ground');
   const where = await page.evaluate(([x, z]) => {
@@ -478,6 +487,136 @@ test('a surface stop: the card offers the street, which is a step aside to the g
   expect(entry.log.some(f => f.phase === 'step')).toBe(true);
   for (const f of entry.log) expect(f.y).toBeGreaterThanOrEqual(f.g + 1 * VE - 1e-6);
   expect(entry.end).toMatchObject({ phase: 'tunnel', regime: 'open', interior: false });
+});
+
+// Fix round 1 (the verifier: District, Elm Park toward Hornchurch at 200 m/s, E 0.5 s after the arrival,
+// the street picked: the walker stepped out 106 m from Hornchurch). D-042 item 1: "only possible to exit
+// them at stations". Off the platform, E brings the walker back to the station; the card is never on offer
+// away from it; the step aside is from the station's point on the drawn track.
+test('the street only at the station: E pressed past a surface stop at 200 m/s brings the walker back to it, and the step aside is beside the station', async () => {
+  expect(await placeAt('district', 'Elm Park', 'Hornchurch')).not.toBeNull();
+  const r = await page.evaluate(async (K) => {
+    const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+    const frame = () => new Promise(res => requestAnimationFrame(res));
+    const hintNow = () => document.getElementById('ug-mode-hint')?.textContent ?? '';
+    const a0 = m.debug().arrivals.length;
+    ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
+    let arr = null, d;
+    const log = [];
+    const t0 = performance.now();
+    try {
+      while (performance.now() - t0 < 30000) {
+        await frame(); d = m.debug();
+        if (!arr && d.arrivals.length > a0) arr = { ...d.arrivals.at(-1) };
+        if (arr && d.clock - arr.at >= 0.5) break;
+      }
+      // Still moving at full speed, W and Shift held: E.
+      const pressed = { past: Math.abs(d.tunnel.s - arr.s), speed: d.tunnel.speed };
+      m.press('use');
+      for (let i = 0; i < 10; i++) { await frame(); d = m.debug(); log.push({ s: d.tunnel?.s, card: d.card?.kind ?? null, hint: hintNow() }); }
+      ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
+      const t1 = performance.now();
+      while (performance.now() - t1 < 10000 && d.card?.kind !== 'arrival') {
+        await frame(); d = m.debug(); log.push({ s: d.tunnel?.s, card: d.card?.kind ?? null, hint: hintNow() });
+      }
+      if (d.card?.kind !== 'arrival') return { arr, pressed, card: d.card, log: log.slice(-5) };
+      const cardPast = Math.abs(d.tunnel.s - arr.s), rows = d.chooser.rows;
+      m.chooseRow(0);
+      let step = null;
+      for (let i = 0; i < 120; i++) { await frame(); d = m.debug(); step ??= d.step; if (d.phase === 'body') break; }
+      for (let i = 0; i < 3; i++) await frame();
+      d = m.debug();
+      const ent = m.network.entrances.find(en => en.stops.some(st => st.path === arr.path && Math.abs(st.s - arr.s) < 1e-6));
+      return { arr: { name: arr.name, s: arr.s }, pressed, cardPast, rows, step, log, end: { phase: d.phase, state: d.state, x: d.x, z: d.z },
+        endFromEntrance: Math.hypot(d.x - ent.x, d.z - ent.z), stationFromEntrance: Math.hypot(step.station.x - ent.x, step.station.z - ent.z), hint: hintNow() };
+    } finally { ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift'); }
+  }, K);
+  expect(r.arr.name).toBe('Hornchurch');
+  expect(r.pressed.speed, 'E pressed at full speed').toBeCloseTo(200, 6);
+  expect(r.pressed.past, 'E pressed off the platform').toBeGreaterThan(K.zone);
+  expect(r.log.some(f => /^Back to Hornchurch/.test(f.hint)), 'the hint says the walker is going back').toBe(true);
+  for (const f of r.log) if (f.card === 'arrival') expect(Math.abs(f.s - r.arr.s), 'the card only on the platform').toBeLessThanOrEqual(K.zone);
+  expect(r.cardPast, 'the card opens back at the stop').toBeLessThan(0.5);
+  expect(r.rows[0]).toBe('Up to the street');
+  expect(r.step).toMatchObject({ kind: 'exit', stop: { name: 'Hornchurch' } });
+  const aside = Math.hypot(r.step.to.x - r.step.station.x, r.step.to.z - r.step.station.z);
+  if (!r.step.fallback) expect(K.aside.some(o => Math.abs(aside - o) < 0.01), `aside ${aside.toFixed(2)} m from the station's point`).toBe(true);
+  expect(aside).toBeLessThanOrEqual(Math.max(...K.aside) + 0.01);
+  expect(r.end).toMatchObject({ phase: 'body', state: 'ground' });
+  test.info().annotations.push({ type: 'street exit', description: `E ${r.pressed.past.toFixed(0)} m past at 200 m/s; stepped out ${aside.toFixed(1)} m aside of the station's point, ${r.endFromEntrance.toFixed(1)} m from the entrance` });
+  // Back on the street at the station: E offers its platforms again (where the drawn track runs that close to it).
+  if (r.stationFromEntrance + aside <= K.entrance) {
+    expect(r.endFromEntrance).toBeLessThanOrEqual(K.entrance);
+    expect(r.hint).toContain('choose a platform at Hornchurch');
+  }
+});
+
+// Fix round 1 (the verifier: Central, Stratford in a covered box, E 34 m out in the open, the street picked: the
+// shaft's passage eased from the open air down through the ground to the platform). Where a station is shown in
+// the other regime from the walker standing inside its platform zone, the street goes there through a cut.
+test('the street from a station shown in the other regime than the walker: a cut, never an ease through the ground', async () => {
+  const r = await page.evaluate(async (K) => {
+    const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+    const frame = () => new Promise(res => requestAnimationFrame(res));
+    const { nearestStopOnPath } = await import('/src/modes/pedestrian-tunnels.js');
+    const net = m.rebuildNetwork(), oa = m.openAir;
+    for (const l of new Set(net.paths.map(p => p.lineId))) oa.ensureLine(net, l);
+    // Stops with the other regime well inside their own platform zone (10 m or more from the stop).
+    const found = { bore: null, open: null };
+    for (const p of net.paths) {
+      for (const { s, stop } of p.stops) {
+        const open = oa.isOpen(p, s), kind = open ? 'open' : 'bore';
+        if (found[kind] || (!open && !(stop.depthM >= 10))) continue;   // a bore stop well below the street
+        for (let ds = 10; ds <= K.zone - 5 && !found[kind]; ds += 2) {
+          for (const sg of [1, -1]) {
+            const ss = s + sg * ds;
+            if (ss < 0 || ss > p.length || oa.isOpen(p, ss) === open || nearestStopOnPath(net, p.id, ss, K.zone) !== stop) continue;
+            found[kind] = { path: p.id, s: ss, stopS: s, name: stop.name, lineId: p.lineId };
+            break;
+          }
+        }
+      }
+    }
+    const out = {};
+    for (const [kind, f] of Object.entries(found)) {
+      if (!f) continue;
+      m.placeInTunnel({ path: f.path, s: f.s, dir: 1 });
+      for (let i = 0; i < 3; i++) await frame();
+      const before = m.debug().regime;
+      m.press('use');
+      let d;
+      for (let i = 0; i < 30; i++) { await frame(); d = m.debug(); if (d.card?.kind === 'arrival') break; }
+      if (d.card?.kind !== 'arrival') { out[kind] = { ...f, before, card: d.card }; continue; }
+      m.chooseRow(0);
+      const log = [];
+      for (let i = 0; i < 900; i++) {
+        await frame(); d = m.debug(); const c = ug.camera.position;
+        log.push({ phase: d.phase, regime: d.regime, y: c.y, g: ug.modes.ctx.getTerrainY(c.x, c.z), interior: d.interior.visible, cut: d.openAir.cut?.kind ?? null, step: d.step });
+        if (d.phase === 'body') break;
+      }
+      out[kind] = { ...f, before, first: log[0], end: log.at(-1), n: log.length,
+        downThrough: log.findIndex((x, i) => i > 0 && log[i - 1].y >= log[i - 1].g && x.y < x.g),
+        stepBelow: log.filter(x => x.phase === 'step' && x.y < x.g + 1 * 5 - 1e-6).length,
+        step: log.find(x => x.step)?.step ?? null, end2: { phase: d.phase, state: d.state, x: d.x, z: d.z } };
+    }
+    return out;
+  }, K);
+  test.info().annotations.push({ type: 'stations', description: `bore stop, walker in the open: ${r.bore?.lineId} ${r.bore?.name}; surface stop, walker in the bore: ${r.open?.lineId} ${r.open?.name}` });
+  // A station in the bore, the walker in the open inside its platform zone: a dip, then the shaft from the bore.
+  expect(r.bore, 'a station in the bore with the open air inside its platform zone').toBeTruthy();
+  expect(r.bore.before).toBe('open');
+  expect(r.bore.first).toMatchObject({ phase: 'shaft', regime: 'bore', cut: 'dip', interior: true });
+  expect(r.bore.first.y, 'in the bore at once').toBeLessThan(r.bore.first.g);
+  expect(r.bore.downThrough, 'never down through the ground').toBe(-1);
+  expect(r.bore.end2).toMatchObject({ phase: 'body', state: 'ground' });
+  // A station in the open, the walker in the bore inside its platform zone: a flare, then the step aside.
+  expect(r.open, 'a station in the open with the bore inside its platform zone').toBeTruthy();
+  expect(r.open.before).toBe('bore');
+  expect(r.open.first).toMatchObject({ phase: 'step', cut: 'flare', interior: false });
+  expect(r.open.stepBelow, 'the step stays above the terrain').toBe(0);
+  const aside = Math.hypot(r.open.step.to.x - r.open.step.station.x, r.open.step.to.z - r.open.step.station.z);
+  expect(aside).toBeLessThanOrEqual(Math.max(...K.aside) + 0.01);
+  expect(r.open.end2).toMatchObject({ phase: 'body', state: 'ground' });
 });
 
 test('the overshoot: released 0.25 s after an arrival at 200 m/s, the walker stops within 53 m, glides back to the stop and the card opens', async () => {
