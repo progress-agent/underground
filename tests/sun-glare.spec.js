@@ -60,10 +60,21 @@ function faceSun(page, pos, { dPitchDeg = 0, away = false } = {}) {
   }, { pos, dPitchDeg, away });
 }
 
-/** The final frame (composer output) as 8-bit luminance, plus the sun's pixel. */
-const readFrame = page => page.evaluate(() => {
+/**
+ * The final frame (composer output) as 8-bit luminance, plus the sun's pixel.
+ * hideClouds (sprint 30Sep26w integration): the cloud layer is hidden for this
+ * one render, inside the same task, because clouds.js sets its own visibility
+ * every frame.
+ */
+const readFrame = (page, { hideClouds = false } = {}) => page.evaluate(({ hideClouds }) => {
   const u = window.__ug, T = window.__ugTHREE, r = u.composer.renderer, gl = r.getContext();
+  let clouds = null;
+  if (hideClouds) u.scene.traverse(o => { if (o.isMesh && o.name === 'clouds') clouds = o; });
+  if (hideClouds && !clouds) throw new Error('no cloud mesh to hide');
+  const cloudsWere = clouds?.visible;
+  if (clouds) clouds.visible = false;
   u.composer.render(0);
+  if (clouds) clouds.visible = cloudsWere;
   const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
   gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
   const L = new Float32Array(w * h);
@@ -78,7 +89,7 @@ const readFrame = page => page.evaluate(() => {
   const p = u.camera.position.clone().add(dir.multiplyScalar(1000)).project(u.camera);
   window.__frameL = L; window.__frameW = w; window.__frameH = h;
   return { w, h, mean: sum / (w * h), blackFraction: black / (w * h), sunX: (p.x + 1) / 2 * w, sunY: (1 - p.y) / 2 * h, sunFront: p.z < 1 };
-});
+}, { hideClouds });
 
 // Luminance at screen (x, y), row 0 at the top, from the last readFrame.
 const sampleRays = (page, cx, cy, radii) => page.evaluate(({ cx, cy, radii }) => {
@@ -248,14 +259,7 @@ test('the blue line is gone: no dark column in the sky opposite the sun', async 
     // clouds hidden, and every outlier with them shown lies on a cloud
     // outline. The clouds' own look is pinned by clouds.spec.js (no rims or
     // rings at dawn and dusk).
-    const cloudMesh = await page.evaluate(() => {
-      let m = null; window.__ug.scene.traverse(o => { if (o.isMesh && o.name === 'clouds') m = o; });
-      if (m) { window.__s30CloudsWere = m.visible; m.visible = false; }
-      return !!m;
-    });
-    expect(cloudMesh).toBe(true);
-    await readFrame(page);
-    await page.evaluate(() => { window.__ug.scene.traverse(o => { if (o.isMesh && o.name === 'clouds') o.visible = window.__s30CloudsWere; }); });
+    await readFrame(page, { hideClouds: true });
     const r = await page.evaluate(() => {
       const L = window.__frameL, w = window.__frameW, h = window.__frameH;
       // Dark outliers against their neighbours 3 px either side, in the upper
