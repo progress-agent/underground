@@ -389,10 +389,14 @@ test.describe('Pedestrian mode', () => {
           const start = { path: A.path, s: A.s + A.d * 150, dir: -A.d };
           const runTo = (want) => {
             const pos = { ...start };
-            T.advance(net, pos, 400, want);
-            return { pos, p: T.pointAt(net.paths[pos.path], pos.s) };
+            const res = T.advance(net, pos, 400, want);
+            return { pos, p: T.pointAt(net.paths[pos.path], pos.s), portal: res.portal };
           };
           const toB = runTo(B.h), toC = runTo(C.h);
+          // Sprint 30Sep26w integration: the portals come from the drawn railway, so a fork near open track can have
+          // a tunnel mouth within the walk, where both walks rightly stop. This test is about the fork: take one the
+          // walk can reach (c820ea9 had no portals; the first fork it found is such a one).
+          if (toB.portal || toC.portal) continue;
           const j = T.pointAt(net.paths[A.path], A.s);
           const dirOf = (q) => { const dx = q.p.x - j.x, dz = q.p.z - j.z, l = Math.hypot(dx, dz) || 1; return { x: dx / l, z: dz / l }; };
           const db = dirOf(toB), dc = dirOf(toC);

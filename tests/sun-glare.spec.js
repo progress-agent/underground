@@ -238,7 +238,24 @@ test('the blue line is gone: no dark column in the sky opposite the sun', async 
       u.controls.update();
     }, { ll, alt });
     await frames(page, 4);
+    // Sprint 30Sep26w integration: the sky is measured with the cloud layer
+    // hidden. The column was the sky shader's (a NaN from pow() of a negative
+    // base, 50f6eec); clouds cannot produce it. Since D-041 item 6 (Lane C)
+    // each cloud is one lobed heap, and blue sky in the notch between two
+    // bright lobes is darker than the lobes 3 px either side, which this
+    // detector counted (worst column 5 to 6 at t=null and t=0.02). Measured on
+    // c820ea9 and on the integration: 0 outliers in all three views with the
+    // clouds hidden, and every outlier with them shown lies on a cloud
+    // outline. The clouds' own look is pinned by clouds.spec.js (no rims or
+    // rings at dawn and dusk).
+    const cloudMesh = await page.evaluate(() => {
+      let m = null; window.__ug.scene.traverse(o => { if (o.isMesh && o.name === 'clouds') m = o; });
+      if (m) { window.__s30CloudsWere = m.visible; m.visible = false; }
+      return !!m;
+    });
+    expect(cloudMesh).toBe(true);
     await readFrame(page);
+    await page.evaluate(() => { window.__ug.scene.traverse(o => { if (o.isMesh && o.name === 'clouds') o.visible = window.__s30CloudsWere; }); });
     const r = await page.evaluate(() => {
       const L = window.__frameL, w = window.__frameW, h = window.__frameH;
       // Dark outliers against their neighbours 3 px either side, in the upper
