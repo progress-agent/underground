@@ -48,6 +48,9 @@ async function boot(page, query = '?skip=1&buildings=baked') {
   }, null, { timeout: 180000 });
 }
 const dbg = (page) => page.evaluate(() => window.__ug.modes.registry.get('pedestrian').debug());
+// Sprint 02Oct26f (Lane F): arrivals are counted by the walk's monotonic `seq`, never by an index into the
+// 64-entry arrivals log (a ride that adds arrivals, or a log that wraps, moved the index under the test).
+const lastSeq = (d) => d.arrivals.reduce((m, a) => Math.max(m, a.seq ?? 0), 0);
 async function enter(page) {
   await page.keyboard.press('2');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
@@ -250,10 +253,10 @@ test.describe('in the tunnel', () => {
   for (const [speed, keys, from, to] of [[60, ['w'], 'Oxford Circus', 'Green Park'], [200, ['w', 'shift'], 'Green Park', 'Victoria']]) {
     test(`arrival fires when crossing the platform at ${speed} m/s; the name shows and the bore opens into the platform tunnel`, async () => {
       expect(await placeAt(page, 'victoria', from, to)).not.toBeNull();
-      const n0 = (await dbg(page)).arrivals.length;
+      const s0 = lastSeq(await dbg(page));
       await page.evaluate((keys) => { for (const k of keys) window.__ug.fpsControls.keys.add(k); }, keys);
       // Up to speed well before the next platform (about 0.5 s), then across it.
-      await page.waitForFunction((n0) => window.__ug.modes.registry.get('pedestrian').debug().arrivals.length > n0, n0, { timeout: 90000 });
+      await page.waitForFunction((s0) => window.__ug.modes.registry.get('pedestrian').debug().arrivals.some(a => a.seq > s0), s0, { timeout: 90000 });
       const d = await dbg(page);
       const shown = await page.evaluate(() => ({ text: document.getElementById('ug-station-banner')?.textContent,
         visible: document.getElementById('ug-station-banner')?.classList.contains('is-visible') }));
@@ -427,7 +430,7 @@ test.describe('in the tunnel', () => {
       const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
       const frame = () => new Promise(res => requestAnimationFrame(res));
       const flare = document.getElementById('ug-portal-flare');
-      const a0 = m.debug().arrivals.length;
+      const s0 = m.debug().arrivals.reduce((mx, a) => Math.max(mx, a.seq ?? 0), 0);
       ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
       const log = [];
       const t0 = performance.now();
@@ -436,11 +439,11 @@ test.describe('in the tunnel', () => {
         const d = m.debug();
         log.push({ regime: d.regime, speed: d.tunnel?.speed, card: d.card?.kind ?? null, flare: +getComputedStyle(flare).opacity, cut: d.openAir.cut?.kind ?? null,
           hint: document.getElementById('ug-mode-hint')?.textContent ?? '', phase: d.phase });
-        if (d.phase !== 'tunnel' || d.arrivals.slice(a0).some(a => a.name === 'Edgware')) break;
+        if (d.phase !== 'tunnel' || d.arrivals.filter(a => a.seq > s0).some(a => a.name === 'Edgware')) break;
       }
       ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
       const d = m.debug();
-      return { log, arrivals: d.arrivals.slice(a0).map(a => a.name), portal: d.portal ?? null };
+      return { log, arrivals: d.arrivals.filter(a => a.seq > s0).map(a => a.name), portal: d.portal ?? null };
     });
     expect(r.arrivals).toEqual(['Golders Green', 'Brent Cross', 'Hendon Central', 'Colindale', 'Burnt Oak', 'Edgware']);
     expect(r.log.every(f => f.card !== 'portal')).toBe(true);
@@ -483,7 +486,7 @@ test.describe('in the tunnel', () => {
       const r = await page.evaluate(async (toward) => {
         const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
         const frame = () => new Promise(res => requestAnimationFrame(res));
-        const a0 = m.debug().arrivals.length;
+        const s0 = m.debug().arrivals.reduce((mx, a) => Math.max(mx, a.seq ?? 0), 0);
         ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
         let first = null;
         const t0 = performance.now();
@@ -491,11 +494,11 @@ test.describe('in the tunnel', () => {
           await frame();
           const d = m.debug(), c = ug.camera.position;
           if (!first && d.regime === 'open') first = { x: c.x, z: c.z };
-          if (d.arrivals.slice(a0).some(a => a.name === toward) || d.phase !== 'tunnel') break;
+          if (d.arrivals.filter(a => a.seq > s0).some(a => a.name === toward) || d.phase !== 'tunnel') break;
         }
         ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
         const d = m.debug();
-        return { first, arrived: d.arrivals.slice(a0).map(a => a.name), portal: d.portal ?? null, phase: d.phase };
+        return { first, arrived: d.arrivals.filter(a => a.seq > s0).map(a => a.name), portal: d.portal ?? null, phase: d.phase };
       }, toward);
       expect(r.arrived, `${from} toward ${toward}: the walk carries on and arrives`).toContain(toward);
       expect(r.portal).toBeNull();

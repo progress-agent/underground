@@ -192,7 +192,10 @@ export function createPedestrianMode(ctx) {
   const trains = createTunnelTrains({ trainSystem: () => ctx.trainSystem, layer: INTERIOR_LAYER });
   let arrived = null;                     // { stop, dismissed } the platform last arrived at
   let transfer = null;                    // { from, to, t, row, bore, open }
-  const arrivals = [];                    // test log: { name, lineId, speed, at }
+  const arrivals = [];                    // test log: { name, lineId, speed, at, seq }
+  // ── s02:F ── a running arrival number: tests count rides by it, never by an index into the 64-entry log
+  let arrivalSeq = 0;
+  // ── /s02:F ──
   let shake = 0, passT = null, lastPass = null;  // the view shake of a pass (tunnel-trains.js stepShake)
   let trackYaw = null;                    // the track's heading last frame, while moving (the view turns with the tunnel)
   // ── /s30:P ──
@@ -750,6 +753,10 @@ export function createPedestrianMode(ctx) {
         }
         halt = null;
       }
+      // ── s02:F ── (D-047 walk-stopping-hint) the hint was chosen above, before the card opened in this very
+      // frame, so "Stopping at X" showed for one frame after the card was up: re-issue the card's own hint.
+      if (card?.kind === 'arrival') hint(`${name}: choose (1-9 or click) · W/S walk on · Esc to stay`);
+      // ── /s02:F ──
     } else if (atEdge) {
       hint(EDGE_HINT); // s01:P
     } else {
@@ -777,6 +784,9 @@ export function createPedestrianMode(ctx) {
     arrivals.push({ name: cleanLabel(stop.name), lineId: stop.lineId, path: stop.path, s: stop.s, speed, at: clock,
       regime }); // s01:P where it was shown
     if (arrivals.length > 64) arrivals.shift();
+    // ── s02:F ──
+    arrivals[arrivals.length - 1].seq = ++arrivalSeq;
+    // ── /s02:F ──
     if (card?.kind === 'arrival') closeCard();
     arrived = { stop, dismissed: false };
     glide = null;
