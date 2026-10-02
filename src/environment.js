@@ -119,13 +119,8 @@ export function getAirSun() {
 
 // Create sky dome — a camera-following "abyss cap" (D1.4).
 //
-// IMPORTANT geometry note: the camera far plane is 50000, so an 80000-radius
-// dome fixed at the origin is almost entirely FRUSTUM-CLIPPED — the sky/void
-// the viewer actually sees is the renderer CLEAR COLOUR, not the dome. That is
-// why darkening the dome texture alone did nothing to the below-horizon void.
-//
-// This dome therefore (a) has radius 45000 (< far plane) and (b) is recentred
-// on the camera every frame in updateEnvironment, so it always renders and its
+// Geometry note (sprint 02Oct26f, D-048 item 8): the dome is a radius-45000
+// sphere recentred on the camera every frame (updateEnvironment), so its
 // equator always sits on the viewer's true horizon. Its job is ONLY the abyss:
 //   • ABOVE the horizon (v > 0.5) the texture alpha is 0 → fully transparent →
 //     the existing clear-colour sky shows through UNCHANGED (the good overview
@@ -133,11 +128,18 @@ export function getAirSun() {
 //   • BELOW the horizon (v < 0.5) the texture ramps to an OPAQUE deep slate →
 //     near-black at nadir, hiding the bright steel-blue clear colour so the
 //     white chalk shaft + warm clay disc read against a dark abyss.
-// depthWrite:false + a very negative renderOrder make it a pure background: all
-// scene geometry (opaque or transparent) draws over it, so it never occludes
-// the terrain/city/column. Master fade (altitude/underground/chalk) rides on
-// material.opacity in updateEnvironment, so it vanishes underground and in the
-// chalk white-out, leaving those regimes' clear-colour handling untouched.
+// It is drawn AT THE FAR PLANE (the vertex shader sets gl_Position.z = w, as
+// sky.js does, with LessEqualDepth), so it fills only pixels that nothing else
+// has claimed. Before this, it was depth-tested at its true radius and painted
+// over every ground point more than 45000 canonical units from the camera, so
+// the map vanished from about 9,000 m of altitude (the visible disc is
+// sqrt(45000^2 - (5 * altitude)^2), and Master cancels). Terrain and every
+// other scene geometry write depth, so they stay in front of it; the clouds
+// and other transparent things draw after it (renderOrder) and blend over it.
+// depthWrite:false keeps it a pure background. Master fade (altitude /
+// underground / chalk white-out) rides on material.opacity in
+// updateEnvironment, so it vanishes underground and in the chalk, leaving
+// those regimes' clear-colour handling untouched.
 export function createSkyDome(scene) {
   const geometry = new THREE.SphereGeometry(45000, 32, 32);
 
@@ -168,6 +170,9 @@ export function createSkyDome(scene) {
     transparent: true,
     opacity: 0.0,        // Start invisible; master fade driven in updateEnvironment
     depthWrite: false,   // pure background — never occlude scene geometry
+    // Drawn at the far plane (z = w in the vertex shader below): passes only
+    // where the depth buffer still holds its cleared 1.0.
+    depthFunc: THREE.LessEqualDepth,
     fog: false,
   });
   // The ordinary dome is an abyss cap: its upper half is transparent because
@@ -194,7 +199,8 @@ export function createSkyDome(scene) {
     shader.vertexShader = shader.vertexShader.replace('void main() {', `
 varying vec3 vDomeDir;
 void main() {`).replace('#include <begin_vertex>', `#include <begin_vertex>
-vDomeDir = position;`);
+vDomeDir = position;`).replace('#include <project_vertex>', `#include <project_vertex>
+gl_Position.z = gl_Position.w;`);
     shader.uniforms.uSubmergedSky = submergedSky;
     shader.uniforms.uSubmergedSkyColor = { value: new THREE.Color(ENV_CONFIG.skyColor) };
     shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
