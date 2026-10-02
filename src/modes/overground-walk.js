@@ -18,7 +18,7 @@
 //     straight across its ends: no flicker of cuts), an open run shorter than that is dropped;
 //   * connectors (kind 'gap') are the bore; stubs inherit the state of the end they leave.
 //
-// No Math.random, no clock: a pure function of its inputs.
+// Deterministic: a pure function of its inputs (nothing random, no clock).
 import { liveY } from './overground-network.js';
 import { passingState } from '../tunnel-trains.js';
 
