@@ -28,6 +28,9 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
+// ── s02:night ──
+import { NIGHT, injectBuildingWindows } from './night.js';
+// ── /s02:night ──
 
 // -- Shared material (single instance across all tiles) -----------------------
 
@@ -52,10 +55,15 @@ buildingMat.onBeforeCompile = (shader) => {
       '#include <begin_vertex>',
       '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;',
     );
+  // ── s02:night ──
+  if (NIGHT.enabled && NIGHT.parts.windows) injectBuildingWindows(shader);
+  // ── /s02:night ──
 };
 // Distinct cache key so this material never shares a compiled program with an
 // un-injected MeshStandardMaterial.
-buildingMat.customProgramCacheKey = () => 'building-height-scale';
+// ── s02:night ──
+buildingMat.customProgramCacheKey = () => (NIGHT.enabled && NIGHT.parts.windows ? 'building-height-scale-night' : 'building-height-scale');
+// ── /s02:night ──
 
 /**
  * Live building-height multiplier. 1.0 = as built (VE-scaled); 0.2 with VE=5

@@ -31,6 +31,7 @@
 //       --views a,b,c       subset of views (default: all six)
 //       --settle <s>        settle/trace seconds per view (default 24)
 //       --arrival-s <s>     trace seconds for the arrival case (default: --settle)
+//       --query <q>         extra URL query, e.g. "night=1" (s02 night proof; default none)
 //   node scripts/measure-setups.mjs compare <before-origin> <after-origin> [options]
 //       Measures both origins on each setup (order alternates per round to
 //       cancel drift) and prints before/after per view.
@@ -130,7 +131,7 @@ function machineNote() {
 }
 
 /** Measure one setup on one origin. */
-export async function measure({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS }) {
+export async function measure({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS, query = '' }) {
   const { chromium } = await import('@playwright/test');
   const S = SETUPS[setup]; if (!S) throw new Error(`unknown setup ${setup}`);
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
@@ -148,7 +149,7 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
       window.__resume = () => { window.__paused = false; for (const cb of held.splice(0)) window.requestAnimationFrame(cb); };
     });
     const t0 = Date.now();
-    await page.goto(`${origin}/?fast=1&buildings=baked`);
+    await page.goto(`${origin}/?fast=1&buildings=baked${query ? '&' + query : ''}`);
     try {
       await page.waitForFunction(() => window.__ug, null, { timeout: 60000 });
     } catch {
@@ -228,7 +229,7 @@ async function main() {
     const [setup, origin] = pos;
     if (!setup || !origin) throw new Error('usage: run <as-lived|weak|both> <origin> [--label] [--out] [--views] [--settle] [--arrival-s]');
     const runs = [];
-    for (const s of setupsOf(setup)) runs.push(await measure({ setup: s, origin, label: opt.label ?? origin, views, settleS, arrivalS }));
+    for (const s of setupsOf(setup)) runs.push(await measure({ setup: s, origin, label: opt.label ?? origin, views, settleS, arrivalS, query: opt.query ?? '' }));
     if (opt.out) await writeFile(opt.out, JSON.stringify(runs.length === 1 ? runs[0] : { runs }, null, 1));
     return;
   }

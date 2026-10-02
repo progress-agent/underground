@@ -91,6 +91,9 @@
 
 import * as THREE from 'three';
 import { CLEAR_SKY, DEFAULT_SKY_LOOK } from './sky-looks.js';
+// ── s02:night ──
+import { applyNightToSkyParams, starWeight, STARS_FRAGMENT_UNIFORMS, STARS_FRAGMENT_FUNCTION, STARS_FRAGMENT_USE } from './night.js';
+// ── /s02:night ──
 
 const DEG = Math.PI / 180;
 
@@ -277,6 +280,9 @@ export function computeSkyParams(_lookName, state, { direction = null, out = cre
   out.aureoleCoreRad = look.aureoleCoreDeg * DEG;
   out.aureoleSkirt = look.aureoleSkirt;
   out.aureoleSkirtRad = look.aureoleSkirtDeg * DEG;
+  // ── s02:night ──
+  applyNightToSkyParams(out);
+  // ── /s02:night ──
   return out;
 }
 
@@ -451,6 +457,7 @@ uniform vec3 uHaze;
 uniform float uHazeNear;
 uniform float uHazeFar;
 uniform float uHazeWeight;
+${/* ── s02:night ── */''}${STARS_FRAGMENT_UNIFORMS}${/* ── /s02:night ── */''}
 varying vec3 vDir;
 ${ABYSS_HAZE_GLSL}
 
@@ -490,6 +497,7 @@ vec3 abyss( float deg ) {
 // Cloud hook (cloud scope, 23Sep26w): a later cirrus layer composites here,
 // over the sky and under the sun disc. Identity today.
 vec3 highCloud( vec3 c, vec3 d ) { return c; }
+${/* ── s02:night ── */''}${STARS_FRAGMENT_FUNCTION}${/* ── /s02:night ── */''}
 
 void main() {
   vec3 d = normalize( vDir );
@@ -499,6 +507,7 @@ void main() {
   // Angular size of this pixel on screen (radians), in uniform control flow.
   float aa = max( 0.5 * length( fwidth( dd ) ), 1e-7 );
   vec3 sky = highCloud( skyRadiance( d ), d );
+${/* ── s02:night ── */''}${STARS_FRAGMENT_USE}${/* ── /s02:night ── */''}
   // Painted aureole (Lane L, 25Sep26f): round on screen, sky only, rolled off
   // under the bloom threshold. Mirror of skyWithAureoleAt() in sky.js.
   float sunCos = dot( dd, uSunDirDisplay );
@@ -569,6 +578,9 @@ function createSkyMesh() {
     uHazeNear: { value: 1 },
     uHazeFar: { value: 2 },
     uHazeWeight: { value: 0 },
+    // ── s02:night ──
+    uStarWeight: { value: 0 },
+    // ── /s02:night ──
   };
   const material = new THREE.ShaderMaterial({
     name: 'analyticSky',
@@ -616,6 +628,9 @@ function writeUniforms(u, p) {
   u.uHazeNear.value = p.hazeNear;
   u.uHazeFar.value = p.hazeFar;
   u.uHazeWeight.value = p.hazeWeight;
+  // ── s02:night ──
+  u.uStarWeight.value = starWeight();
+  // ── /s02:night ──
 }
 
 // ── System ──────────────────────────────────────────────────────────────────

@@ -42,6 +42,10 @@ import { createSunSystem } from './sun.js';
 import { createSkySystem } from './sky.js';
 import { attachSky } from './environment.js';
 // ── /s24:S ──
+// ── s02:night ──
+import { NIGHT, nightUniforms, updateNight, applyNightToSunState, installGroundGlow } from './night.js';
+import { sunState as _nightSunState } from './sun.js';
+// ── /s02:night ──
 // ── s25:C ──
 // Importing clouds.js patches the lit shader chunks for cloud shadows; it must
 // precede any compile, as every import does.
@@ -1275,6 +1279,9 @@ const sunSystem = createSunSystem({ renderer, scene, lights: atmosphereLights, p
 shadowCache = createShadowCache({ renderer, light: atmosphereLights.sun });
 // ── /s24:R ──
 sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? null);
+// ── s02:night ──
+if (NIGHT.enabled && !NIGHT.shadows) sunSystem.setShadowsEnabled(false, { persist: false });
+// ── /s02:night ──
 // ── /sprint:D ──
 
 // ── s24:S ──
@@ -1666,6 +1673,9 @@ const thamesDataPromise = loadThamesData();
             const uvBounds = sceneBBoxToUVBounds(fullBBox);
             applySurfaceTexture(result.topMat, surfaceTexState.texture, uvBounds);
             setSurfaceTextureEnabled(result.topMat, true); // hybrid surface on by default
+            // ── s02:night ──
+            installGroundGlow(result.topMat, fullBBox);
+            // ── /s02:night ──
             surfaceTextureMaterial = result.topMat;
           }
           if(result.undersideMat) {
@@ -4234,6 +4244,13 @@ function tick(frameTime) {
   }
   parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
 
+  // ── s02:night ── (throwaway proof, ?night=1): rebuild the day state, then retint it for the moon
+  if (NIGHT.enabled) {
+    _nightSunState(sunSystem.time, sunSystem.state);
+    applyNightToSunState(sunSystem.state);
+    updateNight(sunSystem.status.airWeight);
+  }
+  // ── /s02:night ──
   // ── sprint:D ──
   // Air-substrate sun blend and shadow fit; must precede the environment and
   // lighting updates below. Automatic quality level 1+ drops shadows first.
@@ -4392,6 +4409,9 @@ if (import.meta.env.DEV) {
   // describes only the composer's final fullscreen pass and cannot.
   window.__ugTHREE = THREE;
   window.__ug = {
+    // ── s02:night ──
+    night: NIGHT, nightUniforms,
+    // ── /s02:night ──
     undergroundCull, get aboveGroundView() { return _aboveGroundView; },
     getTerrainRiverBed,
     materialResistance, classifySubstrateAt, underwaterSurface,
