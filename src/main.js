@@ -35,6 +35,9 @@ import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthIn
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, applyParkUndersideTexture, getTerrainRiverBed } from './terrain.js';
 import { createParkLabels } from './park-labels.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
+// ── s02:F ──
+import { createViewRange } from './view-range.js';
+// ── /s02:F ──
 // ── sprint:D ──
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
@@ -309,6 +312,9 @@ bindMasterController(masterHeight);
 // (tests and tools); morphs counts completed CPU morph passes.
 const structureMorph = { flush: () => {}, morphs: 0, pending: false };
 // ── /s25:S ──
+// ── s02:F ── the depth range follows the camera's display height above 20,000 units (src/view-range.js)
+const viewRange = createViewRange(camera, masterHeight);
+// ── /s02:F ──
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -4234,6 +4240,9 @@ function tick(frameTime) {
   }
   parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
 
+  // ── s02:F ── near/far follow the display height (above 20,000 units only); before the sun fit, fog and sky read the range
+  viewRange.update();
+  // ── /s02:F ──
   // ── sprint:D ──
   // Air-substrate sun blend and shadow fit; must precede the environment and
   // lighting updates below. Automatic quality level 1+ drops shadows first.

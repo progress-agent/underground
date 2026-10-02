@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { setInfraHazeStrength } from './infra-materials.js';
 import { ABYSS_HAZE_GLSL } from './sky.js';
+import { BASE_FAR } from './view-range.js'; // s02:F
 
 // Environment configuration for above/below ground differentiation
 export const ENV_CONFIG = {
@@ -324,6 +325,12 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     const altBlend = Math.min(1, Math.max(0, y / 1500));
     const altFar = baseFar + (macroFar - baseFar) * altBlend;
     let fogFar = Math.max(baseFar + (macroFar - baseFar) * fogFarBlend, altFar);
+    // s02:F: the depth range grows with height above 20,000 display units
+    // (src/view-range.js); the fog grows with it, or the map seen from there is
+    // pure haze. 1 at or below that height, so nothing near the ground changes.
+    const rangeScale = Math.max(1, camera.far / BASE_FAR);
+    fogNear *= rangeScale;
+    fogFar *= rangeScale;
 
     // Chalk white-out (D3.3): lerp fog toward dusty warm white + clamp visibility.
     if (chalkBlend > 0) {

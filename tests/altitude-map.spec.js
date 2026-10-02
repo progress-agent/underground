@@ -170,5 +170,51 @@ test('the map fills the frame below the horizon at every altitude and Master', a
     expect(r.occlusionShare, `occlusion ${tag}`).toBeLessThanOrEqual(0.005);
     // Everything whose ray meets the ground disc inside the far plane is drawn.
     if (r.expected >= 1000) expect(r.coverage, `coverage ${tag}`).toBeGreaterThanOrEqual(0.97);
+    // The far plane follows height (src/view-range.js): the base range up to 20,000 display units,
+    // then far = 2.5 h with the 1:50000 ratio kept.
+    if (r.displayHeight <= 20000) {
+      expect(r.near, `near ${tag}`).toBe(1); expect(r.far, `far ${tag}`).toBe(50000);
+    } else {
+      expect(Math.abs(r.far / r.near - 50000) / 50000, `ratio ${tag}`).toBeLessThan(0.001);
+      expect(r.far, `far ${tag}`).toBeGreaterThanOrEqual(2.4 * r.displayHeight);
+    }
+    // The whole disc below the horizon is inside the far plane, so (almost) none of it is beyond.
+    expect(r.beyondFar, `beyondFar ${tag}`).toBeLessThanOrEqual(0.01);
+    expect(r.expected, `expected ${tag}`).toBeGreaterThan(1000);
+    expect(r.coverage, `coverage ${tag}`).toBeGreaterThanOrEqual(0.97);
+    // Seen from up there the map is the map, not haze: the fog colour fills at most a tenth of it.
+    expect(r.fogged, `fogged ${tag}`).toBeLessThanOrEqual(0.10);
   }
+});
+
+// The weak-setup views (scripts/measure-setups.mjs) all lie below 20,000 display
+// units, so none of them changes: near 1 and far 50000 exactly.
+test('the weak-setup views keep near 1 and far 50000', async ({ page }) => {
+  await boot(page);
+  const VIEWS = {
+    overview: [[0, 20000, 18000], [0, 0, 0]], streetBank: [[2952.9, 337.8, -732.9], [1910.1, 196.2, -783.7]],
+    riverGreenwich: [[8447.1, 112, 2136.1], [7156, 12, 635.4]], m25Edge: [[4910.7, 634.3, -18445.1], [6239.5, 102.8, -20483.9]],
+    heathrow: [[-19493.3, 1606.7, 4622.3], [-22570.2, 120, 4688.2]],
+  };
+  for (const [name, [p, t]] of Object.entries(VIEWS)) {
+    await page.evaluate(([p, t]) => { const u = window.__ug; u.fpsControls.enabled = false; u.camera.position.set(...p); u.controls.target.set(...t); }, [p, t]);
+    await frames(page, 4);
+    const r = await page.evaluate(() => ({ near: window.__ug.camera.near, far: window.__ug.camera.far }));
+    expect(r, name).toEqual({ near: 1, far: 50000 });
+  }
+});
+
+// Coming back down from 30 km restores the range within 2 frames.
+test('returning from 30 km to street level restores near 1 and far 50000', async ({ page }) => {
+  await boot(page);
+  await setMaster(page, 3);
+  await placeAltitude(page, 30000, 3);
+  const up = await page.evaluate(() => ({ near: window.__ug.camera.near, far: window.__ug.camera.far }));
+  expect(up.far).toBeGreaterThan(200000);
+  await page.evaluate(() => {
+    const u = window.__ug;
+    u.camera.position.set(-200, 85, 400); u.controls.target.set(0, 20, 0);
+  });
+  await frames(page, 2);
+  expect(await page.evaluate(() => ({ near: window.__ug.camera.near, far: window.__ug.camera.far }))).toEqual({ near: 1, far: 50000 });
 });
