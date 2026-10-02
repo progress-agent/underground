@@ -13,7 +13,8 @@
 //     and the cache key carries no ratio (the DLR's mapper depends on it; this must not);
 //   * the walker rides OG_LANE_M to the left of its direction of travel, the trains' own lane formula
 //     (overground-trains.js: x += dir.z * 2.6, z -= dir.x * 2.6);
-//   * open flags per vertex from the drawn class (tunnel: bore; everything else open); a tunnel run
+//   * open flags per vertex from the drawn class (tunnel: bore; everything else open), an open run running from its
+//     first open vertex to its last; a tunnel run
 //     shorter than OG_BRIDGE_M between two open runs is an overbridge and is bridged (shown open, y
 //     straight across its ends: no flicker of cuts), an open run shorter than that is dropped;
 //   * connectors (kind 'gap') are the bore; stubs inherit the state of the end they leave.
@@ -72,24 +73,31 @@ export function createOvergroundAirMap({ path } = {}) {
   const filled = [];   // bridged tunnel runs { a, b (the run), sA, sB (the open vertices either side: the height is straight between them) }
   function openIntervals() {
     if (intervals) return intervals;
+    // A run is open from its first open vertex to its last: the drawn track dips into a tunnel over the first samples
+    // of it (surface-rail.js smooths the tunnel samples into the ground), so the half-segment toward a tunnel vertex
+    // is already below the ground; the cut is made at the open vertex, where the track is still on the surface.
     const runs = [];
-    let start = null, first = -1;
+    let first = -1;
     for (let i = 0; i <= n; i++) {
       const f = i < n && recs[i].open;
-      const left = i === 0 ? 0 : (vs[i - 1] + vs[i]) / 2;
-      if (f && start === null) { start = left; first = i; }
-      if (!f && start !== null) { runs.push({ a: start, b: i < n ? left : L, vFirst: vs[first], vLast: vs[i - 1] }); start = null; }
+      if (f && first < 0) first = i;
+      if (!f && first >= 0) {
+        // a/b: the run as shown (first to last open vertex); ma/mb: where it would end half-way to the neighbouring
+        // tunnel vertex, which is what "a tunnel under 60 m" and "an open run under 60 m" are measured on.
+        runs.push({ a: vs[first], b: vs[i - 1], ma: first === 0 ? 0 : (vs[first - 1] + vs[first]) / 2, mb: i < n ? (vs[i - 1] + vs[i]) / 2 : L, vFirst: vs[first], vLast: vs[i - 1] });
+        first = -1;
+      }
     }
     const merged = [];
     filled.length = 0;
     for (const run of runs) {
       const last = merged.at(-1);
-      if (last && run.a - last.b < OG_BRIDGE_M) {
+      if (last && run.ma - last.mb < OG_BRIDGE_M) {
         if (run.a > last.b + 1e-6) filled.push({ a: last.b, b: run.a, sA: last.vLast, sB: run.vFirst });
-        last.b = Math.max(last.b, run.b); last.vLast = run.vLast;
+        last.b = Math.max(last.b, run.b); last.mb = run.mb; last.vLast = run.vLast;
       } else merged.push({ ...run });
     }
-    intervals = merged.filter(r => r.b - r.a >= OG_BRIDGE_M).map(r => [r.a, r.b]);
+    intervals = merged.filter(r => r.mb - r.ma >= OG_BRIDGE_M).map(r => [r.a, r.b]);
     for (let i = filled.length - 1; i >= 0; i--) if (!intervals.some(([a, b]) => filled[i].a >= a - 1e-6 && filled[i].b <= b + 1e-6)) filled.splice(i, 1);
     return intervals;
   }
@@ -220,7 +228,9 @@ export function overgroundPassInputs(map, s, laneSign, walker, fleet, proxies, {
   const near = [];
   const seen = new Set();
   let halfLength = 0;
-  for (const train of fleet?.userData?.trains || []) {
+  const trains = fleet?.userData?.trains || [];
+  for (let idx = 0; idx < trains.length; idx++) {
+    const train = trains[idx];
     const dir = train.phase < train.run ? 1 : -1;
     const ts = train.margin + (dir === 1 ? train.phase : 2 * train.run - train.phase);
     const cum = train.cum, P = train.path;
@@ -231,7 +241,7 @@ export function overgroundPassInputs(map, s, laneSign, walker, fleet, proxies, {
     if (Math.hypot(x - walker.x, z - walker.z) > reachM) continue;
     const dx = (pb.x - pa.x) * dir, dz = (pb.z - pa.z) * dir, h = Math.hypot(dx, dz) || 1;
     let px = proxies.get(train);
-    if (!px) { px = { position: { x: 0, y: 0, z: 0 }, userData: { id: null } }; proxies.set(train, px); }
+    if (!px) { px = { position: { x: 0, y: 0, z: 0 }, userData: { id: `${fleet.name ?? 'overground'}:${idx}` } }; proxies.set(train, px); }
     px.position.x = x + dz / h * OG_LANE_M;
     px.position.y = pa.y + (pb.y - pa.y) * u;
     px.position.z = z - dx / h * OG_LANE_M;

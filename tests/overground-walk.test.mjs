@@ -290,3 +290,15 @@ test('open-air-walk: the Overground pass is dispatched to the line\'s own fleet 
   } finally { console.warn = warn; }
   assert.ok(m);
 });
+
+test('an open run ends AT its last open vertex, not half-way to the tunnel vertex: the drawn track has dipped below the ground by then', () => {
+  const pts = run(0, 0, 3000, 0, (x) => (x >= 1000 && x < 1300 ? 'tunnel' : 'surface'));
+  const { map, path } = walkerOf(pts);
+  const iv = map.openIntervals();
+  assert.equal(iv.length, 2);
+  for (const s of [iv[0][1], iv[1][0]]) assert.ok(path.vertexS.some(v => Math.abs(v - s) < 1e-9), `an interval end (${s}) is a vertex`);
+  // The last open vertex is on the surface: eye height above it is the walker's own; one step into the interval's end it is not below the ground.
+  const edge = map.presentAt(iv[0][1], 0, {});
+  assert.ok(Math.abs(edge.y - (GROUND + 5)) < 1e-9, `the open run ends on the surface, y ${edge.y}`);
+  assert.equal(map.presentAt(iv[0][1] + 6, 0, {}).open, false, 'half-way to the tunnel vertex is already the bore');
+});
