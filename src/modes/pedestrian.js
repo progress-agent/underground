@@ -205,6 +205,7 @@ export function createPedestrianMode(ctx) {
     getTerrainY: (x, z) => ctx.getTerrainY(x, z),
     isInsideM25: (x, z) => (typeof ctx.isInsideM25 === 'function' ? ctx.isInsideM25(x, z) : true),
     VE, document: globalThis.document,
+    overground: () => (typeof ctx.overground === 'function' ? ctx.overground() : null),   // s02:O the Overground's trains through the walker
   });
   let regime = 'bore';                    // where the walker in a line is shown: 'bore' or 'open' (the drawn track)
   const shown = {};                       // the point shown in the open (open-air-map.js presentAt)
@@ -236,14 +237,26 @@ export function createPedestrianMode(ctx) {
   };
 
   function network(force = false) {
+    // ── s02:O ── a network built before the Overground existed gains it as soon as it does.
+    if (net && !net.ogReady && ctx.tubeNetwork?.overground) force = true;
+    // ── /s02:O ──
     if (!force && net && net.paths.length) { markPortals(net); openAir.sync(net); return net; }
     if (!force && net && clock - netTriedAt < NETWORK_RETRY_S) return net;
     netTriedAt = clock;
     const src = ctx.tubeNetwork;
     if (!src) return net;
     try {
-      net = buildTunnelNetwork({ THREE, branchesByLine: src.branches, stationLayers: src.stationLayers, VE,
+      // ── s02:O ── the Overground's branches and stations join those of the Tube and DLR (appended, so
+      // every earlier path keeps its id); lineBranchCenterPts and the station markers never see them.
+      const og = src.overground ?? null;
+      const branches = og ? new Map([...src.branches, ...og.branches]) : src.branches;
+      const stationLayers = og ? new Map([...src.stationLayers, ...og.stationLayers]) : src.stationLayers;
+      // ── /s02:O ──
+      net = buildTunnelNetwork({ THREE, branchesByLine: branches, stationLayers, VE,
         halfSpacing: src.halfSpacing ?? 0 });
+      // ── s02:O ──
+      net.ogReady = !!og;
+      // ── /s02:O ──
     } catch (err) {
       console.warn('[pedestrian] tunnel network', err);
     }
@@ -1199,6 +1212,9 @@ export function createPedestrianMode(ctx) {
     get openAir() { return openAir; },
     /** Per line: paths, mapped, open metres, build ms, refused stretches and Lane T's refusal counts (the brief's report). */
     openAirReport() { return openAir.debug(network()); },
+    // ── s02:O ── per Overground line: stations, stops, joins, gaps, stubs and the stations that are not stops, with reasons
+    overgroundReport() { return ctx.tubeNetwork?.overgroundReport?.() ?? null; },
+    // ── /s02:O ──
     /** The point shown for a tunnel state (tests): { x, y, z } and the regime it is shown in. */
     presentAt(pos) { if (!net?.paths[pos.path]) return null; const reg = openAir.isOpen(net.paths[pos.path], pos.s) ? 'open' : 'bore';
       return { ...walkerPoint(pos, reg), regime: reg }; },

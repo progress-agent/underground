@@ -3,7 +3,8 @@ import { trueHeadingBasis } from './true-proportion.js'; // s25:S
 
 // Schematic services, not live arrival predictions. Instancing keeps an entire
 // line's fleet to three draws, with no per-instance colours (M5 constraint).
-const CAR_LENGTH=19, CAR_STEP=20.5, CAR_WIDTH=3.6, CAR_HEIGHT=3.5;
+const CAR_LENGTH=19, CAR_WIDTH=3.6, CAR_HEIGHT=3.5;
+export const CAR_STEP=20.5;
 export const BODY_GREY=0xe2e3de;
 const SPEED=13, SPACING=2400, VISIBLE_DISTANCE=12000;
 const bodyGeometry=new THREE.BoxGeometry(CAR_WIDTH,CAR_HEIGHT,CAR_LENGTH);

@@ -26,6 +26,10 @@
 // same station and direction are one platform).
 
 import { headingAt, nextStation } from './pedestrian-tunnels.js';
+// ── s02:O ── the Overground's platforms look past junctions (overground-routes.js)
+import { overgroundRows } from './overground-routes.js';
+import { isOgLine } from './overground-network.js';
+// ── /s02:O ──
 
 const ARROW = /\s*(?:&harr;|↔|<->)\s*/;
 
@@ -115,6 +119,17 @@ export function platformRows(net, entrance, { tubeRoutes = new Map(), lineColour
     const path = net?.paths?.[stop.path];
     if (!path) continue;
     const routes = tubeRoutes.get?.(stop.lineId) ?? null;
+    // ── s02:O ── an Overground stop: the rows come from the stations ahead through every junction.
+    if (isOgLine(stop.lineId)) {
+      for (const row of overgroundRows(net, stop, { routes, lineColour, towards, joinOr, cleanStationName })) {
+        if (seen.has(row.key)) continue;
+        seen.add(row.key);
+        if (exclude && exclude(stop, row.dir, row)) continue;
+        rows.push(row);
+      }
+      continue;
+    }
+    // ── /s02:O ──
     for (const dir of [1, -1]) {
       if (dir > 0 ? stop.s >= path.length - 1e-6 : stop.s <= 1e-6) continue;
       const next = nextStation(path, stop.s, dir);

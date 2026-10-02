@@ -59,6 +59,9 @@
 // measured by the caller).
 import { pointAt, headingAt } from './pedestrian-tunnels.js';
 import { mapTubeCurve, mapSnapCurve, sampleRun, sAt, runAt, laneOffset, laneDistance } from '../surface-train-map.js';
+// ── s02:O ── an Overground path is the drawn track itself: its own presenter (overground-walk.js)
+import { createOvergroundAirMap } from './overground-walk.js';
+// ── /s02:O ──
 
 /** Open stretches shorter than this (chord metres) are slivers, not track to walk on. */
 export const MIN_OPEN_M = 20;
@@ -127,6 +130,7 @@ export function uAtTrack(run, ts, dir = 1) {
  * @param {number} [o.VE]
  */
 export function createOpenAirMap({ path, tnet, records = null, ratio = 1, getY = null, groundY = null, VE = 5 }) {
+  if (path.og) return createOvergroundAirMap({ path });   // s02:O
   const lineId = path.lineId;
   const isDlr = lineId === 'dlr';
   const A = chordAdapter(path);
