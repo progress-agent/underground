@@ -38,6 +38,28 @@ test('end to end: a loose piece is extended onto the next piece\'s end, once', (
   assert.deepEqual(B.xy.length, line(545027, 192003, 546000, 192003).length, 'B is not touched');
 });
 
+test('a gap with a 10 m lateral jog gets a connector that runs on into the other piece, which is trimmed to start where it lands', () => {
+  // A heads east and ends at x = 545000; B starts 26 m on and 10 m north of it, heading east too: an S-bend of
+  // 10 m over 26 m turns 40 degrees in 8 m, which the train map would re-fair 10 m off the drawn track.
+  const A = piece(line(544000, 192000, 545000, 192000, 10)), B = piece(line(545026, 192010, 546200, 192010, 10));
+  const bBefore = B.xy.length, bStart = B.xy[0].slice();
+  const joins = joinLoopGaps([A, B]);
+  assert.equal(joins.length, 1);
+  assert.ok(joins[0].advanceM >= 10, `advance ${joins[0].advanceM}`);
+  assert.ok(joins[0].maxTurnDeg <= LOOP_GAP_JOINS.maxTurnDeg + 1e-6, `turn ${joins[0].maxTurnDeg}`);
+  assert.deepEqual(A.xy.at(-1), B.xy[0], 'A ends exactly where the trimmed B begins');
+  assert.ok(B.xy.length < bBefore && B.xy[0][0] > bStart[0] + 9, 'B no longer holds the stretch the connector replaced');
+  assert.ok(B.cls.length === B.xy.length - 1 && B.lonlat.length === B.xy.length);
+  // Independent check of the joined line: resampled every 2 m, no 8 m stretch turns more than 20 degrees (the train map's kink).
+  const pts = [...A.xy.filter(p => p[0] > 544960), ...B.xy.slice(1, 12)];   // A's end and B's start are the same point
+  let worst = 0;
+  for (let k = 4; k < pts.length - 4; k++) {
+    const a = [pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]], b = [pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]];
+    worst = Math.max(worst, Math.acos(Math.min(1, (a[0] * b[0] + a[1] * b[1]) / (Math.hypot(...a) * Math.hypot(...b)))) * 180 / Math.PI);
+  }
+  assert.ok(worst < 20, `vertex turn ${worst}`);
+});
+
 test('end to side: a piece ending beside a long piece is extended onto it, beyond the foot', () => {
   const A = piece(line(544000, 192000, 545000, 192000));
   // B passes 20 m north of A's end, 15 degrees off, and is 3 km long.
@@ -124,18 +146,15 @@ const distToLine = (xy, p) => { let best = Infinity; for (let i = 0; i < xy.leng
 test('dataset: the Hainault loop\'s three gaps are joined (3 to 6 joins in the box)', () => {
   const joined = central.branches.filter(b => (b.extended || []).some(e => e.from === 'gap-join'));
   assert.ok(joined.length >= 3 && joined.length <= 6, `joined pieces: ${joined.length}`);
+  // At each of the three gap sites (north of Hainault, by Grange Hill, by Roding Valley; e0675d7 had gaps of
+  // 26.9, 27.4 and 26.0 m there) the track now meets: some piece end within 90 m of the site lies exactly
+  // (0.01 m) on another piece, an end or the line itself, and the end of the piece it joined is no longer a loose end.
   const sites = { 'north of Hainault': [545077, 191531], 'by Grange Hill': [545089, 192394], 'by Roding Valley': [541462, 192827] };
+  const all = central.branches.map(b => ({ xy: b.points.map(toBng), joined: (b.extended || []).some(e => e.from === 'gap-join') }));
   for (const [name, [e, n]] of Object.entries(sites)) {
-    // Some Central branch ends on a vertex of, or on, another Central branch within 0.5 m of where a gap was.
-    const near = central.branches.map(b => ends(b)).filter(x => Math.hypot(x.end[0] - e, x.end[1] - n) < 60 || Math.hypot(x.start[0] - e, x.start[1] - n) < 60);
-    assert.ok(near.length >= 1, name);
-    let closed = false;
-    for (const x of near) for (const p of [x.start, x.end]) {
-      if (Math.hypot(p[0] - e, p[1] - n) > 60) continue;
-      for (const y of near) if (y !== x && distToLine(y.xy, p) < 0.5) closed = true;
-      for (const b of central.branches) { const xy = b.points.map(toBng); if (xy !== x.xy && xy.length !== x.xy.length && distToLine(xy, p) < 0.5) closed = true; }
-    }
-    assert.ok(closed, `${name}: a piece end now meets the other track`);
+    const meets = all.filter(x => x.joined).some(x => [x.xy[0], x.xy.at(-1)].some(p => Math.hypot(p[0] - e, p[1] - n) <= 90
+      && all.some(y => y !== x && distToLine(y.xy, p) < 0.01)));
+    assert.ok(meets, `${name}: a joined piece end meets the other track`);
   }
 });
 
