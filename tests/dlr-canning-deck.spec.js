@@ -1,7 +1,8 @@
 // dlr-canning-deck.spec.js: Lane F (sprint 02Oct26f, D-047 rail-canning-flyover).
 //
 // Where the DLR flyover leaves the deck it rises from at Canning Town (scene (9458, -905): a 17-point
-// viaduct piece starts 9.3 m beside the viaduct piece it leaves) the two decks stepped by up to 1.5 m.
+// viaduct piece starts 9.3 m beside the viaduct piece it leaves) the two decks stepped by 3.1 to 3.4 m
+// (reported as up to 1.5 m).
 // src/dlr-deck-blend.js now blends the ending deck onto the through deck over its last 30 m, where
 // the track is drawn (tube-surface-rail.js), so the trains that ride the drawn track follow.
 //
@@ -80,10 +81,10 @@ test('the DLR flyover leaves its deck without a step at Canning Town, at Master 
   }
   if (process.env.UG_CANNING_OUT) fs.writeFileSync(process.env.UG_CANNING_OUT, JSON.stringify(results, null, 2));
   for (const [m, r] of Object.entries(results)) {
-    console.log(`[dlr-canning-deck] Master ${m}: ${r.branches} branches, ${r.meshes} meshes, worst jump ${r.worstJumpM.toFixed(3)} m`);
+    console.log(`[dlr-canning-deck] Master ${m}: ${r.branches} branches, ${r.meshes} meshes, worst jump ${r.worstJumpM.toFixed(3)} m ${JSON.stringify(r.report.map(x => ({ n: x.points, hits: x.hits, jumpM: +x.worstJumpM.toFixed(3), at: x.at && [Math.round(x.at.x), Math.round(x.at.z)] })))}`);
     expect(r.meshes, 'the DLR surface-rail meshes exist').toBeGreaterThan(0);
     expect(r.branches, 'DLR branches near the site').toBeGreaterThanOrEqual(2);
     expect(r.report.some(x => x.hits > 20), 'the probe hit the drawn deck').toBe(true);
-    expect(r.worstJumpM, `deck step at Master ${m}`).toBeLessThan(0.10);
+    expect(r.worstJumpM, `deck step at Master ${m}: ${JSON.stringify(r.report.map(x => [x.points, +x.worstJumpM.toFixed(2), x.at]))}`).toBeLessThan(0.10);
   }
 });

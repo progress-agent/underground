@@ -11,6 +11,7 @@ const stepOf = (a, b) => Math.abs(a - b) / U;
 test('a flyover starting 9 m beside a viaduct, 1.5 m off, ends up under 0.1 m off, and the through deck is unmoved', () => {
   const through = path(0, 0, 400, 0, 20 * U);                  // the viaduct, 20 m up, 400 m long
   const leaving = path(200, 9, 200, 309, 21.5 * U, 'viaduct', 60);  // the flyover leaves 9 m beside it, 21.5 m up, a sample every 5 m
+  // A 1.5 m step blends over the 30 m minimum.
   const before = through.map(s => s.y);
   const blends = blendDeckJoins([through, leaving], { unitsPerTrueM: U });
   assert.equal(blends.length, 1);
@@ -24,10 +25,27 @@ test('a flyover starting 9 m beside a viaduct, 1.5 m off, ends up under 0.1 m of
   for (let i = 1; i < leaving.length; i++) assert.ok(Math.abs(leaving[i].y - leaving[i - 1].y) / U / 5 < 0.08);
 });
 
-test('a step over 2.5 m is a different structure and is left alone', () => {
-  const through = path(0, 0, 400, 0, 4.1 * U), flyover = path(200, 8, 200, 300, 8.8 * U);
+test('a step over 6 m is a different structure and is left alone', () => {
+  const through = path(0, 0, 400, 0, 4.1 * U), flyover = path(200, 8, 200, 300, 11.0 * U);
   assert.equal(blendDeckJoins([through, flyover], { unitsPerTrueM: U }).length, 0);
-  assert.equal(flyover[0].y, 8.8 * U);
+  assert.equal(flyover[0].y, 11.0 * U);
+});
+
+test('the Canning Town case: a 3.4 m step is closed over a longer ramp (15 m of track a metre of step), never over half the path', () => {
+  const through = path(0, 0, 400, 0, 0.6 * U);
+  const leaving = path(200, 9.3, 200, 161.3, 4.0 * U, 'viaduct', 152);   // 152 m long, a sample every 1 m, 3.4 m above the deck at its start
+  const blends = blendDeckJoins([through, leaving], { unitsPerTrueM: U });
+  assert.equal(blends.length, 1);
+  assert.ok(Math.abs(blends[0].stepM + 3.4) < 1e-6 || Math.abs(blends[0].stepM - 3.4) < 1e-6);
+  assert.ok(blends[0].lengthM >= 49 && blends[0].lengthM <= 51.5, `ramp ${blends[0].lengthM}`);
+  assert.ok(Math.abs(leaving[0].y - 0.6 * U) < 1e-9, 'it starts on the deck');
+  assert.equal(leaving.at(-1).y, 4.0 * U);
+  // 0.1 m jump limit between the 0.5 m ray samples: at most 1.5 x 3.4 / 51 = 0.1 m per metre, 0.05 m per 0.5 m.
+  for (let i = 1; i < leaving.length; i++) assert.ok(Math.abs(leaving[i].y - leaving[i - 1].y) / U <= 0.101);   // samples 1 m apart: the ramp climbs 0.1 m per metre at most
+  // A short path is blended over half its length at most.
+  const stub = path(200, 9.3, 200, 59.3, 4.0 * U, 'viaduct', 50);
+  const b2 = blendDeckJoins([path(0, 0, 400, 0, 0.6 * U), stub], { unitsPerTrueM: U });
+  assert.ok(b2[0].lengthM <= 25 + 1e-6);
 });
 
 test('a step under 5 cm is noise and is left alone; a path beyond reach is left alone', () => {

@@ -2,7 +2,8 @@
 //
 // Where one DLR path ends beside another, on a raised deck, the two decks can
 // differ by a step: the flyover that leaves the deck at Canning Town starts
-// 9.3 m beside the viaduct it leaves, up to 1.5 m off. The heights are not in
+// 9.3 m beside the lower track it leaves, 3.1 to 3.4 m off (reported as up to
+// 1.5 m). The heights are not in
 // public/data/tube-surface.json (the DLR's come from the shared profile when
 // the track is drawn), so the blend runs there, on the drawn paths, right
 // after buildDlrPath, at both of tube-surface-rail.js's build sites. The trains
@@ -11,14 +12,18 @@
 // For each path end whose sample is raised (viaduct or embankment), take the
 // nearest point of any other DLR path within reachM in plan and its height. A
 // step of a true metre figure inside [minStepM, maxStepM] (smaller is noise;
-// larger is a different structure, such as the 8.8 m flyover over the 4.1 m
-// viaduct beside it, which is left alone) is closed by shifting the ending
+// larger is a different structure) is closed by shifting the ending
 // path's samples within blendM (arc length from the end) by the step times a
-// smoothstep that is 1 at the end and 0 at blendM. The through deck is never
+// smoothstep that is 1 at the end and 0 at the blend length (30 m, or longer
+// for a bigger step). The through deck is never
 // moved; where both paths end at each other, the shorter one moves.
 
 export const RAISED = new Set(['viaduct', 'embankment']);
-export const DEFAULTS = { reachM: 12, blendM: 30, minStepM: 0.05, maxStepM: 2.5 };
+// maxStepM: the flyover that leaves the deck at Canning Town starts 3.1 to 3.4 m above the lower track it leaves
+// (the verifier's capture said 1.5 m; the drawn heights say 3.1 at Master 1.1, 3.4 at Master 5). Larger steps are
+// not blended: past 6 m two different structures meet. rampPerM: a blend runs at least blendM and at least
+// rampPerM metres of track for each metre of step, so the climb off the deck stays under about 7 percent.
+export const DEFAULTS = { reachM: 12, blendM: 30, minStepM: 0.05, maxStepM: 6, rampPerM: 15 };
 
 const smoothstep = t => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 const arcLength = path => { let m = 0; for (let i = 1; i < path.length; i++) m += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); return m; };
@@ -48,7 +53,7 @@ function nearestOnPath(path, x, z) {
  */
 export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
   if (!(unitsPerTrueM > 0)) throw new RangeError('blendDeckJoins needs unitsPerTrueM');
-  const { reachM, blendM, minStepM, maxStepM } = { ...DEFAULTS, ...opts };
+  const { reachM, blendM: baseBlendM, minStepM, maxStepM, rampPerM } = { ...DEFAULTS, ...opts };
   const list = paths.filter(p => p && p.length >= 2);
   const lengths = new Map(list.map(p => [p, arcLength(p)]));
   const out = [];
@@ -67,6 +72,8 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
         if (lq < lp || (lq === lp && best.qi < pi)) continue;
       }
       const shift = best.r.y - E.y;
+      // Long enough for a gentle climb, never more than half the path.
+      const blendM = Math.min(Math.max(baseBlendM, rampPerM * Math.abs(stepM)), 0.5 * lengths.get(P));
       let arc = 0, moved = 0;
       const n = P.length;
       for (let k = 0; k < n; k++) {
