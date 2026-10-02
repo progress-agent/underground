@@ -51,6 +51,7 @@ export const STUB_MAX_M = 450;
 export const EXTRA_M = 30;           // other pieces of a line within d + this of a station also carry it
 export const DEDUPE_M = 100;         // one station listed twice by name within this is one
 export const VERTEX_MERGE_M = 2.5;   // an inserted vertex this near an existing one uses it (under buildTunnelNetwork's 3 m station snap)
+export const JOIN_END_SNAP_M = 12;   // a join that would land this near the END of the other piece lands on the end (the Mildmay's three pieces meet at Willesden Junction within 8 m)
 export const STEP_M = 12;            // connector and stub sampling (the drawn track's own step)
 // The drawn tunnel's own height formula (surface-rail.js BASE_LIFT and CLASS_LIFT_M.tunnel; a node
 // test reads the source and pins that these are still those numbers): ground + BASE_LIFT + (-20 m) * VE.
@@ -172,7 +173,11 @@ export function buildLineTopology(line, { groundY, structuralY = null, VE = 5 } 
       if (n && n.d <= JOIN_M && (!best || n.d < best.d)) best = { ...n, B };
     }
     if (!best) continue;
-    const vq = vertexAt(best.B, best.k, best.t, best.qx, best.qz);
+    // Where the join lands within JOIN_END_SNAP_M of the other piece's own end, it lands ON that end: pieces that meet at
+    // one real junction (the Richmond and Clapham Junction branches start at one point, the Stratford piece ends 7 m on)
+    // then share one vertex, and both branches are ways on from it.
+    const endV = [best.B.verts[0], best.B.verts.at(-1)].find(v => Math.hypot(v.x - best.qx, v.z - best.qz) <= JOIN_END_SNAP_M);
+    const vq = endV ?? vertexAt(best.B, best.k, best.t, best.qx, best.qz);
     vq.j = true;
     if (Math.hypot(E.x - vq.x, E.z - vq.z) < 0.5) { E.x = vq.x; E.z = vq.z; E.j = true; }
     else {

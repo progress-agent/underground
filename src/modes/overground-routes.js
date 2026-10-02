@@ -18,8 +18,10 @@ import { nextStation, pointAt, headingAt } from './pedestrian-tunnels.js';
 
 export const OG_NEXT_MAX_HOPS = 4;
 export const OG_NEXT_MAX_M = 8000;
-const BACK_PROBE_M = 80;     // "straight back" is read over this much track: a pair of joined pieces start with a kink of a few metres
-const BACK_DOT = 0.7;        // about 45 degrees
+const RETRACE_M = 6;          // a continuation whose next 80 m lie within this of the track just walked is that track again, not a way on
+const RETRACE_BEHIND_M = 160;
+const BACK_PROBE_M = 80;     // "straight back" is read over this much track: joined pieces start with a kink of a few metres
+const BACK_DOT = 0.9;        // about 25 degrees: chooseAt's own bar for "straight back the way it came"
 
 const _a = {}, _b = {};
 /** The unit plan direction of travel from s over `len` metres of path in sense dir (clamped to the path), or null. */
@@ -29,16 +31,41 @@ function chordHeading(path, s, dir, len = BACK_PROBE_M) {
   const x = _b.x - _a.x, z = _b.z - _a.z, l = Math.hypot(x, z);
   return l > 1e-6 ? { x: x / l, z: z / l } : null;
 }
-/** Does leaving (q, s, dd) go straight back the way `back` points? */
-function isBack(q, s, dd, back) {
-  const h = chordHeading(q, s, dd);
-  return !!h && !!back && h.x * back.x + h.z * back.z > BACK_DOT;
-}
-
 /** "og:weaver" -> "Weaver" (the line's name when no route data names it). */
 export function ogLineName(lineId) {
   const id = String(lineId || '').replace(/^og:/, '');
   return id ? id[0].toUpperCase() + id.slice(1) : '';
+}
+
+/**
+ * Does leaving (q, s, dd) go back over the track the walker just came along on `p` (arriving at its arc j, travelling d0)? Probes
+ * the continuation 20, 40, 60 and 80 m on and asks whether every one lies within RETRACE_M of the path behind the walker. A
+ * continuation that merely heads back (the Clapham Junction branch leaves the Mildmay at Willesden Junction toward the east, on
+ * its own track beside the one the walker came along) is a way on; one that runs on the same track (the Enfield branch runs on
+ * the Cheshunt line's own for 70 m) is not.
+ */
+function retraces(p, j, d0, q, s, dd) {
+  // Heading straight back the way the walker came (a twin track beside it, joined at a station): not a way on either.
+  const back = chordHeading(p, j, -d0), h = chordHeading(q, s, dd);
+  if (back && h && h.x * back.x + h.z * back.z > BACK_DOT) return true;
+  const lo = Math.min(j, j - d0 * RETRACE_BEHIND_M), hi = Math.max(j, j - d0 * RETRACE_BEHIND_M);
+  let probes = 0, near = 0;
+  for (const m of [20, 40, 60, 80]) {
+    const sq = s + dd * m;
+    if (sq < 0 || sq > q.length) break;
+    pointAt(q, sq, _a);
+    let best = Infinity;
+    for (let i = 0; i + 1 < p.n; i++) {
+      if (p.s[i + 1] < lo || p.s[i] > hi) continue;
+      const dx = p.x[i + 1] - p.x[i], dz = p.z[i + 1] - p.z[i], L2 = dx * dx + dz * dz;
+      let t = L2 > 0 ? ((_a.x - p.x[i]) * dx + (_a.z - p.z[i]) * dz) / L2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      best = Math.min(best, Math.hypot(_a.x - (p.x[i] + dx * t), _a.z - (p.z[i] + dz * t)));
+    }
+    probes++;
+    if (best <= RETRACE_M) near++;
+  }
+  return probes >= 2 && near === probes;
 }
 
 /**
@@ -60,13 +87,12 @@ export function ogNextStations(net, pathId, s, dir, { maxHops = OG_NEXT_MAX_HOPS
       if (hops >= maxHops) continue;
       const dj = dist + Math.abs(j - s0);
       if (dj > maxM) continue;
-      const back = chordHeading(p, j, -d0);                                               // where the walker came from
       for (const e of net.junctionAt.get(`${pid}:${j}`) || []) {
         if (e.path === pid && Math.abs(e.s - j) < 1e-6) continue;                         // this vertex on this path: the way on is the main flow
         const q = net.paths[e.path];
         for (const dd of [1, -1]) {
           if (dd > 0 ? e.s >= q.length - 1e-6 : e.s <= 1e-6) continue;
-          if (isBack(q, e.s, dd, back)) continue;                                         // straight back the way it came
+          if (retraces(p, j, d0, q, e.s, dd)) continue;                                   // the track just walked, again
           walk(e.path, e.s, dd, hops + 1, dj);
         }
       }
@@ -93,14 +119,13 @@ export function ogTerminalStations(net, pathId, s, dir, { maxHops = 14 } = {}) {
     seen.add(key);
     const end = d0 > 0 ? p.length : 0;
     const around = (j, at) => {
-      const back = chordHeading(p, j, -d0);
       let any = false;
       for (const e of net.junctionAt.get(`${pid}:${j}`) || []) {
         if (e.path === pid && Math.abs(e.s - j) < 1e-6) continue;
         const q = net.paths[e.path];
         for (const dd of [1, -1]) {
           if (dd > 0 ? e.s >= q.length - 1e-6 : e.s <= 1e-6) continue;
-          if (isBack(q, e.s, dd, back)) continue;
+          if (retraces(p, j, d0, q, e.s, dd)) continue;
           any = true;
           go(e.path, e.s, dd, hops + 1);
         }

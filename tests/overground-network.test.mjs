@@ -84,6 +84,22 @@ test('joins: ends of two pieces that meet end to end share their coordinates exa
   assert.equal(net.paths[0].junctions.length >= 1, true);
 });
 
+test('joins: a join that lands within 12 m of the other piece\'s own end lands ON that end, so three pieces meeting at one junction share one vertex (Willesden Junction)', () => {
+  // Two branches start at one point (the Richmond and Clapham Junction branches); the main piece ends 7 m on, beside the first.
+  const richmond = piece([[0, 0], [0, 800]]);
+  const clapham = piece([[0, 0], [300, 400]]);
+  const main = piece([[-17, 9], [-17, -600]]);             // its end (-17, 9): 19 m from the shared start, 7 m from its nearest point on the Richmond piece
+  const T = topo([main, richmond, clapham], []);
+  const at = (P) => [P.verts[0], P.verts.at(-1)].map(v => `${v.x}:${v.z}`);
+  const shared = '0:0';
+  assert.ok(at(T.pieces[1]).includes(shared) && at(T.pieces[2]).includes(shared), 'the two branches share their start');
+  assert.ok(at(T.pieces[0]).includes(shared), 'and the main piece\'s join is that same vertex, not one 7 m along the Richmond piece');
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: sourceOf([main, richmond, clapham], []).input().branches, stationLayers: new Map() });
+  const entries = [...net.junctionAt.values()].find(e => e.length >= 3);
+  assert.ok(entries, 'one three-way junction');
+  assert.deepEqual(new Set(entries.map(e => e.path)), new Set([0, 1, 2]));
+});
+
 test('every vertex carries a record and `.og` has one per vertex', () => {
   const A = piece([[0, 0], [600, 0]]), B = piece([[300, 10], [300, 500]]);
   const arrays = sourceOf([A, B], [station('S1', 'One', 200, 3)]).input().branches.get('og:weaver');

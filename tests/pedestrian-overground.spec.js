@@ -116,7 +116,9 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 90000, via 
           speed: d.tunnel?.speed ?? null, x: c.x, y: c.y, z: c.z, g: ug.modes.ctx.getTerrainY(c.x, c.z), water: Number.isFinite(w) ? w : null,
           inside: sampleM25Insideness(c.x, c.z), above: ug.aboveGroundView, cut: d.openAir.cut?.kind ?? null,
           flare: +getComputedStyle(flare).opacity, card: d.card?.kind ?? null, edge: d.atEdge, interior: d.interior.visible,
-          hint: document.getElementById('ug-mode-hint')?.textContent ?? '', arrivals: since(d).length, bridged: !!d.shown?.bridged });
+          hint: document.getElementById('ug-mode-hint')?.textContent ?? '', arrivals: since(d).length, bridged: !!d.shown?.bridged,
+          // metres of path arc to the nearest mouth of an open stretch (the drawn tunnel ramps down over its first 40 m or so)
+          portal: d.tunnel && d.open ? Math.min(Infinity, ...d.open.flatMap(([a, b]) => [Math.abs(d.tunnel.s - a), Math.abs(d.tunnel.s - b)])) : null });
         if (d.phase !== 'tunnel') break;
         if (until && since(d).some(a => a.name === until)) break;
         if (d.atEdge && d.tunnel.speed === 0) break;
@@ -410,7 +412,7 @@ test('O-RTE-6 Liberty, Romford to Upminster: 60 m/s along the drawn track for th
   const v60 = speeds(slow, 60);
   expect(v60.length, '60 m/s windows').toBeGreaterThanOrEqual(5);
   for (const x of v60) expect(Math.abs(x - 60), `60 m/s window ${x}`).toBeLessThanOrEqual(2);
-  const rest = await ride({ lineId: 'og:liberty', until: 'Upminster', maxMs: 70000, via: ORDER.liberty.slice(1) });
+  const rest = await ride({ lineId: 'og:liberty', until: 'Upminster', maxMs: 70000, via: ORDER.liberty.slice(1 + slow.arrivals.length) });
   const names = slow.arrivals.concat(rest.arrivals).map(a => a.name);
   expect(names.filter((n, i, A) => i === 0 || n !== A[i - 1])).toEqual(['Emerson Park', 'Upminster']);
   await checkLeg(slow, 'og:liberty', 'Liberty 60');
@@ -422,8 +424,12 @@ test('O-RTE-6 Liberty, Romford to Upminster: 60 m/s along the drawn track for th
 test('O-RTE-g: in the bore the walker is at today\'s single 20 m depth', async () => {
   const far = bores.filter(f => f.water === null);
   const stops = await page.evaluate(() => window.__ug.modes.registry.get('pedestrian').network.paths.filter(p => p.lineId.startsWith('og:')).flatMap(p => p.stops.map(x => ({ x: x.stop.x, z: x.stop.z }))));
-  const clear = far.filter(f => stops.every(s => Math.hypot(f.x - s.x, f.z - s.z) > 150));
+  // Away from every stop, and more than 60 m (of arc) from a tunnel mouth: the drawn tunnel ramps down from the surface over the
+  // first 40 m or so inside it (surface-rail.js smooths the tunnel samples), which is the depth "smoothed near the mouths".
+  const clear = far.filter(f => stops.every(s => Math.hypot(f.x - s.x, f.z - s.z) > 150) && (f.portal === null || f.portal > 60));
   expect(clear.length, 'bore frames away from every stop').toBeGreaterThanOrEqual(20);
+  const depths = far.filter(f => stops.every(s => Math.hypot(f.x - s.x, f.z - s.z) > 150)).map(f => (f.g - f.y) / VE);
+  console.log('[overground] bore depth, away from stops: min', Math.min(...depths).toFixed(1), 'max', Math.max(...depths).toFixed(1), 'frames', depths.length, 'of which beyond 60 m of a mouth', clear.length);
   for (const f of clear) {
     const depth = (f.g - f.y) / VE;
     expect(depth, `bore depth at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`).toBeGreaterThanOrEqual(14);
@@ -484,7 +490,7 @@ const choose = (labelStart) => page.evaluate(async (labelStart) => {
   const i = rows.findIndex(r => r.label.startsWith(labelStart));
   if (i < 0) return { error: `no row ${labelStart}`, rows: rows.map(r => r.label) };
   const row = rows[i];
-  const before = { regime: m.debug().regime };
+  const before = { regime: m.debug().regime, cuts: m.debug().openAir.cuts.length };
   m.chooseRow(i);
   const log = [];
   for (let k = 0; k < 200; k++) {
@@ -495,7 +501,7 @@ const choose = (labelStart) => page.evaluate(async (labelStart) => {
   const d = m.debug();
   const path = m.network.paths[d.tunnel.path];
   return { ratio: ug.surfaceTrains.ratio, log, line: d.tunnel.lineId, regime: d.regime, shouldBe: m.openAir.isOpen(path, d.tunnel.s) ? 'open' : 'bore',
-    cuts: d.openAir.cuts.length, chosen: row.label };
+    cuts: d.openAir.cuts.length, chosen: row.label, before, kinds: d.openAir.cuts.map(c => c.kind) };
 }, labelStart);
 
 /** After a choice: W and Shift until `until` is arrived at (30 s at most). */
@@ -522,7 +528,12 @@ function checkChoice(r, label) {
   expect(r.error, label).toBeUndefined();
   expect(r.log.at(-1).phase, label).toBe('tunnel');
   expect(r.regime, `${label}: the regime of the platform`).toBe(r.shouldBe);
-  for (const f of r.log.filter(x => x.regime === 'open' && x.phase === 'transfer' || x.phase === 'transfer' && x.regime === 'open')) expect(f.y).toBeGreaterThanOrEqual(f.g + 1 * VE * r.ratio - 1e-6);
+  // Within 3 s the walker is on the chosen line's platform in the regime it is shown in; a change between the bore and
+  // the open air logs a cut (a dip or a flare), never an ease through the ground; between two open platforms the ease stays above it.
+  if (r.before.regime !== r.shouldBe) expect(r.cuts, `${label}: a cut`).toBeGreaterThan(r.before.cuts);
+  if (r.before.regime === 'open' && r.shouldBe === 'open') {
+    for (const f of r.log.filter(x => x.phase === 'transfer')) expect(f.y, `${label}: the ease stays above the terrain`).toBeGreaterThanOrEqual(f.g + 1 * VE * r.ratio - 1e-6);
+  }
 }
 
 test('O-CHG-1/2: Highbury & Islington, Victoria to Mildmay and back; both networks\' rows with TfL\'s towards text', async () => {

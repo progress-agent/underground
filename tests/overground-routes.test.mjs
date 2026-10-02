@@ -147,3 +147,33 @@ test('every Overground row has a non-empty towards list and a label that is more
   }
   assert.equal(typeof overgroundRows, 'function');
 });
+
+test('a branch point: both branches are ways on (Willesden Junction: Clapham Junction or Richmond), a twin track beside the walker going back is not', () => {
+  const routes = load('mildmay');
+  const main = run([[6000, -2000], [60, -60], [0, 0]]);                   // the Stratford piece arrives from the north-east and ends at the branch point
+  const richmond = run([[0, 0], [-800, 800]]);                           // the two branches leave it, one south-west, one south-east
+  const clapham = run([[0, 0], [500, 900]]);
+  const stations = [
+    st(routes, 'Stratford (London)', 6040, -2030), st(routes, 'Kensal Rise', 3000, -1000), st(routes, 'Willesden Junction', 200, -200),
+    st(routes, 'Acton Central', -300, 300), st(routes, 'Shepherds Bush', 250, 450),
+  ];
+  const net = netOf('mildmay', [main, richmond, clapham], stations);
+  const labels = rowsAt(net, routes, 'Willesden Junction').map(l => l.replace('Mildmay', 'Mildmay'));
+  const wj = net.entrances.find(en => en.name === 'Willesden Junction');
+  const rows = platformRows(net, wj, { tubeRoutes: new Map([['og:mildmay', routes]]) }).map(r => r.label);
+  assert.deepEqual(rows.sort(), ['Mildmay · towards Clapham Junction or Richmond (London)', 'Mildmay · towards Stratford (London)'], JSON.stringify(rows));
+  assert.ok(labels.length === 2);
+});
+
+test('a twin track that heads back over the track just walked is not a way on: a station behind the walker is never "ahead"', () => {
+  const routes = load('weaver');
+  // Two parallel pieces 10 m apart that share a station: the walker on one, going east, must not see the other's stations to the west.
+  const a = run([[0, 0], [5000, 0]]), b = run([[0, 10], [5000, 10]]);
+  const stations = [st(routes, 'London Fields', 1000, 5), st(routes, 'Hackney Downs', 3000, 5), st(routes, 'Clapton', 4000, 5)];
+  const net = netOf('weaver', [a, b], stations);
+  const hd = net.paths.flatMap(p => p.stops).find(x => x.stop.name.startsWith('Hackney Downs')).stop;
+  const east = ogNextStations(net, hd.path, hd.s, 1).map(n => n.name.replace(' Rail Station', ''));
+  assert.deepEqual([...new Set(east)], ['Clapton']);
+  const west = ogNextStations(net, hd.path, hd.s, -1).map(n => n.name.replace(' Rail Station', ''));
+  assert.deepEqual([...new Set(west)], ['London Fields']);
+});
