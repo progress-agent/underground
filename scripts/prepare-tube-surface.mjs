@@ -71,6 +71,8 @@ import { createDlrProfile, sampleForSurfaceRail, deckOfSample } from '../src/dlr
 import { BNG_REF_E, BNG_REF_N } from '../src/coordinates.js';
 // s01:R: the open-air track v2 lacks, from OSM (cached Overpass answer).
 import { CACHE_FILE as OSM_CACHE_FILE, placeTrails, PLACES } from './fetch-tube-surface-osm.mjs';
+// s02:T: the Metropolitan beyond Rickmansworth (scripts/termini-osm.mjs; its own cache file).
+import { applyTermini, loadTerminiCache } from './termini-osm.mjs';
 
 /**
  * s01:R (sprint 01Oct26h, D-043 item 4): the places whose OSM track is merged
@@ -960,7 +962,7 @@ export function dlrHeightAt(profile = createDlrProfile({ project: (lat, lon) => 
   };
 }
 
-export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json'), osmCache = null, probe = null, probeOnly = false } = {}) {
+export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json'), osmCache = null, terminiCache = null, probe = null, probeOnly = false } = {}) {
   const src = JSON.parse(await readFile(source, 'utf8'));
   const og = JSON.parse(await readFile(overgroundPath, 'utf8'));
   const report = [];
@@ -969,6 +971,8 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
 
   // s01:R: OSM track for the v2 delivery's gaps (cached Overpass answer).
   const osmAnswer = osmCache ?? await loadOsmCache();
+  // s02:T: the OSM answer for the lines' termini beyond the M25 (the Metropolitan to Amersham and Chesham).
+  const terminiAnswer = terminiCache ?? await loadTerminiCache();
   // s01:R: the OSM probe that tells a real tunnel from a tunnel stub.
   const stubProbe = probe ?? await readFile(STUB_PROBE_FILE, 'utf8').then(JSON.parse, () => null);
   const missingProbes = [];
@@ -1006,6 +1010,8 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     const stubs2 = dropTunnelStubs(pieces, { isRealTunnel });
     stubs.push(...stubs2); stubs.spared.push(...stubs2.spared.filter(sp => !stubs.spared.some(x => x.piece === sp.piece)));
     for (const sp of stubs.spared) report.push(`${id} tunnel stub KEPT, a real tunnel: ${sp.lengthM} m at ${stubKey(id, sp.piece).split('@')[1]}: ${sp.evidence}`);
+    // s02:T: twin fragments dropped and junction gaps closed beyond Rickmansworth (scripts/termini-osm.mjs).
+    report.push(...applyTermini(id, pieces, terminiAnswer, stops));
     const v2Pieces = pieces.filter(p => p.source !== 'osm');
     const stations = stops.map(s => {
       const near = nearestClass(pieces, [s.e, s.n]);
