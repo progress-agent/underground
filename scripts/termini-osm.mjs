@@ -188,6 +188,21 @@ export function dropTwinFragments(pieces, box) {
   return dropped;
 }
 
+/**
+ * The vertex of `piece` at parameter t of its segment i, inserted if it falls inside the segment (a collinear point:
+ * same class, label and flags on both halves), snapped to the segment's end when within 0.3 m of it. Returns its BNG point.
+ */
+export function insertVertex(piece, i, t) {
+  const a = piece.xy[i], b = piece.xy[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (t * L < 0.3) return piece.xy[i];
+  if ((1 - t) * L < 0.3) return piece.xy[i + 1];
+  const p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  piece.xy.splice(i + 1, 0, p); piece.lonlat.splice(i + 1, 0, fromBng(p)); piece.cls.splice(i, 0, piece.cls[i]);
+  if (piece.from) piece.from.splice(i + 1, 0, piece.from[i] && piece.from[i + 1] ? piece.from[i + 1] : null);
+  if (piece.opened) piece.opened.splice(i, 0, piece.opened[i] || 0);
+  return p;
+}
+
 /** Extend `piece` at one end by `pts` (BNG), each point's segment class from `cls` (one per appended segment); labels `label`. */
 function appendToPiece(piece, atEnd, pts, cls, label) {
   const ll = pts.map(fromBng);
@@ -238,19 +253,36 @@ export function closeJunctionGaps(pieces, trails, box) {
       }
       if (!pick) { report.push(`metropolitan gap at ${E.map(Math.round)} (${Math.round(near.d)} m): no OSM trail within ${TRAIL_NEAR_M} m runs on`); continue; }
       const pts = [], cls = [], others = pieces.filter(q => q !== piece);
-      let walked = 0, run = 0, hit = null, prev = E;
+      let walked = 0, run = 0, runFrom = -1, hit = null, prev = E;
       for (let i = pick.i + pick.dir; i >= 0 && i < pick.t.xy.length; i += pick.dir) {
         const q = pick.t.xy[i];
         walked += Math.hypot(q[0] - prev[0], q[1] - prev[1]); prev = q;
         if (walked > WALK_MAX_M) break;
         pts.push(q); cls.push(pick.dir > 0 ? pick.t.cls[i - 1] : pick.t.cls[i]);
         let dMin = Infinity, onPiece = null;
-        for (const o of others) { const r = nearestOnPolyline(o.xy, q); if (r.d < dMin) { dMin = r.d; onPiece = r; } }
-        run = dMin <= FRAGMENT_NEAR_M ? run + 1 : 0;
+        for (const o of others) { const r = nearestOnPolyline(o.xy, q); if (r.d < dMin) { dMin = r.d; onPiece = { ...r, piece: o }; } }
+        if (dMin <= FRAGMENT_NEAR_M) { if (run === 0) runFrom = pts.length - 1; run++; } else run = 0;
         if (dMin <= WALK_STOP_M || run >= PARALLEL_RUN_POINTS) { hit = onPiece; break; }
       }
       if (!hit) { report.push(`metropolitan gap at ${E.map(Math.round)} (${Math.round(near.d)} m): no junction within ${WALK_MAX_M} m along the OSM trail, left as it was`); continue; }
-      pts.push(hit.p); cls.push(cls.at(-1));
+      // A merge, not a hop: where the track has run within 32 m of the other piece (up to 150 m), the points lean
+      // onto it, from nothing at the start of that stretch to all the way at the last point, so the two meet at a
+      // shallow angle instead of by a sideways step (a step of 15 m at Chalfont & Latimer put cars 4 m off the drawn
+      // track). Points before the stretch are the OSM trail's own, untouched.
+      if (runFrom >= 0) {
+        const n = pts.length;
+        for (let k = runFrom; k < n; k++) {
+          let best = null; for (const o of others) { const r = nearestOnPolyline(o.xy, pts[k]); if (!best || r.d < best.d) best = r; }
+          const w = (k - runFrom + 1) / (n - runFrom);
+          pts[k] = [pts[k][0] + (best.p[0] - pts[k][0]) * w, pts[k][1] + (best.p[1] - pts[k][1]) * w];
+        }
+      }
+      // The meeting point is a vertex of the other piece: where it falls inside one of its segments it is inserted there
+      // (a collinear vertex, same class, nothing moves), so both pieces have a drawn node at the junction and the trains'
+      // map joins them exactly (a join to the nearest of two nodes 10 m apart put a back-step in the run and a 6.5 m gap
+      // between two cars).
+      const J = insertVertex(hit.piece, hit.i, hit.t);
+      if (Math.hypot(pts.at(-1)[0] - J[0], pts.at(-1)[1] - J[1]) > 0.05) { pts.push(J); cls.push(cls.at(-1)); } else pts[pts.length - 1] = J;
       appendToPiece(piece, atEnd, pts, cls, TERMINI_LABEL);
       report.push(`metropolitan junction gap closed at the ${atEnd ? 'end' : 'start'} of a ${Math.round(lenXY(piece.xy))} m piece: ${Math.round(lenXY([E, ...pts]))} m of OSM track (${[...new Set(cls)].join(', ')}), ${Math.round(near.d)} m gap`);
     }

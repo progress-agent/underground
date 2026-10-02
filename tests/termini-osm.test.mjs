@@ -63,6 +63,11 @@ test('the walk stops after 15 consecutive points beside another piece, and ends 
   const added = a.xy.length - 14;
   assert.ok(added >= 15 && added <= 17, `about 15 points (${added}), 150 m beside b, then the hop onto b`);
   assert.ok(Math.abs(a.xy.at(-1)[1] - 195020) < 1e-6, 'the last point is on b');
+  // A merge, not a hop: no appended step is longer than the trail's own 10 m spacing plus the lean (a sideways hop of 20 m put
+  // cars 4 m off the drawn track at Chalfont & Latimer).
+  const steps = a.xy.slice(13).map((p, i, all) => (i ? Math.hypot(p[0] - all[i - 1][0], p[1] - all[i - 1][1]) : 0));
+  assert.ok(Math.max(...steps) <= 12, `longest appended step ${Math.max(...steps).toFixed(1)} m`);
+  assert.equal(new Set(a.xy.map(p => p.join())).size, a.xy.length, 'no duplicated point');
 });
 
 test('applyTermini touches only the Metropolitan', () => {
