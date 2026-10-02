@@ -1,0 +1,71 @@
+// DLR deck joins (sprint 02Oct26f, Lane F): src/dlr-deck-blend.js on synthetic paths.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { blendDeckJoins, DEFAULTS } from '../src/dlr-deck-blend.js';
+
+const U = 5;   // canonical units per true metre (structure scale 1)
+const path = (x0, z0, x1, z1, y, cls = 'viaduct', n = 20) =>
+  Array.from({ length: n + 1 }, (_, i) => ({ x: x0 + (x1 - x0) * i / n, z: z0 + (z1 - z0) * i / n, y: typeof y === 'function' ? y(i / n) : y, cls }));
+const stepOf = (a, b) => Math.abs(a - b) / U;
+
+test('a flyover starting 9 m beside a viaduct, 1.5 m off, ends up under 0.1 m off, and the through deck is unmoved', () => {
+  const through = path(0, 0, 400, 0, 20 * U);                  // the viaduct, 20 m up, 400 m long
+  const leaving = path(200, 9, 200, 309, 21.5 * U, 'viaduct', 60);  // the flyover leaves 9 m beside it, 21.5 m up, a sample every 5 m
+  const before = through.map(s => s.y);
+  const blends = blendDeckJoins([through, leaving], { unitsPerTrueM: U });
+  assert.equal(blends.length, 1);
+  assert.equal(blends[0].path, 1); assert.equal(blends[0].end, 'start');
+  assert.ok(stepOf(leaving[0].y, 20 * U) < 0.1, `step ${stepOf(leaving[0].y, 20 * U)}`);
+  assert.deepEqual(through.map(s => s.y), before, 'the through deck is never moved');
+  // The blend ends at blendM: samples beyond it keep their height; the one at blendM-ish is nearly unchanged.
+  assert.equal(leaving.at(-1).y, 21.5 * U);
+  // And it is smooth: a smoothstep over 30 m of a 1.5 m shift never climbs more than 0.08 m per metre
+  // (so under 0.04 m between the 0.5 m ray samples of the acceptance probe).
+  for (let i = 1; i < leaving.length; i++) assert.ok(Math.abs(leaving[i].y - leaving[i - 1].y) / U / 5 < 0.08);
+});
+
+test('a step over 2.5 m is a different structure and is left alone', () => {
+  const through = path(0, 0, 400, 0, 4.1 * U), flyover = path(200, 8, 200, 300, 8.8 * U);
+  assert.equal(blendDeckJoins([through, flyover], { unitsPerTrueM: U }).length, 0);
+  assert.equal(flyover[0].y, 8.8 * U);
+});
+
+test('a step under 5 cm is noise and is left alone; a path beyond reach is left alone', () => {
+  const through = path(0, 0, 400, 0, 20 * U);
+  const tiny = path(200, 9, 200, 300, 20 * U + 0.2);            // 0.04 m
+  assert.equal(blendDeckJoins([through, tiny], { unitsPerTrueM: U }).length, 0);
+  const far = path(200, 40, 200, 300, 21.5 * U);
+  assert.equal(blendDeckJoins([through, far], { unitsPerTrueM: U }).length, 0);
+});
+
+test('only raised ends are blended', () => {
+  const through = path(0, 0, 400, 0, 2 * U, 'surface'), other = path(200, 9, 200, 300, 3 * U, 'surface');
+  assert.equal(blendDeckJoins([through, other], { unitsPerTrueM: U }).length, 0);
+  const embank = path(200, 9, 200, 300, 3 * U, 'embankment');
+  assert.equal(blendDeckJoins([path(0, 0, 400, 0, 2 * U, 'embankment'), embank], { unitsPerTrueM: U }).length, 1);
+});
+
+test('where two paths end at each other, the shorter one moves', () => {
+  const long = path(0, 0, 400, 0, 20 * U), short = path(404, 0, 504, 0, 21 * U);
+  const blends = blendDeckJoins([long, short], { unitsPerTrueM: U });
+  assert.equal(blends.length, 1);
+  assert.equal(blends[0].path, 1);
+  assert.ok(stepOf(short[0].y, long.at(-1).y) < 0.01);
+  assert.equal(long.at(-1).y, 20 * U);
+  // Same result whichever order they are given.
+  const long2 = path(0, 0, 400, 0, 20 * U), short2 = path(404, 0, 504, 0, 21 * U);
+  assert.equal(blendDeckJoins([short2, long2], { unitsPerTrueM: U })[0].path, 0);
+});
+
+test('the true-metre step scales with the structure scale (units per true metre)', () => {
+  const mk = () => [path(0, 0, 400, 0, 20 * 2.2), path(200, 9, 200, 300, 21.5 * 2.2)];
+  const [a, b] = mk();
+  assert.equal(blendDeckJoins([a, b], { unitsPerTrueM: 2.2 }).length, 1);
+  assert.ok(Math.abs(b[0].y - 20 * 2.2) / 2.2 < 0.1);
+});
+
+test('missing or short paths are tolerated; unitsPerTrueM is required', () => {
+  assert.deepEqual(blendDeckJoins([null, [{ x: 0, z: 0, y: 0, cls: 'viaduct' }]], { unitsPerTrueM: U }), []);
+  assert.throws(() => blendDeckJoins([], {}), RangeError);
+  assert.equal(DEFAULTS.blendM, 30);
+});
