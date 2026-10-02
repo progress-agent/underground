@@ -1,0 +1,35 @@
+{
+ "format": "UGR1",
+ "generated": "2026-10-02T21:20:58.938Z",
+ "tolerance_m": 1,
+ "cellM": 2000,
+ "grid": {
+  "x0": -34000,
+  "z0": -28000,
+  "cols": 35,
+  "rows": 29
+ },
+ "classes": [
+  "motorway",
+  "trunk",
+  "primary",
+  "secondary",
+  "tertiary",
+  "residential",
+  "service",
+  "other"
+ ],
+ "classWidthM": [
+  12,
+  10,
+  9,
+  8,
+  7,
+  6,
+  3.5,
+  4.5
+ ],
+ "bytes": 6170212,
+ "source": "OpenStreetMap contributors, ODbL 1.0, via Overpass",
+ "note": "Throwaway proof (sprint 02Oct26f lane R). Roads inside the M25 as quantised polylines, tile-relative decimetres on a 2 km scene grid."
+}

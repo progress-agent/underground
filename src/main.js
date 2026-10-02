@@ -13,6 +13,9 @@ import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSu
 import { airportSuppressionSignature } from './airport-suppression.js';
 import { createDlrProfile } from './dlr-profile.js';
 import { createMotorway, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
+// ── s02:r-roads ──
+import { createRoadsProof, parseRoadsParams } from './r-roads.js';
+// ── /s02:r-roads ──
 // ── sprint:F ──
 import { createFlights } from './flights.js';
 // ── /sprint:F ──
@@ -910,6 +913,9 @@ let airportDockGroup = null;
 let airportDockInitError = null;
 let motorwayGroup = null;
 let motorwayInitError = null;
+// ── s02:r-roads ──
+let rRoadsGroup = null, rRoadsError = null;
+// ── /s02:r-roads ──
 // ── sprint:F ──
 // Living air traffic (flights.js). The integrator wires setWindSource(getSurfaceWind).
 let flightsGroup = null;
@@ -1177,6 +1183,7 @@ function deleteUrlParam(key) {
     overgroundGroup?.userData.setHeightScale(value);
     airportsGroup?.userData.setHeightScale(value);
     motorwayGroup?.userData.setHeightScale(value);
+    rRoadsGroup?.userData.setHeightScale(value); // s02:r-roads
     if (dlrProfile && terrain && lineBranchCenterPts.has('dlr')) snapAllTubesToTerrain({ onlyLine: 'dlr' });
     // ── s30:R ── after the DLR profile has refreshed at this scale
     surfaceRail?.setHeightScale(value);
@@ -1550,6 +1557,11 @@ const thamesDataPromise = loadThamesData();
             VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
           scene.add(motorwayGroup);
           syncMotorwayBridges();
+          // ── s02:r-roads ── throwaway roads and buses proof, only when the URL asks (?roads= or ?buses=)
+          { const rp = parseRoadsParams(location.search);
+            if (rp) createRoadsProof({ getSurfaceY: getStructuralSurfaceY, VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale(), params: rp })
+              .then(g => { rRoadsGroup = g; scene.add(g); }).catch(e => { rRoadsError = String(e); console.warn('r-roads proof failed', e); }); }
+          // ── /s02:r-roads ──
         } catch (error) {
           motorwayInitError = error.message;
           console.warn(`Motorway unavailable (${error.message}); retaining previous road and bridges`);
@@ -4194,6 +4206,7 @@ function tick(frameTime) {
   const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
   if (overgroundGroup) overgroundGroup.userData.update(surfaceSimulationDt, camera);
   motorwayGroup?.userData.update(surfaceSimulationDt, camera);
+  rRoadsGroup?.userData.update(surfaceSimulationDt, camera); // s02:r-roads
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
   // ── /sprint:C ──
@@ -4486,6 +4499,7 @@ if (import.meta.env.DEV) {
     get airportDockInitError() { return airportDockInitError; },
     getAirportDockInfo, getAirportDockSurfaceY,
     get motorwayGroup() { return motorwayGroup; },
+    get rRoads() { return rRoadsGroup; }, get rRoadsError() { return rRoadsError; }, // s02:r-roads
     get motorwayInitError() { return motorwayInitError; },
     // ── sprint:F ──
     get flightsGroup() { return flightsGroup; },
