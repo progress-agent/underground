@@ -61,6 +61,13 @@ export const VIEWS = {
   heathrow: { p: [-19493.3, 1606.7, 4622.3], t: [-22570.2, 120, 4688.2] },
   arrival: null, // street, pushed several rungs down, then flown to riverGreenwich
 };
+// s02:T: views that are selectable with --views but are NOT in the default set (the gate's six are VIEWS):
+// amersham, 300 m above Amersham looking at the station's ground (lane T, a non-gating view over the track
+// that runs on beyond the M25).
+export const EXTRA_VIEWS = {
+  amersham: { p: [-32458, 3650, -16899], t: [-33658, 728, -17799] },
+};
+const ALL_VIEWS = { ...VIEWS, ...EXTRA_VIEWS };
 export const SETUPS = {
   'as-lived': { dpr: 2, cpuThrottle: 1 },
   weak: { dpr: 1, cpuThrottle: 4 },
@@ -164,15 +171,15 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
     });
     if (S.cpuThrottle > 1) { const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: S.cpuThrottle }); }
     // Warm-up: visit every standard view once so programs and uploads are settled.
-    for (const [name, v] of Object.entries(VIEWS)) {
+    for (const [name, v] of Object.entries(ALL_VIEWS)) {
       if (!v || !views.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
       await page.evaluate(pose => { const u = window.__ug; u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update(); }, v);
       await page.waitForTimeout(1500);
     }
     const results = {};
     for (const name of views) {
-      if (!(name in VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
-      const arrival = VIEWS[name] === null, pose = VIEWS[name] ?? VIEWS.riverGreenwich;
+      if (!(name in ALL_VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
+      const arrival = ALL_VIEWS[name] === null, pose = ALL_VIEWS[name] ?? VIEWS.riverGreenwich;
       const ticks = Math.round((arrival ? arrivalS : settleS) * 4);
       const r = await page.evaluate(async ({ pose, arrival, street, ticks }) => {
         const u = window.__ug, sleep = ms => new Promise(res => setTimeout(res, ms));

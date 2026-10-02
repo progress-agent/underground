@@ -51,22 +51,30 @@ import {
 } from './surface-rail.js';
 import { createStationMarkers } from './stations.js';
 import { sampleForSurfaceRail, SURFACE_RAIL_DLR_MATCH_M } from './dlr-profile.js';
-// s01:R: the drawn track stops at the map edge, and no deck or pier stands in the Thames.
-import { isOffMapEdge } from './m25-edge.js';
+// s01:R: no deck or pier stands in the Thames.
+// s02:T: the drawn track no longer stops at the map edge (src/m25-edge.js is not read here any more).
 import { isInThames } from './thames-mask.js';
 
 /**
- * s01:R (sprint 01Oct26h): flag every sample of a built path that lies beyond
- * the map edge (the outer face of the M25's outer barrier, m25-edge.js, where
- * the ground ends in a cliff). buildCorridor (skipTunnel) and drawnOpenFlags
- * leave flagged samples undrawn, so the Central towards Epping and the
- * Metropolitan beyond Rickmansworth stop where the map does instead of
- * floating over the void; the path keeps them, so the data still runs to the
- * buffers. Returns the number flagged.
+ * s01:R (sprint 01Oct26h) flagged every sample beyond the map edge (the outer
+ * face of the M25's outer barrier, m25-edge.js, where the ground ends in a
+ * cliff) so that buildCorridor (skipTunnel) and drawnOpenFlags left it undrawn:
+ * the Central towards Epping and the Metropolitan beyond Rickmansworth stopped
+ * where the map does.
+ *
+ * s02:T (sprint 02Oct26f, D-048 item 7, Jordan: "beyond the m25 they're just a
+ * tunnel or track in empty space"): the Central, the Metropolitan and the
+ * Weaver run on to their termini, so the default predicate is now "no ground":
+ * a sample is flagged only where the terrain grid has none (a sample with no
+ * finite terrainY). buildPath already skips such samples, so nothing in
+ * today's data is flagged; the rule stands for any future track that runs off
+ * the ground, and keeps the clip wherever no real ground exists. A caller may
+ * pass its own predicate. The path keeps every sample; buildCorridor and
+ * drawnOpenFlags read `offMap`. Returns the number flagged.
  */
-export function flagOffMap(path, offMap = isOffMapEdge) {
+export function flagOffMap(path, offMap = p => !Number.isFinite(p.terrainY)) {
   let n = 0;
-  for (const p of path) { let off = false; try { off = offMap({ x: p.x, z: p.z }); } catch { off = false; } if (off) { p.offMap = true; n++; } }
+  for (const p of path) { let off = false; try { off = offMap(p); } catch { off = false; } if (off) { p.offMap = true; n++; } }
   return n;
 }
 /** s01:R: no viaduct deck or pier in the Thames (bridges.js draws the railway bridges). */
@@ -176,7 +184,7 @@ function openRuns(path, i0, i1) {
   const runs = [];
   let start = null;
   for (let i = i0; i <= i1; i++) {
-    const open = path[i].cls !== 'tunnel' && !path[i].offMap; // s01:R: nor beyond the map edge
+    const open = path[i].cls !== 'tunnel' && !path[i].offMap; // s01:R: nor where flagOffMap says there is no ground (s02:T)
     if (open && start === null) start = i;
     if ((!open || i === i1) && start !== null) { const end = open ? i : i - 1; if (end > start) runs.push([start, end]); start = null; }
   }
@@ -351,7 +359,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
 
   // ── Surface station markers (surfaceOnly) ───────────────────────────────────
   await breathe();
-  const offMap = p => { try { return isOffMapEdge({ x: p.x, z: p.z }); } catch { return false; } };
+  // s02:T: a marker is dropped only where there is no ground under it (nothing today), not beyond the map edge:
+  // Epping, Chorleywood, Chalfont & Latimer, Amersham and Chesham are ordinary surface stations with markers.
+  const offMap = p => { try { return !Number.isFinite(getY({ x: p.x, z: p.z })); } catch { return true; } };
   // s01:R: a DLR station whose mapped anchor platform is in tunnel (Stratford:
   // platform 16, on a way OSM tags tunnel under the station) is still an
   // open-air station when another of its platforms is open and the drawn
@@ -381,7 +391,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       for (const [id, s] of Object.entries(dlrProfile.data.stations)) {
         if (seen.has(id)) continue;
         const p = dlrSurfaceStation(id, s);
-        if (!p || offMap(p)) continue; // s01:R: wholly in tunnel, or beyond the map edge
+        if (!p || offMap(p)) continue; // s01:R: wholly in tunnel; s02:T: or with no ground under it
         seen.add(id);
         stations.push({ id, name: s.name, pos: p.clone(), surfaceY: p.y, dlrProfile: p._dlrProfile, nodeIndex: p._dlrProfile.nodeIndex, openPlatform: !!p.openPlatform,
           network: 'dlr', lineId: 'dlr', lineCount: 1, isTerminus: false, surfaceRail: true });
@@ -391,7 +401,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       for (const s of line.stations) {
         if (!s.surface || seen.has(s.naptan)) continue;
         const st = stationOnRail(s, paths, getY, projectStation, 'tube-surface');
-        if (!st || offMap(st.pos)) continue; // s01:R: beyond the map edge (Epping, Amersham)
+        if (!st || offMap(st.pos)) continue; // s02:T: only where there is no ground (the termini beyond the M25 keep their markers)
         seen.add(s.naptan);
         st.lineId = line.id; st.isTerminus = false; st.surfaceRail = true;
         st.groundY = getY(st.pos); st.liftM = (st.pos.y - st.groundY) / VE;

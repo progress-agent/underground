@@ -248,7 +248,7 @@ export function offsetBand(path, i0, i1, offA, offB, yFn) {
  */
 export function drawnOpenFlags(path) {
   const n = path?.length || 0, f = new Uint8Array(n);
-  // s01:R: a sample beyond the map edge (offMap, tube-surface-rail.js) is not drawn either.
+  // s01:R: a sample flagged offMap (tube-surface-rail.js flagOffMap; s02:T: only where there is no ground) is not drawn either.
   const open = i => path[i].cls !== 'tunnel' && !path[i].offMap;
   for (let i = 0; i < n; i++) if (open(i) && ((i > 0 && open(i - 1)) || (i + 1 < n && open(i + 1)))) f[i] = 1;
   return f;
@@ -293,9 +293,10 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
 
   // Split into runs of "kind" so tunnel sections drop the ballast bed and
   // viaduct/embankment/cutting get their dressing per run.
-  // s01:R: with skipTunnel, a sample flagged offMap (beyond the map edge,
-  // tube-surface-rail.js) is undrawn like a tunnel: the track stops where the
-  // map does. The Overground never flags it, so its runs are as before.
+  // s01:R: with skipTunnel, a sample flagged offMap (tube-surface-rail.js
+  // flagOffMap) is undrawn like a tunnel. s02:T: that is now only a sample with
+  // no ground under it (nothing in today's data), not one beyond the map edge: the
+  // track runs on to its terminus. The Overground never flags it, so its runs are as before.
   const kind = p => (skipTunnel && p.offMap ? 'offmap' : p.cls);
   const hidden = p => p.cls === 'tunnel' || p.offMap;
   let runStart = 0;

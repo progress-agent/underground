@@ -22,8 +22,11 @@
 //     network stats are unchanged. One truth then sets both the lining's
 //     daylight cap (tube-interior.js holds at path.open) and the cut. No
 //     mapping, or a refused interval, means the bore: path.open is empty there.
-//   * path.edge (pedestrian-tunnels.js markMapEdge), from isInsideM25 once the
-//     ring is loaded, tested on the chord and on the drawn track shown.
+//   * path.edge (pedestrian-tunnels.js markMapEdge), from the walk's bounds
+//     predicate once the terrain is loaded, tested on the chord and on the drawn
+//     track shown. s02:T: that predicate is the terrain grid inset 200 m
+//     (main.js ctx.insideWalkBounds), not the M25 ring: the lines run on to their
+//     termini, so nothing is held and the seven termini beyond the ring are stops.
 //   * Surface trains passing through the walker in the open (surfacePass).
 //   * The cut's DOM overlay, #ug-portal-flare: a daylight flare leaving a
 //     tunnel, a dip from black entering one, on the mode clock.
@@ -57,7 +60,7 @@ function signature(path) {
  * @param {() => object|null} [o.trainSystem]  trains.js (allTrains, simTime)
  * @param {(x, z) => number|null} o.getStructuralY
  * @param {(x, z) => number|null} o.getTerrainY
- * @param {(x, z) => boolean} [o.isInsideM25]  the map's edge (true everywhere until it is loaded)
+ * @param {(x, z) => boolean} [o.isInsideM25]  the walk's bounds (s02:T: the terrain grid inset 200 m; true everywhere until it is loaded)
  * @param {number} o.VE
  * @param {() => number} [o.now]  a clock for the build budget only
  * @param {Document} [o.document]

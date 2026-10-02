@@ -126,6 +126,22 @@ import { dlrHeightLabel } from './dlr-profile.js';
 // ── s30:T ──
 import { createSurfaceTrains } from './surface-trains.js';
 // ── /s30:T ──
+// ── s02:T ──
+// Lines to their termini beyond the M25 (D-048 item 7). The hidden ground is the
+// terrain grid's own heights, smoothed beyond the map edge (src/hidden-ground.js;
+// identical to the raw samplers on the map): the track beyond the ring, the
+// walker and "Up to the street" stand on it. The corridor round the beyond-ring
+// lines scopes the underground look, sound and labels (src/beyond-edge.js).
+import { createHiddenGround } from './hidden-ground.js';
+import { createBeyondEdgeCorridor, regimeFrom, corridorSources } from './beyond-edge.js';
+import { cullModeFor } from './underground-cull.js';
+const s02HiddenGround = createHiddenGround({ getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, isOffMapEdge });
+const s02Corridor = createBeyondEdgeCorridor({ isOffMapEdge });
+/** One object, rewritten each frame (DEV: window.__ug.termini.regime). */
+const s02Regime = { beyond: false, corridor: 0, under: false, audioUnderground: false, labelsUnderground: false, cullMode: null, regimeInsideness: 0 };
+// Hoisted above tick (the block-scope and TDZ traps in AGENTS.md).
+let s02Under = false, s02RegimeInsideness = 0, s02CullMode = null;
+// ── /s02:T ──
 import { installDoubleSideSplit } from './double-side-split.js';
 import { createShadowCache, casterVersionOf } from './shadow-cache.js';
 import { setTrainEconomies, trainBatchStats } from './trains.js';
@@ -936,7 +952,8 @@ function startSurfaceRail() {
   // The DLR's surface deck is read from the shared profile: make sure it has
   // sampled the terrain (snapAllTubesToTerrain may not have run yet).
   if (dlrProfile?.terrainPending) dlrProfile.refresh({ structureScale: getBuildingHeightScale() });
-  createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ,
+  // s02:T: the track beyond the ring rides the hidden ground (the same call on the map).
+  createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ,
     heightScale: getBuildingHeightScale(), overground: overgroundGroup, dlrProfile }).then(rail => {
     surfaceRail = rail;
     for (const [key, layers] of rail.stationLayers) {
@@ -1032,7 +1049,7 @@ let surfaceTrains = null;
 function updateSurfaceTrains() {
   if (!surfaceTrains && surfaceRail) {
     surfaceTrains = createSurfaceTrains({ scene, trainSystem, surfaceRail, overground: overgroundGroup, dlrProfile,
-      getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ, heightScale: getBuildingHeightScale() });
+      getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, heightScale: getBuildingHeightScale() }); // s02:T
   }
   surfaceTrains?.update(camera);
 }
@@ -1443,7 +1460,7 @@ const thamesDataPromise = loadThamesData();
       });
 
       // Overground surface rail — needs the terrain mesh for at-grade Y (D-019)
-      createOverground({ getTerrainMeshSurfaceY: getStructuralSurfaceY, projectStation: llToXZ, heightScale:getBuildingHeightScale() }).then(group => {
+      createOverground({ getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, heightScale:getBuildingHeightScale() }).then(group => { // s02:T
         if (group) {
           overgroundGroup = group;
           scene.add(overgroundGroup);
@@ -4048,12 +4065,12 @@ function tick(frameTime) {
   const dockAtCamera=airportDockGroup?getAirportDockInfo(camera.position):null;
   // Water's visual separation lift is not a physical elevation measurement.
   const surfaceYAtCamera = dockAtCamera ? dockAtCamera.referenceLevelM*VERTICAL_EXAGGERATION
-    : getTerrainMeshSurfaceY({ x: camera.position.x, z: camera.position.z });
+    : s02HiddenGround.terrainSurfaceY({ x: camera.position.x, z: camera.position.z }); // s02:T: the hidden ground beyond the edge, the same call on the map
   const realAltM = surfaceYAtCamera !== null
     ? Math.round((camera.position.y - surfaceYAtCamera) / VERTICAL_EXAGGERATION)
     : Math.round(camera.position.y / VERTICAL_EXAGGERATION);
   const cameraInsideM25 = isInsideM25(camera.position.x, camera.position.z);
-  const isUnderground = cameraInsideM25 && (surfaceYAtCamera !== null
+  const isUnderground = (cameraInsideM25 || s02Under) && (surfaceYAtCamera !== null
     ? camera.position.y < surfaceYAtCamera
     : camera.position.y < 0);
 
@@ -4104,6 +4121,23 @@ function tick(frameTime) {
   // the disc — outside, there is no chalk stratum to cloud or slow through.
   const insideness = sampleM25Insideness(camera.position.x, camera.position.z);
   _aboveGroundView = isAboveGroundView({ belowSurface, submerged, insideness });
+  // ── s02:T ── beyond the M25 (D-048 item 7): the corridor round the beyond-ring lines puts an
+  // underground camera there on the underground regime (audio, labels, fog and light), and the
+  // 'lines' cull hides the bored tubes from an above-ground camera outside the full-cull zone.
+  if (!s02Corridor.ready && surfaceRail && overgroundGroup?.userData?.linePaths
+      && lineBranchCenterPts.has('central') && lineBranchCenterPts.has('metropolitan')) {
+    s02Corridor.build(corridorSources({ surfaceRailPaths: surfaceRail.paths, overgroundLinePaths: overgroundGroup.userData.linePaths, boreBranches: lineBranchCenterPts }));
+  }
+  {
+    const w = s02Corridor.ready ? s02Corridor.weightAt(camera.position.x, camera.position.z) : 0;
+    const r = regimeFrom({ weight: w, belowSurface, submerged, insideness, cameraInsideM25 });
+    s02Under = r.under; s02RegimeInsideness = r.regimeInsideness;
+    s02CullMode = cullModeFor({ belowSurface, submerged, insideness });
+    s02Regime.beyond = isOffMapEdge({ x: camera.position.x, z: camera.position.z });
+    s02Regime.corridor = r.corridor; s02Regime.under = r.under; s02Regime.labelsUnderground = r.labelsUnderground;
+    s02Regime.cullMode = s02CullMode; s02Regime.regimeInsideness = r.regimeInsideness;
+  }
+  // ── /s02:T ──
   const chalkBlend = (1 - THREE.MathUtils.smoothstep(
     camera.position.y, chalkSurfaceY - 30, chalkSurfaceY + 30
   )) * insideness;
@@ -4217,7 +4251,7 @@ function tick(frameTime) {
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.stationsLayer?.update) {
       layers.stationsLayer.update({
-        camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25,
+        camera, renderer, terrainSurfaceY: surfaceYAtCamera, insideM25: cameraInsideM25 || s02Under, // s02:T
         // Inside chalk every label hides (Item B); hover tooltips live in the
         // separate #hoverTip path and stay active. Submerged (12Jul26u) hides
         // them too — HTML overlays are not fogged, so labels would otherwise
@@ -4253,12 +4287,12 @@ function tick(frameTime) {
   // Update environment based on camera height (sky/fog/background)
   if (skyDome) {
     updateEnvironment(camera, scene, skyDome, renderer,
-      { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend });
+      { insideness: s02RegimeInsideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend }); // s02:T
   }
 
   // Update lighting based on camera position
   updateLighting(camera, atmosphereLights,
-    { insideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend });
+    { insideness: s02RegimeInsideness, chalkBlend, clayLift: _clayLift, chalkClarity: _chalkClarity, submergedBlend: _submergedBlend }); // s02:T
   // ── s25:C ── after the sun, sky and fog: clouds drift on the world clock
   cloudSystem.update({ camera, time: modeSystem?.ctx.time ?? 0,
     quality: renderQualityMode === 'auto' ? adaptiveQuality.get() : null });
@@ -4273,6 +4307,7 @@ function tick(frameTime) {
   updateGeologyClarity(_chalkClarity);
 
   // Update spatial audio (ambient crossfades, filter sweeps, wind)
+  s02Regime.audioUnderground = isUnderground; // s02:T: exactly what the audio is told
   if (isAudioReady()) {
     updateAudio(dt, {
       cameraPosition: camera.position,
@@ -4295,7 +4330,7 @@ function tick(frameTime) {
   // this frame: write any skipped chunk that could now show (fix round 1).
   if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
   // ── /s24:R ──
-  undergroundCull.render(_aboveGroundView && economies.on('underAbove'), () => composer.render(dt));
+  undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => composer.render(dt)); // s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
   sampleCushion();
   requestAnimationFrame(tick);
 }
@@ -4304,8 +4339,8 @@ function tick(frameTime) {
 modeSystem = installModes({
   THREE, camera, controls, canvas: renderer.domElement, fpsControls,
   VE: VERTICAL_EXAGGERATION, masterHeight,
-  getTerrainY: (x, z) => getTerrainMeshSurfaceY({ x, z }),
-  getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }),
+  getTerrainY: s02HiddenGround.terrainY, // s02:T: the hidden ground (identical to the raw sampler on the map)
+  getStructuralY: s02HiddenGround.structuralY, // s02:T
   isSubmergedAt, waterSurfaceAt,
   // Both render paths: live 'buildings-*' tiles and baked 'baked-buildings-*'.
   getBuildingMeshes: () => (surfaceGeometryGroup?.visible
@@ -4353,6 +4388,13 @@ modeSystem.ctx.overgroundLinePaths = () => overgroundGroup?.userData?.linePaths 
 modeSystem.ctx.surfaceTrains = () => surfaceTrains;
 modeSystem.ctx.isInsideM25 = isInsideM25;
 // ── /s01:P ──
+// ── s02:T ──
+// The walk no longer holds at the M25 (D-048 item 7): its map-edge predicate is the
+// terrain grid's bounds inset 200 m (the seven termini beyond the ring are stops), and
+// surface walking has a soft hold at the same box (src/modes/pedestrian.js).
+modeSystem.ctx.insideWalkBounds = s02HiddenGround.insideWalkBounds;
+Object.defineProperty(modeSystem.ctx, 'walkHoldBox', { get: () => s02HiddenGround.holdBox, enumerable: true, configurable: true });
+// ── /s02:T ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map
@@ -4531,6 +4573,10 @@ if (import.meta.env.DEV) {
   // ── s30:P ──
   window.__ug.tflStats = tflStats;
   // ── /s30:P ──
+  // ── s02:T ──
+  // Lines to their termini (DEV): the hidden ground, the corridor (wait for corridor.ready) and the per-frame regime.
+  Object.defineProperty(window.__ug, 'termini', { get: () => ({ hiddenGround: s02HiddenGround, corridor: s02Corridor, regime: s02Regime }), enumerable: true });
+  // ── /s02:T ──
   // ── s24:R ──
   window.__ug.economies = economies;
   window.__ug.trainBatchStats = trainBatchStats;

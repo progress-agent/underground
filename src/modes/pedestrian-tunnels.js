@@ -686,8 +686,10 @@ const EDGE_STEP_M = 10;
 /**
  * The M25 map edge (s01:P; D-043 item 4: "the walk stops at the M25 edge. The
  * Central's last stop is Theydon Bois and the Metropolitan's is Rickmansworth").
- * `inside(x, z)` says whether a point is on the map (main.js isInsideM25; call
- * this only once it is loaded, isInsideM25(1e6, 1e6) === false). Each stretch
+ * `inside(x, z)` says whether a point is on the map (s01:P: main.js isInsideM25;
+ * s02:T, D-048 item 7: the walk's bounds, the terrain grid inset 200 m, so the lines
+ * run on to their termini and nothing is held; call this only once it is loaded,
+ * inside(1e6, 1e6) === false). Each stretch
  * of a path whose point is off the map becomes path.edge [s0, s1], s0 holdM of
  * arc inside the first point off it, so advance() holds the walk there. Stops
  * in an edge stretch are dropped (Epping, Chorleywood): from path.stops, from

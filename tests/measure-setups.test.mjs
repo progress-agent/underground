@@ -4,7 +4,7 @@
 // before/after numbers depend on.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VIEWS, SETUPS, WEAK_FPS_BAR, summariseTrace, compareRuns, parseArgs } from '../scripts/measure-setups.mjs';
+import { VIEWS, EXTRA_VIEWS, SETUPS, WEAK_FPS_BAR, summariseTrace, compareRuns, parseArgs } from '../scripts/measure-setups.mjs';
 
 test('the agreed setups and the five standard views plus arrival', () => {
   assert.deepEqual(SETUPS.weak, { dpr: 1, cpuThrottle: 4 });
@@ -12,6 +12,12 @@ test('the agreed setups and the five standard views plus arrival', () => {
   assert.equal(WEAK_FPS_BAR, 30);
   assert.deepEqual(Object.keys(VIEWS), ['overview', 'streetBank', 'riverGreenwich', 'm25Edge', 'heathrow', 'arrival']);
   assert.equal(VIEWS.arrival, null);
+});
+
+test('s02:T: the Amersham view is selectable and not in the default set (the gate keeps its six)', () => {
+  assert.deepEqual(Object.keys(EXTRA_VIEWS), ['amersham']);
+  assert.ok(!('amersham' in VIEWS));
+  assert.deepEqual(EXTRA_VIEWS.amersham, { p: [-32458, 3650, -16899], t: [-33658, 728, -17799] });
 });
 
 test('a trace settles on the most frequent rung of the last 8 s and counts its changes', () => {
