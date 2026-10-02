@@ -9,9 +9,9 @@
 // Routes, Shift held (200 m/s), each leg a minute at most:
 //   Northern   Hampstead -> Edgware
 //   District   Stepney Green -> Upminster (three legs, the walk carried on from each)
-//   Metropolitan  Moor Park -> Rickmansworth -> the map edge (60 m/s first, then Shift)
+//   Metropolitan  Moor Park -> Rickmansworth -> Amersham (60 m/s first, then Shift); s02:T: no hold at the M25 now
 //   DLR        Bank -> Lewisham: arrivals in order; the regimes bore, open, bore at Cutty Sark, open
-//   Central    Mile End -> Leytonstone, and Debden -> Theydon Bois -> the edge
+//   Central    Mile End -> Leytonstone, and Debden -> Theydon Bois -> Epping (s02:T: no hold at the M25 now)
 //   Jubilee    Swiss Cottage -> Stanmore (two legs); no bore between Finchley Road and Kilburn once Lane
 //              R's West Hampstead stub fix is in the data
 // On every open-air frame: the camera is at least terrain + 0.5 m x VE; within lane + extra + 1 m of the
@@ -249,33 +249,32 @@ for (const [leg, from, toward, until] of [[1, 'Stepney Green', 'Mile End', 'Bark
   });
 }
 
-test('Metropolitan, Moor Park to Rickmansworth and on to the map edge: 60 m/s along the drawn track, then Shift; held 150 m inside the edge', async () => {
+// s02:T (sprint 02Oct26f, D-048 item 7, Jordan: beyond the M25 the lines "are just a tunnel or track in empty
+// space"): this test held the walk 150 m inside the map edge, with nothing beyond it a stop (D-043 item 4).
+// Inverted: the Metropolitan runs on to Amersham, Chorleywood and Chalfont & Latimer are arrived at, nothing is held.
+test('Metropolitan, Moor Park to Rickmansworth and on to Amersham: 60 m/s along the drawn track, then Shift; no hold at the M25 (s02:T)', async () => {
   expect(await placeAt('metropolitan', 'Moor Park', 'Rickmansworth')).not.toBeNull();
   const slow = await ride({ lineId: 'metropolitan', keys: ['w'], maxMs: 9000, stopAtEdge: false });
   const v60 = speeds(slow, 60);
   expect(v60.length).toBeGreaterThan(5);
   for (const x of v60) expect(Math.abs(x - 60), `60 m/s window ${x}`).toBeLessThanOrEqual(2);
-  const r = await ride({ lineId: 'metropolitan', maxMs: 50000 });
+  const r = await ride({ lineId: 'metropolitan', until: 'Amersham', via: ['Rickmansworth', 'Chorleywood', 'Chalfont & Latimer', 'Amersham'], maxMs: 100000 });
   const names = slow.arrivals.concat(r.arrivals).map(a => a.name);
   expect(names).toContain('Rickmansworth');
-  expect(names.some(n => /Chorleywood|Chalfont|Amersham|Chesham/.test(n)), 'nothing beyond the edge is a stop').toBe(false);
-  expect(r.end.atEdge).toBe(true);
-  expect(r.end.hint).toContain('The map ends here · S walks back');
+  expect(names.filter(n => /Chorleywood|Chalfont|Amersham|Chesham/.test(n)), 'the stops beyond the edge are arrived at, in order').toEqual(['Chorleywood', 'Chalfont & Latimer', 'Amersham']);
+  expect(r.end.atEdge, 'nothing holds the walk at the M25 any more').toBe(false);
+  expect(r.end.regime).toBe('open');
   checkOpenFrames(r, 'Metropolitan');
   const v = speeds(r, 200);
   expect(v.length).toBeGreaterThan(5);
   for (const x of v) expect(Math.abs(x - 200), `200 m/s window ${x}`).toBeLessThanOrEqual(6);
-  // The hold sits at least 100 m inside the map's drawn edge, and S walks back.
+  // The walk went well beyond the edge ring: Amersham is about 9 km out.
   const at = await page.evaluate(async () => {
     const { getMapEdgeRing, signedDistanceToRing } = await import('/src/m25-edge.js');
     const c = window.__ug.camera.position;
     return signedDistanceToRing(c.x, c.z, getMapEdgeRing());
   });
-  expect(at, 'the hold is well inside the edge ring').toBeGreaterThanOrEqual(100);
-  const s0 = (await dbg()).tunnel.s;
-  await page.evaluate(() => window.__ug.fpsControls.keys.add('s'));
-  await page.waitForFunction((s0) => Math.abs(window.__ug.modes.registry.get('pedestrian').debug().tunnel.s - s0) > 30, s0, { timeout: 10000 });
-  await page.evaluate(() => window.__ug.fpsControls.keys.delete('s'));
+  expect(at, 'Amersham is beyond the edge ring').toBeLessThanOrEqual(-5000);
 });
 
 test('DLR, Bank to Lewisham: every station in order; bore, open, bore at Cutty Sark, open', async () => {
@@ -315,21 +314,23 @@ test('Central, Mile End to Leytonstone: out of the tunnel and on, Leyton and Ley
   checkOpenFrames(r, 'Central');
 });
 
-test('Central, Debden to Theydon Bois and the map edge: Theydon Bois is the last stop, Epping is beyond the map', async () => {
+// s02:T: this test made Theydon Bois the last stop and Epping "beyond the map" (D-043 item 4). Inverted: the walk
+// goes on to Epping, which is arrived at in the open; "towards Epping" still reads at Theydon Bois.
+test('Central, Debden to Theydon Bois and on to Epping: Epping is the last stop, arrived at in the open (s02:T)', async () => {
   expect(await placeAt('central', 'Debden', 'Theydon Bois')).not.toBeNull();
-  const r = await ride({ lineId: 'central' });
-  expect(r.arrivals.map(a => a.name)).toEqual(['Theydon Bois']);
-  expect(r.end.atEdge).toBe(true);
-  expect(r.end.hint).toContain('The map ends here');
-  checkOpenFrames(r, 'Central edge');
-  // Epping is not a stop, but "towards Epping" still reads at Theydon Bois.
+  const r = await ride({ lineId: 'central', until: 'Epping' });
+  expect(r.arrivals.map(a => a.name)).toEqual(['Theydon Bois', 'Epping']);
+  expect(r.arrivals.find(a => a.name === 'Epping').regime).toBe('open');
+  expect(r.end.atEdge).toBe(false);
+  checkOpenFrames(r, 'Central Epping');
+  // Epping is a stop with an entrance, and "towards Epping" still reads at Theydon Bois.
   const rows = await page.evaluate(() => {
     const m = window.__ug.modes.registry.get('pedestrian');
     const net = m.network;
     const e = net.entrances.find(en => en.name === 'Theydon Bois');
     return { epping: net.entrances.some(en => en.name === 'Epping'), stops: e?.stops.length ?? 0 };
   });
-  expect(rows.epping).toBe(false);
+  expect(rows.epping).toBe(true);
   expect(rows.stops).toBeGreaterThan(0);
   const arr = await page.evaluate(async () => {
     const m = window.__ug.modes.registry.get('pedestrian');
@@ -874,7 +875,7 @@ test('the mapping report: per line, built, timed, its refused open stretches lis
     openKm: +((v.openM || 0) / 1000).toFixed(1), refused: (v.refused || []).map(x => `${x.from.replace(/ (Underground|DLR) Station/, '')}-${x.to.replace(/ (Underground|DLR) Station/, '')}`) }]))));
 });
 
-test('surface stops are stops: every station of a line in the open is arrived at, and none beyond the edge', async () => {
+test('surface stops are stops: every station of a line in the open is arrived at, the seven beyond the M25 included (s02:T)', async () => {
   const s = await page.evaluate(() => {
     const m = window.__ug.modes.registry.get('pedestrian');
     const net = m.rebuildNetwork();
@@ -883,8 +884,10 @@ test('surface stops are stops: every station of a line in the open is arrived at
       edgeStops: net.stats.edgeStops, links: net.stats.links };
   });
   expect(s.shallow).toBeGreaterThan(0);
-  expect(s.epping).toBe(false);
-  expect(s.chorleywood).toBe(false);
-  expect(s.edgeStops).toBeGreaterThanOrEqual(2);
+  // s02:T: this pinned Epping and Chorleywood as dropped (edgeStops >= 2, D-043 item 4). Inverted: they are stops,
+  // and no stop is dropped for lying beyond the edge (the walk's bounds are the terrain grid inset 200 m).
+  expect(s.epping).toBe(true);
+  expect(s.chorleywood).toBe(true);
+  expect(s.edgeStops).toBe(0);
   expect(s.links).toBeGreaterThan(0);
 });

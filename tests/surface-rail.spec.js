@@ -117,7 +117,11 @@ test('the surface railway draws nothing below the ground: no tunnel, and D-024 h
       if (!o.isMesh || !['stripe', 'band'].includes(o.userData.part)) return;
       const pos = o.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
-        const t = u.getTerrainMeshSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
+        // s02:T: the ground the track stands on is the hidden ground (src/hidden-ground.js): the same call as
+        // getTerrainMeshSurfaceY on the map, and beyond the M25 (where the surface model is never drawn, and the
+        // Central, Metropolitan and Weaver now run on to their termini) the smoothed surface the track rides.
+        // The thresholds are unchanged.
+        const t = u.termini.hiddenGround.terrainY(pos.getX(i), pos.getZ(i));
         if (!Number.isFinite(t)) continue;
         const above = (pos.getY(i) - t) / VE; total++;
         if (above < -0.5) buried++; else if (above < 0.05) grazing++;
@@ -774,39 +778,36 @@ test('s01: the stations the last sprint left without a marker have surfaceOnly m
   expect(r.lift.lifted).toBeGreaterThan(0);
 });
 
-test('s01: the drawn railway stops at the map edge, and no surface marker stands beyond it', async () => {
+// s02:T (sprint 02Oct26f, D-048 item 7): this test pinned the s01:R clip, "the drawn railway stops at the map edge, and no
+// surface marker stands beyond it" (D-043 item 4: Epping, Amersham, Chesham and Chorleywood had none). Jordan then ruled that
+// beyond the M25 the lines run on to their termini ("just a tunnel or track in empty space"), so it is inverted: track is
+// drawn beyond the ring, to the buffers, and the five Tube termini beyond it have surface markers like any surface station.
+// tests/termini.spec.js pins the track, the trains, the ground and the walk.
+test('s02:T: the drawn railway runs on beyond the map edge to the termini, and their surface markers stand there', async () => {
   const r = await page.evaluate(async () => {
     const u = window.__ug, { isOffMapEdge, getMapEdgeRing, signedDistanceToRing } = await import('/src/m25-edge.js');
     const ring = getMapEdgeRing();
-    let beyond = 0, worst = 0, checked = 0;
+    let beyond = 0, far = 0, checked = 0;
     for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
       if (!o.isMesh || o.userData.part !== 'stripe') return;
       const p = o.geometry.attributes.position;
-      for (let i = 0; i < p.count; i += 3) { checked++; if (isOffMapEdge({ x: p.getX(i), z: p.getZ(i) })) { beyond++; worst = Math.max(worst, -signedDistanceToRing(p.getX(i), p.getZ(i), ring)); } }
+      for (let i = 0; i < p.count; i += 3) { checked++; if (isOffMapEdge({ x: p.getX(i), z: p.getZ(i) })) { beyond++; if (signedDistanceToRing(p.getX(i), p.getZ(i), ring) < -5000) far++; } }
     });
     let markersBeyond = 0;
     for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) if (isOffMapEdge(s.pos)) markersBeyond++;
-    // The Central runs on to the edge north of Theydon Bois: its last drawn sample there is at the cliff.
-    const central = u.surfaceRail.paths.get('central').filter(Boolean);
-    let edgeGap = Infinity;
-    for (const path of central) {
-      const f = path.map(p => !p.offMap && p.cls !== 'tunnel');
-      for (let i = 0; i < path.length - 1; i++) {
-        if (f[i] && path[i + 1].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i].x, path[i].z, ring)));
-        if (f[i + 1] && path[i].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i + 1].x, path[i + 1].z, ring)));
-      }
-    }
     const names = [...u.surfaceRail.stationLayers.values()].flatMap(l => l.stationsLayer.mesh.userData.stations.map(s => s.name));
-    return { beyond, worst, checked, markersBeyond, edgeGap, epping: names.some(n => /Epping/.test(n)), amersham: names.some(n => /Amersham|Chesham|Chorleywood/.test(n)), theydon: names.some(n => /Theydon Bois/.test(n)) };
+    const has = re => names.some(n => re.test(n));
+    // No sample is flagged any more: only a sample with no ground under it would be.
+    const flagged = [...u.surfaceRail.paths.values()].flat().filter(Boolean).reduce((n, path) => n + path.filter(p => p.offMap).length, 0);
+    return { beyond, far, checked, markersBeyond, flagged, epping: has(/Epping/), chorleywood: has(/Chorleywood/), chalfont: has(/Chalfont/), amersham: has(/Amersham/), chesham: has(/Chesham/), theydon: has(/Theydon Bois/) };
   });
   console.log('map edge', JSON.stringify(r));
   expect(r.checked).toBeGreaterThan(10000);
-  // Stripe vertices may stand at most a stripe half-width (4.5 m) past the ring where the track meets it obliquely.
-  expect(r.worst).toBeLessThan(5);
-  expect(r.markersBeyond).toBe(0);
-  expect(r.epping || r.amersham).toBe(false);
-  expect(r.theydon).toBe(true);
-  expect(r.edgeGap).toBeLessThan(13); // within one 12 m sample of the cliff
+  expect(r.beyond, 'stripe vertices beyond the ring').toBeGreaterThan(1000);
+  expect(r.far, 'stripe vertices more than 5 km beyond it (the Chilterns)').toBeGreaterThan(100);
+  expect(r.flagged).toBe(0);
+  expect(r.markersBeyond).toBeGreaterThanOrEqual(5);
+  for (const k of ['epping', 'chorleywood', 'chalfont', 'amersham', 'chesham', 'theydon']) expect(r[k], k).toBe(true);
 });
 
 test('s01: Tower Gateway: the DLR deck under the canopy is drawn at about 9 m, not at the roof, at every Master', async () => {
