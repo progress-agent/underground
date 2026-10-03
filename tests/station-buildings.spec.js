@@ -482,7 +482,7 @@ test('the height law: a station building and an ordinary box of equal height sta
       const key = sb.siteKeyOf("King's Cross St. Pancras"), b = sb.data.buildings.find(q => q.key === sb.data.sites[key].building);
       const roof = sb.meshes.roofOf(b, scale);
       // the longest wall roundel's front, 80 m out from its middle
-      const w = b.roundels.filter(r => r.on === 'wall').sort((p, q) => q.D - p.D)[0];
+      const walls = b.roundels.filter(r => r.on === 'wall').sort((p, q) => q.D - p.D);
       const level = (x, z, y, tx, tz) => { u.camera.position.set(x, y, z); u.controls.target.set(tx, y, tz); u.controls.update(); };
       const topRow = async (hide, show) => {
         await new Promise(r => setTimeout(r, 500));
@@ -491,9 +491,14 @@ test('the height law: a station building and an ordinary box of equal height sta
         for (let y = H - 1; y >= 0 && top === null; y--) { for (let x = Math.floor(W / 2) - 20; x < Math.floor(W / 2) + 20; x++) if (mask[y * W + x]) { top = H - 1 - y; break; } }
         return top;
       };
-      level(w.x + w.nx * 80, w.z + w.nz * 80, roof.roofY, w.x, w.z);
+      // the longest wall roundel's front first; a front with a neighbouring box standing in the 80 m of sight is skipped for the next
       const g = window.__sbGroup();
-      const stationTop = await topRow(() => { g.visible = false; }, () => { g.visible = true; });
+      let stationTop = null, front = -1;
+      for (const [k, w] of walls.slice(0, 8).entries()) {
+        level(w.x + w.nx * 80, w.z + w.nz * 80, roof.roofY, w.x, w.z);
+        stationTop = await topRow(() => { g.visible = false; }, () => { g.visible = true; });
+        if (stationTop !== null) { front = k; break; }
+      }
       // the nearest ordinary baked box outside every footprint, height >= 6 m: its south face, 80 m out
       let best = null;
       u.scene.getObjectByName('surfaceGeometry').traverse(o => {
@@ -510,7 +515,7 @@ test('the height law: a station building and an ordinary box of equal height sta
       level(best.x, best.z + best.side / 2 + 80, boxRoof, best.x, best.z);
       const m4 = new window.__ugTHREE.Matrix4(); best.o.getMatrixAt(best.i, m4); const away = m4.clone(); away.setPosition(0, -1e6, 0);
       const boxTop = await topRow(() => { best.o.setMatrixAt(best.i, away); best.o.instanceMatrix.needsUpdate = true; }, () => { best.o.setMatrixAt(best.i, m4); best.o.instanceMatrix.needsUpdate = true; });
-      return { master, stationTop, boxTop, boxH: best.h / VE };
+      return { master, stationTop, front, boxTop, boxH: best.h / VE };
     }, master));
   }
   console.log('height law', JSON.stringify(out));
