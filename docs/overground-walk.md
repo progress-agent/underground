@@ -21,8 +21,12 @@ see the Overground (the walk merges `ctx.tubeNetwork.overground` into the maps i
 ## The network rules (constants in `overground-network.js`)
 
 1. **Joins.** A drawn piece whose end is within 30 m of another piece of its line is joined at the nearest point
-   Q. Q becomes a vertex of the other piece (or an existing vertex within 2.5 m is used) and its EXACT coordinates
-   are appended to the joining end, so the rounded-metre junction keys match.
+   Q. Q becomes a vertex of the other piece (an existing vertex within 2.5 m is used, and so is the other piece's own
+   END within 12 m: the Richmond and Clapham Junction branches start at one point and the Stratford piece ends 7 m
+   on, and all three must share one vertex) and its EXACT coordinates are appended to the joining end, so the
+   rounded-metre junction keys match. A second join between the same two pieces within 20 m of the first is
+   skipped: two ends a few metres from each other's bodies (the Windrush's Dalston Junction pieces) make one
+   junction, not a loop a few metres round that a walker could circle for ever.
 2. **Gaps.** While a line has more than one connected component, the shortest link from a component's end vertex to
    a vertex of another, up to 1000 m, is a connector walked in the bore at the drawn tunnel's formula
    (`ground + 5 + (-20) * VE`). The data has one: the Weaver's, about 825 m between the Liverpool Street
@@ -57,13 +61,33 @@ pair, `net.stats.ogMerges` every merge.
 
 - The walker is on the drawn polyline 2.6 m to the left of its direction of travel (`OG_LANE_M`, the trains' own
   formula), eye `P.eye * VE * ratio` above the rail head. 60 and 200 m/s are measured along the track (the path's
-  arc is the track's own arc).
+  arc is the track's own arc), and the step is scaled for the lane on a bend (`laneScale`: the offset curve is shorter
+  on the inside, 6% on a 45 m curve), so the camera's plan speed is the speed asked for.
+- `trackToChord` is NOT clamped to the path's ends. Clamped, the last metre of a path that ends in a junction became a
+  move of a few millimetres whose target fell one rounding short of the junction vertex, and the walker stood there for
+  ever at full speed (the Windrush at Dalston Junction, found by a node stress walk). `advance()` meets the end, or the
+  junction, itself, and stops at a real line end.
+- An open run ends AT its last open vertex, not half-way to the first tunnel vertex: the drawn track dips into a tunnel
+  over its first samples (surface-rail.js smooths them down into the ground), so half a segment on is already 4 m
+  below the surface. The 60 m tests (a tunnel under it is bridged, an open run under it dropped) still measure
+  half-way.
 - A tunnel run under 60 m between open runs is an overbridge: shown open, `y` straight between the open vertices
   either side. An open run under 60 m is dropped. Connectors are the bore.
 - Overground trains in the walker's lane pass through it (`overgroundPass`, `passingState`): the proxy is the train
   on its drawn path at its lane offset. The other lane is 5.2 m away and never passes.
 - The bore uses `tube-interior.js` as it is (a 3.56 m lining coloured with the line). True Overground bore sizes
   belong to the depth review of D-047 item 2.
+
+## Known limits
+
+- Where a tunnel under 60 m is bridged as an overbridge, the nearest drawn point to the walker on the flanks of the
+  bridge is on the dip of the drawn tunnel, below the terrain, while the walker rides straight across: a handful of frames a
+  leg (0.4 to 0.9%) with the eye more than 3 m above the nearest drawn deck. Where two drawn pieces of a line cross at
+  different heights the nearest drawn point is the other piece's.
+- Overground tunnel trains are not drawn in the bore (the Tube's are); the Overground's pass through the walker in the open only.
+- The bore uses the Tube's lining (3.56 m); true Overground bore sizes belong to the depth review (D-047 item 2).
+- The Weaver's Cheshunt and Theobalds Grove are not stops until Lane T draws the track to them (Cheshunt is 520 m past
+  the drawn end; Theobalds Grove is dropped by the map-edge hold).
 
 ## Cost
 
