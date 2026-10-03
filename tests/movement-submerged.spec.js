@@ -41,24 +41,6 @@ function teleport(page, x, y, z) {
   }, [x, y, z]);
 }
 
-async function snapshotCamera(page) {
-  return page.evaluate(() => {
-    const c = window.__ug.camera;
-    return { x: c.position.x, y: c.position.y, z: c.position.z };
-  });
-}
-
-async function holdKeys(page, keys, durationMs) {
-  await page.evaluate((ks) => {
-    for (const k of ks) window.__ug.fpsControls.keys.add(k);
-  }, keys);
-  await page.waitForTimeout(durationMs);
-  await page.evaluate((ks) => {
-    for (const k of ks) window.__ug.fpsControls.keys.delete(k);
-  }, keys);
-  await page.waitForTimeout(80); // let one tick settle with keys released
-}
-
 // Sprint 02Oct26f (Lane F): the parity tests compared a vertical and a horizontal wall-clock key hold
 // (`holdKeys`: waitForTimeout(400) between two page.evaluate round trips), so any frame stall inside
 // one hold and not the other moved the ratio (underground :126 failed under contention at 1.5 against a
@@ -96,13 +78,6 @@ async function measureRate(page, keys, { frames = 12, maxTravel = 30 } = {}) {
   }), [keys, frames, maxTravel, FRAME_CAP_MS]).then(async (r) => { await page.waitForTimeout(80); return { ...r, speed: r.distance / r.seconds }; });
 }
 
-function dist(a, b) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  const dz = a.z - b.z;
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
-}
-
 test.describe('Submerged movement regime + vertical parity', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/?skip=1');
@@ -120,23 +95,25 @@ test.describe('Submerged movement regime + vertical parity', () => {
       null, { timeout: 3000 },
     );
 
-    const p0 = await snapshotCamera(page);
-    await holdKeys(page, ['w'], 400);
-    const p1 = await snapshotCamera(page);
-    const d = dist(p0, p1);
+    // Fix round 2 (Lane F): this test also timed its hold by the wall clock (holdKeys 400 ms: d = 34.4, 34.2 and 34.6
+    // against its bound of more than 35 in 3 of 10 repeated runs at 8eb38e9, 1 of 10 at e0675d7), so a frame stall
+    // inside the hold shortened the distance. It now reads the speed on the app's frame clock (measureRate, above).
+    // The bounds are the same ones: a 0.4 s hold had to cover more than 35 and less than 110 units, which is more
+    // than 87.5 and less than 275 units per second (nominal 150). Nothing else changed.
+    const sub = await measureRate(page, ['w']);
     const submergedSpeed = await page.evaluate(() => window.__ug.fpsControls.lastSpeed);
 
     // Just above the water at the same point.
     await teleport(page, MID.x, 12.5, MID.z);
-    await holdKeys(page, ['w'], 120);
+    await measureRate(page, ['w'], { frames: 6 });
     const aboveSpeed = await page.evaluate(() => window.__ug.fpsControls.lastSpeed);
 
-    // Nominal: 150 u/s x 0.4 s = 60u (0.3x crawl over the 14m-deep reach).
-    // The superseded constant base would give ~200u. Bounds separate the two.
-    console.log(`[movement-submerged] W-hold distance=${d.toFixed(1)} speed=${submergedSpeed} above=${aboveSpeed}`);
+    // Nominal: 150 u/s (0.3x crawl over the 14m-deep reach). The superseded constant base would give ~500 u/s
+    // (200u in 0.4 s). Bounds separate the two.
+    console.log(`[movement-submerged] W-hold speed=${sub.speed.toFixed(1)} u/s (${sub.frames} frames) lastSpeed=${submergedSpeed} above=${aboveSpeed}`);
     expect(submergedSpeed).toBeCloseTo(aboveSpeed, 6);
-    expect(d).toBeGreaterThan(35);
-    expect(d).toBeLessThan(110);
+    expect(sub.speed).toBeGreaterThan(35 / 0.4);
+    expect(sub.speed).toBeLessThan(110 / 0.4);
   });
 
   test('submerged: vertical (Q) displacement matches horizontal (W) for equal holds', async ({ page }) => {
