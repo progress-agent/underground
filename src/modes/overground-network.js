@@ -58,6 +58,12 @@ export const STEP_M = 12;            // connector and stub sampling (the drawn t
 // test reads the source and pins that these are still those numbers): ground + BASE_LIFT + (-20 m) * VE.
 export const BASE_LIFT = 5;
 export const TUNNEL_LIFT_M = -20;
+export const OG_BRIDGE_M = 60;       // a tunnel run shorter than this between open runs is bridged (shown open); an open run shorter is dropped (overground-walk.js)
+// The bore's depth away from a shown mouth. The drawn tunnel (surface-rail.js) ramps to the surface over its first samples and a
+// short one never reaches its depth, and a short open run (under OG_BRIDGE_M) that the walk drops would leave the walker in the
+// bore at the drawn surface height. So in the bore the walker is never above a floor that is the surface at a mouth and the drawn
+// tunnel's full depth OG_MOUTH_RAMP_M of walk away from the nearest one (computed in `buildLineTopology`, applied in `input()`).
+export const OG_MOUTH_RAMP_M = 40;
 
 const tidy = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
 
@@ -100,6 +106,54 @@ export function liveY(rec) {
     case 'mix': { const a = liveY(rec.r0), b = liveY(rec.r1); return a + (b - a) * rec.t; }
     default: return rec.a.y;
   }
+}
+
+/**
+ * The terrain under a vertex record (canonical y), or null when it is not known or the bore is the Thames Tunnel (which lies under
+ * the river bed, not 20 m under the ground, and keeps its drawn height).
+ */
+export function groundOf(rec) {
+  switch (rec.kind) {
+    case 'gap': case 'stub': return Number.isFinite(rec.g) ? rec.g : null;
+    case 'mix': {
+      const a = groundOf(rec.r0), b = groundOf(rec.r1);
+      return a === null || b === null ? null : a + (b - a) * rec.t;
+    }
+    default: return rec.a && !rec.a.underRiver && Number.isFinite(rec.a.terrainY) ? rec.a.terrainY : null;
+  }
+}
+
+/**
+ * The open stretches the walk shows on a path whose vertices carry `recs` (rec.open) at arcs `vs` (length L), exactly as
+ * overground-walk.js presents them: a run is open from its first open vertex to its last; a tunnel run under OG_BRIDGE_M between
+ * open runs is bridged (shown open, listed in `filled`), and an open run under OG_BRIDGE_M is dropped.
+ * `ma`/`mb` are where a run would end half-way to the neighbouring tunnel vertex, which is what the 60 m is measured on.
+ * @returns {{ intervals: Array<{ a, b, i0, i1 }>, filled: Array<{ a, b, sA, sB }> }}  i0, i1: the vertex indices of the ends
+ */
+export function ogOpenRuns(recs, vs, L) {
+  const n = recs.length;
+  const runs = [];
+  let first = -1;
+  for (let i = 0; i <= n; i++) {
+    const f = i < n && recs[i].open;
+    if (f && first < 0) first = i;
+    if (!f && first >= 0) {
+      runs.push({ a: vs[first], b: vs[i - 1], i0: first, i1: i - 1, ma: first === 0 ? 0 : (vs[first - 1] + vs[first]) / 2, mb: i < n ? (vs[i - 1] + vs[i]) / 2 : L, vFirst: vs[first], vLast: vs[i - 1] });
+      first = -1;
+    }
+  }
+  const merged = [];
+  const filled = [];
+  for (const run of runs) {
+    const last = merged.at(-1);
+    if (last && run.ma - last.mb < OG_BRIDGE_M) {
+      if (run.a > last.b + 1e-6) filled.push({ a: last.b, b: run.a, sA: last.vLast, sB: run.vFirst });
+      last.b = Math.max(last.b, run.b); last.i1 = Math.max(last.i1, run.i1); last.mb = run.mb; last.vLast = run.vLast;
+    } else merged.push({ ...run });
+  }
+  const intervals = merged.filter(r => r.mb - r.ma >= OG_BRIDGE_M).map(r => ({ a: r.a, b: r.b, i0: r.i0, i1: r.i1 }));
+  for (let i = filled.length - 1; i >= 0; i--) if (!intervals.some(({ a, b }) => filled[i].a >= a - 1e-6 && filled[i].b <= b + 1e-6)) filled.splice(i, 1);
+  return { intervals, filled };
 }
 
 // ── geometry helpers ───────────────────────────────────────────────────────
@@ -218,7 +272,8 @@ export function buildLineTopology(line, { groundY, structuralY = null, VE = 5 } 
     const verts = [{ x: E.x, z: E.z, rec: E.rec, j: true }];
     for (let j = 1; j < steps; j++) {
       const t = j / steps, x = E.x + (V.x - E.x) * t, z = E.z + (V.z - E.z) * t;
-      verts.push({ x, z, rec: { kind: 'gap', open: false, y0: groundY(x, z) + BASE_LIFT + TUNNEL_LIFT_M * VE } });
+      const g = groundY(x, z);
+      verts.push({ x, z, rec: { kind: 'gap', open: false, g, y0: g + BASE_LIFT + TUNNEL_LIFT_M * VE } });
     }
     verts.push({ x: V.x, z: V.z, rec: V.rec, j: true });
     const piece = { id: pieces.length, kind: 'gap', verts };
@@ -314,7 +369,72 @@ export function buildLineTopology(line, { groundY, structuralY = null, VE = 5 } 
   }
   const stopNames = new Set(placements.map(p => ogCleanName(p.S.name)));
   report.stops = stopNames.size;
+  markMouths(pieces);
   return { id: line.id, pieces, placements, report, structuralY, groundY, VE };
+}
+
+/**
+ * Per piece: `shown` (1 where the vertex is on a shown open stretch) and `dm`, the walk distance in plan from the vertex to the
+ * nearest MOUTH, up to OG_MOUTH_RAMP_M (Infinity beyond). A mouth is an end of a shown open stretch or the end of a path whose end
+ * vertex is open (a junction onto the open track, or a connector leaving a viaduct); a short open run the walk drops is NOT one, so
+ * the bore's depth is carried across it. Distances run on through the vertices pieces share (`j`), so a junction has one `dm`
+ * from both sides. Pure and Master-free (plan metres, the drawn classes only).
+ */
+function markMouths(pieces) {
+  const cs = pieces.map(P => {
+    const c = new Float64Array(P.verts.length);
+    for (let i = 1; i < c.length; i++) c[i] = c[i - 1] + Math.hypot(P.verts[i].x - P.verts[i - 1].x, P.verts[i].z - P.verts[i - 1].z);
+    return c;
+  });
+  const links = new Map();
+  pieces.forEach((P, pi) => {
+    const recs = P.verts.map(v => v.rec);
+    const { intervals } = ogOpenRuns(recs, cs[pi], cs[pi].at(-1));
+    P.shown = new Uint8Array(P.verts.length);
+    for (const iv of intervals) for (let i = iv.i0; i <= iv.i1; i++) P.shown[i] = 1;
+    P.dm = new Float64Array(P.verts.length).fill(Infinity);
+    for (let i = 0; i < P.verts.length; i++) {
+      if (P.shown[i] || ((i === 0 || i === P.verts.length - 1) && recs[i].open)) P.dm[i] = 0;
+      const v = P.verts[i];
+      if (v.j) {
+        const k = `${Math.round(v.x)}:${Math.round(v.z)}`;
+        if (!links.has(k)) links.set(k, []);
+        links.get(k).push([pi, i]);
+      }
+    }
+  });
+  const groups = [...links.values()].filter(g => g.length > 1);
+  for (let pass = 0; pass < 64; pass++) {
+    let changed = false;
+    const relax = (P, i, d) => { if (d < P.dm[i] - 1e-9 && d <= OG_MOUTH_RAMP_M) { P.dm[i] = d; changed = true; } };
+    pieces.forEach((P, pi) => {
+      const c = cs[pi], n = c.length;
+      for (let i = 1; i < n; i++) relax(P, i, P.dm[i - 1] + c[i] - c[i - 1]);
+      for (let i = n - 2; i >= 0; i--) relax(P, i, P.dm[i + 1] + c[i + 1] - c[i]);
+    });
+    for (const g of groups) {
+      let m = Infinity;
+      for (const [pi, i] of g) m = Math.min(m, pieces[pi].dm[i]);
+      for (const [pi, i] of g) relax(pieces[pi], i, m);
+    }
+    if (!changed) break;
+  }
+}
+
+/**
+ * The height of vertex i of a piece as the walk's network has it: the drawn height, except where the walker would be in the bore
+ * (not on a shown open stretch) above the bore's floor, which is the surface at a mouth and the drawn tunnel's full depth
+ * OG_MOUTH_RAMP_M of walk from the nearest one. Only ever deeper than the drawn height.
+ */
+function boreY(P, i, VE) {
+  const rec = P.verts[i].rec;
+  const y = liveY(rec);
+  if (P.shown[i]) return y;
+  const g = groundOf(rec);
+  if (g === null) return y;
+  const f = Math.min(1, P.dm[i] / OG_MOUTH_RAMP_M);
+  const floor = g + BASE_LIFT + TUNNEL_LIFT_M * VE * f;
+  return y > floor ? floor : y;
 }
 
 /**
@@ -354,8 +474,9 @@ export function createOvergroundNetworkSource({ group, getGroundY, getStructural
     for (const L of lines) {
       const lineId = OG_PREFIX + L.id;
       const arrays = L.pieces.map((P) => {
-        const arr = P.verts.map(v => ({ x: v.x, y: liveY(v.rec), z: v.z }));
+        const arr = P.verts.map((v, i) => ({ x: v.x, y: boreY(P, i, VE), z: v.z }));
         arr.og = P.verts.map(v => v.rec);
+        arr.ogMouth = Array.from(P.dm);   // plan metres to the nearest mouth, up to OG_MOUTH_RAMP_M (tests and the spec read it)
         // The vertices where this piece meets another (a join, a connector end, a stub's start): the only
         // places buildTunnelNetwork needs to look for a junction, so it keys these and not every sample.
         arr.ogJunction = P.verts.map(v => !!v.j);
@@ -368,7 +489,7 @@ export function createOvergroundNetworkSource({ group, getGroundY, getStructural
         const sy = L.structuralY ? L.structuralY(pl.S.site.x, pl.S.site.z) : null;
         // ref: the branch array and vertex index it stands on, so buildTunnelNetwork needs no scan for it.
         stations.push({ id: pl.S.ids[0] ?? null, ids: pl.S.ids.slice(), name: pl.S.name,
-          pos: { x: v.x, y: liveY(v.rec), z: v.z }, site: { x: pl.S.site.x, z: pl.S.site.z },
+          pos: { x: v.x, y: arrays[pl.piece.id][pl.piece.verts.indexOf(v)].y, z: v.z }, site: { x: pl.S.site.x, z: pl.S.site.z },
           surfaceY: Number.isFinite(sy) ? sy : null, ref: { branch: arrays[pl.piece.id], vi: pl.piece.verts.indexOf(v) } });
       }
       stationLayers.set(lineId, { stationsLayer: { stations } });

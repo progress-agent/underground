@@ -73,6 +73,18 @@ pair, `net.stats.ogMerges` every merge.
   half-way.
 - A tunnel run under 60 m between open runs is an overbridge: shown open, `y` straight between the open vertices
   either side. An open run under 60 m is dropped. Connectors are the bore.
+- **The bore's floor** (fix round 1, `overground-network.js` `markMouths` and `boreY`). The walker in the bore is placed on the
+  network path's own vertices, so the floor is applied there, to every vertex that is not on a shown open stretch: its
+  height is the drawn height, or the floor if that is shallower. The floor is the surface at a MOUTH (a shown open stretch's
+  end, or a path end whose end vertex is open: a junction onto the open track, a connector leaving a viaduct) and the drawn
+  tunnel's full depth (terrain + 5 - 20 m x VE) `OG_MOUTH_RAMP_M` = 40 m of walk from the nearest mouth, linear between;
+  the distance runs on through the vertices pieces share, so both sides of a junction have one height. An open run the
+  walk drops (under 60 m) is not a mouth, so the depth is carried across it: before, the walker was in the bore at the
+  drawn surface height there (Weaver, near Liverpool Street) and, on the Weaver's gap connector, 8 m up on the deck it
+  leaves. The Thames Tunnel (under the river) keeps its drawn height. The floor reads only the terrain at the sample and
+  the tunnel depth, never the structure ratio, so Master does not move it. The open stretches themselves are the shared
+  `ogOpenRuns`, which the presenter uses too. The acceptance's 14 to 24 m is therefore met everywhere more than 35 m of
+  walk from a mouth (the floor is 14.25 m down at 30 m).
 - Overground trains in the walker's lane pass through it (`overgroundPass`, `passingState`): the proxy is the train
   on its drawn path at its lane offset. The other lane is 5.2 m away and never passes.
 - The bore uses `tube-interior.js` as it is (a 3.56 m lining coloured with the line). True Overground bore sizes

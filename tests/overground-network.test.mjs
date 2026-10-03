@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import {
   buildLineTopology, createOvergroundNetworkSource, liveY, ogNameKeys, ogNamesMatch, ogCleanName, nearestOn,
   JOIN_M, GAP_MAX_M, ON_TRACK_M, STUB_MIN_M, STUB_MAX_M, BASE_LIFT, TUNNEL_LIFT_M, OG_PREFIX, isOgLine,
+  OG_MOUTH_RAMP_M, OG_BRIDGE_M, ogOpenRuns, groundOf,
 } from '../src/modes/overground-network.js';
 import { buildTunnelNetwork, markOpenSections, markOpenSectionsFromTrack } from '../src/modes/pedestrian-tunnels.js';
 
@@ -412,4 +413,122 @@ test('nearestOn: the nearest point of a polyline, and whether it is the end', ()
   assert.equal(nearestOn(V, 30, 0).end, true);
   assert.equal(nearestOn(V, -4, 1).end, true);
   assert.equal(nearestOn(V, 19.9, 1).end, false);
+});
+
+// ── the bore's floor (fix round 1 of lane O: O-RTE-g, every bore frame away from a mouth 14 to 24 m down) ─────────────────────
+/**
+ * A straight drawn piece along +x, a sample every 12 m, class from classAt(i); a tunnel sample is as deep as the drawn tunnel
+ * (surface-rail.js) makes it: the full 20 m, except that the smoothing pulls the samples beside an above-ground one up towards it
+ * (here: 100 canonical units down over 36 m).
+ */
+function ramped(n, classAt, x0 = 0, z = 0, liftOf = (c) => (c === 'viaduct' ? 8 * VE : 0)) {
+  const cls = Array.from({ length: n }, (_, i) => classAt(i));
+  return cls.map((c, i) => {
+    let y;
+    if (c !== 'tunnel') y = GROUND + BASE_LIFT + liftOf(c);
+    else {
+      let d = Infinity;
+      for (let j = 0; j < n; j++) if (cls[j] !== 'tunnel') d = Math.min(d, Math.abs(j - i) * 12);
+      y = GROUND + BASE_LIFT + TUNNEL_LIFT_M * VE * Math.min(1, d / 36);
+    }
+    return { x: x0 + i * 12, z, terrainY: GROUND, cls: c, y };
+  });
+}
+const depthOf = (y) => (GROUND + BASE_LIFT - y) / VE;   // metres below the drawn rail head's surface level (canonical y over VE)
+const FULL = -TUNNEL_LIFT_M;
+
+test('the bore floor: a short open run the walk drops (under 60 m) between tunnel runs is carried at the full depth, not walked at the surface (Weaver, near Liverpool Street)', () => {
+  // 40 tunnel samples, 2 surface samples (a run of about 36 m between tunnel vertices: dropped), 40 tunnel samples.
+  const A = ramped(82, (i) => (i === 40 || i === 41 ? 'surface' : 'tunnel'));
+  const arr = sourceOf([A], []).input().branches.get('og:weaver')[0];
+  const T = topo([A], []);
+  assert.deepEqual(ogOpenRuns(T.pieces[0].verts.map(v => v.rec), Array.from(T.pieces[0].verts, (_, i) => i * 12), 81 * 12).intervals, [], 'the run is dropped');
+  assert.ok(A[40].y > GROUND, 'the drawn surface vertices are at the surface');
+  for (let i = 10; i < 72; i++) assert.ok(depthOf(arr[i].y) >= FULL - 1e-9, `vertex ${i} is ${depthOf(arr[i].y).toFixed(1)} m down, under the dropped run too`);
+  assert.equal(arr[40].y, GROUND + BASE_LIFT + TUNNEL_LIFT_M * VE, 'the dropped run itself is at the bore depth');
+  assert.equal(arr[0].y, A[0].y, 'a vertex already at the full depth is untouched');
+});
+
+test('the bore floor: at a shown mouth the bore is at the surface and reaches the full depth OG_MOUTH_RAMP_M of walk on; an open vertex is never moved', () => {
+  const A = ramped(60, (i) => (i < 20 ? 'viaduct' : 'tunnel'));   // a viaduct that goes into a tunnel
+  const arr = sourceOf([A], []).input().branches.get('og:weaver')[0];
+  for (let i = 0; i < 20; i++) assert.equal(arr[i].y, A[i].y, 'the open run is as drawn');
+  assert.equal(arr.ogMouth[19], 0); assert.equal(arr.ogMouth[20], 12); assert.equal(arr.ogMouth[21], 24); assert.equal(arr.ogMouth[22], 36);
+  assert.equal(arr.ogMouth[23], Infinity, 'beyond OG_MOUTH_RAMP_M it is not tracked');
+  for (let i = 20; i < 60; i++) {
+    const dm = (i - 19) * 12;
+    const maxY = GROUND + BASE_LIFT + TUNNEL_LIFT_M * VE * Math.min(1, dm / OG_MOUTH_RAMP_M);
+    assert.ok(arr[i].y <= maxY + 1e-9, `vertex ${i} (${dm} m from the mouth) is at or under the floor`);
+    assert.ok(arr[i].y <= A[i].y + 1e-9, 'never shallower than the drawn height');
+  }
+  assert.ok(depthOf(arr[22].y) >= 14, '36 m of walk from the mouth it is at least 14 m down');
+  assert.ok(depthOf(arr[23].y) >= FULL - 1e-9, 'and beyond the ramp it is at the full depth');
+});
+
+test('the bore floor: a connector leaving a viaduct starts at the surface and goes down to its depth; it does not plunge from the deck (Weaver path 73)', () => {
+  const A = ramped(40, () => 'viaduct');
+  const B = ramped(40, () => 'tunnel', 39 * 12 + 330);   // 330 m past A's end: a gap
+  const T = topo([A, B], []);
+  assert.equal(T.report.gaps.length, 1);
+  const src = sourceOf([A, B], []).input();
+  const arrays = src.branches.get('og:weaver');
+  const conn = arrays[arrays.length - 1];
+  assert.equal(conn.og[0].open, true, 'the connector leaves an open (viaduct) vertex');
+  assert.equal(conn.ogMouth[0], 0, 'the start of a connector that leaves the open is a mouth');
+  assert.ok(A.at(-1).y > GROUND + BASE_LIFT + 30, 'the deck is high');
+  assert.equal(conn[0].y, GROUND + BASE_LIFT, 'it starts at the surface, not 8 m up on the deck');
+  for (let i = 0; i < conn.length; i++) {
+    const dm = conn.ogMouth[i];
+    assert.ok(conn[i].y <= GROUND + BASE_LIFT + TUNNEL_LIFT_M * VE * Math.min(1, dm / OG_MOUTH_RAMP_M) + 1e-9, `connector vertex ${i} is at or under the floor`);
+  }
+  assert.ok(depthOf(conn[Math.ceil(35 / 12) + 1].y) >= 14, '35 m on it is at least 14 m down');
+  assert.ok(depthOf(conn[conn.length >> 1].y) >= FULL - 1e-9, 'half way along it is at the full depth');
+});
+
+test('the bore floor: distance to a mouth runs on through a junction, so both sides of one junction have the same height', () => {
+  // A tunnel piece B whose end is joined to a tunnel piece A within 30 m; A's far end comes up into the open 24 m past the junction.
+  const A = ramped(30, (i) => (i < 6 ? 'tunnel' : 'surface'), 0);   // tunnel to x = 60 (vertices 0..5), then open (the surface from vertex 6)
+  const B = ramped(30, () => 'tunnel', 60 + 12, 20);               // 20 m off, a tunnel running away on the other side of x = 72
+  const T = topo([A, B], []);
+  assert.ok(T.report.joins.length >= 1);
+  const arrays = sourceOf([A, B], []).input().branches.get('og:weaver');
+  const ends = arrays.map(a => a.at(0)).concat(arrays.map(a => a.at(-1)));
+  for (const a of arrays) for (const b of arrays) {
+    if (a === b) continue;
+    for (const [i, j] of [[0, 0], [0, b.length - 1], [a.length - 1, 0], [a.length - 1, b.length - 1]]) {
+      if (Math.round(a[i].x) === Math.round(b[j].x) && Math.round(a[i].z) === Math.round(b[j].z)) {
+        assert.equal(a[i].y, b[j].y, 'a junction has one height from both pieces');
+        assert.equal(a.ogMouth[i], b.ogMouth[j], 'and one distance to the nearest mouth');
+      }
+    }
+  }
+  assert.ok(ends.length > 0);
+});
+
+test('groundOf: a track sample reads its terrain, a mix interpolates, a stub and a connector carry theirs, the Thames Tunnel has none (it lies under the bed)', () => {
+  const a = { kind: 'track', a: { y: 0, terrainY: 40 }, open: false }, b = { kind: 'track', a: { y: 0, terrainY: 60 }, open: false };
+  assert.equal(groundOf(a), 40);
+  assert.equal(groundOf({ kind: 'mix', r0: a, r1: b, t: 0.25, open: false }), 45);
+  assert.equal(groundOf({ kind: 'stub', base: a, gEnd: 40, g: 33, open: false }), 33);
+  assert.equal(groundOf({ kind: 'gap', g: 12, y0: -88, open: false }), 12);
+  assert.equal(groundOf({ kind: 'track', a: { y: 0, terrainY: 40, underRiver: true }, open: false }), null);
+  assert.equal(groundOf({ kind: 'track', a: { y: 0 }, open: false }), null, 'unknown terrain: no floor');
+  assert.equal(groundOf({ kind: 'mix', r0: a, r1: { kind: 'track', a: { y: 0 }, open: false }, t: 0.5, open: false }), null);
+});
+
+test('the bore floor does not touch the Thames Tunnel: a sample under the river keeps its drawn height', () => {
+  const A = ramped(60, (i) => (i < 10 ? 'surface' : 'tunnel'));
+  for (const p of A) if (p.cls === 'tunnel') p.underRiver = true;
+  const arr = sourceOf([A], []).input().branches.get('og:weaver')[0];
+  for (let i = 0; i < A.length; i++) assert.equal(arr[i].y, A[i].y);
+});
+
+test('the bore floor follows no Master: the drawn heights move, the floor (the terrain and the tunnel depth) does not', () => {
+  const A = ramped(82, (i) => (i === 40 || i === 41 ? 'surface' : 'tunnel'));
+  const src = sourceOf([A], []);
+  const before = src.input().branches.get('og:weaver')[0].map(v => v.y);
+  for (const p of A) if (p.cls !== 'tunnel') p.y += 100;   // Master up: the raised surface vertices
+  const after = src.input().branches.get('og:weaver')[0].map(v => v.y);
+  assert.deepEqual(after, before, 'the dropped run is in the bore: its network height is the bore floor whatever the deck does');
+  assert.equal(OG_BRIDGE_M, 60);
 });

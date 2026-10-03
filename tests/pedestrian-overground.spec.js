@@ -119,8 +119,19 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 90000, via 
           inside: sampleM25Insideness(c.x, c.z), above: ug.aboveGroundView, cut: d.openAir.cut?.kind ?? null,
           flare: +getComputedStyle(flare).opacity, card: d.card?.kind ?? null, edge: d.atEdge, interior: d.interior.visible,
           hint: document.getElementById('ug-mode-hint')?.textContent ?? '', arrivals: since(d).length, bridged: !!d.shown?.bridged,
-          // metres of path arc to the nearest mouth of an open stretch (the drawn tunnel ramps down over its first 40 m or so)
-          portal: d.tunnel && d.open ? Math.min(Infinity, ...d.open.flatMap(([a, b]) => [Math.abs(d.tunnel.s - a), Math.abs(d.tunnel.s - b)])) : null });
+          // metres of walk to the nearest mouth (an end of a shown open stretch, or a path end that is open): the network's own figure
+          // (overground-network.js ogMouth, up to 40 m, null beyond), interpolated at s. In the bore the floor depends on it.
+          mouth: (() => {
+            const p = d.tunnel ? m.network.paths[d.tunnel.path] : null, dm = p?.branchRef?.ogMouth;
+            if (!dm) return null;
+            let i = p.vertexS.findIndex((v, k) => k + 1 < p.vertexS.length && d.tunnel.s <= p.vertexS[k + 1]);
+            if (i < 0) i = p.vertexS.length - 2;
+            const seg = Math.hypot(p.vertices[i + 1].x - p.vertices[i].x, p.vertices[i + 1].z - p.vertices[i].z);
+            const t = Math.min(1, Math.max(0, (d.tunnel.s - p.vertexS[i]) / ((p.vertexS[i + 1] - p.vertexS[i]) || 1)));
+            const m0 = (dm[i] ?? Infinity) + t * seg, m1 = (dm[i + 1] ?? Infinity) + (1 - t) * seg;
+            const r = Math.min(m0, m1);
+            return Number.isFinite(r) ? r : null;
+          })() });
         if (d.phase !== 'tunnel') break;
         if (until && since(d).some(a => a.name === until)) break;
         if (d.atEdge && d.tunnel.speed === 0) break;
@@ -435,7 +446,7 @@ test('O-RTE-6 Liberty, Romford to Upminster: 60 m/s along the drawn track for th
   if (v.length >= 5) expect(Math.abs(median(v) - 200)).toBeLessThanOrEqual(6);
 });
 
-test('O-RTE-g: in the bore the walker is at today\'s single 20 m depth', async () => {
+test('O-RTE-g: in the bore the walker is at today\'s single 20 m depth, every frame, away from a mouth', async () => {
   const far = bores.filter(f => f.water === null);
   const stops = await page.evaluate(() => window.__ug.modes.registry.get('pedestrian').network.paths.filter(p => p.lineId.startsWith('og:')).flatMap(p => p.stops.map(x => ({ x: x.stop.x, z: x.stop.z }))));
   console.log(`[overground] bore frames kept ${bores.length}, off the water ${far.length}, lines ${JSON.stringify([...new Set(bores.map(f => f.lineId))])}`);
@@ -443,14 +454,21 @@ test('O-RTE-g: in the bore the walker is at today\'s single 20 m depth', async (
   // Away from every stop (the platform is shallower than the bore for the Tube's shaft, and a stub's end is at the station).
   const away = far.filter(f => stops.every(s => Math.hypot(f.x - s.x, f.z - s.z) > 150));
   expect(away.length, 'bore frames away from every stop').toBeGreaterThanOrEqual(20);
-  const depths = away.map(f => ({ d: (f.g - f.y) / VE, x: Math.round(f.x), z: Math.round(f.z), portal: f.portal }));
-  const inRange = depths.filter(f => f.d >= 14 && f.d <= 24);
-  const out = depths.filter(f => !(f.d >= 14 && f.d <= 24));
-  console.log(`[overground] bore depth away from stops: ${inRange.length} of ${depths.length} frames within 14 to 24 m (min ${Math.min(...depths.map(f => f.d)).toFixed(1)}, max ${Math.max(...depths.map(f => f.d)).toFixed(1)}); the others: ${JSON.stringify(out.slice(0, 10))}`);
-  // Today's single 20 m depth, smoothed near the mouths: the drawn tunnel (surface-rail.js) ramps from the surface down over its
-  // first 40 m or so, and a tunnel shorter than about 100 m never reaches its depth. Those frames are the rest.
-  expect(inRange.length / depths.length, 'share of bore frames away from stops at 14 to 24 m').toBeGreaterThanOrEqual(0.85);
-  for (const f of depths) expect(f.d, `no bore deeper than 26 m at ${f.x}, ${f.z}`).toBeLessThanOrEqual(26);
+  const depths = away.map(f => ({ d: (f.g - f.y) / VE, x: Math.round(f.x), z: Math.round(f.z), mouth: f.mouth, path: f.path, s: f.s && Math.round(f.s), line: f.lineId }));
+  // The one exemption: within MOUTH_EXEMPT_M of a mouth the bore ramps between the surface and its depth (overground-network.js: the
+  // surface at the mouth, the full depth OG_MOUTH_RAMP_M = 40 m of walk on, so 14 m or more from 28 m on). A dropped open run (under
+  // 60 m) and a connector's start are NOT mouths; a path end is one only where its end vertex is open.
+  const MOUTH_EXEMPT_M = 35;
+  const must = depths.filter(f => !(f.mouth !== null && f.mouth < MOUTH_EXEMPT_M));
+  const bad = must.filter(f => !(f.d >= 14 && f.d <= 24));
+  console.log(`[overground] bore depth away from stops: ${must.length} of ${depths.length} frames are more than ${MOUTH_EXEMPT_M} m of walk from a mouth, ${must.length - bad.length} of those at 14 to 24 m (min ${Math.min(...depths.map(f => f.d)).toFixed(1)}, max ${Math.max(...depths.map(f => f.d)).toFixed(1)}); out of range: ${JSON.stringify(bad.slice(0, 10))}`);
+  expect(must.length, 'bore frames away from a mouth and from every stop').toBeGreaterThanOrEqual(20);
+  expect(bad, 'bore frames away from a mouth that are not 14 to 24 m down').toEqual([]);
+  // Everywhere, the mouths included: never deeper than 26 m, and never above the rail's own lift over the ground (about 1 m).
+  for (const f of depths) {
+    expect(f.d, `no bore deeper than 26 m at ${f.x}, ${f.z}`).toBeLessThanOrEqual(26);
+    expect(f.d, `no bore above the ground at ${f.x}, ${f.z} (path ${f.path}, s ${f.s}, ${f.d.toFixed(1)} m down)`).toBeGreaterThanOrEqual(-2);
+  }
 });
 
 // ── changes and "towards" text ───────────────────────────────────────────────
