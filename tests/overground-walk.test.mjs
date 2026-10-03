@@ -328,3 +328,29 @@ test('a walker arriving at the end of a path that ends in a junction goes throug
     assert.ok(pos.s > 100, 'and walking on along it');
   }
 });
+
+test('the step is scaled for the lane on a bend: the camera\'s plan speed is the speed asked for, on the inside and the outside of a 45 m curve', () => {
+  for (const turn of [1, -1]) {
+    const R = 45, pts = [];
+    for (let k = 0; k <= 60; k++) {
+      const phi = k * 12 / R;       // samples every 12 m of arc
+      pts.push({ x: R * Math.sin(phi), z: turn * R * (1 - Math.cos(phi)), terrainY: GROUND, cls: 'surface', y: GROUND + 5 });
+    }
+    // Lengthen the run so the curve is not at an end.
+    const lead = run(-400, 0, -12, 0);
+    const { map, path } = walkerOf(lead.concat(pts));
+    for (const lane of [1, -1]) {
+      const s0 = 400 + 100;
+      const a = map.presentAt(s0, lane, {});
+      let s = s0, plan = 0, want = 0, px = a.x, pz = a.z;
+      for (let i = 0; i < 40; i++) {       // 40 frames of 200 m/s at 60 Hz: 133 m round the bend
+        const d = 200 / 60;
+        s = map.trackToChord(s, 1, d);
+        const q = map.presentAt(s, lane, {});
+        plan += Math.hypot(q.x - px, q.z - pz); want += d; px = q.x; pz = q.z;
+      }
+      assert.ok(Math.abs(plan / want - 1) < 0.015, `turn ${turn} lane ${lane}: plan ${plan.toFixed(1)} of ${want.toFixed(1)} (${(plan / want).toFixed(3)})`);
+    }
+    assert.ok(path.length > 500);
+  }
+});

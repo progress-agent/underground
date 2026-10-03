@@ -126,7 +126,7 @@ export function createOvergroundAirMap({ path } = {}) {
   function presentAt(s, laneSign = 0, out = {}) {
     if (intervals === null) openIntervals();
     raw(s, out);
-    if (laneSign) { const k = laneSign > 0 ? 1 : -1; out.x += out.hz * k * OG_LANE_M; out.z -= out.hx * k * OG_LANE_M; }
+    if (laneSign) { const k = laneSign > 0 ? 1 : -1; out.x += out.hz * k * OG_LANE_M; out.z -= out.hx * k * OG_LANE_M; lastLane = k; }
     out.lane = laneSign ? OG_LANE_M : 0;
     out.open = !!intervalAt(s);
     out.mapped = true; out.extra = 0; out.ts = clampS(s); out.run = null; out.bridged = false;
@@ -144,6 +144,24 @@ export function createOvergroundAirMap({ path } = {}) {
     return out;
   }
 
+  // The walker rides OG_LANE_M to one side of the track, so on a bend its plan path is shorter (the inside lane) or longer (the
+  // outside) than the track's own, and a walk measured on the centreline would run 6 % slow on a 45 m curve. The step is scaled by
+  // the offset curve's length per metre of centreline, 1 + e * kappa (e: the offset towards the left of +s, kappa: the turn of the
+  // +s heading a metre on, left-turning negative), so the camera's plan speed is the speed asked for.
+  let lastLane = 0;
+  const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const kp = {}, kq = {}, kr = {};
+  function laneScale(s) {
+    if (!lastLane) return 1;
+    const dl = 12;
+    raw(clampS(s - dl), kp); raw(clampS(s), kq); raw(clampS(s + dl), kr);
+    const x1 = kq.x - kp.x, z1 = kq.z - kp.z, x2 = kr.x - kq.x, z2 = kr.z - kq.z;
+    const l1 = Math.hypot(x1, z1), l2 = Math.hypot(x2, z2);
+    if (!(l1 > 1) || !(l2 > 1)) return 1;
+    const kappa = wrapPi(Math.atan2(z2, x2) - Math.atan2(z1, x1)) / ((l1 + l2) / 2);
+    return Math.min(1.5, Math.max(0.5, 1 + lastLane * OG_LANE_M * kappa));
+  }
+
   /**
    * The chord arc reached by moving d metres along the track: the path's own arc is the drawn track's, so s + d, NOT clamped
    * to the ends. The caller takes the distance from it (open-air-walk.js chordDistance) and advance() meets the end of the
@@ -151,7 +169,7 @@ export function createOvergroundAirMap({ path } = {}) {
    * millimetres whose target fell one rounding short of the junction, and the walker stood there for ever at full speed.
    */
   function trackToChord(s, dir, d) {
-    return s + (dir >= 0 ? 1 : -1) * Math.max(0, d);
+    return s + (dir >= 0 ? 1 : -1) * Math.max(0, d) / laneScale(s);
   }
 
   const ha = {}, hb = {};
