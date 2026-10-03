@@ -11,6 +11,8 @@
 //   pass       o-overground-pass.png
 //   barking    o-barking-riverside.png
 //   weak       o-weak-200.png and o-weak-200.json (4x CPU throttle, DPR 1, Automatic quality; Lioness at 200 m/s for 20 s)
+//   weakdistrict  o-weak-200-district-livebase.json: the same measure for the District, Elm Park toward Upminster, on a build without
+//                 the Overground (pass e0675d7's dev URL as <devUrl>): the context figure
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,7 +76,7 @@ const placeAt = (page, lineId, from, toward) => page.evaluate(([lineId, from, to
   const net = m.rebuildNetwork();
   m.openAir.ensureLine(net, lineId);
   const clean = (n) => n.replace(/ (Underground|DLR|Rail) Station$/, '').replace(/ Station$/, '');
-  const target = net.entrances.filter(en => en.names.includes(toward) && en.stops.some(x => x.lineId === lineId));
+  const target = net.entrances.filter(en => (en.names || [en.name]).includes(toward) && en.stops.some(x => x.lineId === lineId));
   let best = null;
   for (const p of net.paths) {
     if (p.lineId !== lineId) continue;
@@ -309,6 +311,30 @@ if (only.includes('weak')) {
   await snap(page, 'o-weak-200.png', JSON.stringify(summary));
   poses['o-weak-200.png'] = { ...(await poseOf(page)), summary, what: 'A frame at the end of the weak-setup ride: 4x CPU throttle, DPR 1, Automatic quality, Lioness at 200 m/s for 20 s from Kensal Green.' };
   console.log('errors', errs.length);
+  await page.close();
+}
+
+if (only.includes('weakdistrict')) {
+  const { page, errs } = await open(base, { throttle: 4 });
+  await enterPedestrian(page);
+  await placeAt(page, 'district', 'Elm Park', 'Hornchurch');
+  const r = await page.evaluate(async () => {
+    const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+    const ts = [];
+    ug.fpsControls.keys.add('w'); ug.fpsControls.keys.add('shift');
+    const t0 = performance.now();
+    while (performance.now() - t0 < 20000) ts.push(await new Promise((res) => window.__raf(res)));
+    ug.fpsControls.keys.delete('w'); ug.fpsControls.keys.delete('shift');
+    return { ts, arrivals: m.debug().arrivals.slice(-6).map(a => a.name), quality: window.__ug.renderQualityMode };
+  });
+  const dts = r.ts.slice(1).map((t, i) => t - r.ts[i]);
+  const secs = (r.ts.at(-1) - r.ts[0]) / 1000;
+  const sorted = dts.slice().sort((a, b) => a - b);
+  const summary = { frames: r.ts.length, seconds: +secs.toFixed(2), meanFps: +((r.ts.length - 1) / secs).toFixed(2), p95FrameMs: +sorted[Math.floor(sorted.length * 0.95)].toFixed(2),
+    medianFrameMs: +sorted[sorted.length >> 1].toFixed(2), maxFrameMs: +sorted.at(-1).toFixed(1), throttle: 4, dpr: 1, viewport: '1440x900', quality: r.quality,
+    line: 'district', from: 'Elm Park', toward: 'Hornchurch, Upminster Bridge... Upminster', arrivals: r.arrivals, build: base };
+  fs.writeFileSync(path.join(out, 'o-weak-200-district-livebase.json'), JSON.stringify({ summary }));
+  console.log('weakdistrict', JSON.stringify(summary), 'errors', errs.length);
   await page.close();
 }
 
