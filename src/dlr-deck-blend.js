@@ -19,11 +19,16 @@
 // moved; where both paths end at each other, the shorter one moves.
 
 export const RAISED = new Set(['viaduct', 'embankment']);
-// maxStepM: the flyover that leaves the deck at Canning Town starts 3.1 to 3.4 m above the lower track it leaves
-// (the verifier's capture said 1.5 m; the drawn heights say 3.1 at Master 1.1, 3.4 at Master 5). Larger steps are
-// not blended: past 6 m two different structures meet. rampPerM: a blend runs at least blendM and at least
-// rampPerM metres of track for each metre of step, so the climb off the deck stays under about 7 percent.
-export const DEFAULTS = { reachM: 12, blendM: 30, minStepM: 0.05, maxStepM: 6, rampPerM: 15 };
+// The step to close, in true metres: the flyover that leaves the deck at Canning Town starts 3.1 to 3.4 m above the
+// lower track it leaves (the verifier's capture said 1.5 m; the drawn heights say 3.1 at Master 1.1, 3.4 at Master 5).
+// Steps under minStepM are the ordinary few-decimetre disagreement between two decks at a junction and are left
+// alone (a first version blended every step from 5 cm: 26 places across the DLR, 107 samples). Steps over maxStepM
+// (a flyover end beside a lower viaduct it crosses, 4.7 m at the 8.8 m flyover over the 4.1 m viaduct) are two
+// different structures. minParallel: the end must leave the deck along it, within 35 degrees of the other path's
+// direction there (a path ending across another is a crossing, not a junction). rampPerM: a blend runs at least
+// blendM and at least rampPerM metres of track for each metre of step, so the climb off the deck stays under
+// about 7 percent.
+export const DEFAULTS = { reachM: 12, blendM: 30, minStepM: 1.0, maxStepM: 4.0, rampPerM: 15, minParallel: Math.cos(35 * Math.PI / 180) };
 
 const smoothstep = t => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
 const arcLength = path => { let m = 0; for (let i = 1; i < path.length; i++) m += Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z); return m; };
@@ -35,7 +40,7 @@ function nearestOnPath(path, x, z) {
     const a = path[i], b = path[i + 1], vx = b.x - a.x, vz = b.z - a.z, l2 = vx * vx + vz * vz || 1e-9;
     const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / l2));
     const d = Math.hypot(x - a.x - vx * t, z - a.z - vz * t);
-    if (!best || d < best.d) best = { d, y: a.y + (b.y - a.y) * t, i, t };
+    if (!best || d < best.d) best = { d, y: a.y + (b.y - a.y) * t, i, t, tx: vx, tz: vz };
   }
   if (!best) return null;
   const last = path.length - 2;
@@ -53,7 +58,7 @@ function nearestOnPath(path, x, z) {
  */
 export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
   if (!(unitsPerTrueM > 0)) throw new RangeError('blendDeckJoins needs unitsPerTrueM');
-  const { reachM, blendM: baseBlendM, minStepM, maxStepM, rampPerM } = { ...DEFAULTS, ...opts };
+  const { reachM, blendM: baseBlendM, minStepM, maxStepM, rampPerM, minParallel } = { ...DEFAULTS, ...opts };
   const list = paths.filter(p => p && p.length >= 2);
   const lengths = new Map(list.map(p => [p, arcLength(p)]));
   const out = [];
@@ -66,6 +71,9 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
       if (!best) continue;
       const stepM = (best.r.y - E.y) / unitsPerTrueM;
       if (Math.abs(stepM) < minStepM || Math.abs(stepM) > maxStepM) continue;
+      // The end must leave the deck along it: its heading into its own path against the other deck's direction there.
+      const nxt = end === 'end' ? P.at(-2) : P[1], hx = nxt.x - E.x, hz = nxt.z - E.z, hl = Math.hypot(hx, hz) || 1, tl = Math.hypot(best.r.tx, best.r.tz) || 1;
+      if (Math.abs((hx * best.r.tx + hz * best.r.tz) / (hl * tl)) < minParallel) continue;
       // Both ends: only the shorter path moves (the lower index when equal); the through deck never does.
       if (best.r.atEnd) {
         const lp = lengths.get(P), lq = lengths.get(best.Q);
@@ -82,6 +90,7 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
         if (arc >= blendM) break;
         P[i].y += shift * smoothstep(1 - arc / blendM);
         P[i].deckBlended = true;   // moved off the profile by design (tests/surface-rail.spec.js exempts exactly these)
+        P[i].deckBlendStepM = stepM;
         moved = arc;
       }
       out.push({ path: pi, end, stepM, lengthM: moved });
