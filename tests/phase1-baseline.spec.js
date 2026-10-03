@@ -85,7 +85,10 @@ test('Phase 1 baseline — 3 runs at origin with 30s settle', async ({ page }) =
     console.log(`\n========== RUN ${runNum}/3 ==========\n`);
 
     // Fresh page for each run
-    await page.goto('/');
+    // Sprint 02Oct26f (D-048 item 6): baked is the default, and with baked buildings and ground the source
+    // loader stops, so this measurement of the LIVE tile loader's plateau (tiles loaded, buildings counted)
+    // reads 0 on the default URL. It is pinned to ?buildings=live; nothing else in it changes.
+    await page.goto('/?buildings=live');
 
     // Wait for initial boot
     await page.waitForFunction(
