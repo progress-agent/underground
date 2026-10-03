@@ -52,6 +52,12 @@ import { attachSky } from './environment.js';
 import { createCloudSystem } from './clouds.js';
 // ── /s25:C ──
 import { createStationMarkers, cleanStationName, getLabelPolicy } from './stations.js';
+// ── s02:B ──
+import { setSurfaceLabelAnchor } from './stations.js';
+import { loadStationBuildings, stationBuildingState, buildStationBuildingsWhenReady, withStationHides, siteKeyOf as s02bSiteKeyOf,
+  stationExitPose as s02bStationExitPose, entrancesForBuilding as s02bEntrancesForBuilding, networksLine as s02bNetworksLine,
+  rayBlockedByBoxes as s02bRayBlockedByBoxes, rayBlockedByGround as s02bRayBlockedByGround } from './station-buildings.js';
+// ── /s02:B ──
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M, WATER_TOP_Y, updateWater } from './thames.js';
@@ -70,6 +76,17 @@ import { WATER_LIFT as S25E_WATER_LIFT } from './render-layers.js';
 // any existing suppression (airports).
 const withOffMapSuppression = (suppress) => (b) => isOffMapEdge(b) || !!suppress?.(b);
 // ── /sprint:B ──
+// ── s02:B ── Station buildings (D-048 items 2 to 4). The data starts loading at
+// module evaluation: the baked path awaits it before its first tile builds, the
+// live path hides what it can and rebuilds its tiles once the data lands.
+let stationBuildingsFailed = false;
+let stationBuildingsMesh = null;      // the meshes object (station-buildings.js createStationBuildingMeshes)
+const stationBuildingsPromise = loadStationBuildings().catch((err) => {
+  stationBuildingsFailed = true;
+  console.warn('Station buildings unavailable:', err.message);
+  return null;
+});
+// ── /s02:B ──
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { getInfraHazeStrength } from './infra-materials.js';
@@ -979,72 +996,10 @@ function startSurfaceRail() {
     console.warn('Could not create the surface railway:', err.message);
   });
 }
-// ── s01:R ── Surface station markers stand above the roof of any building box
-// over their centre (a station building or canopy over the platforms, in the
-// map's data, hid them from above: West Hampstead, Wembley Park and Lewisham
-// DLR among them). Once the city is built (baked: the payload done; live: the
-// tile manifest read), a poll every 0.5 s finds the building meshes that
-// arrived, left or changed since the last one, and reads again the markers
-// within their plan bounds. Fix round 1: the poll never stops. Live buildings
-// (the default) stream in by camera proximity and are disposed beyond it, so
-// a station whose tile arrives late (Hillingdon, Ealing Broadway, Wembley
-// Park when the visit starts in town) is lifted when its building appears and
-// set back on its track when the building goes; switching the buildings off
-// or the path over does the same.
-function s01rRoofHeightAt(x, z, r) {
-  const col = modeSystem?.collision; if (!col) return 0;
-  const scale = getBuildingHeightScale() || 1;
-  let h = 0;
-  for (const b of col.buildingsNear(x, z, r)) {
-    const dx = Math.max(b.minX - x, 0, x - b.maxX), dz = Math.max(b.minZ - z, 0, z - b.maxZ);
-    if (Math.hypot(dx, dz) > r) continue;
-    h = Math.max(h, (b.roofY - b.baseY) / (VERTICAL_EXAGGERATION * scale));
-  }
-  return h;
-}
-// Building mesh -> its instance count and plan bounds (metres) at the last poll.
-const s01rRoofMeshes = new Map();
-function s01rMeshBounds(mesh) {
-  const n = mesh.count | 0, bb = mesh.boundingBox;
-  // As the collision service reads them: the baked mesh's own box, else the
-  // instances (axis-aligned, [0] = side, [12] / [14] = x / z).
-  if (bb && Number.isFinite(bb.min?.x)) return { n, minX: bb.min.x, maxX: bb.max.x, minZ: bb.min.z, maxZ: bb.max.z };
-  const a = mesh.instanceMatrix.array;
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const o = i * 16, h = Math.abs(a[o]) * 0.5;
-    minX = Math.min(minX, a[o + 12] - h); maxX = Math.max(maxX, a[o + 12] + h);
-    minZ = Math.min(minZ, a[o + 14] - h); maxZ = Math.max(maxZ, a[o + 14] + h);
-  }
-  return { n, minX, maxX, minZ, maxZ };
-}
-function s01rRoofPoll() {
-  if (!surfaceRail || !modeSystem?.collision || !surfaceGeometryGroup) return;
-  const done = buildingsPath === 'baked' ? !!bakedBuilder?.isDone() : surfaceDataLoaded;
-  if (!done) return;
-  // The meshes the collision service reads (installModes' getBuildingMeshes).
-  const now = new Set(surfaceGeometryGroup.visible ? surfaceGeometryGroup.children.filter(c => c.isInstancedMesh
-    && (c.name?.startsWith('buildings-') || c.name?.startsWith('baked-buildings-'))) : []);
-  const changed = [];
-  for (const m of now) {
-    const was = s01rRoofMeshes.get(m);
-    if (was && was.n === (m.count | 0)) continue;
-    const b = s01rMeshBounds(m); s01rRoofMeshes.set(m, b); changed.push(b);
-    if (was) changed.push(was);
-  }
-  for (const [m, b] of s01rRoofMeshes) if (!now.has(m)) { s01rRoofMeshes.delete(m); changed.push(b); }
-  if (!changed.length) return;
-  const meshes = modeSystem.collision.sync();
-  // A marker reads boxes within MARKER_ROOF_REACH_M (2 m); 10 m is ample.
-  const near = (x, z) => changed.some(b => x >= b.minX - 10 && x <= b.maxX + 10 && z >= b.minZ - 10 && z <= b.maxZ + 10);
-  const t0 = performance.now(), pass = surfaceRail.liftMarkersOverRoofs(s01rRoofHeightAt, near);
-  surfaceRail.roofLift = { ...pass, meshes, changed: changed.length, passes: (surfaceRail.roofLift?.passes ?? 0) + 1,
-    ms: +(performance.now() - t0).toFixed(1), at: performance.now() };
-}
-setInterval(() => {
-  try { s01rRoofPoll(); } catch (err) { console.warn('surface markers over roofs:', err.message); }
-}, 500);
-// ── /s01:R ──
+// ── s02:B ── The s01:R roof lift (surface station markers lifted over building roofs) is
+// gone with the white spheres: every station is now a building, and its label hangs above
+// the building's roof (stations.js setSurfaceLabelAnchor, set below). ──
+// ── /s02:B ──
 function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
   // Fix round 2: the hit's face names the piece of track under the pointer;
   // the DLR's height is read there, as drawn (a shared stretch says so too).
@@ -1658,7 +1613,7 @@ const thamesDataPromise = loadThamesData();
             const mesh = createTileBuildings(
               filteredBuildings, getStructuralSurfaceY,
               VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file),
-              withOffMapSuppression(airportsGroup ? isAirportBuilding : null) // sprint:B
+              withStationHides(withOffMapSuppression(airportsGroup ? isAirportBuilding : null), 'live') // sprint:B s02:B
             );
             if (mesh) {
               mesh.name = `buildings-${tileEntry.file}`;
@@ -2070,6 +2025,7 @@ async function activateBakedBuildings() {
     landmarkDataPromise ||= fetchLandmarkFootprints().catch(err => { landmarkDataPromise = null; throw err; });
     const [payload, footprints] = await Promise.all([
       bakedPayload || fetchBakedBuildings(undefined, { airportFingerprint }), landmarkDataPromise,
+      stationBuildingsPromise, // s02:B: the station data must be ready before the first baked tile builds
     ]);
     bakedPayload = payload;
     bakedLoadMs = Math.round(performance.now() - t0);
@@ -2094,7 +2050,7 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
-      suppressBuilding: withOffMapSuppression(airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null), // sprint:B
+      suppressBuilding: withStationHides(withOffMapSuppression(airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null), 'baked'), // sprint:B s02:B
       onMesh: (mesh) => {
         bakedMeshes.push(mesh);
         // A switch during the incremental build must not mix both cities.
@@ -2627,7 +2583,7 @@ function initialiseOvergroundStations() {
   }
   for (const {id,colour,stations} of overgroundGroup.userData.stationSets) {
     for(const station of stations)station.lineCount=servedBy.get(cleanStationName(station.name))||1;
-    const stationsLayer=createStationMarkers({scene,stations,colour,size:6,labels:true,surfaceOnly:true});
+    const stationsLayer=createStationMarkers({scene,stations,colour,size:6,labels:true,surfaceOnly:true,draw:false}); // s02:B: no sphere
     stationsLayer.mesh.visible=stationsVisible;
     stationsLayer.setLabelsVisible(labelsVisible);
     lineShaftLayers.set(id,{stationsLayer});
@@ -2917,6 +2873,7 @@ async function buildNetworkMvp() {
             colour,
             size: 6.0,
             labels: true,
+            draw: false, // s02:B: the sphere retires (D-048 item 4); the station building and its label stand instead
           });
           const sv = lineStationsVisible.get(id) ?? stationsVisible;
           const lv = lineLabelsVisible.get(id) ?? labelsVisible;
@@ -3120,6 +3077,10 @@ const openingGate = createOpeningGate({
       }
       return _s24FootprintTiles();
     } },
+    // ── s02:B ──
+    { id: 'stations', label: 'Raising the stations', weight: 0.5,
+      check: () => stationBuildingsMesh ? true : (stationBuildingsFailed ? 'failed' : false) },
+    // ── /s02:B ──
     { id: 'tube', label: 'Tracing the tube lines', weight: 3,
       check: () => tubeStationsReady && !!unifiedShaftLayer && document.querySelector('.station-label') ? true : _s24TubeProgress },
     { id: 'reservoirs', label: 'Filling the reservoirs', weight: 0.5, check: () => _s24Or(!!reservoirsMesh, 'reservoirs') },
@@ -3236,10 +3197,23 @@ let _clearHoverForMotion = null;
   function pickStationUnderPointer(ev) {
     getMouseNdc(ev);
     raycaster.setFromCamera(mouse, camera);
+    // ── s02:B ── Above ground a station is its building (the spheres retired): the displayed prism of the
+    // building under the pointer (station-buildings.js pickRay; the merged geometry is authored at the unscaled
+    // height, so a mesh raycast would hit air above the roof at Master > 1). Below ground this answers null and
+    // the glass shaft (Tier 2) names the station.
+    if (stationBuildingsMesh?.group.visible) {
+      const gy = getStructuralSurfaceY({ x: camera.position.x, z: camera.position.z });
+      if (!Number.isFinite(gy) || camera.position.y > gy) {
+        const o = raycaster.ray.origin, d = raycaster.ray.direction;
+        const hit = stationBuildingsMesh.pickRay(o.x, o.y, o.z, d.x, d.y, d.z);
+        if (hit) return { name: hit.building.title, depthM: 0, network: 'building', networks: s02bNetworksLine(hit.building), building: hit.building };
+      }
+    }
+    // ── /s02:B ──
     // Check station markers from all line shaft layers
     _allStationMeshes.length = 0;
     for (const [, layers] of lineShaftLayers) {
-      if (layers.stationsLayer?.mesh?.visible) {
+      if (layers.stationsLayer?.mesh?.visible && !layers.stationsLayer.mesh.userData.retired) { // s02:B: retired spheres are not drawn
         _allStationMeshes.push(layers.stationsLayer.mesh);
       }
     }
@@ -3303,7 +3277,7 @@ let _clearHoverForMotion = null;
     }
 
     const depthM = station.depthM;
-    const depthLabel = station.network==='dlr' ? dlrLocationLabel(station.dlrProfile)
+    const depthLabel = station.network==='building' ? station.networks : station.network==='dlr' ? dlrLocationLabel(station.dlrProfile)
       : station.network==='overground' ? `London Overground · ${overgroundGroup.userData.registry.get(station.lineId).name} line` : depthM > 0 ? `${Math.round(depthM)}m below ground` : 'Surface station';
 
     tip.innerHTML = `<b>${cleanStationName(station.name)}</b><br/><span class="muted">${depthLabel}</span>`;
@@ -3876,6 +3850,7 @@ function setStationsVisible(v) {
   for (const [lineId, layers] of lineShaftLayers) {
     if (layers.stationsLayer?.mesh) layers.stationsLayer.mesh.visible = stationsVisible;
   }
+  stationBuildingsMesh?.setRoundelsVisible(stationsVisible); // s02:B: the toggle drives the roundels
   prefs.stationsVisible = stationsVisible;
   savePrefs(prefs);
 }
@@ -4017,6 +3992,56 @@ function getShareUrl(base = location.href) {
 
 // ---------- Animate ----------
 let lastFrameTime = null;
+// ── s02:B ── Station buildings: the meshes (built once the terrain and the data exist), the
+// label anchor, the late rebuild of live tiles, visibility. Called each frame from tick.
+let stationBuildingsBuilding = false, stationLateRebuilt = false;
+// What is drawn in front of a station building hides it from hover (fix round 1): the ground, the map's own boxes (live
+// and baked, at the displayed height) and the landmark models. Canonical world space, as the hover raycaster's rays.
+const s02bBoxMeshes = [], s02bOccRay = new THREE.Raycaster(), s02bOccOrigin = new THREE.Vector3(), s02bOccDir = new THREE.Vector3();
+function s02bOccluded(ox, oy, oz, dx, dy, dz, t, scale) {
+  if (s02bRayBlockedByGround((x, z) => getTerrainMeshSurfaceY({ x, z }), ox, oy, oz, dx, dy, dz, t)) return true;
+  if (surfaceGeometryGroup?.visible) {
+    s02bBoxMeshes.length = 0;
+    for (const c of surfaceGeometryGroup.children) if (c.isInstancedMesh && /^(baked-)?buildings-/.test(c.name || '')) s02bBoxMeshes.push(c);
+    if (s02bRayBlockedByBoxes(s02bBoxMeshes, ox, oy, oz, dx, dy, dz, t, scale)) return true;
+    if (landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
+      s02bOccRay.set(s02bOccOrigin.set(ox, oy, oz), s02bOccDir.set(dx, dy, dz));
+      s02bOccRay.far = Math.max(0, t - 0.75);
+      if (s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length) return true;
+    }
+  }
+  return false;
+}
+function s02bFrame() {
+  const idx = stationBuildingState.index;
+  if (!idx) return;
+  if (!stationLateRebuilt) {
+    stationLateRebuilt = true;
+    // Live tiles that built before the data landed drew boxes under the buildings: build them again.
+    if (stationBuildingState.hidden.missedBeforeReady > 0 && buildingsPath === 'live' && surfaceGeometryGroup) {
+      clearLiveBuildingMeshes();
+      resetLoadedTiles();
+    }
+  }
+  if (!stationBuildingsMesh && !stationBuildingsBuilding && terrain) {
+    stationBuildingsBuilding = true;
+    buildStationBuildingsWhenReady({ data: idx, getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }), VE: VERTICAL_EXAGGERATION }).then((m) => {
+      stationBuildingsMesh = m;
+      m.setOccluder(s02bOccluded);
+      m.group.visible = !surfaceGeometryGroup || surfaceGeometryGroup.visible;
+      scene.add(m.group);
+      m.setRoundelsVisible(stationsVisible);
+      setSurfaceLabelAnchor((name) => m.labelAnchor(name));
+    }).catch((err) => { stationBuildingsFailed = true; console.warn('Station buildings could not be built:', err.message); });
+  }
+  // The buildings stand in for the boxes they hid, so they are drawn exactly while the buildings are.
+  if (stationBuildingsMesh && surfaceGeometryGroup) {
+    const v = surfaceGeometryGroup.visible;
+    if (stationBuildingsMesh.group.visible !== v) stationBuildingsMesh.group.visible = v;
+  }
+}
+// ── /s02:B ──
+
 function tick(frameTime) {
   // Integrate against the display frame, not callback scheduling jitter.
   // GPU/DOM work can delay JS within a frame without changing its timestamp.
@@ -4261,6 +4286,7 @@ function tick(frameTime) {
     ? (_s24Viewport.w = renderer.domElement.clientWidth, _s24Viewport.h = renderer.domElement.clientHeight, _s24Viewport)
     : null;
   // ── /s24:R ──
+  s02bFrame(); // s02:B
   // Update station label projections for ALL lines
   let updateCallCount = 0;
   for (const [lineId, layers] of lineShaftLayers) {
@@ -4461,6 +4487,15 @@ modeSystem.ctx.isInsideM25 = isInsideM25;
 modeSystem.ctx.insideWalkBounds = s02HiddenGround.insideWalkBounds;
 Object.defineProperty(modeSystem.ctx, 'walkHoldBox', { get: () => s02HiddenGround.holdBox, enumerable: true, configurable: true });
 // ── /s02:T ──
+// ── s02:B ── The Pedestrian's contact, card and street exit read the station buildings through this getter
+// (null until the data and the meshes exist). It is a function so a later swap is seen.
+modeSystem.ctx.stationBuildings = () => {
+  const idx = stationBuildingState.index, m = stationBuildingsMesh;
+  if (!idx) return null;
+  return { index: idx, mesh: m, siteKeyOf: s02bSiteKeyOf, stationExitPose: s02bStationExitPose, entrancesForBuilding: s02bEntrancesForBuilding,
+    contactAt: (x, z, r) => idx.contactAt(x, z, r), distanceTo: (b, x, z) => idx.distanceTo(b, x, z), roofOf: (b) => m?.roofOf(b) ?? null };
+};
+// ── /s02:B ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map
@@ -4650,4 +4685,19 @@ if (import.meta.env.DEV) {
   window.__ug.shadowCache = shadowCache;
   window.__ug.isShown = isShown;
   // ── /s24:R ──
+  // ── s02:B ──
+  Object.defineProperty(window.__ug, 'stationBuildings', { enumerable: true, get: () => ({
+    get ready() { return !!stationBuildingsMesh; },
+    get data() { return stationBuildingState.index?.json ?? null; },
+    get index() { return stationBuildingState.index; },
+    get meshes() { return stationBuildingsMesh; },
+    siteKeyOf: s02bSiteKeyOf, stationExitPose: s02bStationExitPose, entrancesForBuilding: s02bEntrancesForBuilding,
+    contactAt: (x, z, r) => stationBuildingState.index?.contactAt(x, z, r) ?? null,
+    hidden: stationBuildingState.hidden,
+    get roundelsVisible() { return !!stationBuildingsMesh?.roundels.visible; },
+    setRoundelsVisible: (v) => stationBuildingsMesh?.setRoundelsVisible(v),
+    labelAnchor: (n) => stationBuildingsMesh?.labelAnchor(n) ?? null,
+    get stats() { return stationBuildingsMesh?.stats ?? null; },
+  }) });
+  // ── /s02:B ──
 }

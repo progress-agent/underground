@@ -15,8 +15,10 @@ test('the agreed setups and the five standard views plus arrival', () => {
 });
 
 test('s02:T: the Amersham view is selectable and not in the default set (the gate keeps its six)', () => {
-  assert.deepEqual(Object.keys(EXTRA_VIEWS), ['amersham']);
+  // Integration 02Oct26f: lane B adds kingsCross beside T's amersham; both stay outside the gate's six.
+  assert.deepEqual(Object.keys(EXTRA_VIEWS), ['amersham', 'kingsCross']);
   assert.ok(!('amersham' in VIEWS));
+  assert.ok(!('kingsCross' in VIEWS));
   assert.deepEqual(EXTRA_VIEWS.amersham, { p: [-32458, 3650, -16899], t: [-33658, 728, -17799] });
 });
 

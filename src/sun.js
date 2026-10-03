@@ -360,7 +360,7 @@ buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale
 
 // ── Shadow participation policy ─────────────────────────────────────────────
 
-const CAST_AND_RECEIVE_GROUPS = new Set(['landmarks', 'bridges']);
+const CAST_AND_RECEIVE_GROUPS = new Set(['landmarks', 'bridges', 'station-buildings']);
 const RECEIVE_GROUPS = new Set(['overground', 'm25Motorway', 'airports']);
 
 /**

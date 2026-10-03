@@ -457,13 +457,14 @@ export function createPedestrianMode(ctx) {
     return true;
   }
 
-  function startAscent(stop) {
+  function startAscent(stop, pose = null) {
     const ground = ctx.collision.groundHeightAt(stop.x, stop.z) ?? stop.surfaceY ?? ctx.camera.position.y;
     const c = ctx.camera.position;
     // Back through the cross passage from the bore to the foot of the shaft, then up.
     shaft = { dir: 'up', x0: stop.x, z0: stop.z, x1: stop.x, z1: stop.z, y: stop.platformY,
       targetY: ground + P.eye * VE, t: ALIGN_S, stop, groundY: ground,
-      passage: { x0: c.x, y0: c.y, z0: c.z, x1: stop.x, y1: stop.platformY, z1: stop.z, t: 0 } };
+      passage: { x0: c.x, y0: c.y, z0: c.z, x1: stop.x, y1: stop.platformY, z1: stop.z, t: 0 },
+      exitPose: pose }; // s02:B
     phase = 'shaft';
     tunnel = null;
     arrived = null; glide = null; halt = null; latch = null; // s30:P s01:P
@@ -486,6 +487,7 @@ export function createPedestrianMode(ctx) {
   function updateBody(dt, use, jump) {
     const m = readMove();
     lastEvents = [];
+    const s02bX = body.x, s02bZ = body.z; // s02:B
     stepBody(body, { forward: m.forward, right: m.right, yaw, pitch, jumpPressed: jump, jumpHeld: m.jumpHeld },
       dt, world, P, VE, lastEvents);
     // ── s02:T ── beyond the M25 the walker may walk the hidden ground (D-048 item 7); the only hold is a
@@ -501,11 +503,13 @@ export function createPedestrianMode(ctx) {
     }
     // ── /s02:T ──
     placeCamera(body.x, body.y + P.eye * VE, body.z);
+    contactStep(s02bX, s02bZ); // s02:B
 
     let text = null;
     if (body.state === 'ground') {
       const n = network();
       const ent = n ? nearestEntrance(n, body.x, body.z, ENTRANCE_RADIUS_M) : null;
+      const near = ent ? null : (sbApi()?.contactAt(body.x, body.z, ENTRANCE_RADIUS_M)?.building ?? null); // s02:B
       if (ent) {
         // s30:P E opens the platform chooser; E again (or Esc) closes it.
         text = card?.kind === 'shaft' ? `${cleanLabel(ent.name)}: choose a platform (1-9 or click) · E or Esc to stay`
@@ -514,8 +518,19 @@ export function createPedestrianMode(ctx) {
           if (card?.kind === 'shaft') closeCard();
           else openShaftCard(ent);
         }
-      } else if (card?.kind === 'shaft') {
+      } else if (near) {
+        // ── s02:B ── E within ENTRANCE_RADIUS_M of a station building (its footprint, not only the entrance point:
+        // at a big station the point can lie 100 m inside it) offers the building's card as an entrance does.
+        if (card?.kind === 'shaft' && card.contact && !buildingCardHeld()) closeCard(); // a contact card holds only by its building
+        else {
+          text = card?.kind === 'shaft' ? `${near.title}: choose a platform (1-9 or click) · E or Esc to stay` : `E: choose a platform at ${near.title}`;
+          if (use) { if (card?.kind === 'shaft') closeCard(); else openBuildingCard(near); }
+        }
+        // ── /s02:B ──
+      } else if (card?.kind === 'shaft' && !buildingCardHeld()) { // s02:B a contact card holds while the walker is by its building
         closeCard(); // walked away from the station
+      } else if (card?.kind === 'shaft' && card.building) { // s02:B
+        text = `${card.entrance?.name ?? 'Station'}: choose a platform (1-9 or click) · E or Esc to stay`;
       }
     } else if (body.state === 'swim') {
       text = 'Swimming · Space strokes up · W swims where you look · climb out at a bank';
@@ -578,6 +593,13 @@ export function createPedestrianMode(ctx) {
         const bore = pointAt(net.paths[shaft.stop.path], shaft.stop.s, {}, shaft.side || 0);
         shaft.passage = { x0: x, y0: shaft.y, z0: z, x1: bore.x, y1: bore.y, z1: bore.z, t: 0 };
         return;
+      } else if (shaft.exitPose) {
+        // ── s02:B ── at the top of the shaft: out to the building's street exit (an ease), not a landing at the shaft.
+        const pose = shaft.exitPose, from = ctx.camera.position.clone(), stop = shaft.stop;
+        body.x = shaft.x1; body.z = shaft.z1; body.y = shaft.groundY; body.vx = body.vy = body.vz = 0; body.state = 'ground';
+        startBuildingExit(stop, pose, from);
+        return;
+        // ── /s02:B ──
       } else {
         body.x = shaft.x1; body.z = shaft.z1; body.y = shaft.groundY;
         body.vx = body.vy = body.vz = 0; body.state = 'ground';
@@ -871,6 +893,99 @@ export function createPedestrianMode(ctx) {
     return net?.entrances.find(e => e.stops.includes(stop)) ?? null;
   }
 
+  // ── s02:B ── Station buildings: contact, the card, the street exit (D-048 item 4).
+  // Jordan: "touching a station building stops the walker and opens the platform card at
+  // once. 'Up to the street' puts the walker outside, facing the street, and the card
+  // re-arms only after a few metres' walk away." Data and lookups: src/station-buildings.js
+  // through ctx.stationBuildings() (null until the data exists).
+  const CONTACT_TRIGGER_M = 0.42;      // a footprint this close to the walker's centre is a contact
+  const CONTACT_PUSH_M = 0.36;         // the walker stops this far from a wall (BODY.radius 0.35 plus a hair)
+  const CONTACT_REARM_M = 5;           // the card re-arms once the walker is this much farther out than where it was latched
+  const CONTACT_CARD_KEEP_M = 8;       // a contact card stays open while the walker is within this of its building
+  const CONTACT_PLACE_M = 1;           // place() latches only when it lands this close (a teleport never opens a card)
+  const EXIT_NEAR_STOP_M = 600;        // the exit pose is used only for a building this near the stop
+  let latchB = null;                   // { key, d0 }: no contact card for this building until the walker is d0 + 5 m out
+  let lastContact = null;              // { key, d, latched }: the nearest footprint last frame (debug)
+  const sbApi = () => (typeof ctx.stationBuildings === 'function' ? ctx.stationBuildings() : null);
+  const sbDistance = (api, key, x, z) => { const b = api?.index.byKey.get(key); return b ? api.distanceTo(b, x, z) : Infinity; };
+
+  /** The street exit pose of a stop's station: { x, z, yaw, key, d0 } or null (no data, or no building near the stop). */
+  function exitPoseFor(stop) {
+    const api = sbApi();
+    if (!api) return null;
+    const b = api.index.buildingForName(stop.name);
+    if (!b?.exit) return null;
+    if (Math.hypot(b.exit.x - stop.x, b.exit.z - stop.z) > EXIT_NEAR_STOP_M) return null;
+    return { x: b.exit.x, z: b.exit.z, yaw: b.exit.yaw, key: b.key, d0: api.distanceTo(b, b.exit.x, b.exit.z) };
+  }
+
+  /** After the walker's move: stop at a station building's wall, open its card at the first touch, re-arm 5 m out. */
+  function contactStep(px, pz) {
+    const api = sbApi();
+    if (!api) { lastContact = null; return; }
+    if (latchB && sbDistance(api, latchB.key, body.x, body.z) >= latchB.d0 + CONTACT_REARM_M) latchB = null;
+    const hit = api.contactAt(body.x, body.z, 30);
+    lastContact = hit ? { key: hit.building.key, d: hit.d, latched: !!latchB && latchB.key === hit.building.key } : null;
+    if (!hit || body.state !== 'ground' || hit.d >= CONTACT_TRIGGER_M) return;
+    // (Only a walker on the ground touches: one in the air, over the roof by jetpack, is not into the wall. On a slope
+    // the building can stand partly below the street here, as the design's base is its lowest sample; the footprint
+    // is still the building, so touching it opens the card wherever the walker meets it.)
+    const moved = Math.hypot(body.x - px, body.z - pz) > 1e-6 || Math.hypot(body.vx, body.vz) > 0.05;
+    if (hit.d < CONTACT_PUSH_M) { body.x = hit.x + hit.nx * CONTACT_PUSH_M; body.z = hit.z + hit.nz * CONTACT_PUSH_M; }
+    body.vx = 0; body.vz = 0;
+    placeCamera(body.x, body.y + P.eye * VE, body.z);
+    if (moved && !card && (!latchB || latchB.key !== hit.building.key)) {
+      if (openBuildingCard(hit.building, true)) latchB = { key: hit.building.key, d0: CONTACT_PUSH_M };
+    }
+  }
+
+  /** The platform card for a station building: every network entrance whose name is one of the building's. */
+  function openBuildingCard(building, contact = false) {
+    const api = sbApi();
+    const n = network(true);
+    if (!api || !n) return false;
+    const ents = api.entrancesForBuilding(n, building);
+    const stops = [];
+    for (const e of ents) for (const st of e.stops) if (!stops.includes(st)) stops.push(st);
+    const entrance = { name: building.title, x: building.label.x, z: building.label.z, surfaceY: ents[0]?.surfaceY ?? null, stops };
+    for (const lineId of new Set(stops.map(st => st.lineId))) openAir.ensureLine(n, lineId);
+    let rows = platformRows(n, entrance, { tubeRoutes: ctx.tubeRoutes ?? new Map(), lineColour: colourOf })
+      .map(r => {
+        const surface = surfaceStop(r.stop);
+        const heading = surface ? openAir.headingOf(n.paths[r.stop.path], r.stop.s, r.dir) : r.heading;
+        return { ...r, kind: 'platform', surface, heading };
+      });
+    let kicker = rows.length && rows.every(r => r.surface) ? 'To the platforms' : 'Down to the platforms';
+    // An Overground-only building before lane O's network carries it: the card still opens, and a pick just closes it.
+    if (!rows.length) { rows = [{ label: 'No platforms on the walk here yet', kind: 'none', colour: null }]; kicker = 'Station'; }
+    openCard('shaft', { kicker, title: building.title, rows, extra: { entrance, building: building.key, contact } });
+    return true;
+  }
+
+  /** A card opened by contact stays while the walker is within CONTACT_CARD_KEEP_M of its building. */
+  function buildingCardHeld() {
+    const api = sbApi();
+    return !!(card?.building && api && sbDistance(api, card.building, body.x, body.z) <= CONTACT_CARD_KEEP_M);
+  }
+
+  /**
+   * "Up to the street" at a station with a building: an ease (STEP_S) from where the camera is to the
+   * building's exit pose on the ground, facing away from the building. The card then stays shut until
+   * the walker is d0 + 5 m out (latch).
+   */
+  function startBuildingExit(stop, pose, from) {
+    const ground = ctx.collision.groundHeightAt(pose.x, pose.z) ?? ctx.getTerrainY(pose.x, pose.z) ?? from.y - P.eye * VE;
+    step = { kind: 'exit', from: from.clone(), to: { x: pose.x, y: ground + P.eye * VE, z: pose.z }, fromYaw: yaw, toYaw: yaw + wrap(pose.yaw - yaw),
+      t: 0, stop, ground, off: null, fallback: false, pose: { x: pose.x, z: pose.z, yaw: pose.yaw }, building: pose.key, latch: { key: pose.key, d0: pose.d0 },
+      station: { x: stop.x, z: stop.z } };
+    phase = 'step';
+    tunnel = null; shaft = null; arrived = null; glide = null; halt = null; latch = null;
+    regime = 'bore';
+    hint(`Out to the street at ${cleanLabel(stop.name)}`);
+    return true;
+  }
+  // ── /s02:B ──
+
   function openArrivalCard(stop) {
     const n = net;
     const ent = entranceOf(stop);
@@ -983,8 +1098,12 @@ export function createPedestrianMode(ctx) {
       placeCamera(p.x, p.y, p.z);
       if (!surface) lastBore = { path: tunnel.path, s: tunnel.s, dir: tunnel.dir, side: tunnel.side };
     }
+    // ── s02:B ── the station building's street exit: outside the building, on the ground, facing the street.
+    const pose = exitPoseFor(stop);
+    if (pose && surface) { startBuildingExit(stop, pose, ctx.camera.position); return; }
+    // ── /s02:B ──
     if (surface) startSurfaceExit(stop);
-    else startAscent(stop);
+    else startAscent(stop, pose); // s02:B
   }
 
   /**
@@ -1062,6 +1181,7 @@ export function createPedestrianMode(ctx) {
       body.x = t.x; body.z = t.z; body.y = step.ground;
       body.vx = body.vy = body.vz = 0; body.state = 'ground';
       phase = 'body';
+      if (step.latch) latchB = { ...step.latch }; // s02:B no card until the walker is d0 + 5 m out
       hint(null);
     } else {
       tunnel = { ...step.pos };
@@ -1196,8 +1316,10 @@ export function createPedestrianMode(ctx) {
         glide: glide ? { from: glide.from, to: glide.to, t: glide.t } : null,
         halt: !!halt, latch,
         step: step ? { kind: step.kind, t: step.t, to: { ...step.to }, off: step.off ?? null, fallback: !!step.fallback,
+          pose: step.pose ? { ...step.pose } : null, building: step.building ?? null, // s02:B
           station: step.station ? { ...step.station } : null, stop: step.stop ? { name: cleanLabel(step.stop.name), path: step.stop.path, s: step.stop.s } : null } : null,
         openAir: openAir.debug(),
+        contact: lastContact ? { ...lastContact } : null, latchB: latchB ? { ...latchB } : null, // s02:B
         lastPass: lastPass ? { inside: !!lastPass.inside, insideSpeed: lastPass.insideSpeed ?? 0, rush: lastPass.rush ?? 0, rumble: lastPass.rumble ?? 0 } : null,
         // ── /s01:P ──
       };
@@ -1209,6 +1331,15 @@ export function createPedestrianMode(ctx) {
       enter = null; shaft = null; tunnel = null;
       card = null; chooser.close(); arrived = null; transfer = null; // s30:P
       glide = null; halt = null; latch = null; step = null; regime = 'bore'; openAir.clearCut(); // s01:P
+      // ── s02:B ── a teleport never opens a card: a landing inside a station building is moved out of it,
+      // and one at its wall is latched (re-armed 5 m out).
+      latchB = null;
+      const sbp = sbApi()?.contactAt(x, z, CONTACT_PLACE_M);
+      if (sbp) {
+        if (sbp.d < CONTACT_PUSH_M) { x = sbp.x + sbp.nx * CONTACT_PUSH_M; z = sbp.z + sbp.nz * CONTACT_PUSH_M; }
+        latchB = { key: sbp.building.key, d0: Math.max(sbp.d, CONTACT_PUSH_M) };
+      }
+      // ── /s02:B ──
       settleAt(x, z, Infinity);
       phase = 'body';
       placeCamera(body.x, body.y + P.eye * VE, body.z);

@@ -63,6 +63,23 @@ const countOffMapPayload = async (page) => page.evaluate(async () => {
   return off;
 });
 
+/** s02:B: baked records (not beyond the map edge) whose centre is inside a station building's footprint: the boxes
+ * the station buildings stand in for (D-048 item 2). Counted independently of the build, from the raw payload and the
+ * tracked footprints, so a station hide is its own expected category and never hides inside another. */
+const countStationHidesPayload = async (page) => page.evaluate(async () => {
+  const { parseBakedBuildings, BAKED_URL } = await import('/src/baked-buildings.js');
+  const { isOffMapEdge } = await import('/src/m25-edge.js');
+  await window.__ug.stationBuildings.index;
+  const idx = window.__ug.stationBuildings.index;
+  const payload = parseBakedBuildings(await (await fetch(BAKED_URL)).arrayBuffer());
+  let n = 0;
+  for (const t of payload.tiles) for (let i = 0, o = t.offset; i < t.count; i++, o += 10) {
+    const x = t.minX + payload.view.getUint16(o, true) * 0.1, z = t.minZ + payload.view.getUint16(o + 2, true) * 0.1;
+    if (!isOffMapEdge({ x, z }) && idx.hidesBox({ x, z })) n++;
+  }
+  return n;
+});
+
 async function bootLive(page) {
   await page.goto('/?buildings=live');
   await page.waitForFunction(
@@ -99,7 +116,11 @@ test('baked path places buildings where the live path places them', async ({ pag
   const offMap = await countOffMapPayload(page);
   expect(offMap, 'map-edge suppression should remove only a sliver').toBeGreaterThan(0);
   expect(offMap).toBeLessThan(500);
-  expect(stats.buildings, 'not every on-map baked building became an instance').toBe(stats.buildingsTotal - offMap);
+  // s02:B: expected = total - off-map - station hides (the boxes under a station building, their own category).
+  const stationHides = await countStationHidesPayload(page);
+  expect(stationHides, 'station hides: the boxes under the station buildings').toBeGreaterThan(200);
+  expect(await page.evaluate(() => window.__ug.stationBuildings.hidden.baked), 'the app hid exactly those').toBe(stationHides);
+  expect(stats.buildings, 'not every on-map baked building became an instance').toBe(stats.buildingsTotal - offMap - stationHides);
 
   const baked = await page.evaluate(collect, WINDOW_M);
   expect(baked.length).toBeGreaterThan(1000);
@@ -119,7 +140,8 @@ test('baked path places buildings where the live path places them', async ({ pag
     const inSuppressionDisc = (x, z) => sites.find(s =>
       Math.hypot(x - s.x, z - s.z) <= s.suppressRadiusM);
 
-    let matched = 0, missingSuppressed = 0, missingUnexplained = 0, displaced = 0, ambiguous = 0;
+    let matched = 0, missingSuppressed = 0, missingStationHidden = 0, missingUnexplained = 0, displaced = 0, ambiguous = 0;
+    const sbIdx = window.__ug.stationBuildings.index; // s02:B
     const worst = { pos: 0, y: 0, h: 0, side: 0 };
     const unexplained = [], displacedPairs = [];
     const perSite = {};
@@ -145,6 +167,7 @@ test('baked path places buildings where the live path places them', async ({ pag
       if (!best || bestD > tol) {
         const site = inSuppressionDisc(L[0], L[2]);
         if (site) { missingSuppressed++; perSite[site.id] = (perSite[site.id] || 0) + 1; }
+        else if (sbIdx.hidesBox({ x: L[0], z: L[2] })) missingStationHidden++; // s02:B: a live box under a station building the baked path hid
         else {
           missingUnexplained++;
           if (unexplained.length < 8) unexplained.push({ x: +L[0].toFixed(1), z: +L[2].toFixed(1), side: +L[3].toFixed(2), h: +L[4].toFixed(2), nearest: Number.isFinite(bestD) ? +bestD.toFixed(3) : null });
@@ -168,7 +191,7 @@ test('baked path places buildings where the live path places them', async ({ pag
         });
       }
     }
-    return { live: live.length, baked: baked.length, matched, missingSuppressed, perSite,
+    return { live: live.length, baked: baked.length, matched, missingSuppressed, missingStationHidden, perSite,
              missingUnexplained, unexplained, ambiguous, displaced, displacedPairs, worst };
   }, [live, baked, TOL_M, LANDMARKS.map(l => ({ id: l.id, x: l.x, z: l.z, suppressRadiusM: l.suppressRadiusM })), 5]);
 
@@ -177,7 +200,7 @@ test('baked path places buildings where the live path places them', async ({ pag
   // Landmark carve-outs are the compiler doing its job and are counted, not
   // tolerated: they are the reason the baked city currently has bald patches at
   // the ten named sites, and they close when the models land.
-  const explained = report.matched + report.missingSuppressed;
+  const explained = report.matched + report.missingSuppressed + report.missingStationHidden;
   const rate = explained / report.live;
   expect(rate, `${(rate * 100).toFixed(3)}% of live buildings accounted for; ${report.missingUnexplained} unexplained`).toBeGreaterThan(0.999);
   expect(report.worst.pos, 'plan position drifted past the quantisation bound').toBeLessThanOrEqual(TOL_M);
@@ -198,7 +221,8 @@ test('baked path survives a round trip back to live and forward again', async ({
   await page.waitForFunction(() => window.__ug.bakedStats?.tilesBuilt >= window.__ug.bakedStats?.tilesTotal,
     { timeout: 60000 });
   const bakedCount = await page.evaluate(() => window.__ug.buildingInstanceCount);
-  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal) - await countOffMapPayload(page));
+  // s02:B: minus the station hides (their own category).
+  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal) - await countOffMapPayload(page) - await countStationHidesPayload(page));
 
   // Back to live. Tiles loaded while baked was active hold no building meshes,
   // so resetLoadedTiles() has to send them round the arrival path again. This

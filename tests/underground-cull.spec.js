@@ -38,7 +38,7 @@ test.beforeAll(async ({ browser }) => {
     && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal
     && window.__ug.groundReady && window.__ug.economies && window.__ug.scene.getObjectByName('tideway-whirlpools')?.children.length
     && window.__ug.overground?.userData.stationsAttached && window.__ug.surfaceRail?.stationLayers.size > 0
-    && [...window.__ug.surfaceRail.stationLayers.values()].every(l => l.stationsLayer.mesh.parent),
+    && window.__ug.stationBuildings?.ready, // s02:B: the station buildings are what stand now; the spheres are never in the scene
   null, { timeout: 180000 });
   await page.evaluate(() => { window.__ug.setRenderQualityMode('manual'); window.__ug.renderQuality.set({ scale: 1, samples: 4 }); });
 });
@@ -78,32 +78,35 @@ test('underground and in the river everything is drawn', async () => {
   expect(await page.evaluate(() => [window.__ug.aboveGroundView, window.__ug.undergroundCull.status.hidden])).toEqual([false, 0]);
 });
 
-test('the whirlpools and the surface station markers are never in the set', async () => {
+// s02:B (D-048 item 4): the white spheres retired, so the D-040 carve-out for surfaceOnly station markers
+// (six Overground layers and nine surface-rail layers, 15 in all) became "station buildings are never in the set".
+// The six + nine layers still exist as data (userData.surfaceOnly stays true) but are never added to the scene.
+test('the whirlpools and the station buildings are never in the set; no station-markers object is in the scene', async () => {
   const c = await page.evaluate(() => {
     const u = window.__ug, set = u.undergroundCull.collect();
     const whirl = u.scene.getObjectByName('tideway-whirlpools');
-    const surfaceMarkers = u.scene.children.filter(o => o.userData?.kind === 'station-markers' && o.userData.surfaceOnly);
+    const group = u.scene.getObjectByName('station-buildings');
     const overgroundIds = u.overground.userData.stationSets.map(s => s.id);
     const overgroundMarkers = overgroundIds.map(id => u.lineShaftLayers.get(id)?.stationsLayer.mesh);
     const railMarkers = [...u.surfaceRail.stationLayers.values()].map(l => l.stationsLayer.mesh);
-    return { whirlIn: set.includes(whirl) || set.some(o => o === whirl?.parent), surface: surfaceMarkers.length, surfaceIn: surfaceMarkers.some(m => set.includes(m)),
-      overground: overgroundMarkers.filter(m => m?.userData.surfaceOnly && surfaceMarkers.includes(m)).length,
-      rail: railMarkers.filter(m => m.userData.surfaceOnly && surfaceMarkers.includes(m)).length, railLayers: u.surfaceRail.stationLayers.size,
-      tubeMarkersIn: set.filter(o => o.userData?.kind === 'station-markers').length };
+    let markersInScene = 0; u.scene.traverse(o => { if (o.userData?.kind === 'station-markers') markersInScene++; });
+    return { whirlIn: set.includes(whirl) || set.some(o => o === whirl?.parent),
+      groupIn: set.includes(group) || set.some(o => o.name?.startsWith('station-buildings')), groupDirect: group?.parent === u.scene, groupDrawn: group?.visible,
+      overground: overgroundMarkers.filter(m => m?.userData.surfaceOnly && m.userData.retired).length,
+      rail: railMarkers.filter(m => m.userData.surfaceOnly && m.userData.retired).length, railLayers: u.surfaceRail.stationLayers.size,
+      markersInScene, tubeMarkersIn: set.filter(o => o.userData?.kind === 'station-markers').length };
   });
   expect(c.whirlIn).toBe(false);
-  // Was a single pin of 6 (the six Overground layers). The six are pinned as
-  // before; D-041 adds one surfaceOnly layer per Tube or DLR line with an
-  // open-air station of its own, one marker per station (nine: not the
-  // Victoria or the Waterloo & City, wholly in tunnel, nor the Hammersmith &
-  // City, whose open-air stops are all Circle, District or Metropolitan stops
-  // too), and the total is exactly the two.
+  expect(c.groupIn).toBe(false);
+  expect(c.groupDirect && c.groupDrawn).toBe(true);
+  // The six Overground layers and the nine surface-rail layers (not the Victoria or the Waterloo & City, wholly
+  // in tunnel, nor the Hammersmith & City, whose open-air stops are all Circle, District or Metropolitan stops
+  // too) are pinned as before, as retired data: never drawn, never in the scene.
   expect(c.overground).toBe(6);
   expect(c.rail).toBe(c.railLayers);
   expect(c.railLayers).toBe(9);
-  expect(c.surface).toBe(6 + 9);
-  expect(c.surfaceIn).toBe(false);
-  expect(c.tubeMarkersIn).toBeGreaterThanOrEqual(12);
+  expect(c.markersInScene).toBe(0);
+  expect(c.tubeMarkersIn).toBe(0);
 });
 
 test('from above ground, hover still reads the station below', async () => {

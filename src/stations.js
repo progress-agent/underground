@@ -40,6 +40,19 @@ let _accepted = [];
 let _measureContext;
 let _fontReady = false;
 
+// ── s02:B ── Surface labels hang above the station's building (D-047
+// rail-overground-markers: "the label hanging in the air above the station
+// marker should indeed be elevated above the building"). main.js registers a
+// function from the station buildings: fn(cleanName) -> { x, z, roofY, corners }
+// (the label point, the roof's canonical Y at the current Structure scale, the
+// four corners of the footprint's bounding rectangle) or null.
+let _surfaceLabelAnchor = null;
+export function setSurfaceLabelAnchor(fn) { _surfaceLabelAnchor = typeof fn === 'function' ? fn : null; }
+/** Screen clearance between a label's bottom edge and the highest projected roof point (px). */
+export const LABEL_ROOF_CLEAR_PX = 8;
+const _anchorPt = new THREE.Vector3();
+// ── /s02:B ──
+
 export function stationApproachScale(distance) {
   const t = THREE.MathUtils.clamp((1400 - distance) / 1200, 0, 1);
   return 1 + t * t * (3 - 2 * t);
@@ -209,6 +222,7 @@ export function createStationMarkers({
   size = 1.0,
   labels = true,
   surfaceOnly = false,
+  draw = true,       // s02:B: false retires the sphere drawing (D-048 item 4); the mesh, its data and the labels stay
 }) {
   // ---- 3D markers (fast): InstancedMesh spheres ----
   const geo = new THREE.SphereGeometry(size, 10, 10);
@@ -228,6 +242,7 @@ export function createStationMarkers({
   mesh.userData.kind = 'station-markers';
   mesh.userData.surfaceOnly = surfaceOnly; // Overground markers: drawn from above ground (underground-cull.js)
   mesh.userData.stations = stations; // Store for raycasting lookup
+  mesh.userData.retired = !draw; // s02:B: never added to the scene
 
   const dummy = new THREE.Object3D();
   for (let i = 0; i < stations.length; i++) {
@@ -236,7 +251,7 @@ export function createStationMarkers({
     mesh.setMatrixAt(i, dummy.matrix);
   }
   mesh.instanceMatrix.needsUpdate = true;
-  scene.add(mesh);
+  if (draw) scene.add(mesh);
 
   // ---- Dual HTML label system ----
   // Surface labels: project at each station terrain surface, visible above ground
@@ -350,6 +365,7 @@ export function createStationMarkers({
       const st = stations[i];
       const priority = el._priority || 0;
 
+      if (!el._cleanName) el._cleanName = cleanStationName(st.name);
       // Cheap 3D pre-cull BEFORE any projection: altitude priority + distance.
       // Per-priority reach: singles cull sooner, termini/hubs reach further
       // (capped so the boosted reach stays inside the fog).
@@ -363,11 +379,31 @@ export function createStationMarkers({
 
       // Project station XZ at terrain surface (or Y=0 fallback)
       tmpSurface.set(st.pos.x, st.surfaceY ?? 0, st.pos.z);
-      tmpSurface.project(camera);
-      if (tmpSurface.z > 1) { hideLabel(el); continue; }
+      // ── s02:B ── above the station building's roof when it has one: x from the label point,
+      // y from the highest projected roof point (the anchor or a corner of the footprint's
+      // bounding rectangle), less the label's half height and LABEL_ROOF_CLEAR_PX.
+      let roofTopY = null;
+      const anchor = _surfaceLabelAnchor ? _surfaceLabelAnchor(el._cleanName) : null;
+      if (anchor) {
+        tmpSurface.set(anchor.x, anchor.roofY, anchor.z);
+        tmpSurface.project(camera);
+        if (tmpSurface.z > 1) { hideLabel(el); continue; }
+        roofTopY = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+        for (const c of anchor.corners) {
+          _anchorPt.set(c[0], anchor.roofY, c[1]).project(camera);
+          if (_anchorPt.z > 1) continue;
+          const cy = (1 - (_anchorPt.y * 0.5 + 0.5)) * h;
+          if (cy < roofTopY) roofTopY = cy;
+        }
+      } else {
+        tmpSurface.project(camera);
+        if (tmpSurface.z > 1) { hideLabel(el); continue; }
+      }
+      // ── /s02:B ──
 
       const x = (tmpSurface.x * 0.5 + 0.5) * w;
-      const y = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+      let y = (1 - (tmpSurface.y * 0.5 + 0.5)) * h;
+      if (roofTopY !== null) y = roofTopY - (el._baseFontPx * 0.6 + LABEL_ROOF_CLEAR_PX); // s02:B (font size: refined below)
       if (x < -40 || x > w + 40 || y < -20 || y > h + 20) { hideLabel(el); continue; }
 
       const alpha = d <= fadeStart ? 1.0
@@ -376,7 +412,10 @@ export function createStationMarkers({
       // actually drawn, not platform depth, for perceptual approach distance.
       tmpSurface.set(st.pos.x, st.surfaceY ?? 0, st.pos.z).applyMatrix4(camera.matrixWorldInverse);
       const visualDistance=tmpSurface.length();
-      placeLabel(el,x,y,alpha,stationLabelFont(visualDistance,el._baseFontPx),visualDistance);
+      const fontPx = stationLabelFont(visualDistance,el._baseFontPx);
+      // s02:B the clearance uses the font actually drawn this frame (it grows on approach)
+      if (roofTopY !== null) y = roofTopY - (fontPx * 0.6 + LABEL_ROOF_CLEAR_PX);
+      placeLabel(el,x,y,alpha,fontPx,visualDistance);
     }
   }
 

@@ -58,6 +58,28 @@ buildingMat.onBeforeCompile = (shader) => {
 buildingMat.customProgramCacheKey = () => 'building-height-scale';
 
 /**
+ * s02:B: the building height law for a merged, non-instanced mesh (the station
+ * buildings). The geometry is authored canonical (true metres x VE) with a
+ * per-vertex `aBaseY`; the vertex shader scales the height above that base by
+ * the SAME uniform the boxes use (`uHeightScale`, 1 / Master), so a station
+ * building and a box of equal true height stay equal at every Master. Chains
+ * any existing onBeforeCompile; `extend(shader)` may add more.
+ */
+export function patchBuildingHeight(material, { key = 'merged', extend = null } = {}) {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = function (shader, renderer) {
+    if (previous) previous.call(this, shader, renderer);
+    shader.uniforms.uHeightScale = heightScaleUniform;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uHeightScale;\nattribute float aBaseY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed.y = aBaseY + ( transformed.y - aBaseY ) * uHeightScale;');
+    if (extend) extend(shader);
+  };
+  material.customProgramCacheKey = () => `building-height-base:${key}`;
+  return material;
+}
+
+/**
  * Live building-height multiplier. 1.0 = as built (VE-scaled); 0.2 with VE=5
  * gives true real-world height. Free — one uniform, no geometry touched.
  */
