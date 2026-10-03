@@ -56,8 +56,17 @@ export const RULES = Object.freeze({
   minBuildingAreaM2: 80, bigAreaM2: 5000, nameRadiusM: 150, nameFarRadiusM: 400, distRadiusM: 150, distLowConfM: 60, distMinAreaM2: 200,
   thamesFraction: 0.1, heightMin: 6, heightMax: 30, heightDefault: 10,
   smallPickM2: 200, riseClearM: 4, pavilion: { w: 16, d: 12, h: 7 }, placementClearM: 1.5, viaductOffsetM: 12.5, viaductMinDeckM: 4.5,
-  frontMinM: 6, frontProbeM: 3, boxClearM: 0.5, exitOutM: 6,
-  roundel: { wallFrac: 0.8, wallMaxD: 12, fitFrac: 0.85, roofShortFrac: 0.6, roofEdgeFrac: 1.8, roofMaxD: 80, proud: 0.05, maxPerFront: 6, maxPerBuilding: 32 },
+  frontMinM: 6, frontProbeM: 3, boxClearM: 0.5, exitOutM: 6.5,
+  // Wall roundels (fix round 1): the ring stands on the street, not at half the wall. `designMaster` is the Master the
+  // ground is stretched to when a roundel's height above the base (`yM`) is fixed (the terrain's relief above a building's
+  // base grows with Master while the building does not; 1.1 is the default). The runtime lifts or lowers each ring with the
+  // Master so it keeps its clearance from the street (`gM`, the street's rise above the base at Master 1, is in the data).
+  // `wallMaxD` is 6 m so the whole
+  // bar and name are in the walker's 40 degree view from the exit (6.5 m out, eye 1.7 m): a 12 m ring centred at 7 m
+  // showed only its lower rim there. `groundOffM` samples the street outside a wall at these distances; `clearM` is the
+  // ring's clearance above the highest street under it; `minRingD` the smallest ring.
+  roundel: { wallFrac: 0.8, wallMaxD: 6, fitFrac: 0.85, roofShortFrac: 0.6, roofEdgeFrac: 1.8, roofMaxD: 80, proud: 0.05, maxPerFront: 6, maxPerBuilding: 32,
+    designMaster: 1.1, clearM: 0.4, groundOffM: [0.05, 1, 3], minRingD: 3.4 },
 });
 const TERRAIN_BNG = [490000, 151093.75, 560000, 205000]; // [minE, minN, maxE, maxN], the terrain grid
 const NETS = ['dlr', 'og', 'tube'];
@@ -193,10 +202,12 @@ export function parseOverpass(answer) {
 
 /**
  * @param {{ sites: Map, overpass: object, boxes: object[], bakedSha: string, overpassSha: string, dlrTrack: number[][][],
- *           docks?: object[], inThames?: (x,z)=>boolean }} src
+ *           docks?: object[], inThames?: (x,z)=>boolean, riseOf?: (ring)=>number|null, groundOf?: (x,z)=>number|null }} src
+ *   `groundOf` is the app's ground in TRUE metres at (x, z) (the structural surface over VE); with it a wall roundel is
+ *   lifted clear of the street in front of it and a building is made tall enough to carry one on its high side.
  * @returns {{ json: object, review: object[], counts: object, hidden: number }}
  */
-export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null }) {
+export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null, groundOf = null }) {
   const { blds, areas, ents } = parseOverpass(overpass);
   const R = RULES;
   const siteList = [...sites.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
@@ -415,29 +426,6 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     for (const b of rec.hides) if (!b.hidden) { b.hidden = true; hiddenCount++; }
   }
 
-  // ── Heights ──
-  for (const rec of outlineRecs) {
-    const tags = rec.osm.tags, area = rec.osm.area;
-    const matched = rec.hides.filter(q => q.side * q.side >= 0.5 * area && q.side * q.side <= 2 * area)
-      .sort((a, b) => Math.abs(a.side * a.side - area) - Math.abs(b.side * b.side - area) || a.x - b.x || a.z - b.z)[0];
-    let h, src;
-    const tagH = parseFloat(String(tags.height ?? '').replace(',', '.'));
-    const lv = parseFloat(tags['building:levels']);
-    if (matched && matched.h > 0) { h = matched.h; src = 'box'; }
-    else if (Number.isFinite(tagH) && tagH > 0) { h = tagH; src = 'height-tag'; }
-    else if (Number.isFinite(lv) && lv > 0) { h = lv * 3.2; src = 'levels'; }
-    else { h = R.heightDefault; src = 'default'; }
-    h = Math.min(R.heightMax, Math.max(R.heightMin, h));
-    // A building on a slope is buried on its high side (its base is the lowest ground under it): 7 of the 396, all big
-    // termini (Waterloo, Victoria, King's Cross, Euston, Paddington...), had the street above their roof at one wall.
-    // Where the ground rises more than the building is tall less RISE_CLEAR_M, it is made as tall as the rise plus that,
-    // never above heightMax, so its high-side wall still stands RISE_CLEAR_M above the street.
-    const rise = riseOf ? riseOf(rec.outline) : null;
-    if (rise !== null && rise + R.riseClearM > h) { h = Math.min(R.heightMax, rise + R.riseClearM); src += '+rise'; }
-    rec.height = r2(h);
-    rec.heightSource = src;
-  }
-
   // ── Fronts, roundels and the exit (design sections 3 and 6) ──
   const footGrid = createFootprintGrid(footprints, 32);
   const remainingBoxes = boxes.filter(b => !b.hidden);
@@ -463,6 +451,77 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     }
     return out;
   };
+  // The ground, relative to a building's base, in true metres at the design Master (see RULES.roundel.designMaster).
+  const RK = R.roundel;
+  const widthPerD = ROUNDEL.width / (2 * ROUNDEL.outerR);
+  const baseOf = (rec) => {
+    if (!groundOf) return 0;
+    let m = Infinity;
+    for (const [x, z] of [...rec.ring, centroid(rec.ring)]) { const y = groundOf(x, z); if (Number.isFinite(y) && y < m) m = y; }
+    return Number.isFinite(m) ? m : 0;
+  };
+  /** The highest ground (above the base, at the design Master) in front of a front between s0 and s1 metres along it. */
+  const frontGround = (rec, f, s0, s1) => {
+    const ux = (f.b[0] - f.a[0]) / f.L, uz = (f.b[1] - f.a[1]) / f.L, n = Math.max(2, Math.ceil((s1 - s0) / 2));
+    let m = -Infinity;
+    for (let i = 0; i <= n; i++) {
+      const s = s0 + (s1 - s0) * i / n;
+      for (const off of RK.groundOffM) {
+        const y = groundOf(f.a[0] + ux * s + f.n[0] * off, f.a[1] + uz * s + f.n[1] * off);
+        if (Number.isFinite(y)) m = Math.max(m, (y - rec.baseM) * RK.designMaster);
+      }
+    }
+    return Number.isFinite(m) ? Math.max(0, m) : 0;
+  };
+  /** The slots a front carries roundels in: k of them evenly spaced, each with its centre (s) and half length (hl). */
+  const slotsOf = (f) => {
+    const k = f.L >= 60 ? Math.min(RK.maxPerFront, 1 + Math.floor((f.L - 20) / 40)) : 1;
+    return { k, Dfit: Math.min(RK.wallMaxD, RK.fitFrac * (f.L / k) / widthPerD) };
+  };
+  const highestRoundelGround = (rec) => {
+    let m = 0;
+    for (const f of rec.fronts) {
+      const { k, Dfit } = slotsOf(f);
+      for (let j = 0; j < k; j++) {
+        const c = f.L * (j + 0.5) / k, half = Dfit * widthPerD / 2;
+        m = Math.max(m, frontGround(rec, f, Math.max(0, c - half), Math.min(f.L, c + half)));
+      }
+    }
+    return m;
+  };
+  for (const rec of buildingsById.values()) { rec.baseM = baseOf(rec); rec.fronts = frontsOf(rec); }
+
+  // ── Heights ──
+  for (const rec of outlineRecs) {
+    const tags = rec.osm.tags, area = rec.osm.area;
+    const matched = rec.hides.filter(q => q.side * q.side >= 0.5 * area && q.side * q.side <= 2 * area)
+      .sort((a, b) => Math.abs(a.side * a.side - area) - Math.abs(b.side * b.side - area) || a.x - b.x || a.z - b.z)[0];
+    let h, src;
+    const tagH = parseFloat(String(tags.height ?? '').replace(',', '.'));
+    const lv = parseFloat(tags['building:levels']);
+    if (matched && matched.h > 0) { h = matched.h; src = 'box'; }
+    else if (Number.isFinite(tagH) && tagH > 0) { h = tagH; src = 'height-tag'; }
+    else if (Number.isFinite(lv) && lv > 0) { h = lv * 3.2; src = 'levels'; }
+    else { h = R.heightDefault; src = 'default'; }
+    h = Math.min(R.heightMax, Math.max(R.heightMin, h));
+    // A building on a slope is buried on its high side (its base is the lowest ground under it): 7 of the 396, all big
+    // termini (Waterloo, Victoria, King's Cross, Euston, Paddington...), had the street above their roof at one wall.
+    // Where the ground rises more than the building is tall less RISE_CLEAR_M, it is made as tall as the rise plus that,
+    // never above heightMax, so its high-side wall still stands RISE_CLEAR_M above the street.
+    const rise = riseOf ? riseOf(rec.outline) : null;
+    const riseM = rise === null ? null : rise * RK.designMaster;
+    if (riseM !== null && riseM + R.riseClearM > h) { h = Math.min(R.heightMax, riseM + R.riseClearM); src += '+rise'; }
+    // ... and tall enough for a roundel on the highest street in front of any walkable front (a ring of at least
+    // minRingD needs minRingD / wallFrac of wall above that street).
+    if (groundOf) {
+      const need = highestRoundelGround(rec) + RK.minRingD / RK.wallFrac + 0.05;
+      if (need > h) { h = Math.min(R.heightMax, need); if (!src.endsWith('+rise')) src += '+rise'; }
+    }
+    rec.height = r2(h);
+    rec.heightSource = src;
+  }
+
+
   const ringKinds = (rec) => {
     const nets = new Set(rec.sites.flatMap(s => [...s.nets]));
     rec.nets = NETS.filter(n => nets.has(n));
@@ -471,10 +530,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     if (nets.has('og')) return { rings: ['overground'], dual: false };
     return { rings: ['dlr'], dual: false };
   };
-  const RK = R.roundel;
-  const widthPerD = ROUNDEL.width / (2 * ROUNDEL.outerR);
   for (const rec of buildingsById.values()) {
-    rec.fronts = frontsOf(rec);
     rec.fronts.sort((a, b) => (b.L - a.L) || (a.i - b.i));
     const { rings, dual } = ringKinds(rec);
     if (dual) rec.flags.add('dual-roundel');
@@ -483,20 +539,41 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     rec.title = ordered[0].name;
     rec.names = [...new Set(rec.sites.flatMap(s => [...s.raw].flatMap(r => [cleanStationName(r), cleanName(r)]).concat(s.name)))].sort();
     const H = rec.height;
-    const D0 = Math.min(RK.wallFrac * H, RK.wallMaxD);
-    const roundels = [];
-    // Walls, in the building's own ring order so the alternation is stable.
+    const roundels = [], meta = new Map();
+    // Walls, in the building's own ring order so the alternation is stable. A ring stands on the street: its centre is
+    // the highest ground in front of it (at the design Master) plus clearM plus half its diameter, its diameter is
+    // wallFrac of the wall left above that ground (never above wallMaxD), and where the street outside rises or the wall
+    // is too low a slot slides along its stretch of the front to the place that holds the largest ring, else carries none.
     const ordFronts = rec.fronts.slice().sort((a, b) => a.i - b.i);
     ordFronts.forEach((f, idx) => {
-      const k = f.L >= 60 ? Math.min(RK.maxPerFront, 1 + Math.floor((f.L - 20) / 40)) : 1;
-      const Dfit = Math.min(D0, RK.fitFrac * (f.L / k) / widthPerD);
+      const { k, Dfit } = slotsOf(f);
+      f.rt = [];
       for (let j = 0; j < k; j++) {
-        const t = (j + 0.5) / k;
-        roundels.push({ on: 'wall', x: r2(f.a[0] + (f.b[0] - f.a[0]) * t + f.n[0] * RK.proud), z: r2(f.a[1] + (f.b[1] - f.a[1]) * t + f.n[1] * RK.proud),
-          yM: r2(H / 2), D: r2(Math.max(3.4, Dfit)), nx: r4(f.n[0]), nz: r4(f.n[1]), ring: dual ? rings[idx % 2] : rings[0] });
+        const sc = f.L * (j + 0.5) / k, hl = f.L / (2 * k);
+        let best = null;
+        for (const dj of [0, -0.25, 0.25, -0.5, 0.5]) {
+          const c = sc + dj * hl;
+          let D = Dfit, g = 0;
+          const groundFor = (d) => (groundOf ? frontGround(rec, f, Math.max(0, c - d * widthPerD / 2), Math.min(f.L, c + d * widthPerD / 2)) : 0);
+          for (let it = 0; it < 4; it++) {
+            g = groundFor(D);
+            const Dn = Math.min(Dfit, RK.wallFrac * (H - g));
+            if (Math.abs(Dn - D) < 0.02) { D = Dn; break; }
+            D = Dn;
+          }
+          g = groundFor(D); D = Math.min(D, RK.wallFrac * (H - g));
+          if (D >= RK.minRingD - 1e-9 && (!best || D > best.D + 0.05)) best = { D, g, c };
+          if (best && best.D >= Dfit - 0.05) break;
+        }
+        if (!best) continue;
+        const t = best.c / f.L, D = r2(Math.max(RK.minRingD, best.D));
+        const r = { on: 'wall', x: r2(f.a[0] + (f.b[0] - f.a[0]) * t + f.n[0] * RK.proud), z: r2(f.a[1] + (f.b[1] - f.a[1]) * t + f.n[1] * RK.proud),
+          yM: r2(best.g + RK.clearM + D / 2), gM: r2(best.g / RK.designMaster), D, nx: r4(f.n[0]), nz: r4(f.n[1]), ring: dual ? rings[idx % 2] : rings[0] };
+        roundels.push(r); meta.set(r, { f, s: best.c, W: D * widthPerD });
       }
     });
     while (roundels.length > RK.maxPerBuilding) roundels.pop();
+    for (const r of roundels) { const m = meta.get(r); m.f.rt.push({ s: m.s, W: m.W }); }
     // Roof: one, centred on the label point.
     const lp = rec.outline ? labelPoint(rec.outline) : { x: rec.pavilion.cx, z: rec.pavilion.cz, d: Math.min(rec.pavilion.w, rec.pavilion.d) / 2 };
     rec.label = { x: r2(lp.x), z: r2(lp.z) };
@@ -544,7 +621,10 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       const q = nearestOnSegment(sp[0], sp[1], f.a[0], f.a[1], f.b[0], f.b[1]);
       const ux = (f.b[0] - f.a[0]) / f.L, uz = (f.b[1] - f.a[1]) / f.L;
       const t0 = Math.min(Math.max(q.t * f.L, 2), f.L - 2);
-      const startAt = rec.pavilion ? f.L / 2 : t0;
+      // The walker steps out facing the street, and turns round to the building: stand in front of a roundel, the one
+      // nearest the site point on the nearest front (a pavilion's single roundel is at the middle of its long front).
+      const rt = (f.rt ?? []).slice().sort((a, b) => Math.abs(a.s - t0) - Math.abs(b.s - t0) || a.s - b.s)[0];
+      const startAt = rt ? rt.s : rec.pavilion ? f.L / 2 : t0;
       const tries = [0];
       for (let k = 1; k * 2 <= f.L; k++) tries.push(k * 2, -k * 2);
       for (const dt of tries) {
@@ -620,6 +700,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   }
   const json = {
     version: 1,
+    roundelDesignMaster: RK.designMaster,
     source: { overpassSha256: overpassSha, overpassTimestamp: overpass.osm3s?.timestamp_osm_base ?? null, bakedPayloadSha256: bakedSha,
       generatedBy: 'scripts/prepare-station-buildings.mjs', attribution: '© OpenStreetMap contributors, ODbL 1.0' },
     conventions: {
@@ -627,7 +708,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       outline: 'unclosed ring; negative shoelace sum in (x, z) = counter-clockwise seen from above with north up; the outward normal of edge (dx, dz) is (-dz, dx) / length',
       pavilion: 'cx, cz, w along u = (cos yaw, -sin yaw), d along v = (sin yaw, cos yaw), metres; yaw in radians',
       height: 'true metres above the base (the lowest terrain sample over the footprint)',
-      roundel: 'wall: centre (x, z) 0.05 m proud, yM above the base, diameter D (ring), normal (nx, nz); roof: ax, az the bar direction as read from outside the longest front',
+      roundel: 'wall: centre (x, z) 0.05 m proud, yM above the base at Master roundelDesignMaster (the ring stands 0.4 m clear of the highest street in front of it there), gM that street\'s rise above the base at Master 1, diameter D (ring), normal (nx, nz); roof: ax, az the bar direction as read from outside the longest front',
       exit: 'x, z on the ground outside the building; yaw in the Pedestrian convention (facing (-sin yaw, -cos yaw)), away from the building',
     },
     sites: siteTable,
@@ -673,14 +754,17 @@ async function terrainRise() {
   const mesh = await terrain.tryCreateTerrainMesh({ thamesData: thames });
   if (!mesh) throw new Error('terrain mesh failed to build: cannot read the ground under the footprints');
   const VE = terrain.VERTICAL_EXAGGERATION;
-  return (ring) => {
+  /** The structural ground at (x, z) in true metres (the canonical Y over VE), or null. */
+  const groundOf = (x, z) => { const y = terrain.getStructuralSurfaceY({ x, z }); return Number.isFinite(y) ? y / VE : null; };
+  const riseOf = (ring) => {
     const bb = bounds(ring);
     let mn = Infinity, mx = -Infinity;
-    const take = (x, z) => { const y = terrain.getStructuralSurfaceY({ x, z }); if (Number.isFinite(y)) { if (y < mn) mn = y; if (y > mx) mx = y; } };
+    const take = (x, z) => { const y = groundOf(x, z); if (y !== null) { if (y < mn) mn = y; if (y > mx) mx = y; } };
     for (const [x, z] of ring) take(x, z);
     for (let x = bb.x0; x <= bb.x1; x += 8) for (let z = bb.z0; z <= bb.z1; z += 8) if (pointInRing(x, z, ring)) take(x, z);
-    return Number.isFinite(mn) ? (mx - mn) / VE : null;
+    return Number.isFinite(mn) ? mx - mn : null;
   };
+  return { riseOf, groundOf };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────
@@ -707,8 +791,8 @@ async function main() {
   const docks = JSON.parse(await readFile(path.join(ROOT, 'src/airport-docks-data.json'), 'utf8')).docks;
   const dlrTrack = await loadDlrTrack();
   const { boxes, payloadSha256 } = await loadBakedBoxes([...sites.values()].map(s => s.p));
-  const riseOf = await terrainRise();
-  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf });
+  const { riseOf, groundOf } = await terrainRise();
+  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf, groundOf });
   await writeFile(out, JSON.stringify(res.json) + '\n');
   if (reviewPath) await writeFile(reviewPath, reviewMarkdown(res.review, res.counts, res.json));
   console.log('sites', res.counts.sites, JSON.stringify(res.counts));

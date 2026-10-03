@@ -19,7 +19,7 @@ import {
   shoelace, orient, ringArea, centroid, pointInRing, nearestOnRing, simplifyRing, rectRing, convexOverlap, boxRing, footprintOf,
   distToRing, edgeNormal, yawFacing, minAreaRect, labelPoint,
 } from '../src/station-building-geometry.js';
-import { createStationBuildingIndex, entrancesForBuilding, siteKeyOf, networksLine } from '../src/station-buildings.js';
+import { createStationBuildingIndex, entrancesForBuilding, siteKeyOf, networksLine, rayBlockedByBoxes, rayBlockedByGround } from '../src/station-buildings.js';
 import { compileStationBuildings, RULES, nameTokens, llToXZ } from '../scripts/prepare-station-buildings.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -153,6 +153,57 @@ test('siteKeyOf', () => {
   assert.equal(siteKeyOf('Cutty Sark (for Maritime Greenwich) DLR Station'), 'cutty-sark-for-maritime-greenwich');
 });
 
+// ── 2b. what stands in front of a station building hides it from hover ───
+
+import * as THREE from 'three';
+import { createStationBuildingMeshes } from '../src/station-buildings.js';
+
+/** An InstancedMesh of base-pivoted boxes as the map draws them: translation (x, base, z), scale (side, height, side). */
+const boxMesh = (boxes) => {
+  const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshBasicMaterial(), boxes.length);
+  const d = new THREE.Object3D();
+  boxes.forEach(([x, y, z, side, h], i) => { d.position.set(x, y, z); d.scale.set(side, h, side); d.updateMatrix(); m.setMatrixAt(i, d.matrix); });
+  return m;
+};
+
+test('rayBlockedByBoxes: a box across the ray before tMax blocks it; one behind, beside or below does not; the height law scales the roof', () => {
+  const m = boxMesh([[100, 0, 0, 20, 50]]);                         // a 20 m box, 50 m tall (canonical), x 90..110
+  const ray = (oy, dy, tMax, scale) => rayBlockedByBoxes([m], 0, oy, 0, 1, dy, 0, tMax, scale);
+  assert.equal(ray(25, 0, 300, 1), true, 'a level ray through the box');
+  assert.equal(ray(25, 0, 85, 1), false, 'the station starts before the box');
+  assert.equal(ray(25, 0, 90.5, 1), false, 'a neighbour touching the wall (within the slack) is not in front');
+  assert.equal(ray(25, 0, 300, 0.4), false, 'at scale 0.4 the box is 20 m tall: a ray at 25 m passes over its roof');
+  assert.equal(ray(15, 0, 300, 0.4), true);
+  assert.equal(rayBlockedByBoxes([m], 0, 25, 40, 1, 0, 0, 300, 1), false, 'a ray 40 m to the side');
+  assert.equal(rayBlockedByBoxes([m], 0, 100, 0, 1, -0.5, 0, 300, 1), true, 'a descending ray into its roof');
+  m.visible = false;
+  assert.equal(ray(25, 0, 300, 1), false, 'a hidden mesh blocks nothing');
+});
+
+test('rayBlockedByGround: a ray under the terrain before tMax is blocked; one over it is not', () => {
+  const hill = (x) => (x > 200 && x < 300 ? 40 : 0);
+  assert.equal(rayBlockedByGround((x) => hill(x), 0, 10, 0, 1, 0, 0, 500), true, 'a level ray through a 40 m hill');
+  assert.equal(rayBlockedByGround((x) => hill(x), 0, 60, 0, 1, 0, 0, 500), false);
+  assert.equal(rayBlockedByGround((x) => hill(x), 0, 10, 0, 1, 0, 0, 150), false, 'the station is before the hill');
+  assert.equal(rayBlockedByGround(() => null, 0, 10, 0, 1, 0, 0, 500), false, 'no terrain value, no block');
+});
+
+test('pickRay names a building only where it is not hidden: a box in front takes the hover, the building stands behind it', () => {
+  const idx = createStationBuildingIndex(mini());
+  const sb = createStationBuildingMeshes({ data: idx, getStructuralY: () => 0, VE: 5, atlas: null });
+  // Alpha is x 0..40, z 0..20, 10 m tall (50 canonical). A ray from the west along z = 10 enters it at x = 0.
+  const ray = [-60, 20, 10, 1, 0, 0];
+  assert.equal(sb.pickRay(...ray).building.key, 'w1');
+  const boxes = boxMesh([[-30, 0, 10, 10, 50]]);
+  sb.setOccluder((ox, oy, oz, dx, dy, dz, t, scale) => rayBlockedByBoxes([boxes], ox, oy, oz, dx, dy, dz, t, scale));
+  assert.equal(sb.pickRay(...ray), null, 'a box between the viewer and the wall');
+  assert.equal(sb.pickRayRaw(...ray).building.key, 'w1', 'the raw pick still sees the prism');
+  assert.equal(sb.pickRay(-60, 20, 40, 1, 0, 0), null, 'a ray that misses the building entirely');
+  sb.setOccluder(null);
+  assert.equal(sb.pickRay(...ray).building.key, 'w1');
+  sb.dispose();
+});
+
 // ── 3. the compiler on a synthetic world ──────────────────────────────────
 
 const ll = (x, z) => { const [lon, lat] = proj4('EPSG:27700', 'EPSG:4326', [x + BNG_REF_E, BNG_REF_N - z]); return { lat, lon }; };
@@ -233,6 +284,64 @@ test('compile: a building on a slope is made tall enough that its high-side wall
   assert.equal(steep.height, RULES.heightMax);
   const gentle = compileStationBuildings({ ...world(), riseOf: () => 0.5 }).json.buildings.find(b => b.key === 'w1');
   assert.equal(gentle.height, flat.height, 'a rise under the building\'s own height less 4 m changes nothing');
+});
+
+test('compile: with the ground, every wall roundel stands clear of the street in front of it, on a slope too (fix round 1)', () => {
+  const RK = RULES.roundel, wide = 500 / (2 * 203.1445);
+  // The ground rises 0.1 m per metre toward +z (8 m over Alpha's 80 m, 10 m over the building's 100 m side).
+  const groundOf = (x, z) => Math.max(0, z - 60) * 0.1;
+  const flat = compileStationBuildings(world()).json.buildings.find(b => b.key === 'w1');
+  const hill = compileStationBuildings({ ...world(), groundOf }).json.buildings.find(b => b.key === 'w1');
+  assert.ok(hill.height > flat.height, `the high side needs wall above the street: ${hill.height} against ${flat.height}`);
+  assert.ok(hill.heightSource.endsWith('+rise'));
+  const base = 0; // the lowest ground under Alpha (its z = 60 edge)
+  const walls = hill.roundels.filter(r => r.on === 'wall');
+  assert.ok(walls.length >= 3, 'every side still carries one');
+  for (const r of walls) {
+    assert.ok(r.D >= RK.minRingD && r.D <= RK.wallMaxD + 1e-9, `ring ${r.D}`);
+    // the ground along the ring's width at 0, 1 and 3 m outside the wall, at the design Master
+    const tx = r.nz, tz = -r.nx, half = r.D * wide / 2;
+    let g = 0;
+    for (let sI = -half; sI <= half + 1e-9; sI += half / 4) for (const off of [0, 1, 3]) g = Math.max(g, (groundOf(r.x + tx * sI + r.nx * off, r.z + tz * sI + r.nz * off) - base) * RK.designMaster);
+    assert.ok(r.yM - r.D / 2 >= g + RK.clearM - 0.05, `ring bottom ${(r.yM - r.D / 2).toFixed(2)} over the street ${g.toFixed(2)} at (${r.x}, ${r.z})`);
+    assert.ok(r.yM + r.D / 2 <= hill.height - 0.1, 'and its top stays under the roof line');
+  }
+  // gM is the street's rise above the base at Master 1 (what the runtime keeps the ring clear of as Master moves).
+  for (const r of walls) assert.ok(Number.isFinite(r.gM) && r.gM >= 0 && Math.abs(r.gM * RK.designMaster + RK.clearM + r.D / 2 - r.yM) < 0.03, `gM ${r.gM} with yM ${r.yM}`);
+  // On the flat the ring stands on the street, not at half the wall: bottom at clearM.
+  for (const r of flat.roundels.filter(q => q.on === 'wall')) assert.ok(Math.abs((r.yM - r.D / 2) - RK.clearM) < 0.02, `flat ring bottom ${r.yM - r.D / 2}`);
+});
+
+test('compile: a pavilion on a slope shrinks its ring or drops the roundel, never buries it', () => {
+  const RK = RULES.roundel, wide = 500 / (2 * 203.1445);
+  const groundOf = (x) => Math.max(0, x - 1000) * 0.2; // a 20 % slope in x: a 16 m pavilion across it rises 3 m
+  const { json } = compileStationBuildings({ ...world(), groundOf });
+  let checked = 0, shrunk = 0;
+  for (const b of json.buildings.filter(q => q.pavilion)) {
+    const fp = rectRing(b.pavilion), [cx] = centroid(fp);
+    const base = Math.min(...fp.map(p => groundOf(p[0])), groundOf(cx));
+    for (const r of b.roundels.filter(q => q.on === 'wall')) {
+      assert.ok(r.D >= RK.minRingD && r.D <= RK.wallMaxD + 1e-9, `${b.key} ring ${r.D}`);
+      assert.ok(r.yM + r.D / 2 <= b.height + 1e-6, `${b.key}: the ring is under the roof (${r.yM + r.D / 2} against ${b.height})`);
+      const half = r.D * wide / 2, tx = r.nz;
+      let g = 0;
+      for (let sg = -half; sg <= half + 1e-9; sg += half / 4) for (const off of [0, 1, 3]) g = Math.max(g, (groundOf(r.x + tx * sg + r.nx * off) - base) * RK.designMaster);
+      assert.ok(r.yM - r.D / 2 >= g + RK.clearM - 0.05, `${b.key}: ring bottom ${(r.yM - r.D / 2).toFixed(2)} over the street ${g.toFixed(2)}`);
+      checked++; if (r.D < 5.5) shrunk++;
+    }
+  }
+  assert.ok(checked > 0 && shrunk > 0, `${checked} rings checked, ${shrunk} shrunk by the slope`);
+});
+
+test('compile: the exit stands in front of a wall roundel, so the street view shows its name', () => {
+  const { json } = compileStationBuildings({ ...world(), groundOf: () => 0 });
+  for (const b of json.buildings) {
+    const walls = b.roundels.filter(r => r.on === 'wall');
+    if (!walls.length || b.flags.includes('exit-fallback')) continue;
+    const fx = -Math.sin(b.exit.yaw), fz = -Math.cos(b.exit.yaw);
+    const ok = walls.some(r => r.nx * fx + r.nz * fz > 0.95 && Math.abs((b.exit.x - r.x) * r.nz - (b.exit.z - r.z) * r.nx) <= r.D * 500 / 406.289 / 2 * 0.7);
+    assert.ok(ok, `${b.key}: the exit (${b.exit.x}, ${b.exit.z}) is in front of one of its roundels`);
+  }
 });
 
 test('compile: pavilions are 16 x 12 x 7, clear of the map boxes, and the entrance one stands at the entrance', () => {

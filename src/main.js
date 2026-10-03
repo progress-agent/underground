@@ -51,7 +51,8 @@ import { createStationMarkers, cleanStationName, getLabelPolicy } from './statio
 // ── s02:B ──
 import { setSurfaceLabelAnchor } from './stations.js';
 import { loadStationBuildings, stationBuildingState, buildStationBuildingsWhenReady, withStationHides, siteKeyOf as s02bSiteKeyOf,
-  stationExitPose as s02bStationExitPose, entrancesForBuilding as s02bEntrancesForBuilding, networksLine as s02bNetworksLine } from './station-buildings.js';
+  stationExitPose as s02bStationExitPose, entrancesForBuilding as s02bEntrancesForBuilding, networksLine as s02bNetworksLine,
+  rayBlockedByBoxes as s02bRayBlockedByBoxes, rayBlockedByGround as s02bRayBlockedByGround } from './station-buildings.js';
 // ── /s02:B ──
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -3962,6 +3963,23 @@ let lastFrameTime = null;
 // ── s02:B ── Station buildings: the meshes (built once the terrain and the data exist), the
 // label anchor, the late rebuild of live tiles, visibility. Called each frame from tick.
 let stationBuildingsBuilding = false, stationLateRebuilt = false;
+// What is drawn in front of a station building hides it from hover (fix round 1): the ground, the map's own boxes (live
+// and baked, at the displayed height) and the landmark models. Canonical world space, as the hover raycaster's rays.
+const s02bBoxMeshes = [], s02bOccRay = new THREE.Raycaster(), s02bOccOrigin = new THREE.Vector3(), s02bOccDir = new THREE.Vector3();
+function s02bOccluded(ox, oy, oz, dx, dy, dz, t, scale) {
+  if (s02bRayBlockedByGround((x, z) => getTerrainMeshSurfaceY({ x, z }), ox, oy, oz, dx, dy, dz, t)) return true;
+  if (surfaceGeometryGroup?.visible) {
+    s02bBoxMeshes.length = 0;
+    for (const c of surfaceGeometryGroup.children) if (c.isInstancedMesh && /^(baked-)?buildings-/.test(c.name || '')) s02bBoxMeshes.push(c);
+    if (s02bRayBlockedByBoxes(s02bBoxMeshes, ox, oy, oz, dx, dy, dz, t, scale)) return true;
+    if (landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
+      s02bOccRay.set(s02bOccOrigin.set(ox, oy, oz), s02bOccDir.set(dx, dy, dz));
+      s02bOccRay.far = Math.max(0, t - 0.75);
+      if (s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length) return true;
+    }
+  }
+  return false;
+}
 function s02bFrame() {
   const idx = stationBuildingState.index;
   if (!idx) return;
@@ -3977,6 +3995,7 @@ function s02bFrame() {
     stationBuildingsBuilding = true;
     buildStationBuildingsWhenReady({ data: idx, getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }), VE: VERTICAL_EXAGGERATION }).then((m) => {
       stationBuildingsMesh = m;
+      m.setOccluder(s02bOccluded);
       m.group.visible = !surfaceGeometryGroup || surfaceGeometryGroup.visible;
       scene.add(m.group);
       m.setRoundelsVisible(stationsVisible);

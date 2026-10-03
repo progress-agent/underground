@@ -470,6 +470,110 @@ test('roundel colours by network: red and blue at King\'s Cross and Highbury, or
   expect(hi.orange, 'Highbury no orange').toBeLessThan(50);
 });
 
+test('no wall roundel is under the street in front of it at Master 1.1 (fix round 1: 85 of 1,995 were)', async () => {
+  const r = await page.evaluate(() => {
+    const u = window.__ug, g = u.modes.ctx.getStructuralY, sc = u.getBuildingHeightScale(), VE = 5, sb = u.stationBuildings;
+    let n = 0, centreBelow = 0, bottomBelow = 0, topOverRoof = 0; const bad = [];
+    for (const b of sb.data.buildings) {
+      const base = sb.meshes.bases.get(b.key);
+      for (const q of b.roundels) {
+        if (q.on !== 'wall') continue;
+        n++;
+        const c = base + q.yM * VE * sc, bottom = c - q.D / 2 * VE * sc, top = c + q.D / 2 * VE * sc, roof = base + b.height * VE * sc;
+        let gmax = -Infinity;
+        const half = q.D * 500 / 406.289 / 2, tx = q.nz, tz = -q.nx;
+        for (let s = -half; s <= half + 1e-9; s += half / 3) for (const off of [0, 1, 3]) gmax = Math.max(gmax, g(q.x + tx * s + q.nx * off, q.z + tz * s + q.nz * off));
+        if (g(q.x + q.nx, q.z + q.nz) > c) centreBelow++;
+        if (gmax > bottom) { bottomBelow++; if (bad.length < 5) bad.push({ title: b.title, D: q.D, below: +((gmax - bottom) / (VE * sc)).toFixed(2) }); }
+        if (top > roof + 1e-3) topOverRoof++;
+      }
+    }
+    return { n, centreBelow, bottomBelow, topOverRoof, bad };
+  });
+  console.log('roundels against the street', JSON.stringify(r));
+  expect(r.n).toBeGreaterThan(1900);
+  expect(r.centreBelow, 'no ring centre below the ground 1 m outside its wall').toBe(0);
+  expect(r.bottomBelow, `no ring dips under the street: ${JSON.stringify(r.bad)}`).toBe(0);
+  expect(r.topOverRoof).toBe(0);
+});
+
+test('street view (fix round 1): from the King\'s Cross exit, turned to the building, the ring, the whole bar and the name are in the frame', async () => {
+  await installPixelHelpers();
+  await enterWalk();
+  await placeAtExit(KX);
+  await page.waitForTimeout(1200);
+  const r = await page.evaluate(() => {
+    const u = window.__ug, T = window.__ugTHREE, sb = u.stationBuildings, key = sb.siteKeyOf("King's Cross St. Pancras");
+    const b = sb.data.buildings.find(q => q.key === sb.data.sites[key].building), pose = sb.stationExitPose(key), sc = u.getBuildingHeightScale(), VE = 5;
+    const base = sb.meshes.bases.get(b.key);
+    // the roundel the walker faces: the one in front of him (normal opposite his heading, nearest across)
+    const fx = Math.sin(pose.yaw), fz = Math.cos(pose.yaw); // toward the building
+    let best = null;
+    for (const q of b.roundels.filter(x => x.on === 'wall')) {
+      const dot = -(q.nx * fx + q.nz * fz); if (dot < 0.9) continue;
+      const lat = Math.abs((pose.x - q.x) * q.nz - (pose.z - q.z) * q.nx);
+      if (!best || lat < best.lat) best = { q, lat };
+    }
+    if (!best) return { error: 'no roundel in front' };
+    const q = best.q, cy = base + q.yM * VE * sc, barHalf = q.D * 82.173 / 406.289 / 2 * VE * sc, wHalf = q.D * 500 / 406.289 / 2;
+    const px = (x, y, z) => { const v = new T.Vector3(x, y, z).project(u.camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight, z: v.z }; };
+    const tx = q.nz, tz = -q.nx;
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => px(q.x + tx * a * wHalf * 0.9, cy + c * barHalf * 0.66, q.z + tz * a * wHalf * 0.9));
+    const g = window.__sbGroup();
+    const { A, mask } = window.__sbMask(() => { g.visible = false; }, () => { g.visible = true; });
+    const near = (h, c, w) => Math.min(Math.abs(h - c), 360 - Math.abs(h - c)) <= w;
+    const n = { red: 0, blue: 0 };
+    for (let i = 0, k = 0; i < mask.length; i++, k += 4) { if (!mask[i]) continue; const [h, s, v] = window.__sbHue(A.b[k], A.b[k + 1], A.b[k + 2]); if (s < 0.5 || v < 0.15) continue; if (near(h, 3, 12)) n.red++; else if (near(h, 235, 16)) n.blue++; }
+    return { ...n, nameBox: corners, D: q.D, yM: q.yM, lateral: +best.lat.toFixed(2), eyeAboveGround: u.camera.position.y };
+  });
+  console.log('street view', JSON.stringify(r));
+  expect(r.error).toBeUndefined();
+  expect(r.red, 'the ring is red').toBeGreaterThanOrEqual(1000);
+  expect(r.blue, 'the bar is blue').toBeGreaterThanOrEqual(500);
+  for (const c of r.nameBox) { expect(c.y, 'the name box top and bottom are inside the frame').toBeGreaterThan(0); expect(c.y).toBeLessThan(900); expect(c.x).toBeGreaterThan(0); expect(c.x).toBeLessThan(1440); expect(c.z).toBeLessThan(1); }
+  await page.keyboard.press('1');
+});
+
+test('hover (fix round 1): a station is named only where its building is drawn: a box in front takes the hover, so does the ground', async () => {
+  await installPixelHelpers();
+  const poses = [
+    ['kxStreet', async () => { await bl(KX, 15, 0, 120); }],
+    ['streetBank', async () => { await page.evaluate(async () => { const u = window.__ug; u.camera.position.fromArray([2952.9, 337.8, -732.9]); u.controls.target.fromArray([1910.1, 196.2, -783.7]); u.controls.update(); await new Promise(r => setTimeout(r, 1500)); }); }],
+  ];
+  const summary = {};
+  for (const [name, go] of poses) {
+    await go();
+    const scan = await page.evaluate(() => {
+      const u = window.__ug, T = window.__ugTHREE, mesh = u.stationBuildings.meshes, g = window.__sbGroup();
+      const { A, mask } = window.__sbMask(() => { g.visible = false; }, () => { g.visible = true; });
+      const rc = new T.Raycaster(); const out = { points: 0, seen: 0, seenOnStationPixel: 0, hiddenByOccluder: [], rawOnly: 0 };
+      for (let gx = 0; gx < 48; gx++) for (let gy = 0; gy < 30; gy++) {
+        const sx = 15 + gx * 29, sy = 15 + gy * 29; out.points++;
+        rc.setFromCamera(new T.Vector2(sx / 1440 * 2 - 1, -(sy / 900 * 2 - 1)), u.camera);
+        const o = rc.ray.origin, d = rc.ray.direction;
+        const seen = mesh.pickRay(o.x, o.y, o.z, d.x, d.y, d.z), raw = mesh.pickRayRaw(o.x, o.y, o.z, d.x, d.y, d.z);
+        const vis = mask[(A.H - 1 - sy) * A.W + sx] === 1;
+        if (seen) { out.seen++; if (vis) out.seenOnStationPixel++; }
+        if (raw && !seen) { out.rawOnly++; if (out.hiddenByOccluder.length < 3) out.hiddenByOccluder.push({ sx, sy, title: raw.building.title }); }
+      }
+      return out;
+    });
+    summary[name] = scan;
+    // a point the prism would name but something stands in front of: the real mouse there shows no station
+    for (const p of scan.hiddenByOccluder.slice(0, 2)) {
+      await page.mouse.move(p.sx + 2, p.sy); await page.mouse.move(p.sx, p.sy); await page.waitForTimeout(500);
+      const tip = await page.evaluate(() => { const t = document.getElementById('hoverTip'); return t && t.style.display !== 'none' ? t.textContent : ''; });
+      expect(tip, `${name}: the mouse at (${p.sx}, ${p.sy}) is over something in front of ${p.title}`).not.toContain(p.title);
+    }
+    await page.mouse.move(5, 895);
+  }
+  console.log('hover occlusion', JSON.stringify(summary));
+  for (const [name, s] of Object.entries(summary)) {
+    if (s.seen) expect(s.seenOnStationPixel / s.seen, `${name}: what pickRay names is a station pixel`).toBeGreaterThanOrEqual(0.95);
+  }
+  expect(summary.kxStreet.rawOnly + summary.streetBank.rawOnly, 'at least one point where the building is hidden behind a box or the ground').toBeGreaterThan(0);
+});
+
 test('the height law: a station building and an ordinary box of equal height stay equal at Master 1, 1.1, 3 and 10', async () => {
   await installPixelHelpers();
   const out = [];
