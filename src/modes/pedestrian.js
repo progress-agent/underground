@@ -203,9 +203,7 @@ export function createPedestrianMode(ctx) {
     trainSystem: () => ctx.trainSystem ?? null,
     getStructuralY: (x, z) => (ctx.getStructuralY || ctx.getTerrainY)(x, z),
     getTerrainY: (x, z) => ctx.getTerrainY(x, z),
-    // s02:T: the walk's map edge is the terrain grid's walk bounds (main.js: the grid inset 200 m), not the M25:
-    // the lines run on to their termini (D-048 item 7), so no path is held and the seven are stops.
-    isInsideM25: (x, z) => (typeof ctx.insideWalkBounds === 'function' ? ctx.insideWalkBounds(x, z) : true),
+    isInsideM25: (x, z) => (typeof ctx.insideWalkBounds === 'function' ? ctx.insideWalkBounds(x, z) : true), // s02:T: the walk's edge is the terrain grid's walk bounds, not the M25 (D-048 item 7)
     VE, document: globalThis.document,
   });
   let regime = 'bore';                    // where the walker in a line is shown: 'bore' or 'open' (the drawn track)
