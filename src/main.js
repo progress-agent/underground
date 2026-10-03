@@ -4307,7 +4307,9 @@ function tick(frameTime) {
   updateGeologyClarity(_chalkClarity);
 
   // Update spatial audio (ambient crossfades, filter sweeps, wind)
-  s02Regime.audioUnderground = isUnderground; // s02:T: exactly what the audio is told
+  // ── s02:T ── exactly what the audio is told
+  s02Regime.audioUnderground = isUnderground;
+  // ── /s02:T ──
   if (isAudioReady()) {
     updateAudio(dt, {
       cameraPosition: camera.position,

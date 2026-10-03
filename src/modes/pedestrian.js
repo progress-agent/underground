@@ -508,7 +508,9 @@ export function createPedestrianMode(ctx) {
     } else if (body.jet) {
       text = 'Jetpack';
     }
-    if (s02Held && text === null) text = EDGE_HINT; // s02:T
+    // ── s02:T ──
+    if (s02Held && text === null) text = EDGE_HINT;
+    // ── /s02:T ──
     if (text !== undefined) hint(text);
     sound(body.state === 'ground' ? Math.hypot(body.vx, body.vz) : 0);
   }
