@@ -32,7 +32,9 @@ async function waitForLoadingIdle(page, timeoutMs = 20000) {
 test('Phase 0c — visual dispose→reload cycle', async ({ page }) => {
   test.setTimeout(180000);
 
-  await page.goto('/');
+  // Sprint 02Oct26f (D-048 item 6): baked is the default; this spec measures the LIVE dispose-and-reload
+  // cycle of per-tile building meshes, so it is pinned to ?buildings=live.
+  await page.goto('/?buildings=live');
 
   // Wait for initial boot (loading bar done) then settle.
   await page.waitForFunction(

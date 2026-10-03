@@ -54,6 +54,10 @@ import { sampleForSurfaceRail, SURFACE_RAIL_DLR_MATCH_M } from './dlr-profile.js
 // s01:R: the drawn track stops at the map edge, and no deck or pier stands in the Thames.
 import { isOffMapEdge } from './m25-edge.js';
 import { isInThames } from './thames-mask.js';
+import { blendDeckJoins } from './dlr-deck-blend.js'; // s02:F
+// s02:F: the one DLR junction the deck blend is for, the flyover that leaves the viaduct at Canning Town
+// (scene metres, the acceptance's site (9458, -905); the flyover's start is 14.9 m from it).
+const DLR_DECK_BLEND_SITES = [{ x: 9458, z: -905, radiusM: 40 }];
 
 /**
  * s01:R (sprint 01Oct26h): flag every sample of a built path that lies beyond
@@ -255,6 +259,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       if (path.length >= 2) flagOffMap(path); // s01:R
       return path.length >= 2 ? path : null;
     });
+    // s02:F (D-047 rail-canning-flyover): close the deck steps where DLR paths meet on raised track
+    // (the flyover leaving the deck at Canning Town); the trains ride this drawn track.
+    if (info.isDlr) blendDeckJoins(byBranch, { unitsPerTrueM: VE * structureScale, within: DLR_DECK_BLEND_SITES });
     ownerPaths.set(line.id, byBranch);
     info.paths = byBranch.filter(Boolean);
     await breathe();
@@ -422,6 +429,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       // Rebuild the DLR's own meshes from the profile at this scale.
       for (const m of [...dlr.meshes]) if (m.userData.part !== 'band') { dlr.group.remove(m); m.geometry.dispose(); dlr.meshes.splice(dlr.meshes.indexOf(m), 1); }
       const byBranch = dlr.line.branches.map(b => { const p = buildDlrPath(b, getY, dlrProfile, ratio); if (p.length >= 2) flagOffMap(p); return p.length >= 2 ? p : null; });
+      blendDeckJoins(byBranch, { unitsPerTrueM: VE * ratio, within: DLR_DECK_BLEND_SITES }); // s02:F: as at the first build
       ownerPaths.set('dlr', byBranch); dlr.paths = byBranch.filter(Boolean);
       buildOwn(dlr);
     }

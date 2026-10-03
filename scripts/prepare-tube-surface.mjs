@@ -960,6 +960,367 @@ export function dlrHeightAt(profile = createDlrProfile({ project: (lat, lon) => 
   };
 }
 
+// ── s02:F rules ──
+// Sprint 02Oct26f, Lane F (D-048 item 9; D-047 items train-hainault-gaps and
+// train-stratford-1617). Two named rules, run in Pass A of build() right after
+// the reclass block, before the tunnel stubs and the covered ways. Lane T also
+// edits this file; every F constant and function sits in this section.
+
+/**
+ * LOOP_GAP_JOINS (train-hainault-gaps). On the Hainault loop the drawn pieces
+ * do not meet in three places (north of Hainault, by Grange Hill, by Roding
+ * Valley): the gaps are about 26 to 27 m, with headings 5 to 31 degrees apart.
+ * The train network joins each piece end to the nearest node of another piece
+ * within 60 m (src/surface-train-map.js JOIN_M), so trains cut across the gap
+ * by up to 16 m off the drawn track.
+ *
+ * The rule EXTENDS the loose piece itself with a smooth connector, so the
+ * piece's old end is gone and there is no chord left to take (a separate
+ * connector piece would leave the old end in place for that 60 m join to find).
+ * For each piece A of at least minPieceM and each of its ends E inside the
+ * place's box: F is the nearest point of any other piece B of the line. The
+ * end is joined when minGapM < |EF| <= maxGapM, B's tangent at F (oriented to
+ * continue A's outward heading, measured over headingM) is within maxAngleDeg of
+ * that heading, and either F is B's own end vertex (the other half of the same
+ * track) or B is at least minSideM long (the main line it joins).
+ *
+ * The connector is a cubic Hermite from E to a target Q on B (tangents: A's
+ * heading and B's tangent at Q, each of magnitude |EQ|) sampled every stepM, in
+ * the class of A's end segment, labelled 'gap-join' in the piece's `from`. Q is
+ * as near F as keeps the join gentle: the two ends are about 26 m apart along
+ * the track and 9 to 10 m apart across it, an S-bend a train cannot take
+ * without the train map (surface-train-map.js kinkWindows, which blends any
+ * turn over KINK_TURN_DEG = 20 degrees in 8 m by up to 10 m off the drawn
+ * track) re-fairing it, so the connector runs on beyond F along B (advanced in
+ * advanceStepM steps, up to advanceMaxM) until no 8 m stretch of the joined
+ * line turns more than maxTurnDeg. Where F is B's own end vertex, B is trimmed
+ * to start at Q (the stretch of B before Q is the one the connector replaces,
+ * so there is no second ribbon beside it); where B is the long main line F is
+ * mid-piece and B is left whole. A pair of ends that qualify towards each
+ * other is joined once.
+ */
+export const LOOP_GAP_JOINS = {
+  lineId: 'central', place: 'central-hainault',
+  minPieceM: 300, minGapM: 1, maxGapM: 35, maxAngleDeg: 35, minSideM: 2000,
+  headingM: 30, advanceMinM: 30, advanceStepM: 5, advanceMaxM: 120, maxTurnDeg: 12, turnM: 8, stepM: 5, label: 'gap-join',
+};
+
+const inBox = ([lon, lat], [s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e;
+/** Nearest point of `xy` to p: {d, i, t, pt, atEnd: 'start'|'end'|null}. */
+function nearestOnPolyline(xy, p) {
+  let best = null;
+  for (let i = 0; i < xy.length - 1; i++) {
+    const a = xy[i], b = xy[i + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+    const pt = [a[0] + dx * t, a[1] + dy * t], d = Math.hypot(p[0] - pt[0], p[1] - pt[1]);
+    if (!best || d < best.d) best = { d, i, t, pt };
+  }
+  if (best) best.atEnd = best.i === 0 && best.t === 0 ? 'start' : best.i === xy.length - 2 && best.t === 1 ? 'end' : null;
+  return best;
+}
+const unit = v => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+/** The outward heading of a piece at one end, over the last m metres. */
+function headingOf(xy, atEnd, m) {
+  const E = atEnd ? xy.at(-1) : xy[0];
+  let acc = 0, prev = E;
+  for (let k = 1; k < xy.length; k++) {
+    const q = atEnd ? xy[xy.length - 1 - k] : xy[k];
+    acc += Math.hypot(q[0] - prev[0], q[1] - prev[1]); prev = q;
+    if (acc >= m) return unit([E[0] - q[0], E[1] - q[1]]);
+  }
+  return unit([E[0] - prev[0], E[1] - prev[1]]);
+}
+/**
+ * The point `dist` metres along the polyline `xy` from the point (segment i, parameter t), stepping `dir`
+ * (+1 towards higher indices, -1 towards lower), clipped to the polyline: { pt, tangent (in the stepping
+ * direction), seg, t } with the point on segment [seg, seg + 1] at parameter t.
+ */
+function advanceAlong(xy, i, t, dir, dist) {
+  let pos = [xy[i][0] + (xy[i + 1][0] - xy[i][0]) * t, xy[i][1] + (xy[i + 1][1] - xy[i][1]) * t];
+  let seg = i, left = dist, tangent;
+  for (;;) {
+    const a = xy[seg], b = xy[seg + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9;
+    tangent = unit(dir > 0 ? [b[0] - a[0], b[1] - a[1]] : [a[0] - b[0], a[1] - b[1]]);
+    const target = dir > 0 ? b : a, run = Math.hypot(target[0] - pos[0], target[1] - pos[1]);
+    if (run >= left) {
+      const pt = [pos[0] + tangent[0] * left, pos[1] + tangent[1] * left];
+      return { pt, tangent, seg, t: Math.max(0, Math.min(1, ((pt[0] - a[0]) * (b[0] - a[0]) + (pt[1] - a[1]) * (b[1] - a[1])) / (len * len))) };
+    }
+    left -= run; pos = target;
+    const next = seg + dir;
+    if (next < 0 || next > xy.length - 2) return { pt: pos, tangent, seg, t: dir > 0 ? 1 : 0, clipped: true };
+    seg = next;
+  }
+}
+/** A cubic Hermite from P0 to P1 with unit tangents t0, t1 scaled by |P0P1|, sampled every stepM; excludes P0, includes P1. */
+function hermite(P0, t0, P1, t1, stepM) {
+  const L = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]), n = Math.max(2, Math.ceil(L / stepM)), out = [];
+  for (let k = 1; k <= n; k++) {
+    const u = k / n, u2 = u * u, u3 = u2 * u;
+    const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, h01 = -2 * u3 + 3 * u2, h11 = u3 - u2;
+    out.push(k === n ? [...P1] : [h00 * P0[0] + h10 * L * t0[0] + h01 * P1[0] + h11 * L * t1[0], h00 * P0[1] + h10 * L * t0[1] + h01 * P1[1] + h11 * L * t1[1]]);
+  }
+  return out;
+}
+/** `pts` resampled every `step` metres along its length (first and last kept). */
+function resample(pts, step) {
+  const out = [pts[0]]; let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    for (let d = step - carry; d <= L + 1e-9; d += step) out.push([a[0] + (b[0] - a[0]) * d / L, a[1] + (b[1] - a[1]) * d / L]);
+    carry = (carry + L) % step;
+  }
+  if (Math.hypot(out.at(-1)[0] - pts.at(-1)[0], out.at(-1)[1] - pts.at(-1)[1]) > step * 0.25) out.push(pts.at(-1));
+  return out;
+}
+/** The most any `turnM` stretch of the polyline (resampled every 2 m) turns, in degrees, between index windows [k0, k1] of the resample. */
+function maxTurnOf(poly, turnM, from, to) {
+  const P = resample(poly, 2), h = Math.max(1, Math.round(turnM / 2));
+  const lo = P.findIndex((p, k) => k >= 0 && Math.hypot(p[0] - from[0], p[1] - from[1]) < 1.5), hi = P.findIndex((p) => Math.hypot(p[0] - to[0], p[1] - to[1]) < 1.5);
+  let worst = 0;
+  for (let k = Math.max(h, (lo < 0 ? 0 : lo) - h); k <= Math.min(P.length - 1 - h, (hi < 0 ? P.length - 1 : hi) + h); k++) {
+    const a = [P[k][0] - P[k - h][0], P[k][1] - P[k - h][1]], b = [P[k + h][0] - P[k][0], P[k + h][1] - P[k][1]];
+    const la = Math.hypot(...a), lb = Math.hypot(...b); if (!(la > 1e-9 && lb > 1e-9)) continue;
+    worst = Math.max(worst, Math.acos(Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1]) / (la * lb)))) * 180 / Math.PI);
+  }
+  return worst;
+}
+/** Points of `xy` starting at E going inward along the piece (end = true: E is the last point), `m` metres. */
+function inwardFrom(xy, atEnd, m) {
+  const pts = [atEnd ? xy.at(-1) : xy[0]]; let acc = 0;
+  for (let k = 1; k < xy.length && acc < m; k++) { const q = atEnd ? xy[xy.length - 1 - k] : xy[k]; acc += Math.hypot(q[0] - pts.at(-1)[0], q[1] - pts.at(-1)[1]); pts.push(q); }
+  return pts;
+}
+/** Points of B's body from the point (seg, t) onward in direction `dir`, `m` metres. */
+function bodyFrom(xy, seg, t, dir, m) {
+  const out = []; let pos = [xy[seg][0] + (xy[seg + 1][0] - xy[seg][0]) * t, xy[seg][1] + (xy[seg + 1][1] - xy[seg][1]) * t];
+  out.push(pos);
+  let k = dir > 0 ? seg + 1 : seg, acc = 0;
+  while (k >= 0 && k < xy.length && acc < m) { const q = xy[k]; acc += Math.hypot(q[0] - out.at(-1)[0], q[1] - out.at(-1)[1]); out.push(q); k += dir; }
+  return out;
+}
+/** Trim piece B so that its `side` end is the point (seg, t, Q): everything between the old end and Q goes. */
+function trimEndTo(B, side, seg, t, Q) {
+  const ll = proj4('EPSG:27700', 'EPSG:4326', Q);
+  const hasFrom = !!B.from, hasOpened = !!B.opened;
+  if (side === 'start') {
+    const same = t >= 1 - 1e-9, i = same ? seg + 1 : seg;   // Q is the vertex seg + 1: keep it, no duplicate
+    B.xy = same ? B.xy.slice(i) : [Q, ...B.xy.slice(seg + 1)];
+    B.lonlat = same ? B.lonlat.slice(i) : [ll, ...B.lonlat.slice(seg + 1)];
+    B.cls = B.cls.slice(same ? i : seg);
+    if (hasFrom) B.from = same ? B.from.slice(i) : [null, ...B.from.slice(seg + 1)];
+    if (hasOpened) B.opened = B.opened.slice(same ? i : seg);
+  } else {
+    const same = t <= 1e-9;                                  // Q is the vertex seg: keep it
+    B.xy = same ? B.xy.slice(0, seg + 1) : [...B.xy.slice(0, seg + 1), Q];
+    B.lonlat = same ? B.lonlat.slice(0, seg + 1) : [...B.lonlat.slice(0, seg + 1), ll];
+    B.cls = B.cls.slice(0, same ? seg : seg + 1);
+    if (hasFrom) B.from = same ? B.from.slice(0, seg + 1) : [...B.from.slice(0, seg + 1), null];
+    if (hasOpened) B.opened = B.opened.slice(0, same ? seg : seg + 1);
+  }
+}
+
+/**
+ * Apply LOOP_GAP_JOINS to the pieces of one line (mutating the pieces it
+ * extends, and trimming the end-vertex piece it joins onto). Returns the joins
+ * made: {piece, at, gapM, connectorM, advanceM, maxTurnDeg, angleDeg, toPiece, toEnd, at_lonlat}.
+ */
+export function joinLoopGaps(pieces, rule = LOOP_GAP_JOINS) {
+  const box = PLACES[rule.place].box, cosMax = Math.cos(rule.maxAngleDeg * Math.PI / 180);
+  const joins = [];
+  const consumed = new Set();      // `${piece}:${end}` already joined from the other side
+  const len = () => pieces.map(p => lengthOf(p.xy));
+  for (let a = 0; a < pieces.length; a++) {
+    for (const atEnd of [true, false]) {
+      const A = pieces[a], key = `${a}:${atEnd ? 'end' : 'start'}`, L = len();
+      if (L[a] < rule.minPieceM || consumed.has(key)) continue;
+      const E = atEnd ? A.xy.at(-1) : A.xy[0];
+      if (!inBox(A.lonlat[atEnd ? A.lonlat.length - 1 : 0], box)) continue;
+      let best = null;
+      pieces.forEach((B, b) => { if (b === a) return; const r = nearestOnPolyline(B.xy, E); if (r && (!best || r.d < best.r.d)) best = { r, b }; });
+      if (!best || !(best.r.d > rule.minGapM && best.r.d <= rule.maxGapM)) continue;
+      const { r, b } = best, B = pieces[b], h = headingOf(A.xy, atEnd, rule.headingM);
+      // B's tangent at F, oriented to continue A. At B's own end vertex only the way into B's body counts.
+      let dir, seg, t0;
+      if (r.atEnd) { dir = r.atEnd === 'start' ? 1 : -1; seg = r.atEnd === 'start' ? 0 : B.xy.length - 2; t0 = r.atEnd === 'start' ? 0 : 1; }
+      else { const fwd = unit([B.xy[r.i + 1][0] - B.xy[r.i][0], B.xy[r.i + 1][1] - B.xy[r.i][1]]); dir = fwd[0] * h[0] + fwd[1] * h[1] >= 0 ? 1 : -1; seg = r.i; t0 = r.t; }
+      const tF = advanceAlong(B.xy, seg, t0, dir, 0).tangent;
+      if (tF[0] * h[0] + tF[1] * h[1] < cosMax) continue;
+      if (!r.atEnd && L[b] < rule.minSideM) continue;
+      const gapM = Math.hypot(r.pt[0] - E[0], r.pt[1] - E[1]);
+      // The target on B: the smallest advance along B's body from F whose joined line has no kink.
+      const reach = L[b] - 20, aStart = r.atEnd ? 0 : Math.max(2 * gapM, rule.advanceMinM);
+      const tail = inwardFrom(A.xy, atEnd, 40).reverse();         // A's last 40 m, ending at E
+      let chosen = null;
+      for (let adv = aStart; adv <= Math.min(rule.advanceMaxM, reach); adv += rule.advanceStepM) {
+        const q = advanceAlong(B.xy, seg, t0, dir, adv), pts = hermite(E, h, q.pt, q.tangent, rule.stepM);
+        const body = bodyFrom(B.xy, q.seg, q.t, dir, 40);
+        const turn = maxTurnOf([...tail, ...pts, ...body.slice(1)], rule.turnM, E, q.pt);
+        if (!chosen || turn < chosen.turn - 1e-9) chosen = { adv, q, pts, turn };
+        if (turn <= rule.maxTurnDeg) break;
+      }
+      if (!chosen) continue;
+      const { q, pts } = chosen, connectorM = lengthOf([E, ...pts]);
+      const ll = pts.map(p => proj4('EPSG:27700', 'EPSG:4326', p));
+      const cl = A.cls[atEnd ? A.cls.length - 1 : 0];
+      A.from ||= A.xy.map(() => (A.source === 'osm' ? A.place : null));
+      A.opened ||= A.cls.map(() => 0);
+      const tags = pts.map(() => rule.label), cls = pts.map(() => cl), opened = pts.map(() => 0);
+      if (atEnd) { A.xy.push(...pts); A.lonlat.push(...ll); A.cls.push(...cls); A.from.push(...tags); A.opened.push(...opened); }
+      else { A.xy.unshift(...[...pts].reverse()); A.lonlat.unshift(...[...ll].reverse()); A.cls.unshift(...cls); A.from.unshift(...tags); A.opened.unshift(...opened); }
+      // The other half of a track met end to end begins at Q now, and is not joined again from its side.
+      if (r.atEnd) { trimEndTo(B, r.atEnd, q.seg, q.t, q.pt); consumed.add(`${b}:${r.atEnd}`); }
+      joins.push({ piece: a, at: atEnd ? 'end' : 'start', gapM, connectorM, advanceM: chosen.adv, maxTurnDeg: chosen.turn,
+        angleDeg: Math.acos(Math.min(1, tF[0] * h[0] + tF[1] * h[1])) * 180 / Math.PI, toPiece: b, toEnd: r.atEnd ?? null,
+        at_lonlat: proj4('EPSG:27700', 'EPSG:4326', E) });
+    }
+  }
+  return joins;
+}
+
+/**
+ * STRATFORD_1617_OPEN (train-stratford-1617). The DLR trains of Stratford
+ * International stand at the Stratford DLR station's platforms 16 and 17,
+ * where OSM tags the whole 324 to 352 m stretch tunnel=yes (the Jubilee and
+ * the main-line railway run beside and over it), so the surface railway drew
+ * nothing there and the trains vanished at their stop. In reality the platforms
+ * are open to the sky. The tunnel segments whose midpoints lie within halfM
+ * (along the piece) of the stop's foot on the DLR piece it lies beside are
+ * drawn as open track at grade (class surface, opened: the output lists them as
+ * coveredWays, which src/tube-surface-rail.js buildDlrPath lays at grade
+ * whatever the DLR profile says; changing the class alone would not do, because
+ * the profile there reads as tunnel). halfM was tuned in 75 to 150 until every
+ * car of a dwelling train is drawn: 100 opens 200 m.
+ */
+export const STRATFORD_1617_OPEN = { lineId: 'dlr', stop: /^Stratford DLR Station/, reachM: 100, halfM: 150 };
+
+export function openStratford1617(pieces, stops, rule = STRATFORD_1617_OPEN) {
+  const out = [];
+  for (const s of stops.filter(x => rule.stop.test(x.name))) {
+    let best = null;
+    pieces.forEach((piece, pi) => { const r = nearestOnPolyline(piece.xy, [s.e, s.n]); if (r && r.d <= rule.reachM && (!best || r.d < best.r.d)) best = { r, pi }; });
+    if (!best) continue;
+    const { r, pi } = best, piece = pieces[pi];
+    if (piece.cls[r.i] !== 'tunnel') continue;
+    const arc = [0]; for (let i = 0; i < piece.xy.length - 1; i++) arc.push(arc[i] + Math.hypot(piece.xy[i + 1][0] - piece.xy[i][0], piece.xy[i + 1][1] - piece.xy[i][1]));
+    const foot = arc[r.i] + r.t * (arc[r.i + 1] - arc[r.i]);
+    piece.opened ||= piece.cls.map(() => 0);
+    let m = 0, i0 = null, i1 = null;
+    for (let i = 0; i < piece.cls.length; i++) {
+      if (piece.cls[i] !== 'tunnel') continue;
+      if (Math.abs((arc[i] + arc[i + 1]) / 2 - foot) > rule.halfM) continue;
+      piece.cls[i] = 'surface'; piece.opened[i] = 1; m += arc[i + 1] - arc[i];
+      i0 ??= i; i1 = i + 1;
+    }
+    if (m) out.push({ piece: pi, i0, i1, lengthM: Math.round(m), station: s.name, stationDistanceM: Math.round(r.d) });
+  }
+  return out;
+}
+
+/**
+ * LOOP_JOG_SMOOTH (train-hainault-gaps, fix round 2). Where the drawn Hainault
+ * loop kinks sharply and the train map's own fairing (surface-train-map.js
+ * kinkWindows: a turn over 20 degrees in 8 m is replaced by a gentle Hermite
+ * blend, up to 10 m off the drawn track) would carry the cars more than a metre
+ * off it, the DRAWN track is replaced by that same blend, so the trains and the
+ * rails agree. Two such places exist at e0675d7: by Grange Hill, a 28.6 m
+ * dogleg left where the v2 piece's end was joined to the OSM track (s01:R), that
+ * cars cut by up to 8 m; and 160 m north of Hainault, a vertex 6.7 m out of line
+ * that they cut by 1.9 m. Every other kink on the loop already keeps the cars
+ * within 1 m, and is left alone.
+ *
+ * For each piece of the line with a vertex inside the place's box: kink
+ * vertices are those where the polyline turns more than kinkDeg between the
+ * kinkScaleM metres either side; kinks within clusterM of each other form a
+ * cluster. Each cluster's window is the smallest margin (marginsM, either side)
+ * whose cubic-Hermite replacement (tangents over tangentM metres beyond the
+ * window, sampled every stepM) turns no more than calmDeg per stepM, else the
+ * gentlest. A window is applied only when it lies inside the piece (not at an
+ * end, which the train map handles), every segment in it is plain surface track,
+ * and the replacement strays more than minStrayM from the old polyline: the
+ * drawn track moves by that stray, no more. Points of the replacement take the
+ * `from` tag of the old vertex nearest in proportion along the window.
+ */
+export const LOOP_JOG_SMOOTH = {
+  lineId: 'central', place: 'central-hainault',
+  kinkDeg: 20, kinkScaleM: 8, clusterM: 40, marginsM: [10, 20, 30, 45, 60, 80, 100, 130, 160, 200],
+  tangentM: 12, stepM: 4, calmDeg: 3.5, minStrayM: 1,
+};
+export function smoothLoopJogs(pieces, rule = LOOP_JOG_SMOOTH) {
+  const box = PLACES[rule.place].box, done = [];
+  const angle = (a, b) => { const la = Math.hypot(...a), lb = Math.hypot(...b); return la > 1e-9 && lb > 1e-9 ? Math.acos(Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1]) / (la * lb)))) * 180 / Math.PI : 0; };
+  pieces.forEach((piece, pi) => {
+    const n = piece.xy.length;
+    if (n < 4 || !piece.lonlat.some(ll => inBox(ll, box))) return;
+    const cum = [0]; for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(piece.xy[i][0] - piece.xy[i - 1][0], piece.xy[i][1] - piece.xy[i - 1][1]));
+    const L = cum[n - 1];
+    const seg = s => { if (s <= 0) return 0; if (s >= L) return n - 2; let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; } return lo; };
+    const at = s => { const i = seg(s), l = cum[i + 1] - cum[i], t = l > 0 ? Math.max(0, Math.min(1, (s - cum[i]) / l)) : 0; return [piece.xy[i][0] + (piece.xy[i + 1][0] - piece.xy[i][0]) * t, piece.xy[i][1] + (piece.xy[i + 1][1] - piece.xy[i][1]) * t]; };
+    const turnAt = (s, d) => { const a = at(s - d), b = at(s), c = at(s + d); return angle([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]); };
+    const kinks = [];
+    for (let i = 1; i < n - 1; i++) { const d = Math.min(rule.kinkScaleM, cum[i], L - cum[i]); if (d >= 0.5 && inBox(piece.lonlat[i], box) && turnAt(cum[i], d) > rule.kinkDeg) kinks.push(cum[i]); }
+    if (!kinks.length) return;
+    const fairWindow = (a, b) => {
+      let best = null;
+      for (const e of rule.marginsM) {
+        const w0 = Math.max(0, a - e), w1 = Math.min(L, b + e);
+        const A = at(w0), B = at(w1), ch = unit([B[0] - A[0], B[1] - A[1]]);
+        let tA = null, tB = null;
+        if (w0 > 0.5) { const q = at(Math.max(0, w0 - rule.tangentM)); tA = unit([A[0] - q[0], A[1] - q[1]]); }
+        if (w1 < L - 0.5) { const q = at(Math.min(L, w1 + rule.tangentM)); tB = unit([q[0] - B[0], q[1] - B[1]]); }
+        if (!tA && !tB) { tA = ch; tB = ch; } else if (!tA) tA = unit([2 * ch[0] - tB[0], 2 * ch[1] - tB[1]]); else if (!tB) tB = unit([2 * ch[0] - tA[0], 2 * ch[1] - tA[1]]);
+        const pts = [A, ...hermite(A, tA, B, tB, rule.stepM)];
+        let turn = 0, prev = tA;
+        for (let k = 1; k < pts.length; k++) { const v = [pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]]; turn = Math.max(turn, angle(prev, v)); prev = v; }
+        turn = Math.max(turn, angle(prev, tB));
+        const w = { w0, w1, pts, turn };
+        if (!best || turn < best.turn - 1e-9) best = w;
+        if (turn <= rule.calmDeg) break;
+        if (w0 === 0 && w1 === L) break;
+      }
+      return best;
+    };
+    const windows = [];
+    let a = NaN, b = NaN;
+    const close = () => {
+      let w = fairWindow(a, b);
+      while (windows.length && w.w0 < windows.at(-1).w1 + rule.kinkScaleM) { a = windows.pop().a; w = fairWindow(a, b); }
+      windows.push({ ...w, a, b });
+    };
+    for (const s of kinks) { if (Number.isFinite(b) && s - b <= rule.clusterM) b = s; else { if (Number.isFinite(a)) close(); a = s; b = s; } }
+    if (Number.isFinite(a)) close();
+    // Which windows are applied: inside the piece, plain surface throughout, straying more than minStrayM.
+    const stray = w => { let worst = 0; for (const p of w.pts) { const r = nearestOnPolyline(piece.xy, p); if (r.d > worst) worst = r.d; } return worst; };
+    const apply = windows.filter(w => {
+      if (w.w0 <= 0 || w.w1 >= L) return false;
+      for (let i = seg(w.w0); i <= seg(w.w1); i++) { if (piece.cls[i] !== 'surface' || piece.opened?.[i]) return false; }
+      w.strayM = stray(w);
+      return w.strayM > rule.minStrayM;
+    });
+    if (!apply.length) return;
+    // Rebuilt vertex by vertex (cls and opened belong to the segment that begins at the vertex; the last is dropped).
+    const out = { xy: [], lonlat: [], cls: [], from: piece.from ? [] : null, opened: piece.opened ? [] : null };
+    const push = (p, ll, cls, from, opened) => { out.xy.push(p); out.lonlat.push(ll); out.cls.push(cls); if (out.from) out.from.push(from); if (out.opened) out.opened.push(opened); };
+    const keep = i => push(piece.xy[i], piece.lonlat[i], piece.cls[i] ?? 'surface', piece.from?.[i], piece.opened?.[i] ?? 0);
+    let i = 0;
+    for (const w of apply) {
+      // Vertices before the window, then its start point, the blend, and its end point; the old vertices inside it go.
+      while (i < n && cum[i] < w.w0 - 1e-6) { keep(i); i++; }
+      const tag = f => { if (!piece.from) return undefined; const s = w.w0 + f * (w.w1 - w.w0), j = seg(s), t = cum[j + 1] > cum[j] ? (s - cum[j]) / (cum[j + 1] - cum[j]) : 0; return piece.from[t < 0.5 ? j : j + 1]; };
+      w.pts.forEach((p, k) => push(p, proj4('EPSG:27700', 'EPSG:4326', p), 'surface', tag(k / (w.pts.length - 1)), 0));
+      while (i < n && cum[i] <= w.w1 + 1e-6) i++;
+      done.push({ piece: pi, fromM: Math.round(w.w0), toM: Math.round(w.w1), lengthM: Math.round(w.w1 - w.w0), strayM: w.strayM, turnDeg: w.turn, at_lonlat: proj4('EPSG:27700', 'EPSG:4326', at((w.w0 + w.w1) / 2)) });
+    }
+    while (i < n) { keep(i); i++; }
+    out.cls.pop(); if (out.opened) out.opened.pop();
+    piece.xy = out.xy; piece.lonlat = out.lonlat; piece.cls = out.cls;
+    if (out.from) piece.from = out.from;
+    if (out.opened) piece.opened = out.opened;
+  });
+  return done;
+}
+// ── /s02:F rules ──
+
 export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json'), osmCache = null, probe = null, probeOnly = false } = {}) {
   const src = JSON.parse(await readFile(source, 'utf8'));
   const og = JSON.parse(await readFile(overgroundPath, 'utf8'));
@@ -986,6 +1347,18 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
       const by = {}; for (const c of group) by[`${c.from}->${c.to}`] = (by[`${c.from}->${c.to}`] || 0) + c.lengthM;
       report.push(`${id} classes from OSM in ${place}: ${Object.entries(by).map(([k, m]) => `${k} ${Math.round(m)} m`).join(', ')}`);
     }
+    // ── s02:F rules ── (named rules; see the section above build())
+    if (id === LOOP_GAP_JOINS.lineId) {
+      for (const j of joinLoopGaps(pieces)) report.push(`central gap joined: ${j.gapM.toFixed(1)} m at ${j.at_lonlat[1].toFixed(5)},${j.at_lonlat[0].toFixed(5)}, connector ${j.connectorM.toFixed(1)} m (target ${j.advanceM} m along the other piece), angle ${j.angleDeg.toFixed(0)} deg, sharpest turn ${j.maxTurnDeg.toFixed(1)} deg per ${LOOP_GAP_JOINS.turnM} m (s02:F)`);
+    }
+    if (id === LOOP_JOG_SMOOTH.lineId) {
+      for (const j of smoothLoopJogs(pieces)) report.push(`central jog smoothed: ${j.lengthM} m stretch at ${j.at_lonlat[1].toFixed(5)},${j.at_lonlat[0].toFixed(5)}, drawn track moved by up to ${j.strayM.toFixed(1)} m, sharpest turn ${j.turnDeg.toFixed(1)} deg per ${LOOP_JOG_SMOOTH.stepM} m (s02:F)`);
+    }
+    if (id === STRATFORD_1617_OPEN.lineId) {
+      const f1617 = (L.stations || []).filter(s => Number.isFinite(s.lon) && Number.isFinite(s.lat)).map(s => { const [e, n] = toBng([s.lon, s.lat]); return { name: s.name, e, n }; });
+      for (const o of openStratford1617(pieces, f1617)) report.push(`dlr platforms opened at Stratford 16/17: ${o.lengthM} m (${o.station}, ${o.stationDistanceM} m from the track; s02:F)`);
+    }
+    // ── /s02:F rules ──
     // s01:R: tunnel stubs beside the line's own open track (West Hampstead),
     // unless today's OSM has the line in tunnel there (Kensal Green).
     const isRealTunnel = piece => {

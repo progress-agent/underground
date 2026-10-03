@@ -368,7 +368,7 @@ test('at Master 10 the stretched abyss dome leaves no hole or seam', async ({ pa
   await page.evaluate(() => window.__ug.camera.userData.masterHeightController.setValue(1.1));
   expect(r.skyVisible).toBe(true);
   expect(r.domeScale).toEqual([1, 1, 1]);
-  expect(r.hole).toBeGreaterThan(0.05);   // the dome really is clipped here
+  expect(r.hole).toBeLessThan(0.001);     // the dome is drawn at the far plane, never clipped (was > 0.05 before 02Oct26f)
   expect(r.worst).toBeLessThan(0.02);     // and the sky continues it seamlessly
 });
 

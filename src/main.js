@@ -35,6 +35,10 @@ import { loadStationDepthAnchors, depthForStation, debugDepthStats, buildDepthIn
 import { tryCreateTerrainMesh, xzToTerrainUV, terrainHeightToWorldY, getTerrainSurfaceY, getTerrainMeshSurfaceY, getStructuralSurfaceY, getTerrainBounds, TERRAIN_CONFIG, VERTICAL_EXAGGERATION, applyParkUndersideTexture, getTerrainRiverBed } from './terrain.js';
 import { createParkLabels } from './park-labels.js';
 import { createSkyDome, updateEnvironment, createAtmosphere, updateLighting, ENV_CONFIG } from './environment.js';
+// ── s02:F ──
+import { createViewRange } from './view-range.js';
+import { resolveBuildingsPath, BUILDINGS_PATH_REV } from './buildings-path.js';
+// ── /s02:F ──
 // ── sprint:D ──
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
@@ -309,6 +313,9 @@ bindMasterController(masterHeight);
 // (tests and tools); morphs counts completed CPU morph passes.
 const structureMorph = { flush: () => {}, morphs: 0, pending: false };
 // ── /s25:S ──
+// ── s02:F ── the depth range follows the camera's display height above 20,000 units (src/view-range.js)
+const viewRange = createViewRange(camera, masterHeight);
+// ── /s02:F ──
 // Street-level view looking across central London
 const INITIAL_VIEW = {
   position: new THREE.Vector3(-200, 85, 400),   // Above terrain (central London ground ≈ Y=75 at VE=5)
@@ -887,15 +894,19 @@ const urlFocusLine = getUrlStringParam('focus');
 //   'baked' — one precompiled UGB1 payload (scripts/bake-surface.mjs), whole
 //             city resident from load, never disposed, no per-arrival work.
 //
-// LIVE IS THE DEFAULT and stays the default until the baked path has been
-// assessed in Jordan's hands. ?buildings=baked overrides for one visit;
-// the HUD toggle persists the choice.
+// BAKED IS THE DEFAULT (sprint 02Oct26f, D-048 item 6); live is the automatic
+// fallback (a failed payload or footprint companion, activateBakedBuildings)
+// and an explicit choice. ?buildings=baked or ?buildings=live overrides for one
+// visit; the HUD toggle persists the choice. A 'live' saved before this release
+// is dropped once (src/buildings-path.js).
 const urlBuildingsPath = getUrlStringParam('buildings');
 // Keep the live ground path for controlled comparison and graceful recovery.
 let groundPath = getUrlStringParam('ground') === 'live' ? 'live' : 'baked';
-let buildingsPath = (urlBuildingsPath === 'baked' || urlBuildingsPath === 'live')
-  ? urlBuildingsPath
-  : (prefs.buildingsPath === 'baked' ? 'baked' : 'live');
+// ── s02:F ── replaces: urlBuildingsPath ?? (prefs.buildingsPath === 'baked' ? 'baked' : 'live')
+const _buildingsChoice = resolveBuildingsPath(urlBuildingsPath, prefs);
+if (_buildingsChoice.migrated) savePrefs(prefs);
+let buildingsPath = _buildingsChoice.path;
+// ── /s02:F ──
 
 // Assigned by the HUD block below so an async payload failure can correct the
 // toggle's label. Declared HERE, above that block: it is assigned at module
@@ -1232,7 +1243,7 @@ function deleteUrlParam(key) {
 
   // ── Baked city toggle (06Sep26u) ──
   // Swaps the buildings render path in place so a live/baked comparison happens
-  // inside one session. Off is the live per-tile path and remains the default.
+  // inside one session. On is the baked city, the default since 02Oct26f; off is the live per-tile path.
   //
   // Lives in THIS HUD block, not the fps-controls one that holds Fast flight:
   // both run at module evaluation, and only this one runs after `buildingsPath`
@@ -2115,8 +2126,10 @@ function setBuildingsPath(next) {
   if (next === buildingsPath) return;
   buildingsPath = next;
   prefs.buildingsPath = next;
+  prefs.buildingsPathRev = BUILDINGS_PATH_REV; // s02:F: a choice made after the release persists (src/buildings-path.js)
   savePrefs(prefs);
-  if (next === 'live') deleteUrlParam('buildings'); else setUrlParam('buildings', next);
+  // s02:F: baked is the default path, so it carries no parameter; live is named.
+  if (next === 'baked') deleteUrlParam('buildings'); else setUrlParam('buildings', next);
 
   if (next === 'baked') {
     const cleared = clearLiveBuildingMeshes();
@@ -4234,6 +4247,9 @@ function tick(frameTime) {
   }
   parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
 
+  // ── s02:F ── near/far follow the display height (above 20,000 units only); before the sun fit, fog and sky read the range
+  viewRange.update();
+  // ── /s02:F ──
   // ── sprint:D ──
   // Air-substrate sun blend and shadow fit; must precede the environment and
   // lighting updates below. Automatic quality level 1+ drops shadows first.

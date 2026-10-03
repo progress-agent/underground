@@ -5,7 +5,9 @@
 import { test, expect } from '@playwright/test';
 
 test('Surface tiles re-load after camera drift; reservoirs sit near local terrain', async ({ page }) => {
-  await page.goto('/');
+  // Sprint 02Oct26f (D-048 item 6): baked is the default; this spec measures the LIVE tile streaming
+  // machinery (disposal and reload of per-tile building meshes), so it is pinned to ?buildings=live.
+  await page.goto('/?buildings=live');
 
   await page.waitForFunction(
     () => document.querySelector('#loadingBar')?.classList.contains('done'),

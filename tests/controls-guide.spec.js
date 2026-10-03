@@ -156,6 +156,29 @@ async function gotoAndReveal(page) {
   await page.evaluate(() => window.__ug.controlsGuide.forceReveal());
 }
 
+// Sprint 02Oct26f (Lane F): the freeze-mid-fade-in test below still failed now and then, for a reason
+// the earlier fixes did not reach. forceReveal() schedules ALL the timers at once (show at 3000 ms, hide
+// at 8200 ms), and the reveal itself fires ~300 ms after load by the altitude predicate, inside the
+// start-up freezes. A freeze delays when the show timer FIRES but not the hide timer's due time, so the
+// 5 s hold the test's injected 2.5 s freeze lands in is shortened by however long start-up froze, and the
+// injected freeze can outlast it. So this test reveals once the app is quiet: it opens above the
+// predicate's height (camera 3,000 units up, so nothing reveals it), waits for the ground and for 30
+// consecutive frames under 100 ms, checks it is not yet revealed, and only then reveals. The injected
+// freeze, the recorder and every assertion are unchanged.
+async function gotoQuietThenReveal(page) {
+  await recordTimeline(page);
+  await page.goto('/?fast=1&view=0,3000,0,0,2900,-1000');
+  await page.waitForFunction(() => !!(window.__ug && window.__ug.controlsGuide), null, { timeout: 8000 });
+  await page.waitForFunction(() => window.__ug.groundReady, null, { timeout: 60000 });
+  await page.evaluate(() => new Promise((resolve) => {
+    let last = performance.now(), run = 0;
+    const step = (now) => { run = now - last < 100 ? run + 1 : 0; last = now; if (run >= 30) resolve(); else requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }));
+  expect(await page.evaluate(() => window.__ug.controlsGuide.isRevealed())).toBe(false);
+  await page.evaluate(() => window.__ug.controlsGuide.forceReveal());
+}
+
 async function timelineWhen(page, key) {
   await page.waitForFunction((k) => window.__cgTimeline?.[k] !== undefined, key, { timeout: TIMELINE_WAIT_MS });
   return page.evaluate(() => window.__cgTimeline);
@@ -245,7 +268,7 @@ test('shift-message fade-in contract survives a freeze mid fade-in', async ({ pa
       setTimeout(() => { const until = performance.now() + 2500; while (performance.now() < until) { /* freeze */ } }, 100);
     }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
   });
-  await gotoAndReveal(page);
+  await gotoQuietThenReveal(page);
   const t = await timelineWhen(page, 'shiftOnAt');
   expect(t.shiftOnAt - t.readyAt).toBeGreaterThanOrEqual(SHOW_MS + SHIFT_DELAY_MS - EARLY_EPSILON_MS);
   // A 2.5s freeze ends ~2.4s inside the 5s hold, so the fade-in must have

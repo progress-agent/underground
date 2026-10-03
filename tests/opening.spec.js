@@ -167,10 +167,12 @@ test.describe('Lane O: opening', () => {
     expect(res.audioReady).toBe(false);
   });
 
-  test('live buildings path (default URL): the bar waits for the descent footprint, then streaming pauses in flight', async ({ page }) => {
+  // Sprint 02Oct26f (D-048 item 6): baked is the default, so this live-path case now boots ?buildings=live;
+  // its assertions are unchanged. The default URL is pinned to baked by buildings-default.spec.js.
+  test('live buildings path (?buildings=live): the bar waits for the descent footprint, then streaming pauses in flight', async ({ page }) => {
     test.setTimeout(180000);
     await page.addInitScript(() => localStorage.clear());
-    await boot(page, '/');
+    await boot(page, '/?buildings=live');
     await page.waitForFunction(() => window.__reveal, null, { timeout: 150000 });
     const r = await page.evaluate(() => {
       const u = window.__ug, p = u.intro.getParams();

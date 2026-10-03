@@ -107,7 +107,12 @@ test('live: a station whose building tile arrives after the opening has settled 
     for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) {
       n++; const roof = col.roofHeightAt(s.pos.x, s.pos.z); if (roof !== null && roof > s.pos.y) underRoof++;
     }
-    return { underRoof, n, lift: u.surfaceRail.roofLift };
+    // (which markers, for the report: a station name with its line and the roof over it)
+    const under = [];
+    for (const [lk, l] of u.surfaceRail.stationLayers) for (const s of l.stationsLayer.mesh.userData.stations) {
+      const roof = col.roofHeightAt(s.pos.x, s.pos.z); if (roof !== null && roof > s.pos.y) under.push({ layer: lk, name: s.name, y: +s.pos.y.toFixed(1), roof: +roof.toFixed(1), roofM: s.roofM ?? null });
+    }
+    return { underRoof, n, under, lift: u.surfaceRail.roofLift };
   });
   console.log('all markers', JSON.stringify(r));
   expect(r.underRoof).toBe(0);
