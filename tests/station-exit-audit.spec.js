@@ -65,6 +65,24 @@ test.setTimeout(20 * 60 * 1000);
 let page;
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // Proof that assert mode cannot pass silently (acceptance 8.5): UG_AUDIT_INJECT=1 makes a fake
+  // window.__ug.stationBuildings appear as soon as window.__ug exists, whose stationExitPose returns the centre of a
+  // collision box near Oxford Circus (inside a box), with no key list (so "no site keys" fails); UG_AUDIT_INJECT=keys
+  // also lists one key, so the walk reaches check 2 (box). Either must make this spec FAIL; neither is a real Lane B.
+  if (process.env.UG_AUDIT_INJECT) {
+    await page.addInitScript((withKeys) => {
+      const iv = setInterval(() => {
+        if (!window.__ug) return;
+        clearInterval(iv);
+        const fake = { stationExitPose: () => {
+          const col = window.__ug.modes?.ctx?.collision, b = col?.buildingsNear(-1000.8, -845.1, 300)?.[0];
+          return b ? { x: (b.minX + b.maxX) / 2, z: (b.minZ + b.maxZ) / 2, yaw: 0 } : { x: -1000.8, z: -845.1, yaw: 0 };
+        } };
+        if (withKeys) fake.keys = ['fake-site'];
+        window.__ug.stationBuildings = fake;
+      }, 5);
+    }, process.env.UG_AUDIT_INJECT === 'keys');
+  }
   await page.goto('/?skip=1&buildings=baked');
   await page.waitForFunction(() => !!(window.__ug && window.__ug.modes && window.__ug.intro && !window.__ug.intro.isRunning()), null, { timeout: 120000 });
   await page.waitForFunction(() => {
