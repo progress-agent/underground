@@ -216,20 +216,23 @@ test('T-K5: D-024 beyond the ring: no stripe or band vertex of the Central, Metr
   expect(r.buried).toBe(0);
 });
 
-test('T-K6: the on-map rail is unchanged: every surface-rail mesh but the Central and the Metropolitan hashes identically to e0675d7', async () => {
+// Integration 02Oct26f: lane F changes the DLR on purpose in the same sprint (platforms 16 and 17 at Stratford opened, +114
+// vertices; the Canning Town deck blend), pinned by F's dlr-canning-deck.spec.js and surface-rail.spec.js. Its generated data
+// equals F's own output in the merge, so the DLR is left to those pins here; every other line still hashes as on e0675d7.
+test('T-K6: the on-map rail is unchanged: every surface-rail mesh but the Central, the Metropolitan (and lane F\'s DLR) hashes identically to e0675d7', async () => {
   test.skip(!lb, 'needs the e0675d7 server (UG_LB)');
   const HASH = () => {
     const u = window.__ug, out = {};
     const fnv = (h, bytes) => { for (let i = 0; i < bytes.length; i++) { h ^= bytes[i]; h = Math.imul(h, 16777619) >>> 0; } return h; };
     for (const [line, g] of u.surfaceRail.groups) {
-      if (line === 'central' || line === 'metropolitan') continue;
+      if (line === 'central' || line === 'metropolitan' || line === 'dlr') continue;
       let k = 0;
       g.traverse(o => { if (!o.isMesh || o.isInstancedMesh) return; const p = o.geometry.attributes.position; out[`${line}|${o.userData.part ?? o.name}|${k++}`] = [p.count, fnv(2166136261 >>> 0, new Uint8Array(p.array.buffer, p.array.byteOffset, p.array.byteLength)).toString(16)]; });
     }
     return out;
   };
   const { t, b } = await both(HASH);
-  expect(Object.keys(t).length).toBeGreaterThan(20);
+  expect(Object.keys(t).length).toBeGreaterThanOrEqual(18);   // the 21 meshes of T's own check less the DLR's three
   expect(t).toEqual(b);
 });
 

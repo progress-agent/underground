@@ -130,7 +130,9 @@ test.describe('sprint 01Oct26h, Lane T', () => {
     for (const e of wat) { expect(e.cars).toBe('oooooooo'); expect(e.frontGap).toBeGreaterThan(1.9); expect(e.frontGap).toBeLessThan(3); }
   });
 
-  test('Theydon Bois, the last station inside the map on the Epping branch: trains standing there whole, at the station; none drawn past the map edge', async () => {
+  // Sprint 02Oct26f (D-048 item 7, lane T): the Central runs on past the map edge to Epping, so its trains are drawn past
+  // the edge now; that every such car is on the drawn track is tests/termini.spec.js T-T1 and T-T2. Inverted at integration.
+  test('Theydon Bois, the last station inside the map on the Epping branch: trains standing there whole, at the station; the trains run on past the map edge (s02:T)', async () => {
     const r = await page.evaluate(async () => {
       const u = window.__ug, st = u.surfaceTrains, { trainStateAt } = await import('/src/trains.js');
       const { isOffMapEdge } = await import('/src/m25-edge.js'); // the cliff surface-rail.js stops the track at (s01:R)
@@ -156,7 +158,7 @@ test.describe('sprint 01Oct26h, Lane T', () => {
     expect(r.standing).toBeGreaterThan(5);
     expect(r.whole).toBe(r.standing);
     expect(r.far).toBeLessThan(60);
-    expect(r.offMap).toBe(0);
+    expect(r.offMap, 'cars drawn past the map edge, on the way to Epping').toBeGreaterThan(0);
   });
 
   test('surface trains run on every section Lane R added, on the drawn track, sharing the District\'s into Ealing Broadway', async () => {

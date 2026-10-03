@@ -270,6 +270,10 @@ test('live scene: pinned flights render, switch runway on an easterly and show t
   await page.goto('/?skip=1');
   await page.waitForFunction(() => window.__ug?.flightsGroup, null, { timeout: 120000 });
   expect(await page.evaluate(() => window.__ug.flightsInitError)).toBeNull();
+  // Sprint 02Oct26f: the default is the baked city, which builds tile by tile after load (it also waits for the station
+  // buildings' data). Measure the aircraft once the city has finished building, or the city appearing between the two
+  // shots below is counted as aircraft pixels (16,439 'changed' pixels at luma 69 against about 5,600 when settled).
+  await page.waitForFunction(() => { const u = window.__ug, b = u.bakedStats; return u.buildingsPath !== 'baked' || (!!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal); }, null, { timeout: 120000 });
 
   const pinned = await page.evaluate(() => {
     const u = window.__ug; u.sim.paused = true;
