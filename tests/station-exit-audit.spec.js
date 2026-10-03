@@ -135,19 +135,27 @@ const ANALYSE = ({ x, y, z, yaw, station, buildingFootprints }) => {
         if (Math.hypot(p.x - x, p.z - z) < L + r) things.push({ kind: 'marker', x: p.x, z: p.z, r });
       }
     } else if (o.userData?.type === 'station-shaft') {
+      // Integration 02Oct26f: "ahead at eye height", as for the boxes: a glass shaft whose top is flush with the street
+      // (shafts.js tops every shaft at the ground) is under the walker's eye, and is not drawn above ground anyway (D-040).
       const gy = col.groundHeightAt(o.position.x, o.position.z), top = o.position.y + o.scale.y / 2;
-      if (gy !== null && top >= gy - 1 && Math.hypot(o.position.x - x, o.position.z - z) < L + o.scale.x) things.push({ kind: 'shaft', x: o.position.x, z: o.position.z, r: o.scale.x });
+      if (gy !== null && top >= eyeY && Math.hypot(o.position.x - x, o.position.z - z) < L + o.scale.x) things.push({ kind: 'shaft', x: o.position.x, z: o.position.z, r: o.scale.x });
     }
   });
-  for (const p of (buildingFootprints || [])) {
-    const xs = p.map(q => q[0]), zs = p.map(q => q[1]);
-    things.push({ kind: 'station-building', box: { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) } });
-  }
+  // Integration 02Oct26f: a station building is its footprint polygon, not the polygon's axis-aligned bounds (the bounds of a
+  // turned building reach round its own exit, which stands outside the polygon facing away from it).
+  for (const p of (buildingFootprints || [])) things.push({ kind: 'station-building', poly: p });
   const hit = (dx, dz, maxM) => {
     let best = null;
     for (const t of things) {
       let d = null;
-      if (t.box) {
+      if (t.poly) {
+        for (let i = 0, n = t.poly.length; i < n; i++) {
+          const [ax, az] = t.poly[i], [bx, bz] = t.poly[(i + 1) % n], ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+          if (Math.abs(den) < 1e-12) continue;
+          const s = ((ax - x) * ez - (az - z) * ex) / den, w = ((ax - x) * dz - (az - z) * dx) / den;
+          if (s >= 0 && s <= maxM && w >= 0 && w <= 1 && (d === null || s < d)) d = s;
+        }
+      } else if (t.box) {
         const b = t.box; let t0 = 0, t1 = maxM, ok = true;
         for (const [o, dd, lo, hi] of [[x, dx, b.minX, b.maxX], [z, dz, b.minZ, b.maxZ]]) {
           if (Math.abs(dd) < 1e-9) { if (o < lo || o > hi) ok = false; }
@@ -234,7 +242,17 @@ async function walkOne(page, kind, lineId, name) {
       };
       requestAnimationFrame(step);
     }));
-    const a = await page.evaluate(ANALYSE_SRC, { ...pose, station: stationPt, buildingFootprints: null });
+    // Integration 02Oct26f: in assert mode (lane B present) the walked exit is checked against its station BUILDING, as the
+    // header defines checks 2, 3 and 5 for assert mode: the point of the building nearest the exit and its footprint. The
+    // stop's point on the track lies inside or far from a big building (Euston, London Bridge) and is not where B's exit is.
+    const bld = await page.evaluate(([name]) => {
+      const sb = window.__ug.stationBuildings;
+      if (!sb?.stationExitPose || !sb.centreOf) return null;
+      const key = sb.siteKeyOf(name);
+      return { key, station: sb.centreOf(key), foot: sb.footprintOf(key) };
+    }, [st.name]);
+    rec.building = bld ? { key: bld.key } : null;
+    const a = await page.evaluate(ANALYSE_SRC, { ...pose, station: bld?.station ?? stationPt, buildingFootprints: bld?.foot ? [bld.foot] : null });
     a.rearm = { pass: rearm.opened === 0, framesWithCard: rearm.opened, frames: rearm.frames, movedM: rearm.movedM };
     const file = path.join(SHOTS, `${kind}-${(st.lineId || lineId || 'x')}-${name.replace(/[^A-Za-z0-9]+/g, '-')}.jpg`);
     await page.screenshot({ path: file, type: 'jpeg', quality: 70 });

@@ -57,6 +57,10 @@ export const RULES = Object.freeze({
   thamesFraction: 0.1, heightMin: 6, heightMax: 30, heightDefault: 10,
   smallPickM2: 200, riseClearM: 4, pavilion: { w: 16, d: 12, h: 7 }, placementClearM: 1.5, viaductOffsetM: 12.5, viaductMinDeckM: 4.5,
   frontMinM: 6, frontProbeM: 3, boxClearM: 0.5, exitOutM: 6.5,
+  // Integration 02Oct26f: the street ahead of an exit is open where it can be. Lane F's exit audit (tests/station-exit-audit.spec.js,
+  // check 4) wants nothing solid within `fanM` metres in +-`fanDeg` degrees ahead at eye height; a box whose roof is under
+  // `fanMinH` metres does not reach the eye. An exit with a clear fan is preferred on every front before any without.
+  exitFan: { fanM: 10, fanDeg: 25, stepDeg: 5, fanMinH: 1.7 },
   // Wall roundels (fix round 1): the ring stands on the street, not at half the wall. `designMaster` is the Master the
   // ground is stretched to when a roundel's height above the base (`yM`) is fixed (the terrain's relief above a building's
   // base grows with Master while the building does not; 1.1 is the default). The runtime lifts or lowers each ring with the
@@ -321,9 +325,10 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     const ring = rectRing(cand, R.placementClearM);
     const core = rectRing(cand);
     const b = bounds(ring);
-    let overlap = 0;
+    let overlap = 0, untaken = 0;
     for (const q of boxGrid.near(b.x0, b.z0, b.x1, b.z1)) {
-      if (convexOverlap(ring, q.ring)) overlap++;
+      // (Integration 02Oct26f: `untaken` counts the overlapped boxes this pavilion does not hide, its centre outside the core.)
+      if (convexOverlap(ring, q.ring)) { overlap++; if (!pointInRing(q.box.x, q.box.z, core)) untaken++; }
     }
     const pts = [[cand.cx, cand.cz], ...core];
     const wet = pts.some(p => inWater(p[0], p[1]));
@@ -334,7 +339,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       if (ringsOverlap(core, f.ring)) { hit = true; break; }
     }
     const deck = dlr ? dlrDist(cand.cx, cand.cz, core) : Infinity;
-    return { overlap, wet, out, hit, deckOk: !dlr || deck >= R.viaductMinDeckM, clear: overlap === 0 && !wet && !out && !hit && (!dlr || deck >= R.viaductMinDeckM) };
+    return { overlap, untaken, wet, out, hit, deckOk: !dlr || deck >= R.viaductMinDeckM, clear: overlap === 0 && !wet && !out && !hit && (!dlr || deck >= R.viaductMinDeckM) };
   };
   const dirs = Array.from({ length: 8 }, (_, k) => [Math.cos(k * Math.PI / 4), -Math.sin(k * Math.PI / 4)]);
 
@@ -397,7 +402,10 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     for (const cand of candidates) {
       const t = placeOk(cand, others, { dlr: viaduct });
       if (t.clear) { chosen = { cand, t }; break; }
-      if (!t.wet && !t.out && !t.hit && t.deckOk && (!fallback || t.overlap < fallback.t.overlap)) fallback = { cand, t };
+      // Integration 02Oct26f: with no clear place, prefer one whose overlapped boxes it hides (a box that swallows the station,
+      // such as the shopping centre over Fulham Broadway, is then the station's own and the pavilion stands in its place, where a
+      // walker can reach it), then the fewest overlapped boxes.
+      if (!t.wet && !t.out && !t.hit && t.deckOk && (!fallback || t.untaken < fallback.t.untaken || (t.untaken === fallback.t.untaken && t.overlap < fallback.t.overlap))) fallback = { cand, t };
     }
     const flags = [];
     if (!chosen) {
@@ -596,6 +604,34 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     if (np.d < 5.5 || np.d > 7) return false;
     return true;
   };
+  // ── Integration 02Oct26f: is the fan ahead of an exit clear of boxes and station footprints (the audit's check 4)? ──
+  const FAN = R.exitFan;
+  const fanClear = (x, z, yaw) => {
+    const L = FAN.fanM, near = remGrid.near(x - L - 1, z - L - 1, x + L + 1, z + L + 1), feet = footGrid.near(x - L - 1, z - L - 1, x + L + 1, z + L + 1);
+    for (let deg = -FAN.fanDeg; deg <= FAN.fanDeg; deg += FAN.stepDeg) {
+      const a = yaw + (deg * Math.PI) / 180, dx = -Math.sin(a), dz = -Math.cos(a);
+      for (const q of near) {
+        if (q.box.h < FAN.fanMinH) continue;
+        const h = q.box.side / 2, lo = [q.box.x - h, q.box.z - h], hi = [q.box.x + h, q.box.z + h];
+        let t0 = 0, t1 = L, ok = true;
+        for (const [o, d, l, u] of [[x, dx, lo[0], hi[0]], [z, dz, lo[1], hi[1]]]) {
+          if (Math.abs(d) < 1e-9) { if (o < l || o > u) ok = false; }
+          else { let ta = (l - o) / d, tb = (u - o) / d; if (ta > tb) [ta, tb] = [tb, ta]; t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); }
+        }
+        if (ok && t0 <= t1) return false;
+      }
+      for (const f of feet) {
+        const ring = f.ring;
+        for (let i = 0, n = ring.length; i < n; i++) {
+          const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % n], ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+          if (Math.abs(den) < 1e-12) continue;
+          const t = ((ax - x) * ez - (az - z) * ex) / den, u = ((ax - x) * dz - (az - z) * dx) / den;
+          if (t >= 0 && t <= L && u >= 0 && u <= 1) return false;
+        }
+      }
+    }
+    return true;
+  };
   for (const rec of buildingsById.values()) {
     const site = rec.sites.slice().sort((a, b) => (b.nets.size - a.nets.size) || (a.name < b.name ? -1 : 1))[0];
     const sp = rec.pavilionSite ? rec.pavilionSite.p : site.p;
@@ -617,29 +653,70 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       fronts.sort((a, b) => (dseg(a) - dseg(b)) || (a.i - b.i));
     }
     let exit = null;
-    for (const f of fronts) {
+    // Integration 02Oct26f: first an exit whose fan ahead is clear, on a walkable front; then on any wall of 4 m or more;
+    // then, as before, the first valid one on a walkable front.
+    const anyWall = [];
+    for (let i = 0; i < rec.ring.length; i++) {
+      const a = rec.ring[i], b = rec.ring[(i + 1) % rec.ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L >= 4) anyWall.push({ i, a, b, L, n: edgeNormal(rec.ring, i) });
+    }
+    // (The first pass stands in front of any of the building's wall roundels, 1 m either way at most, so the walker who turns
+    // round still sees one; `slots` lists them on the fronts in order.)
+    const slots = [];
+    for (const f of fronts) for (const r of (f.rt ?? []).slice().sort((a, b) => a.s - b.s)) slots.push({ ...f, slot: r.s });
+    for (const [needFan, list] of [[true, slots], [true, fronts], [true, anyWall], [false, fronts]]) {
+    for (const f of list) {
       const q = nearestOnSegment(sp[0], sp[1], f.a[0], f.a[1], f.b[0], f.b[1]);
       const ux = (f.b[0] - f.a[0]) / f.L, uz = (f.b[1] - f.a[1]) / f.L;
       const t0 = Math.min(Math.max(q.t * f.L, 2), f.L - 2);
       // The walker steps out facing the street, and turns round to the building: stand in front of a roundel, the one
       // nearest the site point on the nearest front (a pavilion's single roundel is at the middle of its long front).
       const rt = (f.rt ?? []).slice().sort((a, b) => Math.abs(a.s - t0) - Math.abs(b.s - t0) || a.s - b.s)[0];
-      const startAt = rt ? rt.s : rec.pavilion ? f.L / 2 : t0;
-      const tries = [0];
-      for (let k = 1; k * 2 <= f.L; k++) tries.push(k * 2, -k * 2);
+      const startAt = list === slots ? f.slot : rt ? rt.s : rec.pavilion ? f.L / 2 : t0;
+      const tries = list === slots ? [0, 1, -1] : [0];
+      if (list !== slots) for (let k = 1; k * 2 <= f.L; k++) tries.push(k * 2, -k * 2);
+      // (Integration 02Oct26f: an exit with a clear fan may stand 5.6 to 6.9 m out, inside the band exitValid allows; 6.5 m first.)
+      outs: for (const out of needFan ? [R.exitOutM, 6, 6.9, 5.6] : [R.exitOutM])
       for (const dt of tries) {
         const t = startAt + dt;
         if (t < 2 || t > f.L - 2) continue;
-        const x = f.a[0] + ux * t + f.n[0] * R.exitOutM, z = f.a[1] + uz * t + f.n[1] * R.exitOutM;
+        const x = f.a[0] + ux * t + f.n[0] * out, z = f.a[1] + uz * t + f.n[1] * out;
         if (!exitValid(x, z, rec)) continue;
         const np = nearestFoot(x, z, rec);
         const nx = (x - np.x) / (np.d || 1), nz = (z - np.z) / (np.d || 1);
         if (nx * f.n[0] + nz * f.n[1] < 0.8) continue;
+        if (needFan && !fanClear(x, z, yawFacing(nx, nz))) continue;
         exit = { x, z, yaw: yawFacing(nx, nz) };
-        break;
+        break outs;
       }
       if (exit) break;
     }
+      if (exit) break;
+      if (list === anyWall || !needFan) {
+        // Integration 02Oct26f: no wall gives an exit 5.5 to 7 m out (with a clear fan, on the first try): look farther
+        // into the street, 7 to 24 m from the building (inside the audit's 25 m), round it in 1 m steps, still facing away from the building.
+        outer2: for (let d = 7.5; d <= 24; d += 1) {
+          const per = [];
+          for (let i = 0; i < rec.ring.length; i++) {
+            const a = rec.ring[i], b = rec.ring[(i + 1) % rec.ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = edgeNormal(rec.ring, i);
+            for (let t = 0; t <= L; t += 1) per.push([a[0] + (b[0] - a[0]) * t / (L || 1) + n[0] * d, a[1] + (b[1] - a[1]) * t / (L || 1) + n[1] * d]);
+          }
+          for (const [x, z] of per) {
+            const np = nearestFoot(x, z, rec);
+            if (np.d < 7 || np.d < d - 0.5) continue;
+            // (the 2 m cross of clear ground an exit wants; the last pass, with no fan, takes clear ground under the walker)
+            if (!clearPoint(x, z) || (needFan && (!clearPoint(x + 2, z) || !clearPoint(x - 2, z) || !clearPoint(x, z + 2) || !clearPoint(x, z - 2)))) continue;
+            const yaw = yawFacing((x - np.x) / np.d, (z - np.z) / np.d);
+            if (needFan && !fanClear(x, z, yaw)) continue;
+            exit = { x, z, yaw };
+            rec.flags.add('exit-street'); rec.flags.add('exit-fallback');   // not 5.5 to 7 m from a wall: a fallback (B1.9)
+            break outer2;
+          }
+        }
+        if (exit) break;
+      }
+    }
+    if (exit && !fanClear(exit.x, exit.z, exit.yaw)) rec.flags.add('exit-fan-blocked');
     if (!exit) {
       // A spiral from the site point: 3 m steps to 60 m, 16 directions a ring.
       outer: for (let r = 3; r <= 60; r += 3) for (let k = 0; k < 16; k++) {
@@ -681,7 +758,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   for (const rec of buildingsById.values()) if (rec.sites.length > 1) shared.set(rec.key, rec);
   for (const rec of shared.values()) note(rec.sites[0], 'building shared by sites', rec.osm, { detail: rec.sites.map(s => s.name).join(', ') });
   for (const rec of buildingsById.values()) for (const f of rec.flags) {
-    if (/^(landmark-overlap|no-walkable-front|exit-fallback|dual-roundel|overlap|substituted)/.test(f)) note(rec.sites[0], `flag ${f}`, rec.osm, { detail: `building ${rec.key}` });
+    if (/^(landmark-overlap|no-walkable-front|exit-fallback|exit-fan-blocked|exit-street|dual-roundel|overlap|substituted)/.test(f)) note(rec.sites[0], `flag ${f}`, rec.osm, { detail: `building ${rec.key}` });
   }
 
   const outBuildings = [...buildingsById.values()].sort((a, b) => (a.key < b.key ? -1 : 1)).map(rec => {
@@ -754,8 +831,14 @@ async function terrainRise() {
   const mesh = await terrain.tryCreateTerrainMesh({ thamesData: thames });
   if (!mesh) throw new Error('terrain mesh failed to build: cannot read the ground under the footprints');
   const VE = terrain.VERTICAL_EXAGGERATION;
+  // Integration 02Oct26f: beyond the map edge the app's ground is lane T's hidden ground (src/hidden-ground.js, the smoothed
+  // surface the track, the walker and the street exit stand on), and the runtime stands the station buildings on it; on the
+  // map it is the structural sampler itself, bit for bit, so only the seven termini beyond the edge change.
+  const { isOffMapEdge } = await import('../src/m25-edge.js');
+  const { createHiddenGround } = await import('../src/hidden-ground.js');
+  const hidden = createHiddenGround({ getTerrainMeshSurfaceY: terrain.getTerrainMeshSurfaceY, getStructuralSurfaceY: terrain.getStructuralSurfaceY, getTerrainBounds: terrain.getTerrainBounds, isOffMapEdge });
   /** The structural ground at (x, z) in true metres (the canonical Y over VE), or null. */
-  const groundOf = (x, z) => { const y = terrain.getStructuralSurfaceY({ x, z }); return Number.isFinite(y) ? y / VE : null; };
+  const groundOf = (x, z) => { const y = hidden.structuralY(x, z); return Number.isFinite(y) ? y / VE : null; };
   const riseOf = (ring) => {
     const bb = bounds(ring);
     let mn = Infinity, mx = -Infinity;

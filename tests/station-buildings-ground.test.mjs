@@ -24,7 +24,12 @@ test('no wall roundel is under the street in front of it (Master 1.0 and 1.1), a
   const thames = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/data/thames.json'), 'utf8'));
   assert.ok(await terrain.tryCreateTerrainMesh({ thamesData: thames }), 'the terrain builds under the shim');
   const VE = terrain.VERTICAL_EXAGGERATION;
-  const Y = (x, z) => terrain.getStructuralSurfaceY({ x, z }) / VE;
+  // Integration 02Oct26f: the app's ground is lane T's hidden ground beyond the map edge (identical to the structural sampler
+  // on the map), which is what the runtime stands the buildings on and what the walker stands on in front of them.
+  const { isOffMapEdge } = await imp('src/m25-edge.js');
+  const { createHiddenGround } = await imp('src/hidden-ground.js');
+  const hidden = createHiddenGround({ getTerrainMeshSurfaceY: terrain.getTerrainMeshSurfaceY, getStructuralSurfaceY: terrain.getStructuralSurfaceY, getTerrainBounds: terrain.getTerrainBounds, isOffMapEdge });
+  const Y = (x, z) => hidden.structuralY(x, z) / VE;
   const data = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
   const wide = 500 / (2 * 203.1445);
   const rows = { 1: 0, 1.1: 0 }; let rings = 0, worst = Infinity;

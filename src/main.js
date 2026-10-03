@@ -3999,7 +3999,7 @@ let stationBuildingsBuilding = false, stationLateRebuilt = false;
 // and baked, at the displayed height) and the landmark models. Canonical world space, as the hover raycaster's rays.
 const s02bBoxMeshes = [], s02bOccRay = new THREE.Raycaster(), s02bOccOrigin = new THREE.Vector3(), s02bOccDir = new THREE.Vector3();
 function s02bOccluded(ox, oy, oz, dx, dy, dz, t, scale) {
-  if (s02bRayBlockedByGround((x, z) => getTerrainMeshSurfaceY({ x, z }), ox, oy, oz, dx, dy, dz, t)) return true;
+  if (s02bRayBlockedByGround(s02HiddenGround.terrainY, ox, oy, oz, dx, dy, dz, t)) return true; // integration: the hidden ground beyond the edge (the same call on the map)
   if (surfaceGeometryGroup?.visible) {
     s02bBoxMeshes.length = 0;
     for (const c of surfaceGeometryGroup.children) if (c.isInstancedMesh && /^(baked-)?buildings-/.test(c.name || '')) s02bBoxMeshes.push(c);
@@ -4025,7 +4025,9 @@ function s02bFrame() {
   }
   if (!stationBuildingsMesh && !stationBuildingsBuilding && terrain) {
     stationBuildingsBuilding = true;
-    buildStationBuildingsWhenReady({ data: idx, getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }), VE: VERTICAL_EXAGGERATION }).then((m) => {
+    // integration: beyond the M25 the seven termini's buildings stand on T's hidden ground, as the track and the walker do
+    // (s02HiddenGround.structuralY is the raw sampler itself on the map).
+    buildStationBuildingsWhenReady({ data: idx, getStructuralY: s02HiddenGround.structuralY, VE: VERTICAL_EXAGGERATION }).then((m) => {
       stationBuildingsMesh = m;
       m.setOccluder(s02bOccluded);
       m.group.visible = !surfaceGeometryGroup || surfaceGeometryGroup.visible;
@@ -4698,6 +4700,22 @@ if (import.meta.env.DEV) {
     setRoundelsVisible: (v) => stationBuildingsMesh?.setRoundelsVisible(v),
     labelAnchor: (n) => stationBuildingsMesh?.labelAnchor(n) ?? null,
     get stats() { return stationBuildingsMesh?.stats ?? null; },
+    // s02:I (integration): the exit audit's assert-mode interface (lane F, tests/station-exit-audit.spec.js): every site key,
+    // a site's footprint ring, and the point of its building nearest the site's exit, so the audit's "near" and "facing" read
+    // the building itself (a terminus's centroid lies far inside it), as the audit's own comment defines them.
+    get keys() { const j = stationBuildingState.index?.json; return j ? Object.keys(j.sites) : null; },
+    footprintOf: (key) => { const idx = stationBuildingState.index, b = idx?.buildingForSite(key); return b ? idx.items.find(it => it.building === b)?.ring ?? null : null; },
+    centreOf: (key) => {
+      const idx = stationBuildingState.index, b = idx?.buildingForSite(key), e = b?.exit, ring = b ? idx.items.find(it => it.building === b)?.ring : null;
+      if (!ring || !e) return null;
+      let best = null;
+      for (let i = 0, n = ring.length; i < n; i++) {
+        const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % n], vx = bx - ax, vz = bz - az, l2 = vx * vx + vz * vz || 1e-12;
+        const t = Math.max(0, Math.min(1, ((e.x - ax) * vx + (e.z - az) * vz) / l2)), x = ax + vx * t, z = az + vz * t, d = Math.hypot(e.x - x, e.z - z);
+        if (!best || d < best.d) best = { x, z, d };
+      }
+      return { x: best.x, z: best.z };
+    },
   }) });
   // ── /s02:B ──
 }
