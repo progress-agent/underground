@@ -205,12 +205,14 @@ async function checkLeg(r, line, label, { slack = true } = {}) {
     }
   });
   if (slack) expect(hops / Math.max(1, open.length), `${label}: frames between 3.6 and 20 m of the track`).toBeLessThanOrEqual(0.01);
-  // The eye is 1.7 m above the rail head; where the drawn deck lies BELOW the rendered terrain (the Overground is drawn on the structural
-  // ground, and the terrain is never carved for rail) the walker is held 1 m above that terrain, which can put the eye more than 3 m above
-  // the deck. Those frames are few and every one of them is that clamp; they are listed, not hidden.
+  // The eye is 1.7 m above the rail head, 3 m at most above the nearest drawn deck. The exceptions are the flanks of a tunnel bridged
+  // as an overbridge (a tunnel run under 60 m between open runs is shown open, the rail head straight across): the drawn deck dips
+  // into the first tunnel sample (surface-rail.js smooths the tunnel samples down into the ground), so the nearest drawn point
+  // there, still of a surface sample's class, lies below the terrain while the walker rides straight across. A few frames a
+  // leg; every one has the deck below the terrain, and they are listed here, not hidden.
   if (high.length) console.log(`[overground] ${label}: ${high.length} of ${open.length} open frames with the eye over 3 m above the nearest deck: ${JSON.stringify(high.slice(0, 6))}`);
-  expect(high.filter(h => !h.clamped), `${label}: eye more than 3 m above the deck where the walker is not held above the terrain`).toEqual([]);
-  expect(high.length / Math.max(1, open.length), `${label}: share of open frames with the eye over 3 m above the deck`).toBeLessThanOrEqual(0.02);
+  expect(high.filter(h => !(h.deckBelowGroundM > 0.3)), `${label}: eye more than 3 m above a deck that is not below the terrain`).toEqual([]);
+  expect(high.length / Math.max(1, open.length), `${label}: share of open frames with the eye over 3 m above the deck`).toBeLessThanOrEqual(0.01);
   return { open: open.length, hops };
 }
 

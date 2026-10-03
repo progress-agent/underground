@@ -72,14 +72,16 @@ test('the walker is shown on the drawn track, 2.6 m to the left of its direction
   assert.ok(Math.abs(o2.x - 2.6) < 1e-9 && Math.abs(o2.z - 300) < 1e-9, `left of a southbound heading is +x: ${o2.x}`);
 });
 
-test('identity speed: 60 m/s for a second is 60 m of the drawn track, 200 m/s is 200, in either sense; clamped at the ends', () => {
+test('identity speed: 60 m/s for a second is 60 m of the drawn track, 200 m/s is 200, in either sense', () => {
   const { map, path } = walkerOf(run(0, 0, 2000, 0));
   assert.ok(Math.abs(path.length - 2000) < 1e-6, 'the arc is the track\'s');
   assert.equal(map.trackToChord(100, 1, 60), 160);
   assert.equal(map.trackToChord(1000, 1, 200), 1200);
   assert.equal(map.trackToChord(1000, -1, 200), 800);
-  assert.equal(map.trackToChord(10, -1, 60), 0);
-  assert.equal(map.trackToChord(1990, 1, 60), path.length);
+  // Not clamped to the ends: advance() meets the end of the path (or the junction there) itself.
+  assert.equal(map.trackToChord(10, -1, 60), -50);
+  assert.equal(map.trackToChord(1990, 1, 60), 2050);
+  assert.ok(Math.abs(Math.abs(map.trackToChord(path.length, 1, 3.3) - path.length) - 3.3) < 1e-9);
   // Through advance() (the walk's own step), displacement in plan equals the speed on a level run.
   const pos = { path: 0, s: 300, dir: 1 };
   advance(map.path ? { paths: [path], junctionAt: new Map(), VE } : null, pos, 200, { x: 1, z: 0 }, { holdAtPortals: false });
@@ -301,4 +303,28 @@ test('an open run ends AT its last open vertex, not half-way to the tunnel verte
   const edge = map.presentAt(iv[0][1], 0, {});
   assert.ok(Math.abs(edge.y - (GROUND + 5)) < 1e-9, `the open run ends on the surface, y ${edge.y}`);
   assert.equal(map.presentAt(iv[0][1] + 6, 0, {}).open, false, 'half-way to the tunnel vertex is already the bore');
+});
+
+test('a walker arriving at the end of a path that ends in a junction goes through it, whatever the last step: no stall at the junction vertex', () => {
+  // Two pieces end to end (the Windrush's Dalston Junction pieces): the walker comes down the first and must carry on onto the second.
+  const A = run(0, 0, 1000, 0), B = run(1000, 0, 2000, 0);
+  const g = { userData: { linePaths: new Map([['x', [A, B]]]), stationSets: [{ id: 'x', stations: [] }] } };
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: createOvergroundNetworkSource({ group: g, getGroundY: groundY, VE }).input().branches, stationLayers: new Map() });
+  const walk = createOpenAirWalk({ surfaceTrains: () => null, surfaceRail: () => null, getStructuralY: () => GROUND, getTerrainY: () => GROUND, VE, document: null });
+  walk.attach(net); walk.pump(net);
+  const A0 = net.paths[0];
+  for (const dt of [1 / 60, 1 / 30, 0.0123, 0.0177, 0.05]) {
+    const pos = { path: 0, s: A0.length - 150 * dt, dir: 1, side: 1 };
+    let stuck = 0, last = -1;
+    for (let i = 0; i < 400; i++) {
+      const d = walk.chordDistance(net.paths[pos.path], pos.s, pos.dir, 200 * dt);
+      const r = advance(net, pos, d, { x: 1, z: 0 }, { holdAtPortals: false, headingOf: walk.headingOf, branchHeadingOf: walk.branchHeadingOf });
+      if (r.stopped) break;
+      const key = `${pos.path}:${pos.s.toFixed(6)}`;
+      stuck = key === last ? stuck + 1 : 0; last = key;
+      assert.ok(stuck < 3, `stuck at ${key} with dt ${dt}`);
+    }
+    assert.equal(pos.path, 1, `on the second piece (dt ${dt}): ${JSON.stringify(pos)}`);
+    assert.ok(pos.s > 100, 'and walking on along it');
+  }
 });

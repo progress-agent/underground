@@ -144,9 +144,14 @@ export function createOvergroundAirMap({ path } = {}) {
     return out;
   }
 
-  /** The chord arc reached by moving d metres along the track: the path's own arc is the drawn track's, so s + d. */
+  /**
+   * The chord arc reached by moving d metres along the track: the path's own arc is the drawn track's, so s + d, NOT clamped
+   * to the ends. The caller takes the distance from it (open-air-walk.js chordDistance) and advance() meets the end of the
+   * path, or the junction there, itself: clamped, the last metre of a path that ends in a junction became a move of a few
+   * millimetres whose target fell one rounding short of the junction, and the walker stood there for ever at full speed.
+   */
   function trackToChord(s, dir, d) {
-    return clampS(s + (dir >= 0 ? 1 : -1) * Math.max(0, d));
+    return s + (dir >= 0 ? 1 : -1) * Math.max(0, d);
   }
 
   const ha = {}, hb = {};

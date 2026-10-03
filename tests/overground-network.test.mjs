@@ -100,6 +100,17 @@ test('joins: a join that lands within 12 m of the other piece\'s own end lands O
   assert.deepEqual(new Set(entries.map(e => e.path)), new Set([0, 1, 2]));
 });
 
+test('joins: two ends a few metres from each other\'s bodies are one junction, not two (a loop a few metres round that a walker could circle for ever)', () => {
+  // The Windrush's two pieces at Dalston Junction: both end at about the same point, 3 m apart, one running in from the west, one from the south.
+  const west = piece([[0, 0], [1000, 0]]);
+  const south = piece([[1003, 800], [1003, 3]]);
+  const T = topo([west, south], []);
+  assert.equal(T.report.joins.length, 1, JSON.stringify(T.report.joins));
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: sourceOf([west, south], []).input().branches, stationLayers: new Map() });
+  const groups = [...new Set([...net.junctionAt.values()])];
+  assert.equal(groups.length, 1, 'one junction group');
+});
+
 test('every vertex carries a record and `.og` has one per vertex', () => {
   const A = piece([[0, 0], [600, 0]]), B = piece([[300, 10], [300, 500]]);
   const arrays = sourceOf([A, B], [station('S1', 'One', 200, 3)]).input().branches.get('og:weaver');

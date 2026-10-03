@@ -51,6 +51,7 @@ export const STUB_MAX_M = 450;
 export const EXTRA_M = 30;           // other pieces of a line within d + this of a station also carry it
 export const DEDUPE_M = 100;         // one station listed twice by name within this is one
 export const VERTEX_MERGE_M = 2.5;   // an inserted vertex this near an existing one uses it (under buildTunnelNetwork's 3 m station snap)
+export const DUP_JOIN_M = 20;        // a second join between the same two pieces this near the first is the same junction seen from the other end
 export const JOIN_END_SNAP_M = 12;   // a join that would land this near the END of the other piece lands on the end (the Mildmay's three pieces meet at Willesden Junction within 8 m)
 export const STEP_M = 12;            // connector and stub sampling (the drawn track's own step)
 // The drawn tunnel's own height formula (surface-rail.js BASE_LIFT and CLASS_LIFT_M.tunnel; a node
@@ -162,6 +163,7 @@ export function buildLineTopology(line, { groundY, structuralY = null, VE = 5 } 
   const union = (a, b) => { parent[find(a)] = find(b); };
 
   // 1. JOINS
+  const joinPts = [];
   const ends = [];
   for (const A of pieces) { ends.push([A, 'start']); ends.push([A, 'end']); }
   for (const [A, which] of ends) {
@@ -173,6 +175,11 @@ export function buildLineTopology(line, { groundY, structuralY = null, VE = 5 } 
       if (n && n.d <= JOIN_M && (!best || n.d < best.d)) best = { ...n, B };
     }
     if (!best) continue;
+    // Two ends that lie a few metres from each other's bodies (the Windrush's Dalston Junction pieces, 3 m apart) are one
+    // junction: each end would otherwise join the other's body, and the two joins make a loop a few metres round that a
+    // walker can circle for ever. The second is skipped.
+    if (joinPts.some(j => ((j.a === A.id && j.b === best.B.id) || (j.a === best.B.id && j.b === A.id)) && Math.hypot(j.x - best.qx, j.z - best.qz) < DUP_JOIN_M)) continue;
+    joinPts.push({ a: A.id, b: best.B.id, x: best.qx, z: best.qz });
     // Where the join lands within JOIN_END_SNAP_M of the other piece's own end, it lands ON that end: pieces that meet at
     // one real junction (the Richmond and Clapham Junction branches start at one point, the Stratford piece ends 7 m on)
     // then share one vertex, and both branches are ways on from it.
