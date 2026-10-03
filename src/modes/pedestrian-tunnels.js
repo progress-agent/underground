@@ -70,11 +70,18 @@
 //   * path.edge [[s0, s1]]: stretches beyond the M25 map edge (markMapEdge); advance() always holds at
 //     their start, whatever holdAtPortals, and reports { edge: true }.
 
+// ── s02:O ── the Overground joins the network (overground-network.js builds its branches)
+import { isOgLine, ogNameKeys } from './overground-network.js';
+// ── /s02:O ──
+
 export const SAMPLE_STEP_M = 10;
 export const MIN_PLATFORM_DEPTH_M = 3;   // shallower stations (elevated DLR, surface Met) are stops marked `shallow` (s01:P)
 export const HEADING_PROBE_M = 6;
 const STATION_SNAP_M = 3;                // a station's position vs its branch vertex (both come from the same registry)
 const ENTRANCE_MERGE_M = 40;             // stops closer than this share one entrance (interchanges)
+// ── s02:O ──
+export const INTERCHANGE_NAME_M = 400;   // an Overground stop also joins an entrance this near that carries its name
+// ── /s02:O ──
 
 const key = (lineId, x, z) => `${lineId}:${Math.round(x)}:${Math.round(z)}`;
 
@@ -104,6 +111,18 @@ export function boreVertices(THREE, pts, halfSpacing) {
 function samplePath(THREE, lineId, pts, VE, id, sampleStep, halfSpacing) {
   const V = pts.map(p => new THREE.Vector3(p.x, p.y, p.z));
   const n = V.length;
+  // ── s02:O ── an Overground path is the drawn track: every vertex (the drawn 12 m samples) is a sample, joined
+  // by straight segments exactly as the walker is shown on them (overground-walk.js), with no spline between.
+  if (isOgLine(lineId)) {
+    const xs = new Float64Array(n), ys = new Float64Array(n), zs = new Float64Array(n), s = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      xs[i] = V[i].x; ys[i] = V[i].y; zs[i] = V[i].z;
+      if (i > 0) s[i] = s[i - 1] + Math.hypot(xs[i] - xs[i - 1], (ys[i] - ys[i - 1]) / VE, zs[i] - zs[i - 1]);
+    }
+    return { id, lineId, n, x: xs, y: ys, z: zs, s, left: null, right: null, length: s[n - 1], vertexS: Array.from(s), vertices: V,
+      junctions: [], stops: [], stations: [], open: [], edge: [] };
+  }
+  // ── /s02:O ──
   const curve = new THREE.CatmullRomCurve3(V);
   const bores = halfSpacing > 0 ? boreVertices(THREE, V, halfSpacing) : null;
   const lCurve = bores ? new THREE.CatmullRomCurve3(bores.left) : null;
@@ -165,10 +184,16 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
     for (const branch of branches || []) {
       const pts = (branch || []).filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z));
       if (pts.length < 2) continue;
-      const path = samplePath(THREE, lineId, pts, VE, paths.length, sampleStep, hs);
+      // s02:O an Overground path is the drawn track itself: one bore on its centreline, whatever the twin spacing.
+      const path = samplePath(THREE, lineId, pts, VE, paths.length, sampleStep, isOgLine(lineId) ? 0 : hs);
       if (!(path.length > 0)) continue;
+      // s02:O per-vertex record of where each vertex came from in the drawn data (overground-walk.js).
+      // The filter above drops array properties, so it is read from `branch` and kept only while no vertex was dropped.
+      if (branch?.og && branch.og.length === pts.length) { path.og = branch.og; path.branchRef = branch; }
       paths.push(path);
       path.vertices.forEach((v, i) => {
+        // s02:O an Overground path meets another only where its network source says so (ogJunction): not at every one of its 12 m samples.
+        if (path.og && branch.ogJunction && !branch.ogJunction[i]) return;
         const k = key(lineId, v.x, v.z);
         if (!byKey.has(k)) byKey.set(k, []);
         const list = byKey.get(k);
@@ -199,12 +224,16 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
       const pos = st?.pos;
       if (!pos || !Number.isFinite(pos.x)) continue;
       for (const p of linePaths) {
-        for (let i = 0; i < p.vertices.length; i++) {
+        // s02:O a station placed on a known vertex of a known branch (overground-network.js `ref`) is that vertex's: no scan.
+        const only = st.ref ? (p.branchRef === st.ref.branch ? st.ref.vi : -1) : null;
+        if (only === -1) continue;
+        for (let i = only ?? 0, last = only === null ? p.vertices.length : only + 1; i < last; i++) {
           const v = p.vertices[i];
           if (Math.hypot(v.x - pos.x, v.z - pos.z) > STATION_SNAP_M) continue;
           // s30:P every station on the path, platform or not (the chooser's next station).
           if (!p.stations.some(x => Math.abs(x.s - p.vertexS[i]) < 1e-6)) {
-            p.stations.push({ s: p.vertexS[i], id: st.id ?? null, name: st.name ?? st.id ?? '' });
+            p.stations.push({ s: p.vertexS[i], id: st.id ?? null, name: st.name ?? st.id ?? '',
+              ...(st.ids ? { ids: st.ids } : {}) });   // s02:O every naptan of a station listed twice
           }
           const platformY = v.y;
           const surfaceY = Number.isFinite(st.surfaceY) ? st.surfaceY : null;
@@ -216,6 +245,9 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
           const shallow = depthM === null || depthM < minDepthM;
           const stop = { path: p.id, s: p.vertexS[i], lineId, name: st.name ?? st.id ?? '', id: st.id ?? null,
             x: v.x, z: v.z, platformY, surfaceY, depthM: depthM ?? 0, shallow };
+          // s02:O an Overground stop stands where its station does (the street, the shaft and the interchange rule
+          // read the site); its platform is the track vertex, at `s`. Naptans: every id of a station listed twice.
+          if (st.site) { stop.x = st.site.x; stop.z = st.site.z; stop.site = { x: st.site.x, z: st.site.z }; stop.ids = st.ids ? st.ids.slice() : (st.id ? [st.id] : []); }
           p.stops.push({ s: stop.s, stop });
           stops.push(stop);
         }
@@ -224,9 +256,11 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
   }
   for (const p of paths) { p.stops.sort((a, b) => a.s - b.s); p.stations.sort((a, b) => a.s - b.s); }
   const links = linkStations(paths, junctionAt);
+  const ogLinks = linkOvergroundStations(paths, junctionAt, stops);   // s02:O
 
   const entrances = [];
   for (const stop of stops) {
+    if (isOgLine(stop.lineId)) continue;   // s02:O the Overground's stops join after the Tube's and DLR's (below)
     let e = entrances.find(en => Math.hypot(en.x - stop.x, en.z - stop.z) < ENTRANCE_MERGE_M);
     if (!e) {
       e = { name: cleanName(stop.name), x: stop.x, z: stop.z, surfaceY: stop.surfaceY, stops: [] };
@@ -234,8 +268,52 @@ export function buildTunnelNetwork({ THREE, branchesByLine, stationLayers, VE = 
     }
     e.stops.push(stop);
   }
+  // ── s02:O ── Interchanges with the Overground (D-048 item 5). An Overground stop, measured from its SITE,
+  // joins every entrance within ENTRANCE_MERGE_M, or within INTERCHANGE_NAME_M that carries its name
+  // (case, parentheticals, apostrophes and "&" ignored, a leading "London " optional): Overground
+  // stations often sit further than 40 m from the Tube station they serve (Seven Sisters 220 m,
+  // Liverpool Street 140 m). None founds a new entrance at the site; one is joined; several are MERGED into
+  // the nearest (their stops move to it; it keeps its name, x, z and surfaceY), so the DLR's Stratford and
+  // the Central's, or Liverpool Street's two, are one card with the Overground's rows too. Only entrances
+  // an Overground stop matched are touched; every pair formed is listed in stats.ogInterchanges.
+  const ogPairs = [], ogMerges = [];
+  const keysOf = new WeakMap();
+  const entranceKeys = (en) => {
+    let k = keysOf.get(en);
+    if (!k || k.n !== en.stops.length) { k = { n: en.stops.length, set: new Set(en.stops.flatMap(st => ogNameKeys(st.name))) }; keysOf.set(en, k); }
+    return k.set;
+  };
+  for (const stop of stops) {
+    if (!isOgLine(stop.lineId)) continue;
+    const site = stop.site ?? { x: stop.x, z: stop.z };
+    const mine = ogNameKeys(stop.name);
+    const near = [];
+    for (const en of entrances) {
+      const d = Math.hypot(en.x - site.x, en.z - site.z);
+      if (d < ENTRANCE_MERGE_M) near.push({ en, d, rule: 'distance' });
+      else if (d <= INTERCHANGE_NAME_M && mine.some(k => entranceKeys(en).has(k))) near.push({ en, d, rule: 'name' });
+    }
+    if (!near.length) {
+      entrances.push({ name: cleanName(stop.name), x: site.x, z: site.z, surfaceY: stop.surfaceY, stops: [stop] });
+      continue;
+    }
+    near.sort((a, b) => a.d - b.d);
+    const into = near[0].en;
+    into.stops.push(stop);
+    for (const { en, d, rule } of near) {
+      ogPairs.push({ og: cleanName(stop.name), ogLine: stop.lineId, with: en.name, m: +d.toFixed(1), rule });
+      if (en === into) continue;
+      for (const st of en.stops) if (!into.stops.includes(st)) into.stops.push(st);
+      entrances.splice(entrances.indexOf(en), 1);
+      ogMerges.push({ og: cleanName(stop.name), keep: into.name, merged: en.name, m: +d.toFixed(1) });
+    }
+  }
+  // Every entrance lists the cleaned names of all its stops (additive: `name` keeps its meaning).
+  for (const en of entrances) en.names = [...new Set(en.stops.map(st => cleanName(st.name)))];
+  // ── /s02:O ──
   return { paths, entrances, junctionAt, VE, halfSpacing: hs, stats: { paths: paths.length, stops: stops.length, entrances: entrances.length,
-    junctions: [...byKey.values()].filter(x => x.length > 1).length, links } };
+    junctions: [...byKey.values()].filter(x => x.length > 1).length, links,
+    ...(ogPairs.length || ogLinks ? { ogLinks, ogInterchanges: ogPairs, ogMerges } : {}) } };
 }
 
 /** s01:P a path end at a station joins the same station on another path of its line within this (plan metres). */
@@ -256,7 +334,7 @@ export const STATION_LINK_M = 100;
  */
 function linkStations(paths, junctionAt) {
   const byLine = new Map();
-  for (const p of paths) { if (!byLine.has(p.lineId)) byLine.set(p.lineId, []); byLine.get(p.lineId).push(p); }
+  for (const p of paths) { if (isOgLine(p.lineId)) continue; if (!byLine.has(p.lineId)) byLine.set(p.lineId, []); byLine.get(p.lineId).push(p); }   // s02:O: the Overground links its own (linkOvergroundStations)
   const vertexAt = (p, s) => { const i = p.vertexS.findIndex(v => Math.abs(v - s) < 1e-6); return i >= 0 ? p.vertices[i] : null; };
   const pairs = [];
   for (const P of byLine.values()) {
@@ -279,8 +357,16 @@ function linkStations(paths, junctionAt) {
       }
     }
   }
+  return mergeJunctionPairs(paths, junctionAt, pairs);
+}
+
+/**
+ * Merge pairs of { path, s } ends into junction groups: every member of a group lists all of it
+ * (s02:O: split out of linkStations unchanged, so the Overground's station junctions use it too).
+ * Returns the number of pairs.
+ */
+function mergeJunctionPairs(paths, junctionAt, pairs) {
   if (!pairs.length) return 0;
-  // Merge into junction groups: every member of a group lists all of it.
   const groupOf = new Map();
   const keyOf = (e) => `${e.path}:${e.s}`;
   const group = (e) => groupOf.get(keyOf(e)) || (() => { const g = (junctionAt.get(keyOf(e)) || [e]).slice(); for (const x of g) groupOf.set(keyOf(x), g); return g; })();
@@ -299,8 +385,35 @@ function linkStations(paths, junctionAt) {
   return pairs.length;
 }
 
+// ── s02:O ── Overground station junctions. A station on two parallel pieces of a line (Hackney Downs
+// on both Weaver trunks) is one junction group, so a walker can change track there and reach Rectory
+// Road from the Chingford trunk. Pairs every stop of an `og:` station with the first one.
+function linkOvergroundStations(paths, junctionAt, stops) {
+  const byStation = new Map();
+  for (const stop of stops) {
+    if (!isOgLine(stop.lineId) || !stop.ids?.length) continue;
+    const k = `${stop.lineId}|${stop.ids[0]}`;
+    if (!byStation.has(k)) byStation.set(k, []);
+    byStation.get(k).push(stop);
+  }
+  const pairs = [];
+  for (const list of byStation.values()) {
+    for (let i = 1; i < list.length; i++) {
+      if (list[i].path === list[0].path) continue;
+      pairs.push([{ path: list[0].path, s: list[0].s }, { path: list[i].path, s: list[i].s }]);
+    }
+  }
+  return mergeJunctionPairs(paths, junctionAt, pairs);
+}
+// ── /s02:O ──
+
+const cleanMemo = new Map();   // s02:O station names are a few hundred and every network rebuild cleans them all again
 export function cleanName(name) {
-  return String(name || '').replace(/\s+(Underground|DLR|Rail)\s+Station$/i, '').replace(/\s+Station$/i, '').trim();
+  const hit = typeof name === 'string' ? cleanMemo.get(name) : undefined;
+  if (hit !== undefined) return hit;
+  const out = String(name || '').replace(/\s+(Underground|DLR|Rail)\s+Station$/i, '').replace(/\s+Station$/i, '').trim();
+  if (typeof name === 'string' && cleanMemo.size < 4096) cleanMemo.set(name, out);
+  return out;
 }
 
 function indexAt(path, s) {
@@ -561,6 +674,7 @@ export function markOpenSections(net, { groundY, isWater = null, waterY = null, 
   if (!known) return -1;
   let portals = 0;
   for (const p of net.paths) {
+    if (p.og) continue;   // s02:O the Overground's open stretches come from its drawn track (overground-walk.js)
     const raw = new Float64Array(p.n), known = new Uint8Array(p.n);
     for (let j = 0; j < p.n; j++) { const g = groundY(p.x[j], p.z[j]); if (Number.isFinite(g)) { raw[j] = g; known[j] = 1; } }
     // Box average over +/- smoothM of arc (two pointers).
@@ -648,6 +762,7 @@ export function markOpenSectionsFromTrack(net, { classAt, reachM = TRACK_MATCH_M
   let portals = 0, unmatched = 0;
   const share = {};
   for (const p of net.paths) {
+    if (p.og) continue;   // s02:O see markOpenSections
     const c = new Int8Array(p.n);
     let known = 0;
     for (let j = 0; j < p.n; j++) {
@@ -682,6 +797,7 @@ export function markOpenSectionsFromTrack(net, { classAt, reachM = TRACK_MATCH_M
 // ── s01:P the map edge ───────────────────────────────────────────────────────
 export const EDGE_HOLD_M = 150;   // the walk holds this far (arc) inside where its line leaves the map
 const EDGE_STEP_M = 10;
+const OG_EDGE_STEP_M = 80;   // s02:O
 
 /**
  * The M25 map edge (s01:P; D-043 item 4: "the walk stops at the M25 edge. The
@@ -706,6 +822,8 @@ export function markMapEdge(net, { inside, holdM = EDGE_HOLD_M, stepM = EDGE_STE
   const offAt = (p, s) => {
     pointAt(p, s, tmp, 0);
     if (!inside(tmp.x, tmp.z)) return true;
+    // s02:O an Overground path IS the drawn track: no second point is shown there to test.
+    if (p.og) return false;
     for (const q of positionsAt ? (positionsAt(p, s) || []) : []) if (q && !inside(q.x, q.z)) return true;
     return false;
   };
@@ -713,7 +831,9 @@ export function markMapEdge(net, { inside, holdM = EDGE_HOLD_M, stepM = EDGE_STE
   const gone = new Set();
   for (const p of net.paths) {
     if (only && !only.has(p.id)) { if (!p.edge) p.edge = []; continue; }
-    const n = Math.max(2, Math.ceil(p.length / stepM) + 1);
+    // s02:O the Overground's 210 km are stepped coarsely (a pass over the polygon a step costs a microsecond);
+    // each boundary is still bisected to a metre, and the edge is a smooth ring, not a saw.
+    const n = Math.max(2, Math.ceil(p.length / (p.og ? OG_EDGE_STEP_M : stepM)) + 1);
     const S = (k) => (p.length * k) / (n - 1);
     const runs = [];
     let start = null;

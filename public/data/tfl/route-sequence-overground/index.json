@@ -1,0 +1,30 @@
+{
+  "kind": "tfl-route-sequence-cache-overground",
+  "generatedAt": "2026-10-02T20:57:56.465Z",
+  "lines": {
+    "liberty": {
+      "file": "liberty.json",
+      "url": "https://api.tfl.gov.uk/Line/liberty/Route/Sequence/all"
+    },
+    "lioness": {
+      "file": "lioness.json",
+      "url": "https://api.tfl.gov.uk/Line/lioness/Route/Sequence/all"
+    },
+    "mildmay": {
+      "file": "mildmay.json",
+      "url": "https://api.tfl.gov.uk/Line/mildmay/Route/Sequence/all"
+    },
+    "suffragette": {
+      "file": "suffragette.json",
+      "url": "https://api.tfl.gov.uk/Line/suffragette/Route/Sequence/all"
+    },
+    "weaver": {
+      "file": "weaver.json",
+      "url": "https://api.tfl.gov.uk/Line/weaver/Route/Sequence/all"
+    },
+    "windrush": {
+      "file": "windrush.json",
+      "url": "https://api.tfl.gov.uk/Line/windrush/Route/Sequence/all"
+    }
+  }
+}

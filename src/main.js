@@ -157,6 +157,9 @@ import { getMasterBus } from './audio.js';
 // ── /sprint:A1 ──
 // ── s25:P ──
 import { createTubeInterior } from './tube-interior.js';
+// ── s02:O ── the Overground's entry into the Pedestrian walk network (D-048 item 5)
+import { createOvergroundNetworkSource, OG_PREFIX } from './modes/overground-network.js';
+// ── /s02:O ──
 // ── /s25:P ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
@@ -4396,6 +4399,52 @@ modeSystem.ctx.lineColour = (lineId) => lineColoursById.get(lineId);
 modeSystem.ctx.surfaceRail = () => surfaceRail;
 modeSystem.ctx.overgroundLinePaths = () => overgroundGroup?.userData?.linePaths ?? null;
 // ── /s30:integrate ──
+// ── s02:O ──
+// The London Overground in the Pedestrian walk (D-048 item 5): every station a stop, changes to and from the Tube
+// and DLR, the walk on the drawn track. Its branches and stations are built from the drawn track
+// (src/modes/overground-network.js) and handed in through `tubeNetwork.overground`, never through
+// lineBranchCenterPts or lineShaftLayers, which also feed tube snapping, hover and the station markers.
+{
+  const ogSource = createOvergroundNetworkSource({
+    group: () => overgroundGroup, VE: VERTICAL_EXAGGERATION,
+    getGroundY: (x, z) => getStructuralSurfaceY({ x, z }), getStructuralY: (x, z) => getStructuralSurfaceY({ x, z }),
+  });
+  let ogColoured = false;
+  Object.defineProperty(modeSystem.ctx.tubeNetwork, 'overground', {
+    enumerable: true,
+    get() {
+      const input = ogSource.input();
+      if (!input) return null;
+      if (!ogColoured) {
+        ogColoured = true;
+        for (const { id, colour } of overgroundGroup.userData.stationSets) {
+          const n = parseInt(String(colour || '').replace('#', ''), 16);
+          if (Number.isFinite(n)) lineColoursById.set(OG_PREFIX + id, n);   // the lining and the chooser resolve it like any line
+        }
+      }
+      return input;
+    },
+  });
+  modeSystem.ctx.tubeNetwork.overgroundReport = () => ogSource.report();
+  modeSystem.ctx.overground = () => overgroundGroup;
+  // TfL's route sequences for the six lines ("Line · towards X"), pinned to the bundled copy. Their own directory:
+  // the Tube's index (route-sequence/index.json) makes this file build a Tube line for every entry.
+  (async () => {
+    try {
+      const base = '/data/tfl/route-sequence-overground/';
+      const index = await (await fetch(`${base}index.json`)).json();
+      for (const [id, meta] of Object.entries(index.lines || {})) {
+        const seq = await (await fetch(`${base}${meta.file}`)).json();
+        const names = new Map();
+        for (const sq of seq.stopPointSequences || []) for (const sp of sq.stopPoint || []) if (sp?.id && !names.has(sp.id)) names.set(sp.id, sp.name);
+        s30pTubeRoutes.set(OG_PREFIX + id, { lineName: seq.lineName || id, orderedLineRoutes: seq.orderedLineRoutes || [], names });
+      }
+    } catch (err) {
+      console.warn('[overground] route sequences', err);
+    }
+  })();
+}
+// ── /s02:O ──
 // ── s01:P ──
 // Pedestrian to the ends of the lines (D-042 item 1, D-043 item 4): in the open
 // the walker is shown on the drawn track through the surface trains' mapping

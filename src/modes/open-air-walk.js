@@ -37,6 +37,10 @@ import { markMapEdge, headingAt } from './pedestrian-tunnels.js';
 import { createOpenAirMap } from './open-air-map.js';
 import { passingState } from '../tunnel-trains.js';
 import { sampleRun, laneOffset } from '../surface-train-map.js';
+// ── s02:O ── the Overground's trains through the walker (overground-walk.js)
+import { overgroundPass } from './overground-walk.js';
+import { CAR_STEP } from '../overground-trains.js';
+// ── /s02:O ──
 
 export const BUILD_BUDGET_MS = 4;          // lazy mapping work per frame
 export const PASS_REACH_M = 1200;          // surface trains within this (plan) of the walker are tested
@@ -66,7 +70,8 @@ function signature(path) {
  * @param {Document} [o.document]
  */
 export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = () => null, getStructuralY, getTerrainY,
-  isInsideM25 = null, VE = 5, now = () => globalThis.performance?.now?.() ?? 0, document = globalThis.document } = {}) {
+  isInsideM25 = null, VE = 5, now = () => globalThis.performance?.now?.() ?? 0, document = globalThis.document,
+  overground = () => null /* s02:O the Overground group (its fleets) */ } = {}) {
   const sigOf = new WeakMap();            // path -> signature
   const netIds = new WeakMap();           // Lane T network -> id
   let nextNetId = 1;
@@ -89,6 +94,13 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
   }
 
   function keyOf(path) {
+    // ── s02:O ── an Overground path is the drawn track itself: no Lane T network, no ratio in the key
+    // (its presenter reads the drawn heights live, so Master follows with no rebuild).
+    if (path.og) {
+      if (!sigOf.has(path)) sigOf.set(path, signature(path));
+      return { key: `${sigOf.get(path)}@og`, sig: sigOf.get(path), og: true };
+    }
+    // ── /s02:O ──
     const st = surfaceTrains?.();
     if (!st) return null;
     let tnet;
@@ -107,8 +119,9 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
     const t0 = now();
     let m;
     try {
-      m = createOpenAirMap({ path, tnet: k.tnet, records: records(path.lineId), ratio: k.st.ratio ?? 1,
-        getY: (p) => getStructuralY(p.x, p.z), groundY: (x, z) => getTerrainY(x, z), VE });
+      m = k.og ? createOpenAirMap({ path, groundY: (x, z) => getTerrainY(x, z), VE })   // s02:O
+        : createOpenAirMap({ path, tnet: k.tnet, records: records(path.lineId), ratio: k.st.ratio ?? 1,
+          getY: (p) => getStructuralY(p.x, p.z), groundY: (x, z) => getTerrainY(x, z), VE });
       m.openIntervals();
     } catch (err) {
       console.warn('[pedestrian] open-air mapping', path.lineId, err);
@@ -192,11 +205,14 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
     if (!net) return -1;
     sync(net);
     markEdge(net);
-    if (!surfaceTrains?.()) return -1;
+    // s02:O the Overground's paths map without the surface trains (they are the drawn track itself).
+    const haveSurface = !!surfaceTrains?.();
+    if (!haveSurface && !net.paths.some(p => p.og)) return -1;
     const end = now() + budgetMs;
     let pending = 0;
     const done = new Set();
     for (const p of net.paths) {
+      if (!haveSurface && !p.og) continue;
       if (mappingOf(p, { fresh: true })) continue;
       if (now() < end) { build(p); apply(net, p); done.add(p.id); }
       else pending++;
@@ -239,13 +255,35 @@ export function createOpenAirWalk({ surfaceTrains, surfaceRail, trainSystem = ()
   const wq = { ...pt };
   let lastPass = { nearest: null, inside: false, insideSpeed: 0, rush: 0, rumble: 0 };
   let passes = 0, wasInside = false, passLine = null;
-  function resetPasses() { proxies.clear(); prev.clear(); wasInside = false; lastPass = { nearest: null, inside: false, insideSpeed: 0, rush: 0, rumble: 0 }; }
+  function resetPasses() { proxies.clear(); prev.clear(); ogState.proxies.clear(); ogState.prev.clear(); wasInside = false; lastPass = { nearest: null, inside: false, insideSpeed: 0, rush: 0, rumble: 0 }; }
   /**
    * The passing state of the walker's line's surface trains against the walker
    * in the open: { nearest, inside, insideSpeed, rush, rumble } (tunnel-trains.js passingState).
    * here = present(path, s, laneSign) for the walker, laneSign its lane.
    */
+  const ogState = { proxies: new Map(), prev: new Map() };
+  const ogWarned = new Set();
   function surfacePass(path, here, laneSign, dt) {
+    // ── s02:O ── the Overground's trains: its own fleet, in the walker's lane (overground-walk.js)
+    if (path.og) {
+      const m = mappingOf(path);
+      const group = overground?.();
+      const fleet = group?.userData?.fleets?.find(f => f.name === `overground-trains-${path.lineId.slice(3)}`) ?? null;
+      if (!m || !fleet || !here?.mapped) { resetPasses(); return lastPass; }
+      if (passLine !== path.lineId) { resetPasses(); passLine = path.lineId; }
+      try {
+        lastPass = overgroundPass(m, here, laneSign, dt, fleet, ogState, { VE, carStep: CAR_STEP });
+      } catch (err) {
+        // A throw in a per-frame pass must not kill the render loop.
+        if (!ogWarned.has(path.lineId)) { ogWarned.add(path.lineId); console.warn('[pedestrian] Overground pass', path.lineId, err); }
+        resetPasses();
+        return lastPass;
+      }
+      if (lastPass.inside && !wasInside) passes++;
+      wasInside = lastPass.inside;
+      return lastPass;
+    }
+    // ── /s02:O ──
     const st = surfaceTrains?.(), ts = trainSystem?.();
     if (!st || !ts || !here?.mapped || !here.run) { resetPasses(); return lastPass; }
     if (passLine !== path.lineId) { resetPasses(); passLine = path.lineId; }
