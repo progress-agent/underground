@@ -430,7 +430,7 @@ test.describe('in one load', () => {
       // Every car drawn stands on open track, above the ground under it.
       const snap = u.surfaceTrains.snapshot();
       let below = 0, cars = 0;
-      for (const tr of Object.values(snap)) for (const c of tr.cars) { cars++; const y = u.getTerrainMeshSurfaceY({ x: c.m[12], z: c.m[14] }); if (Number.isFinite(y) && c.m[13] < y - 2) below++; }
+      for (const tr of Object.values(snap)) for (const c of tr.cars) { cars++; const y = u.termini.hiddenGround.terrainY(c.m[12], c.m[14]); if (Number.isFinite(y) && c.m[13] < y - 2) below++; } // s02:T: the hidden ground (the same as getTerrainMeshSurfaceY on the map; beyond the M25 the surface model is not drawn)
       return { above: u.aboveGroundView, top: g.parent === u.scene, named: g.name, culled: inSet(g), undergroundNotCulled, under, surface, below, cars };
     });
     expect(r.above).toBe(true);

@@ -117,7 +117,11 @@ test('the surface railway draws nothing below the ground: no tunnel, and D-024 h
       if (!o.isMesh || !['stripe', 'band'].includes(o.userData.part)) return;
       const pos = o.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
-        const t = u.getTerrainMeshSurfaceY({ x: pos.getX(i), z: pos.getZ(i) });
+        // s02:T: the ground the track stands on is the hidden ground (src/hidden-ground.js): the same call as
+        // getTerrainMeshSurfaceY on the map, and beyond the M25 (where the surface model is never drawn, and the
+        // Central, Metropolitan and Weaver now run on to their termini) the smoothed surface the track rides.
+        // The thresholds are unchanged.
+        const t = u.termini.hiddenGround.terrainY(pos.getX(i), pos.getZ(i));
         if (!Number.isFinite(t)) continue;
         const above = (pos.getY(i) - t) / VE; total++;
         if (above < -0.5) buried++; else if (above < 0.05) grazing++;
@@ -143,7 +147,11 @@ const OVERGROUND_PARTS_387DFF0 = {
   'lioness|stripe': [16410, '9014d5c9', '6324ce47'], 'lioness|ballast': [14616, '8634cf39', '1aa9fe89'], 'lioness|earth': [324, '2e9e463', '249eca2c'],
   'mildmay|stripe': [22626, 'ae4e9044', 'd2627f5a'], 'mildmay|ballast': [16866, 'b10f7a0', '370c5c06'], 'mildmay|earth': [4608, '7fb462b1', '5457c543'], 'mildmay|cutShadow': [3024, '6f6e01e1', '990db4f4'],
   'suffragette|stripe': [13332, 'e2763bb1', 'adf458fe'], 'suffragette|ballast': [8358, '23e5283a', '80439ddb'], 'suffragette|cutShadow': [1056, '9ecf286a', '7485496f'],
-  'weaver|stripe': [23520, 'ed77ec20', 'e3fb6875'], 'weaver|ballast': [16398, '3ef65a3b', 'd06d296d'], 'weaver|earth': [1008, '7d18e7d1', 'cb03ed77'], 'weaver|cutShadow': [36, 'e338bcae', '5a38f6ae'],
+  // s02:T (sprint 02Oct26f, D-048 item 7): re-pinned from [23520, 'ed77ec20', 'e3fb6875'] and [16398, '3ef65a3b', 'd06d296d']. The Weaver now runs on to
+  // Cheshunt (scripts/extend-overground-termini.mjs appends 525 m of OSM track, 64 points) and rides the hidden ground beyond the M25 (src/hidden-ground.js:
+  // the canopy taken off), so its stripe and ballast gain 384 vertices each (24 more 16-vertex samples of track) and every position beyond the ring
+  // moves; its earth and cutting meshes (all inside the map) are byte-identical, as is every other Overground line. Measured on the Mac Studio, Master 1.1.
+  'weaver|stripe': [23904, 'd4c0001f', 'f2288620'], 'weaver|ballast': [16782, 'dddc9125', '58f732f2'], 'weaver|earth': [1008, '7d18e7d1', 'cb03ed77'], 'weaver|cutShadow': [36, 'e338bcae', '5a38f6ae'],
   'windrush|stripe': [27402, '493d9b89', '43bcbcff'], 'windrush|ballast': [19728, 'e557da80', 'f66b53c0'], 'windrush|earth': [1908, '503d90b3', '37817b77'], 'windrush|cutShadow': [4284, '68e32bef', 'ffe671ee'],
 };
 
@@ -165,7 +173,9 @@ test('the Overground builds exactly what c820ea9 built, and draws the same pixel
   // else is pinned byte-identical to 387dff0 part by part (positions and
   // normals of every stripe, ballast, earth and cutting mesh), below.
   const fp = await page.evaluate(overgroundFingerprint);
-  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: 'a0c6e9b8', meshes: 26, vertices: 234060 });
+  // s02:T: re-pinned from { total: 'a0c6e9b8', meshes: 26, vertices: 234060 }: the Weaver's stripe and ballast gain 384 vertices each (the Weaver rows above), so the
+  // vertex delta (768) is exactly the Weaver parts' delta, and the total hash moves with the Weaver's positions; the mesh count and the masonry key set are unchanged.
+  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: '42ef82e6', meshes: 26, vertices: 234828 });
   const others = Object.fromEntries(Object.entries(fp.parts).filter(([k]) => !k.endsWith('|masonry')));
   expect(others).toEqual(OVERGROUND_PARTS_387DFF0);
   expect(Object.keys(fp.parts).filter(k => k.endsWith('|masonry')).sort()).toEqual(['liberty', 'lioness', 'mildmay', 'suffragette', 'weaver', 'windrush'].map(l => `${l}|masonry`));
@@ -793,39 +803,36 @@ test('s01: the stations the last sprint left without a marker have surfaceOnly m
   expect(r.lift.lifted).toBeGreaterThan(0);
 });
 
-test('s01: the drawn railway stops at the map edge, and no surface marker stands beyond it', async () => {
+// s02:T (sprint 02Oct26f, D-048 item 7): this test pinned the s01:R clip, "the drawn railway stops at the map edge, and no
+// surface marker stands beyond it" (D-043 item 4: Epping, Amersham, Chesham and Chorleywood had none). Jordan then ruled that
+// beyond the M25 the lines run on to their termini ("just a tunnel or track in empty space"), so it is inverted: track is
+// drawn beyond the ring, to the buffers, and the five Tube termini beyond it have surface markers like any surface station.
+// tests/termini.spec.js pins the track, the trains, the ground and the walk.
+test('s02:T: the drawn railway runs on beyond the map edge to the termini, and their surface markers stand there', async () => {
   const r = await page.evaluate(async () => {
     const u = window.__ug, { isOffMapEdge, getMapEdgeRing, signedDistanceToRing } = await import('/src/m25-edge.js');
     const ring = getMapEdgeRing();
-    let beyond = 0, worst = 0, checked = 0;
+    let beyond = 0, far = 0, checked = 0;
     for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
       if (!o.isMesh || o.userData.part !== 'stripe') return;
       const p = o.geometry.attributes.position;
-      for (let i = 0; i < p.count; i += 3) { checked++; if (isOffMapEdge({ x: p.getX(i), z: p.getZ(i) })) { beyond++; worst = Math.max(worst, -signedDistanceToRing(p.getX(i), p.getZ(i), ring)); } }
+      for (let i = 0; i < p.count; i += 3) { checked++; if (isOffMapEdge({ x: p.getX(i), z: p.getZ(i) })) { beyond++; if (signedDistanceToRing(p.getX(i), p.getZ(i), ring) < -5000) far++; } }
     });
     let markersBeyond = 0;
     for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) if (isOffMapEdge(s.pos)) markersBeyond++;
-    // The Central runs on to the edge north of Theydon Bois: its last drawn sample there is at the cliff.
-    const central = u.surfaceRail.paths.get('central').filter(Boolean);
-    let edgeGap = Infinity;
-    for (const path of central) {
-      const f = path.map(p => !p.offMap && p.cls !== 'tunnel');
-      for (let i = 0; i < path.length - 1; i++) {
-        if (f[i] && path[i + 1].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i].x, path[i].z, ring)));
-        if (f[i + 1] && path[i].offMap) edgeGap = Math.min(edgeGap, Math.abs(signedDistanceToRing(path[i + 1].x, path[i + 1].z, ring)));
-      }
-    }
     const names = [...u.surfaceRail.stationLayers.values()].flatMap(l => l.stationsLayer.mesh.userData.stations.map(s => s.name));
-    return { beyond, worst, checked, markersBeyond, edgeGap, epping: names.some(n => /Epping/.test(n)), amersham: names.some(n => /Amersham|Chesham|Chorleywood/.test(n)), theydon: names.some(n => /Theydon Bois/.test(n)) };
+    const has = re => names.some(n => re.test(n));
+    // No sample is flagged any more: only a sample with no ground under it would be.
+    const flagged = [...u.surfaceRail.paths.values()].flat().filter(Boolean).reduce((n, path) => n + path.filter(p => p.offMap).length, 0);
+    return { beyond, far, checked, markersBeyond, flagged, epping: has(/Epping/), chorleywood: has(/Chorleywood/), chalfont: has(/Chalfont/), amersham: has(/Amersham/), chesham: has(/Chesham/), theydon: has(/Theydon Bois/) };
   });
   console.log('map edge', JSON.stringify(r));
   expect(r.checked).toBeGreaterThan(10000);
-  // Stripe vertices may stand at most a stripe half-width (4.5 m) past the ring where the track meets it obliquely.
-  expect(r.worst).toBeLessThan(5);
-  expect(r.markersBeyond).toBe(0);
-  expect(r.epping || r.amersham).toBe(false);
-  expect(r.theydon).toBe(true);
-  expect(r.edgeGap).toBeLessThan(13); // within one 12 m sample of the cliff
+  expect(r.beyond, 'stripe vertices beyond the ring').toBeGreaterThan(1000);
+  expect(r.far, 'stripe vertices more than 5 km beyond it (the Chilterns)').toBeGreaterThan(100);
+  expect(r.flagged).toBe(0);
+  expect(r.markersBeyond).toBeGreaterThanOrEqual(5);
+  for (const k of ['epping', 'chorleywood', 'chalfont', 'amersham', 'chesham', 'theydon']) expect(r[k], k).toBe(true);
 });
 
 test('s01: Tower Gateway: the DLR deck under the canopy is drawn at about 9 m, not at the roof, at every Master', async () => {

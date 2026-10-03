@@ -41,11 +41,17 @@ export const SEEN_FROM_ABOVE = new Set(['tideway-whirlpools']);
  * least half the 1500m edge band (750m) inside the ring. */
 export const INSIDE_MIN = 0.999;
 
-/** The objects to leave undrawn above ground, refilled into `out`. */
-export function collectUndergroundLayers(scene, out = []) {
+/**
+ * The objects to leave undrawn above ground, refilled into `out`. With
+ * `linesOnly` (s02:T, the 'lines' cull mode) only the top-level `line:*` groups:
+ * the bores and ribbons of the lines, nothing of the geology, the cliff, the
+ * skirt or the chalk column.
+ */
+export function collectUndergroundLayers(scene, out = [], { linesOnly = false } = {}) {
   out.length = 0;
   for (const c of scene.children) {
     const n = c.name || '';
+    if (linesOnly) { if (n.startsWith('line:')) out.push(c); continue; }
     if (UNDERGROUND_LAYER_NAMES.has(n) || n.startsWith('line:') || c.userData?.kind === 'unified-shafts') out.push(c);
     else if (n === 'tideway-system') { for (const k of c.children) if (!SEEN_FROM_ABOVE.has(k.name)) out.push(k); }
     else if (c.userData?.kind === 'station-markers' && !c.userData.surfaceOnly) out.push(c);
@@ -58,14 +64,37 @@ export function isAboveGroundView({ belowSurface, submerged, insideness }) {
   return !belowSurface && !submerged && insideness >= INSIDE_MIN;
 }
 
+/**
+ * s02:T (sprint 02Oct26f, D-048 item 7): which cull applies to this camera.
+ *   'full'  the whole underground set (isAboveGroundView: above ground, out of the
+ *           water and well inside the map edge, insideness at least INSIDE_MIN);
+ *   'lines' only the top-level `line:*` groups, for any other above-ground camera
+ *           out of the water: a bore beyond the edge (or inside the 750 m edge
+ *           band) is visible from above wherever the camera is, and the track the
+ *           line draws there is the surface railway. The cliff, clay skirt, chalk
+ *           column and geology are never in that set, and the exterior views of
+ *           them are taken from below the ground, so they are unchanged;
+ *   null    nothing hidden (a camera below ground or in the water).
+ */
+export function cullModeFor({ belowSurface, submerged, insideness }) {
+  if (isAboveGroundView({ belowSurface, submerged, insideness })) return 'full';
+  if (!belowSurface && !submerged) return 'lines';
+  return null;
+}
+
 export function createUndergroundCull({ scene }) {
   const set = [], hidden = [];
-  const status = { active: false, hidden: 0 };
-  /** Run `draw` with the underground set hidden when `active`; restores it after. */
-  function render(active, draw) {
-    status.active = !!active;
-    if (!active) { status.hidden = 0; return draw(); }
-    collectUndergroundLayers(scene, set);
+  const status = { active: false, mode: null, hidden: 0 };
+  /**
+   * Run `draw` with the underground set hidden when `mode` is set; restores it
+   * after. `mode` is `true` or 'full' (the whole set), 'lines' (s02:T) or falsy.
+   */
+  function render(mode, draw) {
+    const m = mode === true ? 'full' : mode === 'full' || mode === 'lines' ? mode : null;
+    status.active = !!m;
+    status.mode = m;
+    if (!m) { status.hidden = 0; return draw(); }
+    collectUndergroundLayers(scene, set, { linesOnly: m === 'lines' });
     hidden.length = 0;
     for (const o of set) if (o.visible) { o.visible = false; hidden.push(o); }
     status.hidden = hidden.length;

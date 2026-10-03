@@ -206,7 +206,7 @@ export function createPedestrianMode(ctx) {
     trainSystem: () => ctx.trainSystem ?? null,
     getStructuralY: (x, z) => (ctx.getStructuralY || ctx.getTerrainY)(x, z),
     getTerrainY: (x, z) => ctx.getTerrainY(x, z),
-    isInsideM25: (x, z) => (typeof ctx.isInsideM25 === 'function' ? ctx.isInsideM25(x, z) : true),
+    isInsideM25: (x, z) => (typeof ctx.insideWalkBounds === 'function' ? ctx.insideWalkBounds(x, z) : true), // s02:T: the walk's edge is the terrain grid's walk bounds, not the M25 (D-048 item 7)
     VE, document: globalThis.document,
   });
   let regime = 'bore';                    // where the walker in a line is shown: 'bore' or 'open' (the drawn track)
@@ -214,6 +214,9 @@ export function createPedestrianMode(ctx) {
   let glide = null;                       // { from, to, t, stop } back to the stop after an arrival at speed
   let step = null;                        // { kind: 'exit' | 'entry', from, to, fromYaw, toYaw, t, ... } a surface stop's ease
   let atEdge = false;                     // held at the map edge
+  // ── s02:T ──
+  let s02Held = false;                    // surface walking held at the terrain grid's walk bounds (soft hold)
+  // ── /s02:T ──
   let brakeFrom = null;                   // the speed braking began at (the rate is held at its start)
   // Fix round 1: the street is on offer at the station only. Off the platform after an arrival, E brings
   // the walker back (`halt`: brake to rest, then the glide, then the card); fix round 2: so does E on the
@@ -472,6 +475,18 @@ export function createPedestrianMode(ctx) {
     lastEvents = [];
     stepBody(body, { forward: m.forward, right: m.right, yaw, pitch, jumpPressed: jump, jumpHeld: m.jumpHeld },
       dt, world, P, VE, lastEvents);
+    // ── s02:T ── beyond the M25 the walker may walk the hidden ground (D-048 item 7); the only hold is a
+    // soft one at the terrain grid's bounds inset 200 m (ctx.walkHoldBox): clamped back in, the outward
+    // velocity dropped, and the hint says so.
+    s02Held = false;
+    const s02Box = ctx.walkHoldBox;
+    if (s02Box) {
+      if (body.x < s02Box.minX) { body.x = s02Box.minX; if (body.vx < 0) body.vx = 0; s02Held = true; }
+      else if (body.x > s02Box.maxX) { body.x = s02Box.maxX; if (body.vx > 0) body.vx = 0; s02Held = true; }
+      if (body.z < s02Box.minZ) { body.z = s02Box.minZ; if (body.vz < 0) body.vz = 0; s02Held = true; }
+      else if (body.z > s02Box.maxZ) { body.z = s02Box.maxZ; if (body.vz > 0) body.vz = 0; s02Held = true; }
+    }
+    // ── /s02:T ──
     placeCamera(body.x, body.y + P.eye * VE, body.z);
 
     let text = null;
@@ -494,6 +509,9 @@ export function createPedestrianMode(ctx) {
     } else if (body.jet) {
       text = 'Jetpack';
     }
+    // ── s02:T ──
+    if (s02Held && text === null) text = EDGE_HINT;
+    // ── /s02:T ──
     if (text !== undefined) hint(text);
     sound(body.state === 'ground' ? Math.hypot(body.vx, body.vz) : 0);
   }

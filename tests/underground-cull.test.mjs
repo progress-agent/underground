@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectUndergroundLayers, createUndergroundCull, isAboveGroundView, INSIDE_MIN } from '../src/underground-cull.js';
+import { collectUndergroundLayers, createUndergroundCull, isAboveGroundView, cullModeFor, INSIDE_MIN } from '../src/underground-cull.js';
 
 // D-040 (Jordan, 26Sep26s): trade-offs 7 and 8 on, with no ribbons kept above
 // ground. Plain objects stand in for the scene: only name, userData, visible
@@ -62,4 +62,49 @@ test('above ground means above the surface, out of the river and well inside the
   assert.equal(isAboveGroundView({ ...base, submerged: true }), false);
   assert.equal(isAboveGroundView({ ...base, insideness: 0.99 }), false, 'near or beyond the edge the cliff shows');
   assert.equal(isAboveGroundView({ ...base, insideness: INSIDE_MIN }), true);
+});
+
+// ── s02:T (sprint 02Oct26f, D-048 item 7): the 'lines' mode beyond the edge ──
+test('cullModeFor: full well inside, lines for any other above-ground camera, none below ground or in water', () => {
+  const base = { belowSurface: false, submerged: false, insideness: 1 };
+  assert.equal(cullModeFor(base), 'full');
+  assert.equal(cullModeFor({ ...base, insideness: INSIDE_MIN }), 'full');
+  assert.equal(cullModeFor({ ...base, insideness: 0.998 }), 'lines', 'in the 750 m edge band the cliff may show: lines only');
+  assert.equal(cullModeFor({ ...base, insideness: 0 }), 'lines', 'beyond the ring a bore is visible from above: lines only');
+  assert.equal(cullModeFor({ ...base, belowSurface: true }), null);
+  assert.equal(cullModeFor({ ...base, belowSurface: true, insideness: 0 }), null, 'an exterior view of the cliff is taken from below the ground');
+  assert.equal(cullModeFor({ ...base, submerged: true }), null);
+  assert.equal(cullModeFor({ ...base, submerged: true, insideness: 0 }), null);
+  // Agrees with isAboveGroundView wherever the old rule applied.
+  for (const insideness of [0, 0.5, 0.99, INSIDE_MIN, 1]) for (const belowSurface of [false, true]) for (const submerged of [false, true]) {
+    const a = { belowSurface, submerged, insideness };
+    assert.equal(cullModeFor(a) === 'full', isAboveGroundView(a));
+  }
+});
+
+test("the 'lines' set is only the top-level line groups: never the geology, the skirt, the chalk column or the markers", () => {
+  const sc = scene();
+  const names = collectUndergroundLayers(sc, [], { linesOnly: true }).map(o => o.name);
+  assert.deepEqual(names.sort(), ['line:central', 'line:dlr']);
+  // The default set is unchanged.
+  assert.equal(collectUndergroundLayers(sc).length, 11);
+});
+
+test("render takes 'lines': hides only the line groups for the draw and restores them", () => {
+  const sc = scene(), cull = createUndergroundCull({ scene: sc });
+  const central = sc.children.find(c => c.name === 'line:central'), strata = sc.children.find(c => c.name === 'geological-strata');
+  let during = null;
+  cull.render('lines', () => { during = { central: central.visible, strata: strata.visible, tunnel: sc.tidewayTunnel.visible }; });
+  assert.deepEqual(during, { central: false, strata: true, tunnel: true });
+  assert.equal(central.visible, true);
+  assert.equal(cull.status.mode, 'lines');
+  assert.equal(cull.status.hidden, 2);
+  cull.render(true, () => { during = central.visible; });
+  assert.equal(during, false);
+  assert.equal(cull.status.mode, 'full', 'true still means the whole set');
+  assert.equal(cull.status.hidden, 11);
+  cull.render(null, () => { during = central.visible; });
+  assert.equal(during, true);
+  assert.equal(cull.status.mode, null);
+  assert.equal(cull.status.hidden, 0);
 });

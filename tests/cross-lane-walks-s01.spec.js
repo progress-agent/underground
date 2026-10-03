@@ -10,8 +10,9 @@
 //   Central        White City -> North Acton -> West Acton -> Ealing Broadway (R's new track)
 //   Central        Leytonstone -> round the Hainault loop -> Woodford (R's new track from Newbury Park)
 //   Metropolitan   Harrow-on-the-Hill -> West Harrow -> Rayners Lane (R's new track)
-//   Metropolitan   Harrow-on-the-Hill -> Rickmansworth -> held at the map edge
-//   Central        Woodford -> Theydon Bois -> held at the map edge (Epping lies beyond it)
+//   Metropolitan   Harrow-on-the-Hill -> Rickmansworth -> Amersham (s02:T: no hold at the map edge; the
+//                  lines run on to their termini beyond the M25, D-048 item 7)
+//   Central        Woodford -> Theydon Bois -> Epping (s02:T: likewise)
 //   Northern       Hampstead -> Edgware
 //   DLR            Bank -> Lewisham
 // Per route it records whether the walker stayed on the drawn track, the stops arrived at in
@@ -233,22 +234,24 @@ test('Metropolitan, Harrow-on-the-Hill to Rayners Lane: on R\'s new track throug
   checkRoute(summarise('Metropolitan Harrow-on-the-Hill - Rayners Lane', r, expected));
 });
 
-test('Metropolitan, Harrow-on-the-Hill to Rickmansworth and the map edge', async () => {
+// s02:T: these two ended held at the map edge (D-043 item 4: Rickmansworth and Theydon Bois the last stops, the hint
+// "The map ends here"). Inverted: the walk rides on to Amersham and to Epping and arrives there in the open; nothing holds it.
+test('Metropolitan, Harrow-on-the-Hill to Amersham, beyond the M25 (s02:T)', async () => {
   expect(await placeAt('metropolitan', 'Harrow-on-the-Hill', 'North Harrow')).not.toBeNull();
-  const expected = ['North Harrow', 'Pinner', 'Northwood Hills', 'Northwood', 'Moor Park', 'Rickmansworth'];
-  const r = await ride({ lineId: 'metropolitan', via: expected });
-  checkRoute(summarise('Metropolitan Harrow-on-the-Hill - Rickmansworth - edge', r, expected));
-  expect(r.end.atEdge).toBe(true);
-  expect(r.end.hint).toContain('The map ends here');
+  const expected = ['North Harrow', 'Pinner', 'Northwood Hills', 'Northwood', 'Moor Park', 'Rickmansworth', 'Chorleywood', 'Chalfont & Latimer', 'Amersham'];
+  const r = await ride({ lineId: 'metropolitan', until: 'Amersham', via: expected, maxMs: 200000 });
+  checkRoute(summarise('Metropolitan Harrow-on-the-Hill - Amersham', r, expected));
+  expect(r.end.atEdge).toBe(false);
+  expect(r.arrivals.find(a => a.name === 'Amersham').regime).toBe('open');
 });
 
-test('Central, Woodford to Theydon Bois and the map edge', async () => {
+test('Central, Woodford to Epping, beyond the M25 (s02:T)', async () => {
   expect(await placeAt('central', 'Woodford', 'Buckhurst Hill')).not.toBeNull();
-  const expected = ['Buckhurst Hill', 'Loughton', 'Debden', 'Theydon Bois'];
-  const r = await ride({ lineId: 'central', via: expected });
-  checkRoute(summarise('Central Woodford - Theydon Bois - edge', r, expected));
-  expect(r.end.atEdge).toBe(true);
-  expect(r.end.hint).toContain('The map ends here');
+  const expected = ['Buckhurst Hill', 'Loughton', 'Debden', 'Theydon Bois', 'Epping'];
+  const r = await ride({ lineId: 'central', until: 'Epping', via: expected });
+  checkRoute(summarise('Central Woodford - Epping', r, expected));
+  expect(r.end.atEdge).toBe(false);
+  expect(r.arrivals.find(a => a.name === 'Epping').regime).toBe('open');
 });
 
 test('Northern, Hampstead to Edgware', async () => {
