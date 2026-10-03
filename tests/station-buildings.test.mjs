@@ -222,6 +222,19 @@ test('compile: hides the boxes inside an outline and takes the matched box heigh
   assert.ok(alpha.height >= RULES.heightMin && alpha.height <= RULES.heightMax);
 });
 
+test('compile: a building on a slope is made tall enough that its high-side wall stands 4 m above the street (never above 30 m)', () => {
+  const w = world();
+  const flat = compileStationBuildings(w).json.buildings.find(b => b.key === 'w1');
+  const slope = compileStationBuildings({ ...world(), riseOf: () => 12 }).json.buildings.find(b => b.key === 'w1');
+  assert.ok(slope.height >= 16 && slope.height <= RULES.heightMax, `height ${slope.height}`);
+  assert.ok(slope.heightSource.endsWith('+rise'));
+  assert.ok(slope.height > flat.height);
+  const steep = compileStationBuildings({ ...world(), riseOf: () => 60 }).json.buildings.find(b => b.key === 'w1');
+  assert.equal(steep.height, RULES.heightMax);
+  const gentle = compileStationBuildings({ ...world(), riseOf: () => 0.5 }).json.buildings.find(b => b.key === 'w1');
+  assert.equal(gentle.height, flat.height, 'a rise under the building\'s own height less 4 m changes nothing');
+});
+
 test('compile: pavilions are 16 x 12 x 7, clear of the map boxes, and the entrance one stands at the entrance', () => {
   const w = world();
   const { json } = compileStationBuildings(w);

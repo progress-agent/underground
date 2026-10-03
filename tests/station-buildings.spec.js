@@ -51,6 +51,13 @@ const bl = (name, upM, dx, dz, wait = 1200) => page.evaluate(async ([name, upM, 
   return { key, building: b.key };
 }, [name, upM, dx, dz, wait]);
 
+/** bl() for another page (the live path's). */
+const bl2 = (p, name) => p.evaluate(async (name) => {
+  const u = window.__ug, sb = u.stationBuildings, b = sb.index.buildingForName(name), gy = u.getTerrainMeshSurfaceY({ x: b.label.x, z: b.label.z });
+  u.camera.position.set(b.label.x, gy + 300 * 5, b.label.z + 200); u.controls.target.set(b.label.x, gy, b.label.z); u.controls.update();
+  await new Promise(r => setTimeout(r, 1200));
+}, name);
+
 // ── The scene, the cost and the data in the browser ────────────────────────
 
 test('the station buildings are built from the tracked data: two meshes, no per-instance colour, inside the cost cap', async () => {
@@ -204,7 +211,6 @@ async function enterWalk() {
 }
 const placeAtExit = (name, back = 0) => page.evaluate(async ([name, back]) => {
   const u = window.__ug, m = u.modes.registry.get('pedestrian'), sb = u.stationBuildings, key = sb.siteKeyOf(name), pose = sb.stationExitPose(key);
-  m.press('use'); // nothing near: harmless
   m.place(pose.x - Math.sin(pose.yaw) * -back, pose.z - Math.cos(pose.yaw) * -back, { yaw: pose.yaw + Math.PI, pitch: 0 });
   await new Promise(r => requestAnimationFrame(r));
   return { pose, key };
@@ -547,6 +553,77 @@ test('white stays under the bloom threshold at noon, and bloom on or off leaves 
   console.log('brightest station pixel (linear luminance, pre-bloom)', JSON.stringify(r));
   for (const x of r) { expect(x.n, `${x.name}: station pixels`).toBeGreaterThan(500); expect(x.max, `${x.name}: under the bloom threshold 0.88`).toBeLessThan(0.88); }
   await page.evaluate(() => { const sun = document.getElementById('sunTime'); sun.value = window.__sunBefore; sun.dispatchEvent(new Event('input', { bubbles: true })); });
+});
+
+test('every viaduct pavilion stands beside the drawn DLR deck, never under it (at least 4.5 m from its centreline)', async () => {
+  const r = await page.evaluate(() => {
+    const u = window.__ug, sb = u.stationBuildings, paths = u.surfaceRail.paths.get('dlr').filter(Boolean).flat();
+    const rect = (p) => { const c = Math.cos(p.yaw), s = Math.sin(p.yaw); return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [p.cx + c * a * p.w / 2 + s * b * p.d / 2, p.cz - s * a * p.w / 2 + c * b * p.d / 2]); };
+    const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - t * dx, pz - a.z - t * dz); };
+    const out = [];
+    const inRing = (x, z, r) => { let ins = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) { if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) ins = !ins; } return ins; };
+    for (const b of sb.data.buildings.filter(q => q.kind === 'pavilion-viaduct')) {
+      const ring = rect(b.pavilion); let min = Infinity;
+      for (const p of paths) {
+        if (Math.hypot(p.x - b.pavilion.cx, p.z - b.pavilion.cz) > 100) continue;
+        let d = 0;
+        if (!inRing(p.x, p.z, ring)) { d = Infinity; for (let i = 0; i < 4; i++) { const q = ring[i], r = ring[(i + 1) % 4]; d = Math.min(d, segDist(p.x, p.z, { x: q[0], z: q[1] }, { x: r[0], z: r[1] })); } }
+        min = Math.min(min, d);
+      }
+      out.push({ key: b.key, min, near: min < Infinity });
+    }
+    return out;
+  });
+  console.log('viaduct clearance', JSON.stringify(r.map(x => [x.key, +x.min.toFixed(1)])));
+  expect(r.length).toBeGreaterThanOrEqual(9);
+  for (const x of r) { expect(x.near, `${x.key}: the DLR path is within 100 m`).toBe(true); expect(x.min, `${x.key}: ${x.min.toFixed(1)} m from the drawn deck points`).toBeGreaterThanOrEqual(4.5); }
+});
+
+// ── The live path (D-048 item 2 on both paths; replaces the retired roof-lift live-marker spec) ──
+
+test('live: after its tile arrives each station building is drawn and no box centre is inside a footprint', async ({ browser }) => {
+  test.setTimeout(600000);
+  const live = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const liveErrors = [];
+  live.on('console', (m) => { if (m.type() === 'error') liveErrors.push(m.text()); });
+  live.on('pageerror', (e) => liveErrors.push('pageerror: ' + e.message));
+  try {
+    await load(live, '/?fast=1&buildings=live&mh=1.1');
+    await live.evaluate(() => { const u = window.__ug; u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 }); u.sim.paused = true; });
+    const out = [];
+    for (const name of [KX, 'Euston', 'Dalston Junction', 'Wembley Park', 'Hillingdon', 'Ealing Broadway']) {
+      await bl2(live, name);
+      // The loader is quiet: nothing loading and the loaded count unchanged for three one-second checks.
+      await live.waitForFunction(async () => {
+        const u = window.__ug, s0 = u.surfaceLoaderStats; if (!s0 || s0.loading !== 0) return false;
+        for (let i = 0; i < 3; i++) { await new Promise(r => setTimeout(r, 1000)); const s = u.surfaceLoaderStats; if (s.loading !== 0 || s.loaded !== s0.loaded) return false; }
+        return true;
+      }, null, { timeout: 120000, polling: 1000 });
+      out.push(await live.evaluate((name) => {
+        const u = window.__ug, sb = u.stationBuildings, b = sb.index.buildingForName(name), idx = sb.index;
+        let meshes = 0, inside = 0, near = 0;
+        u.scene.getObjectByName('surfaceGeometry').traverse(o => {
+          if (!o.name?.startsWith('buildings-')) return;
+          meshes++; const a = o.instanceMatrix.array;
+          for (let i = 0; i < o.count; i++) {
+            const x = a[i * 16 + 12], z = a[i * 16 + 14];
+            if (Math.hypot(x - b.label.x, z - b.label.z) < 150) near++;
+            if (idx.hidesBox({ x, z })) inside++;
+          }
+        });
+        const g = u.scene.getObjectByName('station-buildings');
+        return { name, meshes, near, inside, drawn: !!g?.visible && g.parent === u.scene, hidden: sb.hidden };
+      }, name));
+    }
+    console.log('live path', JSON.stringify(out));
+    for (const r of out) {
+      expect(r.near, `${r.name}: its tile has arrived (boxes within 150 m)`).toBeGreaterThan(0);
+      expect(r.inside, `${r.name}: no box centre inside a footprint on the live path`).toBe(0);
+      expect(r.drawn, `${r.name}: the station building is drawn`).toBe(true);
+    }
+    expect(out.at(-1).hidden.live, 'the live predicate hid boxes').toBeGreaterThan(0);
+    expect(liveErrors.filter(e => !/favicon/i.test(e)), 'live cold load: no console error').toEqual([]);
+  } finally { await live.close(); }
 });
 
 test('a cold load printed no console error', async () => {

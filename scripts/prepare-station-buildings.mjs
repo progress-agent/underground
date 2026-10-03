@@ -55,7 +55,7 @@ out tags geom;
 export const RULES = Object.freeze({
   minBuildingAreaM2: 80, bigAreaM2: 5000, nameRadiusM: 150, nameFarRadiusM: 400, distRadiusM: 150, distLowConfM: 60, distMinAreaM2: 200,
   thamesFraction: 0.1, heightMin: 6, heightMax: 30, heightDefault: 10,
-  smallPickM2: 200, pavilion: { w: 16, d: 12, h: 7 }, placementClearM: 1.5, viaductOffsetM: 12.5, viaductMinDeckM: 4.5,
+  smallPickM2: 200, riseClearM: 4, pavilion: { w: 16, d: 12, h: 7 }, placementClearM: 1.5, viaductOffsetM: 12.5, viaductMinDeckM: 4.5,
   frontMinM: 6, frontProbeM: 3, boxClearM: 0.5, exitOutM: 6,
   roundel: { wallFrac: 0.8, wallMaxD: 12, fitFrac: 0.85, roofShortFrac: 0.6, roofEdgeFrac: 1.8, roofMaxD: 80, proud: 0.05, maxPerFront: 6, maxPerBuilding: 32 },
 });
@@ -196,7 +196,7 @@ export function parseOverpass(answer) {
  *           docks?: object[], inThames?: (x,z)=>boolean }} src
  * @returns {{ json: object, review: object[], counts: object, hidden: number }}
  */
-export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false }) {
+export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null }) {
   const { blds, areas, ents } = parseOverpass(overpass);
   const R = RULES;
   const siteList = [...sites.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
@@ -427,7 +427,14 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     else if (Number.isFinite(tagH) && tagH > 0) { h = tagH; src = 'height-tag'; }
     else if (Number.isFinite(lv) && lv > 0) { h = lv * 3.2; src = 'levels'; }
     else { h = R.heightDefault; src = 'default'; }
-    rec.height = r2(Math.min(R.heightMax, Math.max(R.heightMin, h)));
+    h = Math.min(R.heightMax, Math.max(R.heightMin, h));
+    // A building on a slope is buried on its high side (its base is the lowest ground under it): 7 of the 396, all big
+    // termini (Waterloo, Victoria, King's Cross, Euston, Paddington...), had the street above their roof at one wall.
+    // Where the ground rises more than the building is tall less RISE_CLEAR_M, it is made as tall as the rise plus that,
+    // never above heightMax, so its high-side wall still stands RISE_CLEAR_M above the street.
+    const rise = riseOf ? riseOf(rec.outline) : null;
+    if (rise !== null && rise + R.riseClearM > h) { h = Math.min(R.heightMax, rise + R.riseClearM); src += '+rise'; }
+    rec.height = r2(h);
     rec.heightSource = src;
   }
 
@@ -654,6 +661,28 @@ export function reviewMarkdown(review, counts, json) {
   return lines.join('\n');
 }
 
+/**
+ * The ground's rise under a footprint in true metres (highest minus lowest structural-surface sample over its vertices and
+ * an 8 m grid), read from the app's OWN terrain code under the bake's Node shim, exactly as the bake does.
+ */
+async function terrainRise() {
+  const { installNodeEnv } = await import('./bake-node-env.mjs');
+  installNodeEnv();
+  const terrain = await import('../src/terrain.js');
+  const thames = JSON.parse(await readFile(path.join(ROOT, 'public/data/thames.json'), 'utf8'));
+  const mesh = await terrain.tryCreateTerrainMesh({ thamesData: thames });
+  if (!mesh) throw new Error('terrain mesh failed to build: cannot read the ground under the footprints');
+  const VE = terrain.VERTICAL_EXAGGERATION;
+  return (ring) => {
+    const bb = bounds(ring);
+    let mn = Infinity, mx = -Infinity;
+    const take = (x, z) => { const y = terrain.getStructuralSurfaceY({ x, z }); if (Number.isFinite(y)) { if (y < mn) mn = y; if (y > mx) mx = y; } };
+    for (const [x, z] of ring) take(x, z);
+    for (let x = bb.x0; x <= bb.x1; x += 8) for (let z = bb.z0; z <= bb.z1; z += 8) if (pointInRing(x, z, ring)) take(x, z);
+    return Number.isFinite(mn) ? (mx - mn) / VE : null;
+  };
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────
 async function main() {
   const argv = process.argv.slice(2);
@@ -678,7 +707,8 @@ async function main() {
   const docks = JSON.parse(await readFile(path.join(ROOT, 'src/airport-docks-data.json'), 'utf8')).docks;
   const dlrTrack = await loadDlrTrack();
   const { boxes, payloadSha256 } = await loadBakedBoxes([...sites.values()].map(s => s.p));
-  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames });
+  const riseOf = await terrainRise();
+  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf });
   await writeFile(out, JSON.stringify(res.json) + '\n');
   if (reviewPath) await writeFile(reviewPath, reviewMarkdown(res.review, res.counts, res.json));
   console.log('sites', res.counts.sites, JSON.stringify(res.counts));
