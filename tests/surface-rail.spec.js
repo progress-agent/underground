@@ -147,7 +147,11 @@ const OVERGROUND_PARTS_387DFF0 = {
   'lioness|stripe': [16410, '9014d5c9', '6324ce47'], 'lioness|ballast': [14616, '8634cf39', '1aa9fe89'], 'lioness|earth': [324, '2e9e463', '249eca2c'],
   'mildmay|stripe': [22626, 'ae4e9044', 'd2627f5a'], 'mildmay|ballast': [16866, 'b10f7a0', '370c5c06'], 'mildmay|earth': [4608, '7fb462b1', '5457c543'], 'mildmay|cutShadow': [3024, '6f6e01e1', '990db4f4'],
   'suffragette|stripe': [13332, 'e2763bb1', 'adf458fe'], 'suffragette|ballast': [8358, '23e5283a', '80439ddb'], 'suffragette|cutShadow': [1056, '9ecf286a', '7485496f'],
-  'weaver|stripe': [23520, 'ed77ec20', 'e3fb6875'], 'weaver|ballast': [16398, '3ef65a3b', 'd06d296d'], 'weaver|earth': [1008, '7d18e7d1', 'cb03ed77'], 'weaver|cutShadow': [36, 'e338bcae', '5a38f6ae'],
+  // s02:T (sprint 02Oct26f, D-048 item 7): re-pinned from [23520, 'ed77ec20', 'e3fb6875'] and [16398, '3ef65a3b', 'd06d296d']. The Weaver now runs on to
+  // Cheshunt (scripts/extend-overground-termini.mjs appends 525 m of OSM track, 64 points) and rides the hidden ground beyond the M25 (src/hidden-ground.js:
+  // the canopy taken off), so its stripe and ballast gain 384 vertices each (24 more 16-vertex samples of track) and every position beyond the ring
+  // moves; its earth and cutting meshes (all inside the map) are byte-identical, as is every other Overground line. Measured on the Mac Studio, Master 1.1.
+  'weaver|stripe': [23904, 'd4c0001f', 'f2288620'], 'weaver|ballast': [16782, 'dddc9125', '58f732f2'], 'weaver|earth': [1008, '7d18e7d1', 'cb03ed77'], 'weaver|cutShadow': [36, 'e338bcae', '5a38f6ae'],
   'windrush|stripe': [27402, '493d9b89', '43bcbcff'], 'windrush|ballast': [19728, 'e557da80', 'f66b53c0'], 'windrush|earth': [1908, '503d90b3', '37817b77'], 'windrush|cutShadow': [4284, '68e32bef', 'ffe671ee'],
 };
 
@@ -169,7 +173,9 @@ test('the Overground builds exactly what c820ea9 built, and draws the same pixel
   // else is pinned byte-identical to 387dff0 part by part (positions and
   // normals of every stripe, ballast, earth and cutting mesh), below.
   const fp = await page.evaluate(overgroundFingerprint);
-  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: 'a0c6e9b8', meshes: 26, vertices: 234060 });
+  // s02:T: re-pinned from { total: 'a0c6e9b8', meshes: 26, vertices: 234060 }: the Weaver's stripe and ballast gain 384 vertices each (the Weaver rows above), so the
+  // vertex delta (768) is exactly the Weaver parts' delta, and the total hash moves with the Weaver's positions; the mesh count and the masonry key set are unchanged.
+  expect({ total: fp.total, meshes: fp.meshes, vertices: fp.vertices }).toEqual({ total: '42ef82e6', meshes: 26, vertices: 234828 });
   const others = Object.fromEntries(Object.entries(fp.parts).filter(([k]) => !k.endsWith('|masonry')));
   expect(others).toEqual(OVERGROUND_PARTS_387DFF0);
   expect(Object.keys(fp.parts).filter(k => k.endsWith('|masonry')).sort()).toEqual(['liberty', 'lioness', 'mildmay', 'suffragette', 'weaver', 'windrush'].map(l => `${l}|masonry`));
