@@ -99,6 +99,17 @@ export function createOvergroundAirMap({ path } = {}) {
     }
     intervals = merged.filter(r => r.mb - r.ma >= OG_BRIDGE_M).map(r => [r.a, r.b]);
     for (let i = filled.length - 1; i >= 0; i--) if (!intervals.some(([a, b]) => filled[i].a >= a - 1e-6 && filled[i].b <= b + 1e-6)) filled.splice(i, 1);
+    // Across a bridged run the walker is shown straight across, but the path's own arc runs down into the drawn tunnel and
+    // up again, so a step of the arc is a shorter step in plan; `ratio` (arc over plan between the open vertices either side)
+    // makes the walk cover the speed asked for there too.
+    for (const g of filled) {
+      let plan = 0;
+      for (let i = 0; i + 1 < n; i++) {
+        if (vs[i + 1] <= g.sA || vs[i] >= g.sB) continue;
+        plan += Math.hypot(V[i + 1].x - V[i].x, V[i + 1].z - V[i].z);
+      }
+      g.ratio = plan > 1 ? Math.min(3, Math.max(1, (g.sB - g.sA) / plan)) : 1;
+    }
     return intervals;
   }
 
@@ -169,7 +180,10 @@ export function createOvergroundAirMap({ path } = {}) {
    * millimetres whose target fell one rounding short of the junction, and the walker stood there for ever at full speed.
    */
   function trackToChord(s, dir, d) {
-    return s + (dir >= 0 ? 1 : -1) * Math.max(0, d) / laneScale(s);
+    if (intervals === null) openIntervals();
+    let k = laneScale(s);
+    for (const g of filled) if (s >= g.sA && s <= g.sB) { k /= g.ratio; break; }
+    return s + (dir >= 0 ? 1 : -1) * Math.max(0, d) / k;
   }
 
   const ha = {}, hb = {};

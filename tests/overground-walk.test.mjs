@@ -354,3 +354,22 @@ test('the step is scaled for the lane on a bend: the camera\'s plan speed is the
     assert.ok(path.length > 500);
   }
 });
+
+test('across a bridged tunnel the walk covers the speed asked for in plan, though the path\'s arc dips into the drawn tunnel and back', () => {
+  const pts = run(0, 0, 2400, 0, (x) => (x >= 1000 && x < 1040 ? 'tunnel' : 'surface'));
+  const { map, path } = walkerOf(pts);
+  const iv = map.openIntervals();
+  assert.equal(iv.length, 1, 'bridged');
+  // The synthetic dip is a 20 m cliff in 12 m: the arc through it is far longer than the plan.
+  const s0 = 900;
+  let s = s0, plan = 0, want = 0, last = map.presentAt(s, 1, {});
+  for (let i = 0; i < 80; i++) {            // 80 frames at 200 m/s: 267 m, across the bridge
+    const d = 200 / 60;
+    s = map.trackToChord(s, 1, d);
+    const q = map.presentAt(s, 1, {});
+    plan += Math.hypot(q.x - last.x, q.z - last.z); want += d; last = q;
+  }
+  assert.ok(last.x > 1100, `crossed the bridge: x ${last.x}`);
+  assert.ok(Math.abs(plan / want - 1) < 0.03, `plan ${plan.toFixed(1)} of ${want.toFixed(1)} (${(plan / want).toFixed(3)})`);
+  assert.ok(path.length > 2400, 'the arc is longer than the plan');
+});
