@@ -49,6 +49,10 @@ const probe = (page, site) => page.evaluate((site) => {
   u.scene.traverse(o => { if (o.isMesh && o.userData?.lineId === 'dlr' && (o.parent?.userData?.kind === 'surface-rail' || o.userData?.kind === 'surface-rail')) meshes.push(o); });
   const paths = (u.surfaceRail.paths.get('dlr') || []).filter(Boolean);
   const near = paths.filter(p => p.some(s => Math.hypot(s.x - site.x, s.z - site.z) <= 40));
+  // The junction is where a path END lies within 15 m of the site: here the flyover's start. The other branch is
+  // reached along the straight segment from that end to its nearest point; its own far end, 55 m away, has a
+  // 0.9 m ledge in the deck mesh of its own (measured after the blend, at (9474, -881)) that no deck blend touches.
+  const junction = near.filter(p => [p[0], p.at(-1)].some(s => Math.hypot(s.x - site.x, s.z - site.z) <= 15));
   const ray = new T.Raycaster(); ray.far = 100000;
   const down = new T.Vector3(0, -1, 0), origin = new T.Vector3();
   const decks = meshes.filter(m => m.userData.part === 'dressing');
@@ -59,7 +63,7 @@ const probe = (page, site) => page.evaluate((site) => {
   const pointAt = (path, A, s) => { let i = 0; while (i < path.length - 2 && A[i + 1] < s) i++; const t = (s - A[i]) / ((A[i + 1] - A[i]) || 1); return { x: path[i].x + (path[i + 1].x - path[i].x) * t, z: path[i].z + (path[i + 1].z - path[i].z) * t }; };
   const nearestOther = (p, mine) => { let best = null; for (const q of near) { if (q === mine) continue; for (let i = 0; i < q.length - 1; i++) { const a = q[i], b = q[i + 1], vx = b.x - a.x, vz = b.z - a.z, t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / (vx * vx + vz * vz || 1))); const x = a.x + vx * t, z = a.z + vz * t, d = Math.hypot(p.x - x, p.z - z); if (!best || d < best.d) best = { d, x, z }; } } return best; };
   const report = [];
-  for (const path of near) {
+  for (const path of junction) {
     const A = arcs(path), total = A.at(-1);
     // The end nearest the site.
     const dStart = Math.hypot(path[0].x - site.x, path[0].z - site.z), dEnd = Math.hypot(path.at(-1).x - site.x, path.at(-1).z - site.z);
@@ -81,7 +85,7 @@ const probe = (page, site) => page.evaluate((site) => {
     report.push({ points: path.length, lengthM: total, endDistToSite: Math.min(dStart, dEnd), otherDistM: other?.d ?? null, hits, samples: samples.length, worstJumpCanonical: worst, worstJumpM: worst * ratio, worstJumpAllMeshesM: worstAll * ratio, at,
       traceAroundWorst: worstK < 0 ? [] : trace.slice(Math.max(0, worstK - 6), worstK + 4) });
   }
-  return { ratio, meshes: meshes.length, decks: decks.length, branches: near.length, report, worstJumpM: Math.max(0, ...report.map(r => r.worstJumpM)) };
+  return { ratio, meshes: meshes.length, decks: decks.length, branches: near.length, junctions: junction.length, report, worstJumpM: Math.max(0, ...report.map(r => r.worstJumpM)) };
 }, site);
 
 test('the DLR flyover leaves its deck without a step at Canning Town, at Master 1.1 and Master 5', async ({ page }) => {
@@ -98,6 +102,7 @@ test('the DLR flyover leaves its deck without a step at Canning Town, at Master 
     expect(r.meshes, 'the DLR surface-rail meshes exist').toBeGreaterThan(0);
     expect(r.decks, 'the DLR deck meshes exist').toBeGreaterThan(0);
     expect(r.branches, 'DLR branches near the site').toBeGreaterThanOrEqual(2);
+    expect(r.junctions, 'a DLR path ends at the junction').toBeGreaterThanOrEqual(1);
     expect(r.report.some(x => x.hits > 20), 'the probe hit the drawn deck').toBe(true);
     expect(r.worstJumpM, `deck step at Master ${m}: ${JSON.stringify(r.report.map(x => [x.points, +x.worstJumpM.toFixed(2), x.at]))}`).toBeLessThan(0.10);
   }
