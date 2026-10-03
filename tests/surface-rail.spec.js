@@ -281,17 +281,20 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
       // ray can meet the neighbour's first (seen near Canning Town, Custom
       // House and Poplar), so the drawn deck is looked for among the hits.
       let checked = 0, within = 0;
-      // Sprint 02Oct26f (Lane F, rail-canning-flyover): where a DLR path ends on a raised deck beside another
-      // deck at a different height, the end is blended onto that deck (src/dlr-deck-blend.js; the Canning Town
-      // flyover's start is the case it was made for), so the end's first samples are drawn off the profile BY
-      // DESIGN and the blend flags them `deckBlended`. They are the only samples exempt from this check, and the
-      // exemption is itself checked below: each exempt sample lies within 65 m of a path end (a blend reaches at
-      // most half the path or 15 m of track per metre of a step of at most 4 m, so 60 m), and there are few (41 to 47
-      // samples in 10 places: the Canning Town flyover and nine other junction ends whose decks stepped by 1 to 3 m).
-      const exempt = raised.filter(p => p.deckBlended);
+      // Sprint 02Oct26f (Lane F, rail-canning-flyover): the Canning Town flyover's start is blended onto the deck it
+      // leaves (src/dlr-deck-blend.js, gated to that one junction; fix round 1 withdrew the network-wide blend that
+      // had moved nine unreviewed junction ends and had needed this exemption widened to 80 samples). The blend
+      // flags every sample it moves `deckBlended` and records how far (`deckBlendShiftY`); a sample it moved by 0.1 m
+      // or more (in this check's own units, y / 5) is drawn off the profile BY DESIGN and is the only kind exempt.
+      // The exemption is itself checked below: all of them lie within 55 m of the junction (the ramp is 15 m of
+      // track per metre of a 3.4 m step, 51 m, and a sample 0.1 m from its profile is near the ramp's far end).
+      const CANNING = { x: 9458, z: -905 };
+      const blended = raised.filter(p => p.deckBlended);
+      const exempt = blended.filter(p => Math.abs(p.deckBlendShiftY) / 5 >= 0.1);
+      const exemptSet = new Set(exempt);
       raised.filter(p => p.cls === 'viaduct' && !ends.has(p)).forEach((p, k) => {
         if (k % 25) return;           // the same every-25th sample as before the blend
-        if (p.deckBlended) return;    // (and only those the blend moved are skipped)
+        if (exemptSet.has(p)) return; // (and only those the blend moved by 0.1 m or more are skipped)
         ray.set(new T.Vector3(p.x, 20000, p.z), new T.Vector3(0, -1, 0));
         const hits = ray.intersectObjects(masonry, false); if (!hits.length) return;
         const prof = u.dlrProfile.sample({ x: p.x, z: p.z, structureScale: u.getBuildingHeightScale(), kinds: ['elevated'], maxDistance: 40 });
@@ -299,12 +302,10 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
         const want = Math.max(prof.y, p.terrainY + 5 * u.getBuildingHeightScale());
         checked++; if (hits.some(h => Math.abs(h.point.y - want) / 5 < 0.3)) within++;
       });
-      const endPts = paths.flatMap(path => [path[0], path.at(-1)]);
-      const exemptNearEnd = exempt.every(p => endPts.some(e => Math.hypot(p.x - e.x, p.z - e.z) < 65));
-      const clusters = []; for (const p of exempt) { const c = clusters.find(k => Math.hypot(k.x - p.x, k.z - p.z) < 100); if (c) c.n++; else clusters.push({ x: Math.round(p.x), z: Math.round(p.z), n: 1 }); }
-      const steps = exempt.map(p => Math.abs(p.deckBlendStepM));
-      return { raised: raised.length, sources, flagged, surveyedOk, checked, within, exempt: exempt.length, exemptNearEnd, exemptClusters: clusters,
-        exemptStepM: steps.length ? [Math.min(...steps), Math.max(...steps)] : null };
+      const farthest = Math.max(0, ...blended.map(p => Math.hypot(p.x - CANNING.x, p.z - CANNING.z)));
+      const steps = blended.map(p => Math.abs(p.deckBlendStepM));
+      return { raised: raised.length, sources, flagged, surveyedOk, checked, within, blended: blended.length, exempt: exempt.length, farthestM: Math.round(farthest),
+        stepM: steps.length ? [Math.min(...steps), Math.max(...steps)] : null };
     };
     const setMaster = v => { const el = document.getElementById('masterHeight'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush(); };
     const at11 = deckAt();
@@ -321,9 +322,10 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
   for (const s of [at11, at3, back]) {
     expect(s.checked).toBeGreaterThan(20);
     expect(s.within).toBe(s.checked); // drawn where the shared profile says, within 0.3 m
-    expect(s.exemptNearEnd).toBe(true);   // the blend's exemption covers nothing but the first samples of a path end
-    expect(s.exempt).toBeGreaterThan(0); expect(s.exempt).toBeLessThan(80);
-    expect(s.exemptStepM[0]).toBeGreaterThanOrEqual(1); expect(s.exemptStepM[1]).toBeLessThanOrEqual(4);   // the blend's own range, in true metres
+    expect(s.blended).toBeGreaterThan(0);                // the Canning Town blend ran
+    expect(s.farthestM).toBeLessThan(55);                // and moved nothing but samples at that one junction
+    expect(s.exempt).toBeLessThanOrEqual(10);            // a handful of samples (6 measured), not a network's worth
+    expect(s.stepM[0]).toBeGreaterThanOrEqual(1); expect(s.stepM[1]).toBeLessThanOrEqual(4);   // the blend's own range, in true metres
   }
 });
 

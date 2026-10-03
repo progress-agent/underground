@@ -3,8 +3,10 @@
 // Where the DLR flyover leaves the deck it rises from at Canning Town (scene (9458, -905): a 17-point
 // viaduct piece starts 9.3 m beside the viaduct piece it leaves) the two decks stepped by 3.1 to 3.4 m
 // (reported as up to 1.5 m).
-// src/dlr-deck-blend.js now blends the ending deck onto the through deck over its last 30 m, where
-// the track is drawn (tube-surface-rail.js), so the trains that ride the drawn track follow.
+// src/dlr-deck-blend.js now blends the ending deck onto the through deck over a ramp of 15 m of track per metre
+// of step (51 m for this 3.4 m step), where the track is drawn (tube-surface-rail.js), so the trains that ride the
+// drawn track follow. Since fix round 1 (03Oct26) the blend is gated to this one junction (`within`): the
+// network-wide version had also moved nine other DLR junction ends that nobody had reviewed.
 //
 // The probe casts vertical rays DOWN against the DLR's surface-rail meshes, every 0.5 m along each
 // branch's centreline from 40 m before its end nearest the site, and along the straight segment from

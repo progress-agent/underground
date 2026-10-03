@@ -100,6 +100,25 @@ test('a path that ends across another (a crossing, not a junction) is left alone
   assert.ok(along[0].deckBlended && Math.abs(along[0].deckBlendStepM) > 3);
 });
 
+test('within gates the blend to the listed sites: a junction outside them is left exactly as drawn, one inside is blended', () => {
+  const site = { x: 200, z: 9, radiusM: 40 };
+  const mk = () => ({ through: path(0, 0, 800, 0, 20 * U, 'viaduct', 160), near: leave(200, 9, 300, 21.5 * U, 'viaduct', 60), far: leave(600, 9, 300, 21.5 * U, 'viaduct', 60) });
+  // Ungated, both junctions blend (the module's default).
+  const all = mk(); assert.equal(blendDeckJoins([all.through, all.near, all.far], { unitsPerTrueM: U }).length, 2);
+  // Gated to the first, only it blends, and the other path is byte for byte what it was.
+  const g = mk(), before = g.far.map(s => ({ ...s }));
+  const blends = blendDeckJoins([g.through, g.near, g.far], { unitsPerTrueM: U, within: [site] });
+  assert.equal(blends.length, 1); assert.equal(blends[0].path, 1);
+  assert.ok(stepOf(g.near[0].y, 20 * U) < 0.1);
+  assert.deepEqual(g.far, before, 'an end outside every site is not touched, flags included');
+  assert.equal(g.far[0].deckBlended, undefined);
+  // An empty list gates everything out.
+  const e = mk(); assert.equal(blendDeckJoins([e.through, e.near, e.far], { unitsPerTrueM: U, within: [] }).length, 0);
+  // Every sample the blend moves records how far (the deck pin in tests/surface-rail.spec.js exempts by it).
+  assert.ok(g.near.filter(s => s.deckBlended).every(s => Number.isFinite(s.deckBlendShiftY)));
+  assert.ok(Math.abs(g.near[0].deckBlendShiftY - (20 * U - 21.5 * U)) < 1e-9);
+});
+
 test('missing or short paths are tolerated; unitsPerTrueM is required', () => {
   assert.deepEqual(blendDeckJoins([null, [{ x: 0, z: 0, y: 0, cls: 'viaduct' }]], { unitsPerTrueM: U }), []);
   assert.throws(() => blendDeckJoins([], {}), RangeError);

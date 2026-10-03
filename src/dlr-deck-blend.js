@@ -17,6 +17,11 @@
 // smoothstep that is 1 at the end and 0 at the blend length (30 m, or longer
 // for a bigger step). The through deck is never
 // moved; where both paths end at each other, the shorter one moves.
+//
+// Scope (fix round 1, 03Oct26): the brief asked for Canning Town only, and nine other DLR junction ends the blend
+// also moved had no capture and no review, so `within` gates it to listed sites: an end is blended only when it lies
+// inside one of them. tube-surface-rail.js passes the Canning Town flyover; elsewhere the DLR decks are as drawn
+// on e0675d7.
 
 export const RAISED = new Set(['viaduct', 'embankment']);
 // The step to close, in true metres: the flyover that leaves the deck at Canning Town starts 3.1 to 3.4 m above the
@@ -53,10 +58,12 @@ function nearestOnPath(path, x, z) {
 /**
  * Close the deck steps where DLR paths meet on raised track. Mutates the `y`
  * of the ending path's samples. `unitsPerTrueM` is canonical y per true metre
- * (5 x the structure scale, as dlr-profile.js info() converts). Returns the
- * blends made: { path, end, stepM, lengthM }.
+ * (5 x the structure scale, as dlr-profile.js info() converts). `within`, when
+ * given, is a list of { x, z, radiusM } sites: only an end inside one is blended
+ * (omitted: every end, as the module's unit tests use it). Returns the blends
+ * made: { path, end, stepM, lengthM }.
  */
-export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
+export function blendDeckJoins(paths, { unitsPerTrueM, within, ...opts } = {}) {
   if (!(unitsPerTrueM > 0)) throw new RangeError('blendDeckJoins needs unitsPerTrueM');
   const { reachM, blendM: baseBlendM, minStepM, maxStepM, rampPerM, minParallel } = { ...DEFAULTS, ...opts };
   const list = paths.filter(p => p && p.length >= 2);
@@ -66,6 +73,7 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
     for (const end of ['start', 'end']) {
       const E = end === 'end' ? P.at(-1) : P[0];
       if (!RAISED.has(E.cls)) continue;
+      if (within && !within.some(w => Math.hypot(E.x - w.x, E.z - w.z) <= w.radiusM)) continue;
       let best = null;
       list.forEach((Q, qi) => { if (Q === P) return; const r = nearestOnPath(Q, E.x, E.z); if (r && r.d <= reachM && (!best || r.d < best.r.d)) best = { r, Q, qi }; });
       if (!best) continue;
@@ -91,6 +99,7 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
         P[i].y += shift * smoothstep(1 - arc / blendM);
         P[i].deckBlended = true;   // moved off the profile by design (tests/surface-rail.spec.js exempts exactly these)
         P[i].deckBlendStepM = stepM;
+        P[i].deckBlendShiftY = shift * smoothstep(1 - arc / blendM);   // canonical y units this sample moved
         moved = arc;
       }
       out.push({ path: pi, end, stepM, lengthM: moved });
