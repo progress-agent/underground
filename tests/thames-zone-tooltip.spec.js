@@ -51,7 +51,12 @@ test('Thames zone tooltip: renders tabular zone-named tooltip + priority beats T
     // we know lies above the Thames, then read #hoverTip.
     return {
       thamesFound: true,
-      thamesUserData: thamesMesh.userData,
+      // Sprint 02Oct26f: only the two plain fields. This used to return thamesMesh.userData whole, and its
+      // interiorShell is a Mesh whose `parent` chain leads to the whole scene, so Playwright serialised the
+      // scene graph: 19.7 s and a large object with live buildings, and past the 512 MB string limit
+      // ("Cannot create a string longer than 0x1fffffe8 characters") once the baked city (1.2 million
+      // instances) is the default. Nothing below reads anything else from it.
+      thamesUserData: { type: thamesMesh.userData.type, name: thamesMesh.userData.name },
       hitPoint,
     };
   });
