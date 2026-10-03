@@ -952,8 +952,7 @@ function startSurfaceRail() {
   // The DLR's surface deck is read from the shared profile: make sure it has
   // sampled the terrain (snapAllTubesToTerrain may not have run yet).
   if (dlrProfile?.terrainPending) dlrProfile.refresh({ structureScale: getBuildingHeightScale() });
-  // s02:T: the track beyond the ring rides the hidden ground (the same call on the map).
-  createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ,
+  createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, // s02:T: beyond the ring the track rides the hidden ground (the same call on the map)
     heightScale: getBuildingHeightScale(), overground: overgroundGroup, dlrProfile }).then(rail => {
     surfaceRail = rail;
     for (const [key, layers] of rail.stationLayers) {
