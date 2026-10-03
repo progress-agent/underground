@@ -1,11 +1,11 @@
 // Lane F (sprint 02Oct26f): the two named data rules of scripts/prepare-tube-surface.mjs,
-// LOOP_GAP_JOINS (train-hainault-gaps) and STRATFORD_1617_OPEN (train-stratford-1617),
+// LOOP_GAP_JOINS (train-hainault-gaps), LOOP_JOG_SMOOTH (its fix round 2) and STRATFORD_1617_OPEN (train-stratford-1617),
 // on synthetic track and on the tracked public/data/tube-surface.json.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import proj4 from 'proj4';
-import { joinLoopGaps, openStratford1617, LOOP_GAP_JOINS, STRATFORD_1617_OPEN, toBng, lengthOf, segmentClasses } from '../scripts/prepare-tube-surface.mjs';
+import { joinLoopGaps, smoothLoopJogs, openStratford1617, LOOP_GAP_JOINS, LOOP_JOG_SMOOTH, STRATFORD_1617_OPEN, toBng, lengthOf, segmentClasses } from '../scripts/prepare-tube-surface.mjs';
 
 const data = JSON.parse(readFileSync(new URL('../public/data/tube-surface.json', import.meta.url)));
 
@@ -114,6 +114,53 @@ test('a join at a piece\'s start prepends the connector', () => {
   assert.ok(consistent(A));
 });
 
+// ── LOOP_JOG_SMOOTH: a dogleg the train map would fair 8 m off the drawn track is smoothed in the drawn track ──
+// The turn, in degrees, between the k metres either side, worst over a polyline resampled every 2 m.
+const worstTurn = (xy, k = 8) => {
+  const P = []; let carry = 0; P.push(xy[0]);
+  for (let i = 1; i < xy.length; i++) { const a = xy[i - 1], b = xy[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]); for (let d = 2 - carry; d <= L + 1e-9; d += 2) P.push([a[0] + (b[0] - a[0]) * d / L, a[1] + (b[1] - a[1]) * d / L]); carry = (carry + L) % 2; }
+  const h = k / 2; let worst = 0;
+  for (let i = h; i < P.length - h; i++) {
+    const a = [P[i][0] - P[i - h][0], P[i][1] - P[i - h][1]], b = [P[i + h][0] - P[i][0], P[i + h][1] - P[i][1]];
+    worst = Math.max(worst, Math.acos(Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1]) / (Math.hypot(...a) * Math.hypot(...b))))) * 180 / Math.PI);
+  }
+  return worst;
+};
+// Grange Hill's shape: a loop track heading west-north-west, a 28 m dogleg north, then on west-north-west (e0675d7's vertices).
+const dogleg = () => [...line(546000, 192000, 545128, 192000 + 0, 40), [545100, 192000], [545099, 192028.6], [545080, 192040], ...line(545060, 192052, 544000, 192052, 40)];
+const withTags = p => ({ ...p, from: p.xy.map(() => 'central-hainault'), opened: p.cls.map(() => 0) });
+
+test('LOOP_JOG_SMOOTH replaces a dogleg the train map would fair off the track, and keeps the piece\'s ends and arrays in step', () => {
+  const p = withTags(piece(dogleg()));
+  const before = p.xy.map(q => [...q]), ends = [before[0], before.at(-1)];
+  assert.ok(worstTurn(before) > LOOP_JOG_SMOOTH.kinkDeg, `the dogleg turns ${worstTurn(before)} degrees in 8 m before`);
+  const out = smoothLoopJogs([p]);
+  assert.equal(out.length, 1);
+  assert.ok(out[0].strayM > LOOP_JOG_SMOOTH.minStrayM && out[0].strayM < 15, `stray ${out[0].strayM}`);
+  assert.deepEqual([p.xy[0], p.xy.at(-1)], ends, 'the piece\'s ends do not move');
+  assert.ok(consistent(p), 'xy, lonlat, cls, from and opened stay in step');
+  assert.ok(p.cls.every(c => c === 'surface') && p.from.every(f => f === 'central-hainault') && p.opened.every(o => o === 0));
+  assert.ok(worstTurn(p.xy) < LOOP_JOG_SMOOTH.kinkDeg, `turn after ${worstTurn(p.xy)} degrees in 8 m, under the train map's kink`);
+  assert.ok(Math.abs(lengthOf(p.xy) / lengthOf(before) - 1) < 0.02, `the drawn length changes by under 2 percent (${lengthOf(p.xy)} against ${lengthOf(before)})`);
+  assert.deepEqual(smoothLoopJogs([p]), [], 'idempotent: a second run finds no kink to move');
+});
+
+test('LOOP_JOG_SMOOTH leaves a mild sidestep, a kink under the stray gate, a kink in tunnel, a window at a piece end, and track outside the box alone', () => {
+  const keep = p => JSON.stringify(p.xy);
+  // A 2 m sidestep over 10 m of track: the train map keeps its cars within a metre of it, so it stays as drawn.
+  const mild = withTags(piece([...line(545600, 192000, 545110, 192000, 10), [545105, 192000], [545100, 192002], ...line(545095, 192002, 544500, 192002, 10)])), mb = keep(mild);
+  assert.equal(smoothLoopJogs([mild]).length, 0); assert.equal(keep(mild), mb, 'a sidestep the cars keep within a metre of is not touched');
+  // The stray gate itself: the same dogleg, with the gate raised above its stray, is left as drawn.
+  const gated = withTags(piece(dogleg())), gb = keep(gated);
+  assert.equal(smoothLoopJogs([gated], { ...LOOP_JOG_SMOOTH, minStrayM: 100 }).length, 0); assert.equal(keep(gated), gb);
+  const tun = withTags(piece(dogleg(), 'tunnel')), tb = keep(tun);
+  assert.equal(smoothLoopJogs([tun]).length, 0); assert.equal(keep(tun), tb, 'a kink in tunnel is not touched');
+  const atEnd = withTags(piece([...line(545200, 192000, 545100, 192000, 20), [545099, 192028.6], [545080, 192040]])), ab = keep(atEnd);
+  assert.equal(smoothLoopJogs([atEnd]).length, 0); assert.equal(keep(atEnd), ab, 'a window reaching the piece end is the train map\'s');
+  const away = withTags(piece(dogleg().map(([x, y]) => [x - 20000, y - 20000]))), ob = keep(away);
+  assert.equal(smoothLoopJogs([away]).length, 0); assert.equal(keep(away), ob, 'outside the Hainault box nothing moves');
+});
+
 test('STRATFORD_1617_OPEN opens the tunnel around the stop and nothing else', () => {
   const xy = line(538000, 184400, 538800, 184400, 20);
   const p = { xy, lonlat: xy.map(q => proj4('EPSG:27700', 'EPSG:4326', q)), cls: xy.slice(1).map((_, i) => (i < 5 ? 'surface' : 'tunnel')) };
@@ -178,4 +225,19 @@ test('dataset: Stratford 16/17 is a covered way of 150 to 300 m on the DLR branc
   // Opened segments are drawn as surface in the data.
   const cls = segmentClasses(best.b.points.length, best.b.segments);
   for (const r of ranges) for (let i = r.i0; i < r.i1; i++) if (lens.some(m => m >= 150)) assert.notEqual(cls[i], 'tunnel');
+});
+
+test('dataset: no kink on the Hainault loop would carry a train more than a metre off the drawn track (Grange Hill and north of Hainault smoothed)', () => {
+  const pieces = central.branches.map(b => { const xy = b.points.map(toBng); const cls = Array(xy.length - 1).fill('tunnel'); for (const sg of b.segments) for (let i = sg.i0; i < sg.i1; i++) cls[i] = sg.class; return { xy, lonlat: b.points.map(p => [...p]), cls }; });
+  assert.deepEqual(smoothLoopJogs(pieces), [], 'a second run of the rule moves nothing: the tracked data is already smoothed');
+  // e0675d7 had a 28.6 m dogleg at (14917, -12179) scene (BNG 545025 192358, v2 piece joined to OSM track), cars off by 8 m,
+  // and a vertex 6.7 m out of line at scene (15085, -11307) (cars off by 1.9 m). Neither stretch kinks any more.
+  for (const [name, [e, n]] of Object.entries({ 'Grange Hill': [545025, 192358], 'north of Hainault': [545090, 191600] })) {
+    const near = pieces.filter(p => p.xy.some(q => Math.hypot(q[0] - e, q[1] - n) < 150));
+    assert.ok(near.length, name);
+    for (const p of near) {
+      const seg = []; p.xy.forEach((q, i) => { if (Math.hypot(q[0] - e, q[1] - n) < 120) seg.push(q); });
+      if (seg.length > 3) assert.ok(worstTurn(seg) < LOOP_JOG_SMOOTH.kinkDeg, `${name}: worst turn ${worstTurn(seg)} degrees in 8 m`);
+    }
+  }
 });

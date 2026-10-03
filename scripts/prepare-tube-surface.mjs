@@ -1216,6 +1216,109 @@ export function openStratford1617(pieces, stops, rule = STRATFORD_1617_OPEN) {
   }
   return out;
 }
+
+/**
+ * LOOP_JOG_SMOOTH (train-hainault-gaps, fix round 2). Where the drawn Hainault
+ * loop kinks sharply and the train map's own fairing (surface-train-map.js
+ * kinkWindows: a turn over 20 degrees in 8 m is replaced by a gentle Hermite
+ * blend, up to 10 m off the drawn track) would carry the cars more than a metre
+ * off it, the DRAWN track is replaced by that same blend, so the trains and the
+ * rails agree. Two such places exist at e0675d7: by Grange Hill, a 28.6 m
+ * dogleg left where the v2 piece's end was joined to the OSM track (s01:R), that
+ * cars cut by up to 8 m; and 160 m north of Hainault, a vertex 6.7 m out of line
+ * that they cut by 1.9 m. Every other kink on the loop already keeps the cars
+ * within 1 m, and is left alone.
+ *
+ * For each piece of the line with a vertex inside the place's box: kink
+ * vertices are those where the polyline turns more than kinkDeg between the
+ * kinkScaleM metres either side; kinks within clusterM of each other form a
+ * cluster. Each cluster's window is the smallest margin (marginsM, either side)
+ * whose cubic-Hermite replacement (tangents over tangentM metres beyond the
+ * window, sampled every stepM) turns no more than calmDeg per stepM, else the
+ * gentlest. A window is applied only when it lies inside the piece (not at an
+ * end, which the train map handles), every segment in it is plain surface track,
+ * and the replacement strays more than minStrayM from the old polyline: the
+ * drawn track moves by that stray, no more. Points of the replacement take the
+ * `from` tag of the old vertex nearest in proportion along the window.
+ */
+export const LOOP_JOG_SMOOTH = {
+  lineId: 'central', place: 'central-hainault',
+  kinkDeg: 20, kinkScaleM: 8, clusterM: 40, marginsM: [10, 20, 30, 45, 60, 80, 100, 130, 160, 200],
+  tangentM: 12, stepM: 4, calmDeg: 3.5, minStrayM: 1,
+};
+export function smoothLoopJogs(pieces, rule = LOOP_JOG_SMOOTH) {
+  const box = PLACES[rule.place].box, done = [];
+  const angle = (a, b) => { const la = Math.hypot(...a), lb = Math.hypot(...b); return la > 1e-9 && lb > 1e-9 ? Math.acos(Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1]) / (la * lb)))) * 180 / Math.PI : 0; };
+  pieces.forEach((piece, pi) => {
+    const n = piece.xy.length;
+    if (n < 4 || !piece.lonlat.some(ll => inBox(ll, box))) return;
+    const cum = [0]; for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(piece.xy[i][0] - piece.xy[i - 1][0], piece.xy[i][1] - piece.xy[i - 1][1]));
+    const L = cum[n - 1];
+    const seg = s => { if (s <= 0) return 0; if (s >= L) return n - 2; let lo = 0, hi = n - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (cum[m] <= s) lo = m; else hi = m; } return lo; };
+    const at = s => { const i = seg(s), l = cum[i + 1] - cum[i], t = l > 0 ? Math.max(0, Math.min(1, (s - cum[i]) / l)) : 0; return [piece.xy[i][0] + (piece.xy[i + 1][0] - piece.xy[i][0]) * t, piece.xy[i][1] + (piece.xy[i + 1][1] - piece.xy[i][1]) * t]; };
+    const turnAt = (s, d) => { const a = at(s - d), b = at(s), c = at(s + d); return angle([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]); };
+    const kinks = [];
+    for (let i = 1; i < n - 1; i++) { const d = Math.min(rule.kinkScaleM, cum[i], L - cum[i]); if (d >= 0.5 && inBox(piece.lonlat[i], box) && turnAt(cum[i], d) > rule.kinkDeg) kinks.push(cum[i]); }
+    if (!kinks.length) return;
+    const fairWindow = (a, b) => {
+      let best = null;
+      for (const e of rule.marginsM) {
+        const w0 = Math.max(0, a - e), w1 = Math.min(L, b + e);
+        const A = at(w0), B = at(w1), ch = unit([B[0] - A[0], B[1] - A[1]]);
+        let tA = null, tB = null;
+        if (w0 > 0.5) { const q = at(Math.max(0, w0 - rule.tangentM)); tA = unit([A[0] - q[0], A[1] - q[1]]); }
+        if (w1 < L - 0.5) { const q = at(Math.min(L, w1 + rule.tangentM)); tB = unit([q[0] - B[0], q[1] - B[1]]); }
+        if (!tA && !tB) { tA = ch; tB = ch; } else if (!tA) tA = unit([2 * ch[0] - tB[0], 2 * ch[1] - tB[1]]); else if (!tB) tB = unit([2 * ch[0] - tA[0], 2 * ch[1] - tA[1]]);
+        const pts = [A, ...hermite(A, tA, B, tB, rule.stepM)];
+        let turn = 0, prev = tA;
+        for (let k = 1; k < pts.length; k++) { const v = [pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]]; turn = Math.max(turn, angle(prev, v)); prev = v; }
+        turn = Math.max(turn, angle(prev, tB));
+        const w = { w0, w1, pts, turn };
+        if (!best || turn < best.turn - 1e-9) best = w;
+        if (turn <= rule.calmDeg) break;
+        if (w0 === 0 && w1 === L) break;
+      }
+      return best;
+    };
+    const windows = [];
+    let a = NaN, b = NaN;
+    const close = () => {
+      let w = fairWindow(a, b);
+      while (windows.length && w.w0 < windows.at(-1).w1 + rule.kinkScaleM) { a = windows.pop().a; w = fairWindow(a, b); }
+      windows.push({ ...w, a, b });
+    };
+    for (const s of kinks) { if (Number.isFinite(b) && s - b <= rule.clusterM) b = s; else { if (Number.isFinite(a)) close(); a = s; b = s; } }
+    if (Number.isFinite(a)) close();
+    // Which windows are applied: inside the piece, plain surface throughout, straying more than minStrayM.
+    const stray = w => { let worst = 0; for (const p of w.pts) { const r = nearestOnPolyline(piece.xy, p); if (r.d > worst) worst = r.d; } return worst; };
+    const apply = windows.filter(w => {
+      if (w.w0 <= 0 || w.w1 >= L) return false;
+      for (let i = seg(w.w0); i <= seg(w.w1); i++) { if (piece.cls[i] !== 'surface' || piece.opened?.[i]) return false; }
+      w.strayM = stray(w);
+      return w.strayM > rule.minStrayM;
+    });
+    if (!apply.length) return;
+    // Rebuilt vertex by vertex (cls and opened belong to the segment that begins at the vertex; the last is dropped).
+    const out = { xy: [], lonlat: [], cls: [], from: piece.from ? [] : null, opened: piece.opened ? [] : null };
+    const push = (p, ll, cls, from, opened) => { out.xy.push(p); out.lonlat.push(ll); out.cls.push(cls); if (out.from) out.from.push(from); if (out.opened) out.opened.push(opened); };
+    const keep = i => push(piece.xy[i], piece.lonlat[i], piece.cls[i] ?? 'surface', piece.from?.[i], piece.opened?.[i] ?? 0);
+    let i = 0;
+    for (const w of apply) {
+      // Vertices before the window, then its start point, the blend, and its end point; the old vertices inside it go.
+      while (i < n && cum[i] < w.w0 - 1e-6) { keep(i); i++; }
+      const tag = f => { if (!piece.from) return undefined; const s = w.w0 + f * (w.w1 - w.w0), j = seg(s), t = cum[j + 1] > cum[j] ? (s - cum[j]) / (cum[j + 1] - cum[j]) : 0; return piece.from[t < 0.5 ? j : j + 1]; };
+      w.pts.forEach((p, k) => push(p, proj4('EPSG:27700', 'EPSG:4326', p), 'surface', tag(k / (w.pts.length - 1)), 0));
+      while (i < n && cum[i] <= w.w1 + 1e-6) i++;
+      done.push({ piece: pi, fromM: Math.round(w.w0), toM: Math.round(w.w1), lengthM: Math.round(w.w1 - w.w0), strayM: w.strayM, turnDeg: w.turn, at_lonlat: proj4('EPSG:27700', 'EPSG:4326', at((w.w0 + w.w1) / 2)) });
+    }
+    while (i < n) { keep(i); i++; }
+    out.cls.pop(); if (out.opened) out.opened.pop();
+    piece.xy = out.xy; piece.lonlat = out.lonlat; piece.cls = out.cls;
+    if (out.from) piece.from = out.from;
+    if (out.opened) piece.opened = out.opened;
+  });
+  return done;
+}
 // ── /s02:F rules ──
 
 export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.join(ROOT, 'public/data/overground.json'), osmCache = null, probe = null, probeOnly = false } = {}) {
@@ -1247,6 +1350,9 @@ export async function build({ source = DEFAULT_SOURCE, overgroundPath = path.joi
     // ── s02:F rules ── (named rules; see the section above build())
     if (id === LOOP_GAP_JOINS.lineId) {
       for (const j of joinLoopGaps(pieces)) report.push(`central gap joined: ${j.gapM.toFixed(1)} m at ${j.at_lonlat[1].toFixed(5)},${j.at_lonlat[0].toFixed(5)}, connector ${j.connectorM.toFixed(1)} m (target ${j.advanceM} m along the other piece), angle ${j.angleDeg.toFixed(0)} deg, sharpest turn ${j.maxTurnDeg.toFixed(1)} deg per ${LOOP_GAP_JOINS.turnM} m (s02:F)`);
+    }
+    if (id === LOOP_JOG_SMOOTH.lineId) {
+      for (const j of smoothLoopJogs(pieces)) report.push(`central jog smoothed: ${j.lengthM} m stretch at ${j.at_lonlat[1].toFixed(5)},${j.at_lonlat[0].toFixed(5)}, drawn track moved by up to ${j.strayM.toFixed(1)} m, sharpest turn ${j.turnDeg.toFixed(1)} deg per ${LOOP_JOG_SMOOTH.stepM} m (s02:F)`);
     }
     if (id === STRATFORD_1617_OPEN.lineId) {
       const f1617 = (L.stations || []).filter(s => Number.isFinite(s.lon) && Number.isFinite(s.lat)).map(s => { const [e, n] = toBng([s.lon, s.lat]); return { name: s.name, e, n }; });
