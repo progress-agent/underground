@@ -81,6 +81,7 @@ export function blendDeckJoins(paths, { unitsPerTrueM, ...opts } = {}) {
         if (k > 0) arc += Math.hypot(P[i].x - P[prev].x, P[i].z - P[prev].z);
         if (arc >= blendM) break;
         P[i].y += shift * smoothstep(1 - arc / blendM);
+        P[i].deckBlended = true;   // moved off the profile by design (tests/surface-rail.spec.js exempts exactly these)
         moved = arc;
       }
       out.push({ path: pi, end, stepM, lengthM: moved });

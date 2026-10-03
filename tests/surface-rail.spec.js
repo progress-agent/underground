@@ -281,8 +281,14 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
       // ray can meet the neighbour's first (seen near Canning Town, Custom
       // House and Poplar), so the drawn deck is looked for among the hits.
       let checked = 0, within = 0;
+      // Sprint 02Oct26f (Lane F, rail-canning-flyover): the Canning Town flyover's start is blended down onto the
+      // deck it leaves (src/dlr-deck-blend.js), so its first samples (within 47 m of the start) are drawn off the
+      // profile BY DESIGN and are flagged `deckBlended` by the blend. They are the only samples exempt from this
+      // check, and the exemption is itself checked below: every exempt sample lies within 80 m of that junction.
+      const exempt = raised.filter(p => p.deckBlended);
       raised.filter(p => p.cls === 'viaduct' && !ends.has(p)).forEach((p, k) => {
-        if (k % 25) return;
+        if (k % 25) return;           // the same every-25th sample as before the blend
+        if (p.deckBlended) return;    // (and only those the blend moved are skipped)
         ray.set(new T.Vector3(p.x, 20000, p.z), new T.Vector3(0, -1, 0));
         const hits = ray.intersectObjects(masonry, false); if (!hits.length) return;
         const prof = u.dlrProfile.sample({ x: p.x, z: p.z, structureScale: u.getBuildingHeightScale(), kinds: ['elevated'], maxDistance: 40 });
@@ -290,7 +296,8 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
         const want = Math.max(prof.y, p.terrainY + 5 * u.getBuildingHeightScale());
         checked++; if (hits.some(h => Math.abs(h.point.y - want) / 5 < 0.3)) within++;
       });
-      return { raised: raised.length, sources, flagged, surveyedOk, checked, within };
+      const exemptNearSite = exempt.every(p => Math.hypot(p.x - 9458, p.z + 905) < 80);
+      return { raised: raised.length, sources, flagged, surveyedOk, checked, within, exempt: exempt.length, exemptNearSite };
     };
     const setMaster = v => { const el = document.getElementById('masterHeight'); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush(); };
     const at11 = deckAt();
@@ -307,6 +314,8 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
   for (const s of [at11, at3, back]) {
     expect(s.checked).toBeGreaterThan(20);
     expect(s.within).toBe(s.checked); // drawn where the shared profile says, within 0.3 m
+    expect(s.exemptNearSite).toBe(true);   // the blend's exemption covers nothing but the Canning Town junction
+    expect(s.exempt).toBeGreaterThan(0); expect(s.exempt).toBeLessThan(25);
   }
 });
 
