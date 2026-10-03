@@ -321,11 +321,15 @@ test('no per-instance colour anywhere in the scene (D-015); colour on the railwa
       else if (o.material.vertexColors || o.geometry.attributes.color) otherVertexColours++;
     });
     const markers = [...u.surfaceRail.stationLayers.values()].filter(l => l.stationsLayer.mesh.instanceColor).length;
-    return { instanced, coloured, railInstanced, otherVertexColours, baked, markers };
+    // s02:B: the station buildings are two merged meshes, never instanced and never per-instance coloured.
+    const sb = []; u.scene.getObjectByName('station-buildings')?.traverse(o => { if (o.isMesh) sb.push(o); });
+    return { instanced, coloured, railInstanced, otherVertexColours, baked, markers, stationMeshes: sb.length, stationInstanced: sb.filter(o => o.isInstancedMesh || o.instanceColor).length };
   });
   expect(r.instanced).toBeGreaterThan(10);
   expect(r.coloured).toBe(0);
   expect(r.markers).toBe(0);
+  expect(r.stationMeshes).toBe(2);
+  expect(r.stationInstanced).toBe(0);
   expect(r.railInstanced).toBe(0);
   // The four dressing archetypes are one mesh per line with their colours
   // baked into the vertices (allowed: variants are separate meshes or baked
@@ -726,52 +730,48 @@ test('s01: the Overground viaducts stand on decks and piers; none of it in the T
   expect(consoleErrors.filter(e => /mergeGeometries/.test(e))).toEqual([]);
 });
 
-test('s01: the stations the last sprint left without a marker have surfaceOnly markers, visible from above', async () => {
-  // Lifted over the roof of any building box standing over them (Greenwich and
-  // Lewisham DLR stand under their station buildings in the map's data).
-  await page.waitForFunction(() => !!window.__ug.surfaceRail.roofLift, null, { timeout: 60000 });
+test('s02: the stations the last sprint left without a marker are station buildings, drawn from above (the spheres retired)', async () => {
+  // Was: surfaceOnly markers lifted over the roof of any building box standing over them (s01:R). The spheres
+  // are gone (D-048 item 4); each of these stations is now a white building, drawn from above, never culled.
+  await page.waitForFunction(() => !!window.__ug.stationBuildings?.ready, null, { timeout: 60000 });
   const named = [['jubilee', 'West Hampstead'], ['jubilee', 'Wembley Park'], ['metropolitan', 'Preston Road'], ['dlr', 'Lewisham DLR'], ['dlr', 'Greenwich DLR'], ['dlr', 'Stratford DLR']];
   const r = await page.evaluate(async (named) => {
     window.__thaw();
     const u = window.__ug, T = window.__ugTHREE, rr = u.composer.renderer, gl = rr.getContext(), set = u.undergroundCull.collect();
+    const group = u.scene.getObjectByName('station-buildings');
     const grab = () => { u.undergroundCull.render(u.aboveGroundView && u.economies.on('underAbove'), () => u.composer.render(0)); rr.setRenderTarget(null);
       const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); return { b, W, H }; };
     const out = [];
     for (const [lineId, name] of named) {
       const layer = u.surfaceRail.stationLayers.get(`surface:${lineId}`)?.stationsLayer.mesh;
-      const i = layer ? layer.userData.stations.findIndex(s => s.name.startsWith(name)) : -1;
-      if (i < 0) { out.push({ name, found: false }); continue; }
-      const st = layer.userData.stations[i], p = st.pos, g = u.getTerrainMeshSurfaceY({ x: p.x, z: p.z });
-      u.camera.position.set(p.x, g + 250 * 5, p.z + 300); u.controls.target.set(p.x, p.y, p.z); u.controls.update();
+      const st = layer ? layer.userData.stations.find(s => s.name.startsWith(name)) : null;
+      if (!st) { out.push({ name, found: false }); continue; }
+      const b = u.stationBuildings.index.buildingForName(st.name);
+      if (!b) { out.push({ name, found: true, building: false }); continue; }
+      const g = u.getTerrainMeshSurfaceY({ x: b.label.x, z: b.label.z });
+      u.camera.position.set(b.label.x, g + 250 * 5, b.label.z + 60); u.controls.target.set(b.label.x, g, b.label.z); u.controls.update(); // near top-down: nothing stands between the camera and a pavilion
       await new Promise(r => setTimeout(r, 600));
       const A = grab();
-      const m = new T.Matrix4(); layer.getMatrixAt(i, m); const away = m.clone(); away.setPosition(0, -1e6, 0); layer.setMatrixAt(i, away); layer.instanceMatrix.needsUpdate = true;
-      const B = grab(); layer.setMatrixAt(i, m); layer.instanceMatrix.needsUpdate = true;
-      const v = new T.Vector3(p.x, p.y, p.z).project(u.camera), sx = Math.round((v.x + 1) / 2 * A.W), sy = Math.round((v.y + 1) / 2 * A.H);
-      let px = 0; for (let y = Math.max(0, sy - 40); y < Math.min(A.H, sy + 40); y++) for (let x = Math.max(0, sx - 40); x < Math.min(A.W, sx + 40); x++) { const k = (y * A.W + x) * 4; if (Math.abs(A.b[k] - B.b[k]) + Math.abs(A.b[k + 1] - B.b[k + 1]) + Math.abs(A.b[k + 2] - B.b[k + 2]) > 6) px++; }
-      out.push({ name, found: true, surfaceOnly: layer.userData.surfaceOnly, culled: set.includes(layer), px, above: u.aboveGroundView });
+      group.visible = false; const B = grab(); group.visible = true;
+      const v = new T.Vector3(b.label.x, g, b.label.z).project(u.camera), sx = Math.round((v.x + 1) / 2 * A.W), sy = Math.round((v.y + 1) / 2 * A.H);
+      let px = 0; for (let y = Math.max(0, sy - 60); y < Math.min(A.H, sy + 60); y++) for (let x = Math.max(0, sx - 60); x < Math.min(A.W, sx + 60); x++) { const k = (y * A.W + x) * 4; if (Math.abs(A.b[k] - B.b[k]) + Math.abs(A.b[k + 1] - B.b[k + 1]) + Math.abs(A.b[k + 2] - B.b[k + 2]) > 6) px++; }
+      out.push({ name, found: true, building: true, kind: b.kind, culled: set.includes(group), px, above: u.aboveGroundView, retired: layer.userData.retired === true });
     }
     // Hatton Cross is an underground station (OSM: the Piccadilly is in cut-and-cover tunnel there): no surface marker.
     const hatton = [...u.surfaceRail.stationLayers.values()].some(l => l.stationsLayer.mesh.userData.stations.some(s => /Hatton Cross/.test(s.name)));
-    // No surface marker sits inside a building box (its centre under a roof).
-    const col = u.modes.collision; let underRoof = 0;
-    for (const l of u.surfaceRail.stationLayers.values()) for (const s of l.stationsLayer.mesh.userData.stations) {
-      const roof = col.roofHeightAt(s.pos.x, s.pos.z); if (roof !== null && roof > s.pos.y) underRoof++;
-    }
     window.__thaw();
-    return { out, hatton, underRoof, lift: u.surfaceRail.roofLift };
+    return { out, hatton };
   }, named);
-  console.log('named markers', JSON.stringify(r));
+  console.log('named station buildings', JSON.stringify(r));
   for (const m of r.out) {
     expect(m.found, m.name).toBe(true);
-    expect(m.surfaceOnly, m.name).toBe(true);
+    expect(m.building, m.name).toBe(true);
+    expect(m.retired, `${m.name}: the sphere is retired`).toBe(true);
     expect(m.culled, m.name).toBe(false);
     expect(m.above, m.name).toBe(true);
-    expect(m.px, `${m.name}: marker pixels from above`).toBeGreaterThan(150);
+    expect(m.px, `${m.name}: station-building pixels from above`).toBeGreaterThan(150);
   }
   expect(r.hatton).toBe(false);
-  expect(r.underRoof).toBe(0);
-  expect(r.lift.lifted).toBeGreaterThan(0);
 });
 
 test('s01: the drawn railway stops at the map edge, and no surface marker stands beyond it', async () => {

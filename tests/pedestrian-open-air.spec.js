@@ -433,7 +433,7 @@ test('surface trains pass through the walker in the open: rumble and a brief sha
   expect(r.passes).toBeGreaterThanOrEqual(1);
 });
 
-test('a surface stop: the card offers the street, which is a step aside to the ground; from the street, a surface platform eases onto the track', async () => {
+test('a surface stop: the card offers the street, which is an ease to the station building\'s exit pose on the ground; from the street, a surface platform eases onto the track', async () => {
   expect(await placeAt('district', 'Upminster Bridge', 'Upminster')).not.toBeNull();
   await ride({ lineId: 'district', until: 'Upminster', keys: ['w'], maxMs: 30000 });
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'arrival', null, { timeout: 20000 });
@@ -451,10 +451,15 @@ test('a surface stop: the card offers the street, which is a step aside to the g
   expect(seen.some(f => f.phase === 'step')).toBe(true);
   expect(seen.at(-1).phase).toBe('body');
   for (const f of seen) expect(f.y).toBeGreaterThanOrEqual(f.g + 1 * VE - 1e-6);   // the ease is above the terrain
-  // Fix round 1: the step is aside from the station's own point on the drawn track, not from the walker's.
+  // s02:B (D-048 item 4, B6.2): "Up to the street" is an ease to the station building's exit pose, outside the
+  // building and facing the street: the one pose stationExitPose gives (was: a step aside of 12, 20 or 30 m).
   const st = seen.find(f => f.step)?.step;
   expect(st.stop.name).toBe('Upminster');
-  if (!st.fallback) expect(K.aside.some(o => Math.abs(Math.hypot(st.to.x - st.station.x, st.to.z - st.station.z) - o) < 0.01)).toBe(true);
+  const pose = await page.evaluate(() => window.__ug.stationBuildings.stationExitPose(window.__ug.stationBuildings.siteKeyOf('Upminster')));
+  expect(pose).not.toBeNull();
+  expect(st.pose).toEqual(pose);
+  expect(st.building).toBeTruthy();
+  expect(Math.hypot(st.to.x - pose.x, st.to.z - pose.z)).toBeLessThan(1e-6);
   const d = await dbg();
   expect(d.state).toBe('ground');
   const where = await page.evaluate(([x, z]) => {
@@ -499,7 +504,7 @@ test('a surface stop: the card offers the street, which is a step aside to the g
 // the street picked: the walker stepped out 106 m from Hornchurch). D-042 item 1: "only possible to exit
 // them at stations". Off the platform, E brings the walker back to the station; the card is never on offer
 // away from it; the step aside is from the station's point on the drawn track.
-test('the street only at the station: E pressed past a surface stop at 200 m/s brings the walker back to it, and the step aside is beside the station', async () => {
+test('the street only at the station: E pressed past a surface stop at 200 m/s brings the walker back to it, and the exit is beside the station building', async () => {
   expect(await placeAt('district', 'Elm Park', 'Hornchurch')).not.toBeNull();
   const r = await page.evaluate(async (K) => {
     const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
@@ -545,9 +550,12 @@ test('the street only at the station: E pressed past a surface stop at 200 m/s b
   expect(r.cardPast, 'the card opens back at the stop').toBeLessThan(0.5);
   expect(r.rows[0]).toBe('Up to the street');
   expect(r.step).toMatchObject({ kind: 'exit', stop: { name: 'Hornchurch' } });
+  // s02:B: the exit pose of Hornchurch's station building (was: 12, 20 or 30 m aside of the station's point). It stands
+  // outside the building, so it is further from the station's point than a step aside could be, but never far from it.
   const aside = Math.hypot(r.step.to.x - r.step.station.x, r.step.to.z - r.step.station.z);
-  if (!r.step.fallback) expect(K.aside.some(o => Math.abs(aside - o) < 0.01), `aside ${aside.toFixed(2)} m from the station's point`).toBe(true);
-  expect(aside).toBeLessThanOrEqual(Math.max(...K.aside) + 0.01);
+  expect(r.step.pose, 'the exit is the building\'s pose').toBeTruthy();
+  expect(r.step.building).toBeTruthy();
+  expect(aside, `exit ${aside.toFixed(1)} m from the station's point`).toBeLessThanOrEqual(300);
   expect(r.end).toMatchObject({ phase: 'body', state: 'ground' });
   test.info().annotations.push({ type: 'street exit', description: `E ${r.pressed.past.toFixed(0)} m past at 200 m/s; stepped out ${aside.toFixed(1)} m aside of the station's point, ${r.endFromEntrance.toFixed(1)} m from the entrance` });
   // Back on the street at the station: E offers its platforms again (where the drawn track runs that close to it).
@@ -620,8 +628,10 @@ test('the street from a station shown in the other regime than the walker: a cut
   expect(r.open.before).toBe('bore');
   expect(r.open.first).toMatchObject({ phase: 'step', cut: 'flare', interior: false });
   expect(r.open.stepBelow, 'the step stays above the terrain').toBe(0);
+  // s02:B: to the station building's exit pose (was: a step aside of at most 30 m).
   const aside = Math.hypot(r.open.step.to.x - r.open.step.station.x, r.open.step.to.z - r.open.step.station.z);
-  expect(aside).toBeLessThanOrEqual(Math.max(...K.aside) + 0.01);
+  expect(r.open.step.pose).toBeTruthy();
+  expect(aside).toBeLessThanOrEqual(300);
   expect(r.open.end2).toMatchObject({ phase: 'body', state: 'ground' });
 });
 
@@ -785,11 +795,12 @@ test('no station label is drawn in the bore, the walker\'s own line\'s included;
   // platform level) are hidden as in the bore, and the lining is not drawn; leaving the mode restores them.
   expect(d.interior.visible).toBe(false);
   expect(d.interior.hiddenDevices).toBeGreaterThan(0);
+  // s02:B: no white sphere is drawn in the mode or out of it (the spheres retired); the station buildings stand throughout.
   const markers = () => page.evaluate(() => { let n = 0; window.__ug.scene.traverse(o => { if (o.userData?.kind === 'station-markers' && o.visible) n++; }); return n; });
   expect(await markers()).toBe(0);
   await page.keyboard.press('1');
   await page.waitForTimeout(300);
-  expect(await markers()).toBeGreaterThan(0);
+  expect(await markers()).toBe(0);
   await page.keyboard.press('2');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
 });

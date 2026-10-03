@@ -72,10 +72,16 @@ test('all six Overground lines retain source station locations and obey shared v
  await expect(page.locator('.station-label-surface').filter({hasText:/^Richmond$/})).toHaveCount(1);
  await expect(page.locator('.station-label-surface').filter({hasText:/^Bethnal Green \(Overground\)$/})).toHaveCount(1);
  await page.evaluate(()=>document.getElementById('hudDetails').open=true);
+ // s02:B: the checkbox is "Station roundels" now (the spheres retired): it drives the roundels mesh, and the
+ // station buildings themselves stay drawn; the station lists behind the (retired) spheres follow it as before.
+ await expect(page.locator('label:has(#victoriaStations)')).toContainText('Station roundels');
+ await page.waitForFunction(()=>window.__ug.stationBuildings?.ready);
  await page.locator('#victoriaStations').uncheck();
  expect(await page.evaluate(()=>window.__ug.overground.userData.stationSets.every(s=>!window.__ug.lineShaftLayers.get(s.id).stationsLayer.mesh.visible))).toBe(true);
+ expect(await page.evaluate(()=>{const m=window.__ug.stationBuildings.meshes;return [m.roundels.visible,m.walls.visible];})).toEqual([false,true]);
  await page.locator('#victoriaLabels').uncheck();
  expect(await page.locator('.station-layer-surface:visible').count()).toBe(0);
  await page.locator('#victoriaStations').check();await page.locator('#victoriaLabels').check();
  expect(await page.evaluate(()=>window.__ug.overground.userData.stationSets.every(s=>window.__ug.lineShaftLayers.get(s.id).stationsLayer.mesh.visible))).toBe(true);
+ expect(await page.evaluate(()=>{const m=window.__ug.stationBuildings.meshes;return [m.roundels.visible,m.walls.visible];})).toEqual([true,true]);
 });

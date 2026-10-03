@@ -61,6 +61,17 @@ export const VIEWS = {
   heathrow: { p: [-19493.3, 1606.7, 4622.3], t: [-22570.2, 120, 4688.2] },
   arrival: null, // street, pushed several rungs down, then flown to riverGreenwich
 };
+// s02:B: views outside the default six (named by --views only). `station` poses are resolved in the page from the
+// station buildings' label point: the camera `dist` m out along +z at eye height `upM` metres, looking at the label point.
+export const EXTRA_VIEWS = {
+  kingsCross: { station: "King's Cross St. Pancras", upM: 2, dx: 0, dz: 120 },
+};
+const ALL_VIEWS = { ...VIEWS, ...EXTRA_VIEWS };
+const resolvePose = async (page, pose) => (!pose?.station ? pose : page.evaluate(({ station, upM, dx, dz }) => {
+  const u = window.__ug, sb = u.stationBuildings, key = sb.siteKeyOf(station), b = sb.data.buildings.find(q => q.key === sb.data.sites[key].building);
+  const g = u.getTerrainMeshSurfaceY({ x: b.label.x, z: b.label.z });
+  return { p: [b.label.x + dx, g + upM * 5, b.label.z + dz], t: [b.label.x, g + 10 * 5, b.label.z] };
+}, pose));
 export const SETUPS = {
   'as-lived': { dpr: 2, cpuThrottle: 1 },
   weak: { dpr: 1, cpuThrottle: 4 },
@@ -164,15 +175,16 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
     });
     if (S.cpuThrottle > 1) { const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: S.cpuThrottle }); }
     // Warm-up: visit every standard view once so programs and uploads are settled.
-    for (const [name, v] of Object.entries(VIEWS)) {
-      if (!v || !views.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
+    for (const [name, v0] of Object.entries(ALL_VIEWS)) {
+      if (!v0 || !views.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
+      const v = await resolvePose(page, v0);
       await page.evaluate(pose => { const u = window.__ug; u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update(); }, v);
       await page.waitForTimeout(1500);
     }
     const results = {};
     for (const name of views) {
-      if (!(name in VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
-      const arrival = VIEWS[name] === null, pose = VIEWS[name] ?? VIEWS.riverGreenwich;
+      if (!(name in ALL_VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
+      const arrival = ALL_VIEWS[name] === null, pose = await resolvePose(page, ALL_VIEWS[name] ?? VIEWS.riverGreenwich);
       const ticks = Math.round((arrival ? arrivalS : settleS) * 4);
       const r = await page.evaluate(async ({ pose, arrival, street, ticks }) => {
         const u = window.__ug, sleep = ms => new Promise(res => setTimeout(res, ms));

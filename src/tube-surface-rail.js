@@ -90,13 +90,6 @@ const DRESSING_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexCol
 // dlr-profile.js, shared with the data builder.
 const PROFILE_CLASS = { elevated: 'viaduct', embankment: 'embankment', surface: 'surface', cutting: 'cutting', tunnel: 'tunnel' };
 export const DLR_MATCH_M = SURFACE_RAIL_DLR_MATCH_M;
-/**
- * s01:R: a marker is lifted only when a building box stands over its centre
- * (within MARKER_ROOF_REACH_M of it: inside a station building or under a
- * canopy, where nothing of it shows), not when a building merely stands beside
- * it; its centre then stands MARKER_ROOF_CLEARANCE_M above that roof (true m).
- */
-export const MARKER_ROOF_REACH_M = 2, MARKER_ROOF_CLEARANCE_M = 1.5;
 /** s01:R: how far an open platform may be from a DLR station's mapped point, and from the drawn track. */
 export const DLR_OPEN_PLATFORM_M = 250, DLR_PLATFORM_ON_TRACK_M = 30;
 const ESTIMATE_BASIS = 'Illustrative class estimate; no profiled DLR track within 40 m';
@@ -400,7 +393,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     }
     if (!stations.length) continue;
     markerStations.set(line.id, stations);
-    const layer = createStationMarkers({ scene, stations, colour: line.colour, size: 6, labels: false, surfaceOnly: true });
+    const layer = createStationMarkers({ scene, stations, colour: line.colour, size: 6, labels: false, surfaceOnly: true, draw: false }); // s02:B: the spheres retire (the station buildings stand instead)
     layer.mesh.userData.surfaceRail = line.id;
     stationLayers.set(`surface:${line.id}`, { stationsLayer: layer });
   }
@@ -428,19 +421,17 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     for (const [lineId, stations] of markerStations) for (const st of stations) placeMarker(lineId, st, ratio);
     writeMarkers();
   }
-  // A marker's height at a structure scale: on its track (the DLR: the
-  // profile), and s01:R above the roof of any building box over it (roofM, true
-  // metres, liftMarkersOverRoofs), so a station under its own building or a
-  // canopy (Greenwich and Lewisham DLR, 41 Overground stations among others)
-  // still shows its marker from above. True size at every Master (D-039).
+  // A marker's height at a structure scale: on its track (the DLR: the profile).
+  // True size at every Master (D-039). The marker is no longer drawn (s02:B), but its
+  // position still feeds the station lists, the walk network and the labels' ground
+  // anchor; the s01:R roof lift is gone with the spheres (the label now hangs above
+  // the station building's roof instead, stations.js setSurfaceLabelAnchor).
   function placeMarker(lineId, st, ratio) {
-    const roof = st.roofM > 0 ? st.roofM + MARKER_ROOF_CLEARANCE_M : 0;
     if (lineId === 'dlr' && dlrProfile) {
       const p = dlrProfile.station({ id: st.id, nodeIndex: st.nodeIndex, structureScale: ratio });
       st.pos.copy(p); st.dlrProfile = p._dlrProfile;
-      if (roof) { const g = getY({ x: p.x, z: p.z }); if (Number.isFinite(g)) st.pos.y = Math.max(st.pos.y, g + roof * VE * ratio); }
     } else {
-      st.pos.y = st.groundY + Math.max(st.liftM, roof) * VE * ratio;
+      st.pos.y = st.groundY + st.liftM * VE * ratio;
     }
     st.surfaceY = st.pos.y;
   }
@@ -528,34 +519,6 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       };
     },
     setHeightScale,
-    /**
-     * s01:R: lift surface station markers above the building boxes over them.
-     * `roofHeightAt(x, z, r)` gives the true height (m) of the tallest
-     * building box within r of (x, z), 0 where there is none. With
-     * `near(x, z)` (fix round 1), only the markers it accepts are read again
-     * (main.js: those within the plan bounds of a building tile that arrived,
-     * left or changed); every other marker keeps the roof it had. A marker
-     * whose building has gone returns to its track. Returns { lifted, lowered
-     * (this pass), checked (read again), roofed (markers a building box stands
-     * over now, all lines) }.
-     */
-    liftMarkersOverRoofs(roofHeightAt, near = null) {
-      let lifted = 0, lowered = 0, checked = 0, roofed = 0;
-      for (const [lineId, stations] of markerStations) for (const st of stations) {
-        if (!near || near(st.pos.x, st.pos.z)) {
-          checked++;
-          const r = roofHeightAt(st.pos.x, st.pos.z, MARKER_ROOF_REACH_M);
-          st.roofM = Number.isFinite(r) && r > 0 ? r : 0;
-          const before = st.pos.y;
-          placeMarker(lineId, st, structureScale);
-          if (st.pos.y > before + 1e-6) lifted++;
-          else if (st.pos.y < before - 1e-6) lowered++;
-        }
-        if (st.roofM > 0) roofed++;
-      }
-      if (checked) writeMarkers();
-      return { lifted, lowered, checked, roofed };
-    },
     /** s01:R: every surface marker station, by line (tests and hover). */
     markerStations,
     setLineVisible(lineId, visible) {

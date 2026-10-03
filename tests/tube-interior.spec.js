@@ -155,12 +155,18 @@ test('in a tunnel the walker is enclosed by the lining, ribbons hidden, near cli
       .concat([...ug.lineShaftLayers.values()].map(l => l.stationsLayer?.mesh).filter(Boolean))
       .concat([ug.unifiedShaftLayer.group]);
     window.__devices = devices.map(m => [m, m.visible]);
+    // s02:B: the white spheres retired, so "drawn markers" (in the scene, every ancestor visible) is 0 before entry; the
+    // marker meshes still exist as data with their own visible flags, and the hidden-and-restored check below still
+    // covers them with every other device.
+    const drawn = (m) => { for (let p = m; p; p = p.parent) if (!p.visible) return false; return !!m.parent; };
     return { near: ug.camera.near, ribbons: [...ug.lineRibbonsById.values()].flat().filter(m => m.visible).length,
-      markers: [...ug.lineShaftLayers.values()].filter(l => l.stationsLayer?.mesh?.visible).length, devices: devices.length };
+      markers: [...ug.lineShaftLayers.values()].filter(l => l.stationsLayer?.mesh && drawn(l.stationsLayer.mesh)).length,
+      flagged: [...ug.lineShaftLayers.values()].filter(l => l.stationsLayer?.mesh?.visible).length, devices: devices.length };
   });
   expect(before.near).toBe(1);
   expect(before.ribbons).toBeGreaterThan(10);
-  expect(before.markers).toBeGreaterThan(5);
+  expect(before.markers).toBe(0);
+  expect(before.flagged).toBeGreaterThan(5);
   expect(await page.evaluate(() => window.__ug.modes.ctx.tubeInterior.visible)).toBe(false);
 
   await descend('Lancaster Gate', 'central');
@@ -175,7 +181,7 @@ test('in a tunnel the walker is enclosed by the lining, ribbons hidden, near cli
     return {
       ownRibbons: (ug.lineRibbonsById.get('central') || []).map(m => m.visible),
       anyRibbon: [...ug.lineRibbonsById.values()].flat().some(m => m.visible),
-      anyMarker: [...ug.lineShaftLayers.values()].some(l => l.stationsLayer?.mesh?.visible),
+      anyMarker: [...ug.lineShaftLayers.values()].some(l => { const m = l.stationsLayer?.mesh; if (!m?.parent) return false; for (let p = m; p; p = p.parent) if (!p.visible) return false; return true; }), // s02:B: none is drawn in or out of the bore
       shafts: ug.unifiedShaftLayer.group.visible,
       boreRadius: ug.trueProportion.boreRadiusM('central'),
       master: ug.masterHeight.value,
