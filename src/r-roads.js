@@ -30,6 +30,7 @@ export function parseRoadsParams(search) {
   const roads = sp.get('roads'), buses = sp.get('buses');
   if (!roads && !buses) return null;
   const out = { ribbons: roads === 'ribbons', classes: null, realBuses: false, syntheticBuses: 0 };
+  if (sp.get('rmerge')) out.merge = Math.max(1, Math.min(32, +sp.get('rmerge') | 0));
   const rc = sp.get('rclasses');
   if (rc) out.classes = new Set(rc.split(',').filter(c => ROAD_CLASSES.includes(c)));
   if (buses) for (const part of buses.split(/[+, ]/)) { if (part === 'real') out.realBuses = true; else if (/^\d+$/.test(part)) out.syntheticBuses += +part; }
@@ -160,7 +161,10 @@ export async function createRoadsProof({ getSurfaceY, VE = 5, heightScale = 1, p
     const STEP = 20, LIFT = 0.6; // metres between drape samples; canonical lift (about 12 cm real) above the terrain triangle
     let tris = 0, verts = 0, meshes = 0, samples = 0;
     const ribbons = new THREE.Group(); ribbons.name = 'rRoadsRibbons';
-    for (const cell of data.cells) {
+    // co-writer test (rmerge=N): merge N x N of the 2 km cells into one mesh, to separate per-mesh cost from triangle cost
+    const M = params.merge || 1, groups = new Map();
+    for (const cell of data.cells) { const key = Math.floor(cell.ci / M) + ',' + Math.floor(cell.cj / M); if (!groups.has(key)) groups.set(key, { ci: Math.floor(cell.ci / M), cj: Math.floor(cell.cj / M), pieces: [] }); groups.get(key).pieces.push(...cell.pieces); }
+    for (const cell of groups.values()) {
       const pos = [], idx = [];
       for (const pc of cell.pieces) {
         if (params.classes && !params.classes.has(ROAD_CLASSES[pc.cls])) continue;
