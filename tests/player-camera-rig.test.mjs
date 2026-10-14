@@ -122,3 +122,38 @@ test('the swim row has its own pivot and distance', () => {
   rig.follow(FEET, 0, { snap: true });
   near(rig.wantedDistance, 4.6, 1e-9);
 });
+
+test('the pivot never trails a fast body by more than the lag limits (a jetpack climb keeps the head in frame)', () => {
+  const ratio = 0.2;
+  const rig = mk({ ratio });
+  rig.reset({});
+  let y = 0;
+  rig.follow({ x: 0, y, z: 0 }, 1 / 60);
+  for (let i = 0; i < 120; i++) {              // climbing 18 m/s: 90 canonical units a second
+    y += 90 / 60;
+    rig.follow({ x: 0, y, z: 0 }, 1 / 60);
+  }
+  const lagM = (y - (rig.origin.y - 1.45 / ratio)) * ratio;
+  assert.ok(lagM <= RIG.maxLagY + 1e-6, `vertical lag ${lagM} m`);
+  assert.ok(lagM > 0.2, 'still a smooth follow, not a rigid one');
+  let x = 0;
+  const rig2 = mk({ ratio });
+  rig2.reset({});
+  rig2.follow({ x, y: 0, z: 0 }, 1 / 60);
+  for (let i = 0; i < 120; i++) { x += 15 / 60; rig2.follow({ x, y: 0, z: 0 }, 1 / 60); }
+  const lagX = x - (rig2.origin.x - 0.45);
+  assert.ok(lagX <= RIG.maxLagXZ + 1e-6, `horizontal lag ${lagX} m`);
+});
+
+test('a pulled-in camera asks for a lower near plane, so the figure is not cut; an unpulled one asks for nothing', () => {
+  const rig = mk();
+  rig.reset({});
+  rig.follow(FEET, 0, { snap: true });
+  assert.equal(rig.suggestedNear, null);
+  const close = mk({ lineOfSight: () => ({ clear: false, t: 0.4 }) });
+  close.reset({});
+  close.follow(FEET, 0, { snap: true });
+  const n = close.suggestedNear;
+  assert.ok(n !== null && n >= 0.12 && n < 1, `near ${n}`);
+  assert.ok(n <= 0.4 * close.distance + 1e-9);
+});

@@ -212,7 +212,13 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
         cam.updateMatrixWorld(true);
       }
       ctx.player?.update(dt, st, show);
-      if (show) ctx.player?.project(cam);
+      if (show) {
+        // Pulled in against a facade the figure is closer than the on-foot near plane (1 m): lower it for those frames
+        // only. pedestrian.js puts its own near back at the start of every frame it does not hold.
+        const wantNear = rig.suggestedNear;
+        if (wantNear !== null && cam.near !== wantNear) { cam.near = wantNear; cam.updateProjectionMatrix(); }
+        ctx.player?.project(cam);
+      }
       captureFinal();
     },
 

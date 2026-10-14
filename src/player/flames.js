@@ -6,7 +6,7 @@
 // thrust level and the mode clock, pinned by node tests: no random draw anywhere (a flicker is two sines of
 // the clock, a phase apart per flame). The THREE half draws four additive cones on the figure's hand and foot
 // bones. Colour is in the vertex colours of one shared geometry; never per-instance colour (D-015: the M5
-// driver renders instanceColor black), and the material is the plain MeshBasicMaterial.
+// driver renders it black), and the material is the plain MeshBasicMaterial.
 
 export const FLAME_ORDER = Object.freeze(['hand_l', 'hand_r', 'foot_l', 'foot_r']);
 export const FLAME = Object.freeze({

@@ -28,6 +28,8 @@ export const RIG = Object.freeze({
   dragRadPerPx: 0.005,
   pivotRateXZ: 18,       // /s, how fast the pivot catches the body horizontally
   pivotRateY: 9,         // /s, vertically (and the row's pivot height)
+  maxLagXZ: 0.9,         // m, the pivot never trails the body by more than this horizontally (a jetpack at 15 m/s)
+  maxLagY: 0.5,          // m (display), nor vertically: a climb at 18 m/s would otherwise lift the head out of frame
   snapJumpM: 5,          // a body jump larger than this snaps the pivot
   losPad: 0.25,          // m, clearance kept from a facade
   losMinDistance: 0.5,   // m, the closest the camera is pulled
@@ -110,6 +112,11 @@ export function createCameraRig({ THREE, ratio = 1, lineOfSight = null, groundY 
       pivot.z = damp(pivot.z, feet.z, RIG.pivotRateXZ, dt);
       pivot.y = damp(pivot.y, feet.y, RIG.pivotRateY, dt);
       pivot.h = damp(pivot.h, r.pivot, RIG.pivotRateY, dt);
+      // a smooth follow, but a bounded one
+      const lx = pivot.x - feet.x, lz = pivot.z - feet.z, lh = Math.hypot(lx, lz);
+      if (lh > RIG.maxLagXZ) { pivot.x = feet.x + lx * RIG.maxLagXZ / lh; pivot.z = feet.z + lz * RIG.maxLagXZ / lh; }
+      const limY = RIG.maxLagY / rat;
+      pivot.y = clamp(pivot.y, feet.y - limY, feet.y + limY);
     }
     const cp = Math.cos(pitch), sp = Math.sin(pitch), sy = Math.sin(yaw), cy = Math.cos(yaw);
     // The look direction in display space, and the origin the camera orbits (pivot plus the shoulder offset).
@@ -178,6 +185,12 @@ export function createCameraRig({ THREE, ratio = 1, lineOfSight = null, groundY 
     get wantedDistance() { return rowDistance(); },
     get zoomFactor() { return zoomF; },
     get pulled() { return pulled; },
+    /**
+     * The near plane (canonical, X/Z metres along the view axis) that keeps the figure whole when the camera is pulled
+     * in: 1 m is the game's own near plane on foot (a body less than 1 m from the camera would be cut by it), so
+     * below 2.5 m of distance it follows the distance, never under 0.12 m. Null when the default is fine.
+     */
+    get suggestedNear() { const d = curDist ?? rowDistance(); return d < 2.5 ? Math.max(0.12, 0.4 * d) : null; },
     get origin() { return origin; },
     get row() { return lastRow; },
   };

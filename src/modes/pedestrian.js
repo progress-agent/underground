@@ -1264,7 +1264,9 @@ export function createPedestrianMode(ctx) {
     },
 
     onLook(dx, dy) {
-      if (onFoot.onLook(dx, dy)) return; // s14:P third person: the rig takes the drag
+      // ── s14:P ── third person: the rig takes the drag
+      if (onFoot.onLook(dx, dy)) return;
+      // ── /s14:P ──
       const k = P.look / 1000;
       yaw -= dx * k;
       pitch = Math.min(PITCH_LIMIT, Math.max(-PITCH_LIMIT, pitch - dy * k));
@@ -1276,7 +1278,9 @@ export function createPedestrianMode(ctx) {
       ease.update(dt, P.easeTime);
       const jump = jumpLatch, use = useLatch;
       jumpLatch = useLatch = false;
-      onFoot.preUpdate(dt); // s14:P V, and in third person the walker's view is the rig's
+      // ── s14:P ── V, and in third person the walker's view is the rig's
+      onFoot.preUpdate(dt);
+      // ── /s14:P ──
       // s30:P out of the bore (a transfer, the shaft, the street) a shake only dies away.
       if (phase !== 'tunnel' && shake > 0) ({ shake, passT } = stepShake({ shake, passT }, null, dt));
       // s01:P every other line is mapped onto its drawn track lazily, within a budget a frame; not while
@@ -1291,7 +1295,9 @@ export function createPedestrianMode(ctx) {
       else if (phase === 'step') updateStep(dt); // s01:P
       openAir.stepCut(dt); // s01:P the flare or the dip, on the mode clock
       syncUndergroundView();
-      onFoot.postUpdate(dt); // s14:P third person overwrites the camera and draws the figure
+      // ── s14:P ── third person overwrites the camera and draws the figure
+      onFoot.postUpdate(dt);
+      // ── /s14:P ──
       return true;
     },
 
@@ -1337,7 +1343,9 @@ export function createPedestrianMode(ctx) {
           station: step.station ? { ...step.station } : null, stop: step.stop ? { name: cleanLabel(step.stop.name), path: step.stop.path, s: step.stop.s } : null } : null,
         openAir: openAir.debug(),
         contact: lastContact ? { ...lastContact } : null, latchB: latchB ? { ...latchB } : null, // s02:B
-        view: onFoot.debug(), // s14:P
+        // ── s14:P ──
+        view: onFoot.debug(),
+        // ── /s14:P ──
         lastPass: lastPass ? { inside: !!lastPass.inside, insideSpeed: lastPass.insideSpeed ?? 0, rush: lastPass.rush ?? 0, rumble: lastPass.rumble ?? 0 } : null,
         // ── /s01:P ──
       };
@@ -1361,7 +1369,9 @@ export function createPedestrianMode(ctx) {
       settleAt(x, z, Infinity);
       phase = 'body';
       placeCamera(body.x, body.y + P.eye * VE, body.z);
-      onFoot.snap(); // s14:P
+      // ── s14:P ──
+      onFoot.snap();
+      // ── /s14:P ──
       return true;
     },
     press(which) { if (which === 'jump') jumpLatch = true; else if (which === 'use') useLatch = true; },

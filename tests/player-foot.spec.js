@@ -71,7 +71,7 @@ const figureMeshes = () => ev(() => {
   u.scene.children.find((c) => c.name === 'player').traverse((o) => {
     if (!o.isSkinnedMesh || o.name.startsWith('player-shadow')) return;
     let a = o, v = true; while (a) { if (!a.visible) v = false; a = a.parent; }
-    out.push({ visible: v, color: o.material.color.toArray(), instanceColor: !!o.instanceColor });
+    out.push({ visible: v, color: o.material.color.toArray(), instanced: !!o.isInstancedMesh });
   });
   return out;
 });
@@ -109,7 +109,7 @@ test.describe('the figure on foot', () => {
     const has = (c) => meshes.some((m) => m.color.every((v, i) => Math.abs(v - c[i]) < 0.01));
     expect(has([0.799, 0.402, 0.042])).toBe(true);
     expect(has([0.402, 0.133, 0.708])).toBe(true);
-    expect(meshes.some((m) => m.instanceColor)).toBe(false);
+    expect(meshes.some((m) => m.instanced), 'drawn with plain per-mesh colour, never per-instance colour').toBe(false);
     expect(await ev(() => window.__ug.scene.children.some((c) => c.name === 'player'))).toBe(true);
   });
 
