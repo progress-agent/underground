@@ -26,10 +26,10 @@ function box(widthX, heightY, depthZ, x, y, z) {
  * the origin; the deck box is the first geometry merged, then an extra box stands in for everything else.
  */
 function makeBridge({ slug = 'testbridge', archetype = 'suspension', len = 200, ext = 30, deckTop = 6.75, thick = 6,
-  width = 12, spanM = 150, clearanceM = 8, cx = 0, cz = 0 } = {}) {
+  width = 12, spanM = 150, clearanceM = 8, cx = 0, cz = 0, extra = [] } = {}) {
   const aX = -len / 2 - ext, bX = len / 2 + ext, length = bX - aX;
   const deckY = deckTop - thick / 2;
-  const geoms = [box(length, thick, width, (aX + bX) / 2, deckY, 0), box(4, 20, 4, 0, 5, 40)];
+  const geoms = [box(length, thick, width, (aX + bX) / 2, deckY, 0), box(4, 20, 4, 0, 5, 40), ...extra];
   const merged = mergeGeometries(geoms, false);
   const group = {
     name: `bridge:${slug}`, visible: true, parent: null, position: { x: cx, z: cz }, rotation: { y: 0 },
@@ -263,6 +263,17 @@ test('ceilingAt is the deck underside; a tower standing on the deck leaves a 3 m
   // ... and the tower underside above it is a ceiling for a body rising on the deck.
   const c = svc.ceilingAt(towerX, 0, 6.75);
   assert.ok(Math.abs(c - (6.75 + 3 * VE)) < 0.2, `passage ceiling ${c}`);
+});
+
+test('a cantilever bearer hangs below the deck underside and is a ceiling, its bottom read from the drawn mesh', () => {
+  // Wandsworth: a 28 m block under the deck at each interior pier (here at u = -26 and 26), 10 units below the underside.
+  const under = 34, bearer = box(28, 12, 13.5, -26, under - 4, 0), bearer2 = box(28, 12, 13.5, 26, under - 4, 0);
+  const rec = makeBridge({ archetype: 'cantilever', deckTop: 40, thick: 6, width: 12, extra: [bearer, bearer2] });
+  const { svc } = world({ bridges: bridgesGroup(rec) });
+  assert.ok(Math.abs(svc.ceilingAt(-26, 0, 0) - 24) < 1e-4, `at the pier ${svc.ceilingAt(-26, 0, 0)}`);
+  assert.ok(Math.abs(svc.ceilingAt(30, 0, 0) - 24) < 1e-4, 'under the second bearer');
+  assert.ok(Math.abs(svc.ceilingAt(0, 0, 0) - 34) < 1e-4, 'between the bearers it is the deck underside');
+  assert.ok(svc.solidStats().piers >= 4, 'two piers and two bearers');
 });
 
 // ── (10) segmentHitsSolids ───────────────────────────────────────────────
