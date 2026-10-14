@@ -341,7 +341,13 @@ test('4b. the DLR from Stratford International through Stratford, and from Strat
       if (excess > worst) { worst = excess; at = { x: Math.round(f.x), z: Math.round(f.z), step, run }; }
     }
     console.log(`[xl-s02] DLR ${label}: worst height step beyond a 10% grade ${worst.toFixed(3)} m at ${JSON.stringify(at)}`);
-    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.5);
+    // s14:F (sprint 14Oct26w, D-053 item 9): the limit was 0.5 m, over twice what the check had ever measured (0.23 m, one run). Fresh
+    // measurement, 11 runs on this build: the worst is on the Stratford leg, 0.284 to 0.319 m (at about (7861, -4320): a 0.42 m step over
+    // a 1.06 m run, the same place in every run); Canning Town reads 0.167 to 0.249 m. bf10309 reads the same (0.238 and 0.316 in two runs;
+    // the figure moves with the frame timing of the walk, not with the build). The limit is the smallest multiple of 0.05 m at least 1.25 x
+    // the worst fresh reading (1.25 x 0.319 = 0.399): 0.40 m, a margin of 0.08 m. The 0.5 m step the check was
+    // written to catch still fails it (tests-broken record: F/tests-broken.md).
+    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.4);
   }
 });
 
