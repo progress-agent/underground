@@ -47,9 +47,14 @@ import { RENDER_ORDER } from './render-layers.js';
 import {
   MATS, BASE_LIFT, STRIPE_LIFT, STRIPE_HALF_W, CLASS_LIFT_M, SAMPLE_STEP_M,
   buildPath, buildCorridor, stationOnRail, createStripeMaterial, stripGeometry, offsetBand,
-  llToScene, branchClasses, createRailMorph, normaliseForMerge, drawnOpenFlags,
+  llToScene, branchClasses, createRailMorph, normaliseForMerge, drawnOpenFlags, stripeColour,
 } from './surface-rail.js';
 import { createStationMarkers } from './stations.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'; // s14:F
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'; // s14:F
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'; // s14:F
+import { isOffMapEdge } from './m25-edge.js'; // s14:F
+import { BEYOND_EDGE_KIND } from './underground-cull.js'; // s14:F
 import { sampleForSurfaceRail, SURFACE_RAIL_DLR_MATCH_M } from './dlr-profile.js';
 // s01:R: no deck or pier stands in the Thames.
 // s02:T: the drawn track no longer stops at the map edge (src/m25-edge.js is not read here any more).
@@ -85,6 +90,20 @@ export function flagOffMap(path, offMap = p => !Number.isFinite(p.terrainY)) {
 export const structureClear = (x, z) => !isInThames(x, z);
 
 const VE = VERTICAL_EXAGGERATION;
+// ── s14:F (sprint 14Oct26w, D-053 item 9: the thin Chesham branch at 8 km) ──────────────────────────────
+// A flat 9 m stripe seen side-on from kilometres away draws under a pixel and the multisampling breaks it
+// into dashes: Chesham's branch runs across the line of sight from the report's pose (0.57 to 0.63 px at 7 to
+// 8 km) where Amersham's runs along it (0.87 to 1.00 px). Beyond the map edge, where there is no ground to
+// confuse it with, the track also gets a line of at least BEYOND_EDGE_MIN_PX CSS pixels (the aircraft's
+// precedent, flights.js MIN_ON_SCREEN_PX: true scale is kept whenever the thing is larger than this). It lies
+// between the bed and the stripe, so wherever the stripe is wider than the line the stripe covers it; it
+// fades in from BEYOND_EDGE_NEAR_M (where depth precision stops separating the two) and out between the
+// far figures, so the standard views keep their pixels. 0 removes it.
+export const BEYOND_EDGE_MIN_PX = 1.5;
+export const BEYOND_EDGE_FADE_M = [12000, 20000];
+export const BEYOND_EDGE_NEAR_M = [1500, 3000];
+const BEYOND_EDGE_LIFT = 0.4; // scene units above the bed, under the stripe's STRIPE_LIFT
+// ── /s14:F ──
 export const SURFACE_RAIL_PREFIX = 'surface-rail-';
 export const SURFACE_RAIL_TYPE = 'surface-rail';
 /** Band above the stripe it overlays (scene units), plus a polygon offset. */
@@ -300,7 +319,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   // keeps, per merged piece, its first face and its source, so a hover hit's
   // faceIndex names the path (or the shared-track span) under the pointer: at a
   // flyover the upper and the lower track are different paths.
-  const addMerged = (info, geos, mat, part, { morphed = true, colours = null, sources = null } = {}) => {
+  const addMerged = (info, geos, mat, part, { morphed = true, colours = null, sources = null, beyondEdge = false } = {}) => {
     if (!geos.length) return null;
     // The viaduct piers are indexed BoxGeometry with uv; the deck strips are
     // not. mergeGeometries refuses the mix and returns null, which silently
@@ -320,6 +339,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     const mesh = new THREE.Mesh(merged, mat);
     mesh.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
     mesh.userData = { type: SURFACE_RAIL_TYPE, lineId: info.line.id, name: names.get(info.line.id), part };
+    if (beyondEdge) mesh.userData.beyondEdge = true; // s14:F: the cull's 'below' mode hides these from a camera under the hidden ground
     if (sources) faceSources.set(mesh, { firstFace, sources });
     info.group.add(mesh);
     info.meshes.push(mesh);
@@ -327,6 +347,36 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     return mesh;
   };
   const faceSources = new WeakMap(); // mesh -> { firstFace, sources }
+  // s14:F: split one list of strip geometries (and the parallel list of sources) into the part on the map and the
+  // part beyond the map edge, by triangle centroid, so the cull can hide the second from a camera below the hidden
+  // ground. Nothing is moved: the two halves together are the original triangles, vertex for vertex.
+  const splitBeyondEdge = (geos, srcs) => {
+    const res = { on: [], onSrc: [], off: [], offSrc: [] };
+    geos.forEach((g0, k) => {
+      const g = normaliseForMerge(g0), pos = g.attributes.position, nor = g.attributes.normal, col = g.attributes.color ?? null, nTri = pos.count / 3;
+      const side = new Uint8Array(nTri); let nOff = 0;
+      for (let t = 0; t < nTri; t++) {
+        const cx = (pos.getX(3 * t) + pos.getX(3 * t + 1) + pos.getX(3 * t + 2)) / 3, cz = (pos.getZ(3 * t) + pos.getZ(3 * t + 1) + pos.getZ(3 * t + 2)) / 3;
+        if (isOffMapEdge({ x: cx, z: cz })) { side[t] = 1; nOff++; }
+      }
+      if (nOff === 0) { res.on.push(g); res.onSrc.push(srcs[k]); return; }
+      if (nOff === nTri) { res.off.push(g); res.offSrc.push(srcs[k]); return; }
+      for (const want of [0, 1]) {
+        const n = want ? nOff : nTri - nOff, P = new Float32Array(n * 9), N = new Float32Array(n * 9), C = col ? new Float32Array(n * 9) : null; let o = 0;
+        for (let t = 0; t < nTri; t++) if (side[t] === want) for (let v = 0; v < 3; v++, o += 3) {
+          P[o] = pos.getX(3 * t + v); P[o + 1] = pos.getY(3 * t + v); P[o + 2] = pos.getZ(3 * t + v);
+          N[o] = nor.getX(3 * t + v); N[o + 1] = nor.getY(3 * t + v); N[o + 2] = nor.getZ(3 * t + v);
+          if (C) { C[o] = col.getX(3 * t + v); C[o + 1] = col.getY(3 * t + v); C[o + 2] = col.getZ(3 * t + v); }
+        }
+        const h = new THREE.BufferGeometry(); h.setAttribute('position', new THREE.BufferAttribute(P, 3)); h.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+        if (C) h.setAttribute('color', new THREE.BufferAttribute(C, 3));
+        (want ? res.off : res.on).push(h); (want ? res.offSrc : res.onSrc).push(srcs[k]);
+      }
+      g.dispose();
+    });
+    return res;
+  };
+  const hasBeyondEdge = info => !info.isDlr && info.paths.some(path => path.some(p => isOffMapEdge(p))); // s14:F
   const buildOwn = (info) => {
     const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
     const from = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] }; // the path each geometry came from
@@ -335,9 +385,21 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       buildCorridor(path, out, { skipTunnel: true, pierShortRuns: info.isDlr, structureClear });
       for (const k of Object.keys(out)) for (let j = before[k]; j < out[k].length; j++) from[k].push({ samples: path, own: true, morphed: !info.isDlr });
     }
-    addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
-    const geos = DRESSING_PARTS.flatMap(part => out[part]), colours = DRESSING_PARTS.flatMap(part => out[part].map(() => MATS[part].color));
-    addMerged(info, geos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours, sources: DRESSING_PARTS.flatMap(part => from[part]) });
+    const dressingGeos = DRESSING_PARTS.flatMap(part => out[part]), dressingColours = DRESSING_PARTS.flatMap(part => out[part].map(() => MATS[part].color));
+    const dressingSrc = DRESSING_PARTS.flatMap(part => from[part]);
+    if (!hasBeyondEdge(info)) { // every line but the Central and the Metropolitan: exactly as before
+      addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
+      addMerged(info, dressingGeos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours: dressingColours, sources: dressingSrc });
+      return;
+    }
+    // s14:F: the part beyond the map edge in meshes of its own (same group, same part names), flagged for the cull.
+    const st = splitBeyondEdge(out.stripe, from.stripe);
+    addMerged(info, st.on, info.stripeMat, 'stripe', { sources: st.onSrc });
+    const dr = splitBeyondEdge(dressingGeos.map((g, k) => { const n = normaliseForMerge(g), c = dressingColours[k], a = new Float32Array(n.attributes.position.count * 3);
+      for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); return n; }), dressingSrc);
+    addMerged(info, dr.on, DRESSING_MAT, 'dressing', { sources: dr.onSrc });
+    addMerged(info, st.off, info.stripeMat, 'stripe', { sources: st.offSrc, beyondEdge: true });
+    addMerged(info, dr.off, DRESSING_MAT, 'dressing', { sources: dr.offSrc, beyondEdge: true });
   };
   for (const info of lineInfo.values()) {
     await breathe();
@@ -351,6 +413,68 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
       gridFor(info.line.id).add(p.x, p.z, span ? span.lines : [info.line.id]);
     });
   }
+  // ── s14:F: the minimum-width line along the beyond-edge track (BEYOND_EDGE_MIN_PX) ──────────────────────
+  // One LineSegments2 per line that has drawn beyond-edge samples, in a top-level group of its own: never inside
+  // `groups` (its meshes' position attributes are read by many traversals, and pickables() walks the groups) and
+  // never raycast. Canonical (VE5) heights are kept and morphed with Master exactly as createRailMorph does.
+  const legibility = new THREE.Group();
+  legibility.name = 'beyond-edge-track-lines';
+  legibility.userData = { kind: BEYOND_EDGE_KIND };
+  const legByLine = new Map(); // lineId -> { line: LineSegments2, orig: Float32Array (canonical positions), bases: Float32Array }
+  const legV = new THREE.Vector4();
+  function addLegibility(info) {
+    const pts = [];
+    for (const path of info.paths) {
+      const open = drawnOpenFlags(path);
+      for (let i = 0; i + 1 < path.length; i++) {
+        if (!open[i] || !open[i + 1] || !isOffMapEdge(path[i]) || !isOffMapEdge(path[i + 1])) continue;
+        const a = path[i], b = path[i + 1];
+        pts.push(a.x, a.y + BEYOND_EDGE_LIFT, a.z, b.x, b.y + BEYOND_EDGE_LIFT, b.z);
+      }
+    }
+    if (!pts.length) return;
+    const geometry = new LineSegmentsGeometry().setPositions(pts);
+    const material = new LineMaterial({ color: stripeColour(info.line.colour), linewidth: BEYOND_EDGE_MIN_PX, worldUnits: false, transparent: true, depthTest: true, depthWrite: false, fog: true });
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uNearM = { value: new THREE.Vector2(...BEYOND_EDGE_NEAR_M) };
+      shader.uniforms.uFadeM = { value: new THREE.Vector2(...BEYOND_EDGE_FADE_M) };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', 'uniform vec2 uNearM;\nuniform vec2 uFadeM;\nvoid main() {')
+        .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n gl_FragColor.a *= smoothstep( uNearM.x, uNearM.y, vFogDepth ) * ( 1.0 - smoothstep( uFadeM.x, uFadeM.y, vFogDepth ) );\n#endif');
+    };
+    material.customProgramCacheKey = () => 'ug-beyond-edge-line';
+    const line = new LineSegments2(geometry, material);
+    line.name = `beyond-edge-track-${info.line.id}`;
+    line.userData = { lineId: info.line.id, part: 'legibility' };
+    line.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
+    line.frustumCulled = false; // the bounding sphere is rebuilt only with the positions; a few segments, never worth a cull bug
+    line.raycast = () => {}; // never picked: the hover reads the real track
+    // A CSS-pixel width at any device pixel ratio and render scale: the viewport of the target being drawn.
+    line.onBeforeRender = renderer => {
+      renderer.getCurrentViewport(legV);
+      material.resolution.set(legV.z, legV.w);
+      const css = renderer.domElement.clientHeight || legV.w;
+      material.linewidth = BEYOND_EDGE_MIN_PX * legV.w / css;
+    };
+    const orig = Float32Array.from(pts), bases = new Float32Array(pts.length / 3);
+    for (let i = 0; i < bases.length; i++) bases[i] = getY({ x: orig[i * 3], z: orig[i * 3 + 2] });
+    legByLine.set(info.line.id, { line, orig, bases });
+    legibility.add(line);
+  }
+  if (BEYOND_EDGE_MIN_PX > 0) for (const info of lineInfo.values()) if (!info.isDlr) addLegibility(info);
+  function applyLegibility(ratio) {
+    for (const { line, orig, bases } of legByLine.values()) {
+      const arr = line.geometry.attributes.instanceStart.data.array;
+      for (let i = 0; i < bases.length; i++) {
+        const seg = (i >> 1) * 6 + (i & 1) * 3; // two points per segment, the interleaved buffer's layout
+        arr[seg] = orig[i * 3]; arr[seg + 2] = orig[i * 3 + 2];
+        arr[seg + 1] = orig[i * 3 + 1] < bases[i] ? orig[i * 3 + 1] : bases[i] + (orig[i * 3 + 1] - bases[i]) * ratio;
+      }
+      line.geometry.attributes.instanceStart.data.needsUpdate = true;
+      line.geometry.computeBoundingSphere();
+    }
+  }
+  // ── /s14:F ──
   // Overground-owned spans: the Overground's own hover names only its line;
   // this lookup lets a caller ask which lines share a point of it.
   for (const [owner, spans] of bandSpans) if (overgroundIds.has(owner)) for (const s of spans) {
@@ -427,6 +551,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   function setHeightScale(ratio, { rebuildDlr = true } = {}) {
     structureScale = ratio;
     morph.apply(ratio);
+    applyLegibility(ratio); // s14:F
     const dlr = lineInfo.get('dlr');
     if (rebuildDlr && dlr && dlrProfile) {
       // Rebuild the DLR's own meshes from the profile at this scale.
@@ -542,16 +667,20 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     setLineVisible(lineId, visible) {
       const g = groups.get(lineId); if (g) g.visible = visible;
       const layer = stationLayers.get(`surface:${lineId}`); if (layer) layer.stationsLayer.mesh.visible = visible;
+      const leg = legByLine.get(lineId); if (leg) leg.line.visible = visible; // s14:F: the minimum-width line follows its line
     },
     /** Every surface-rail mesh, for the hover picker. */
     pickables() { const out = []; for (const g of groups.values()) if (g.visible) for (const m of g.children) if (m.isMesh) out.push(m); return out; },
     /** Built paths per line (canonical for Tube lines, current scale for the DLR): Lane T lays trains on these. */
     paths: ownerPaths,
+    /** s14:F: the group of minimum-width lines along the beyond-edge track (a top-level scene child when it has any). */
+    legibility,
   };
   // The DLR was just built from the profile at this scale; the Tube corridors
   // and markers take it now.
   setHeightScale(heightScale, { rebuildDlr: false });
   // Lines wholly in tunnel (Victoria, Waterloo & City) have nothing to draw.
   for (const g of groups.values()) if (g.children.length) scene.add(g);
+  if (legibility.children.length) scene.add(legibility); // s14:F
   return api;
 }

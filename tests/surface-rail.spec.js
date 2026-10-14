@@ -341,18 +341,18 @@ test('every DLR raised segment has a measured or a flagged fallback deck, and th
 
 test('no per-instance colour anywhere in the scene (D-015); colour on the railway is per line or baked', async () => {
   const r = await page.evaluate(() => {
-    const u = window.__ug; let instanced = 0, coloured = 0, railInstanced = 0, otherVertexColours = 0, baked = 0;
+    const u = window.__ug; let instanced = 0, coloured = 0, railInstanced = 0, otherVertexColours = 0, baked = 0, bakedBeyond = 0;
     u.scene.traverse(o => { if (o.isInstancedMesh) { instanced++; if (o.instanceColor) coloured++; } });
     for (const g of u.surfaceRail.groups.values()) g.traverse(o => {
       if (!o.isMesh) return;
       if (o.isInstancedMesh) railInstanced++;
-      if (o.userData.part === 'dressing') { if (o.material.vertexColors && o.geometry.attributes.color) baked++; }
+      if (o.userData.part === 'dressing') { if (o.material.vertexColors && o.geometry.attributes.color) { if (o.userData.beyondEdge) bakedBeyond++; else baked++; } }   // s14:F: the beyond-edge part of the Central's and the Metropolitan's dressing is a mesh of its own
       else if (o.material.vertexColors || o.geometry.attributes.color) otherVertexColours++;
     });
     const markers = [...u.surfaceRail.stationLayers.values()].filter(l => l.stationsLayer.mesh.instanceColor).length;
     // s02:B: the station buildings are two merged meshes, never instanced and never per-instance coloured.
     const sb = []; u.scene.getObjectByName('station-buildings')?.traverse(o => { if (o.isMesh) sb.push(o); });
-    return { instanced, coloured, railInstanced, otherVertexColours, baked, markers, stationMeshes: sb.length, stationInstanced: sb.filter(o => o.isInstancedMesh || o.instanceColor).length };
+    return { instanced, coloured, railInstanced, otherVertexColours, baked, bakedBeyond, markers, stationMeshes: sb.length, stationInstanced: sb.filter(o => o.isInstancedMesh || o.instanceColor).length };
   });
   expect(r.instanced).toBeGreaterThan(10);
   expect(r.coloured).toBe(0);
@@ -364,6 +364,9 @@ test('no per-instance colour anywhere in the scene (D-015); colour on the railwa
   // baked into the vertices (allowed: variants are separate meshes or baked
   // vertex colour); the stripes and bands are per-line materials.
   expect(r.baked).toBe(10);
+  // s14:F (D-053 item 9): the Central and the Metropolitan each also have a dressing mesh for the part beyond the map edge (baked
+  // colour as well, never per-instance), which the cull's 'below' mode hides: 10 + 2, the 10 pinned as before.
+  expect(r.bakedBeyond).toBe(2);
   expect(r.otherVertexColours).toBe(0);
 });
 

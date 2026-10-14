@@ -13,7 +13,7 @@
 //   Walk         the seven are stops, nothing held, Up to the street lands on the hidden ground, walking it, the soft
 //                hold at the terrain grid, Epping is not underground
 //   Cost         no console errors, O(1) per frame
-// "Before" is e0675d7, served by a second dev server (UG_LB, default http://localhost:5254, a detached worktree at
+// "Before" is e0675d7 (s14:F: bf10309 since sprint 14Oct26w, whose on-map rail is the same), served by a second dev server (UG_LB, default http://localhost:5254, a detached worktree at
 // e0675d7); the checks that compare with it are skipped when UG_LB is "off".
 
 import { test, expect } from '@playwright/test';
@@ -232,7 +232,10 @@ test('T-K6: the on-map rail is unchanged: every surface-rail mesh but the Centra
     return out;
   };
   const { t, b } = await both(HASH);
-  expect(Object.keys(t).length).toBeGreaterThanOrEqual(18);   // the 21 meshes of T's own check less the DLR's three
+  // s14:F (D-053 item 9): pinned at exactly 18, as this comment and the integration commit bf10309 say (21 meshes less the DLR's
+  // three; the Central and the Metropolitan are excluded above, so lane F's extra beyond-edge meshes on those two do not count).
+  // The old `>= 18` let a stray extra mesh in a non-excluded line group through.
+  expect(Object.keys(t).length).toBe(18);
   expect(t).toEqual(b);
 });
 
@@ -454,7 +457,9 @@ test('T-R1: an underground camera in the bore near Chalfont & Latimer is undergr
   const reg = await page.evaluate(REGIME), lab = await page.evaluate(LABELS), look = await page.evaluate(LOOK);
   console.log('[termini] bore regime', JSON.stringify({ reg, lab }));
   expect(reg.corridor).toBeGreaterThanOrEqual(0.99);
-  expect(reg.under).toBe(true); expect(reg.audioUnderground).toBe(true); expect(reg.labelsUnderground).toBe(true); expect(reg.cullMode).toBeNull();
+  // s14:F (D-053 item 9): below the hidden ground beyond the edge the cull is now 'below' (the beyond-edge surface railway is hidden: from
+  // underneath its ballast and skirts showed as a large black band); it was null. Shooters Hill, in the map, stays null (below).
+  expect(reg.under).toBe(true); expect(reg.audioUnderground).toBe(true); expect(reg.labelsUnderground).toBe(true); expect(reg.cullMode).toBe('below');
   expect(reg.beyond).toBe(true);
   expect(lab.underground, 'an underground label layer is displayed').toBe(true);
   expect(lab.surface, 'no surface label layer is').toBe(false);
@@ -471,7 +476,9 @@ test('T-R1: an underground camera in the bore near Chalfont & Latimer is undergr
     await pose(lb, bore.p, bore.t);
     const before = await lb.evaluate(LABELS);
     console.log('[termini] before (e0675d7) labels in the same bore', JSON.stringify(before));
-    expect(before.surface, 'on e0675d7 the surface labels show in a beyond-edge bore').toBe(true);
+    // s14:F: this premise is e0675d7's, from before lane T. A base that already carries lane T (bf10309, which sprint 14Oct26w serves
+    // as UG_LB) has the underground labels in that bore, so the premise is asserted only on a base without `__ug.termini`.
+    if (!(await lb.evaluate(() => !!window.__ug.termini))) expect(before.surface, 'on e0675d7 the surface labels show in a beyond-edge bore').toBe(true);
     await thaw(lb);
   }
   expect(errors.length, 'no console error during the pose').toBe(errs0);
@@ -508,11 +515,12 @@ test('T-R3: no bore ribbon from 300 m above Amersham: the lines cull hides line:
     return { p: [c.x - 400, g + 1500, c.z + 300], t: [c.x, g, c.z] }; }, ST.amersham);
   const errs0 = errors.length;
   await pose(page, pz.p, pz.t);
-  const st = await page.evaluate(() => { const u = window.__ug, lines = u.scene.children.filter(c => c.name?.startsWith('line:') && c.visible); return { reg: { ...u.termini.regime }, above: u.aboveGroundView, mode: u.undergroundCull.status.mode, hidden: u.undergroundCull.status.hidden, lines: lines.length }; });
+  // s14:F: the 'lines' cull also hides the glass-shaft group, so the hidden count is the visible line:* groups plus the visible shafts groups.
+  const st = await page.evaluate(() => { const u = window.__ug, lines = u.scene.children.filter(c => (c.name?.startsWith('line:') || c.userData?.kind === 'unified-shafts') && c.visible); return { reg: { ...u.termini.regime }, above: u.aboveGroundView, mode: u.undergroundCull.status.mode, hidden: u.undergroundCull.status.hidden, lines: lines.length }; });
   console.log('[termini] cull from 300 m above Amersham', JSON.stringify(st));
   expect(st.reg.cullMode).toBe('lines'); expect(st.above).toBe(false);
   expect(st.mode).toBe('lines');
-  expect(st.hidden, 'the hidden count is the visible top-level line:* groups').toBe(st.lines);
+  expect(st.hidden, 'the hidden count is the visible top-level line:* groups plus the shafts group').toBe(st.lines);
   const a = await page.evaluate(PIXELS, { hide: [], mode: 'app' }), noBore = await page.evaluate(PIXELS, { hide: ['line:metropolitan'], mode: 'app' }), noRail = await page.evaluate(PIXELS, { hide: ['surface-rail-metropolitan'], mode: 'app' });
   expect(diffPixels(a, noBore), 'toggling line:metropolitan changes no pixel').toBe(0);
   expect(diffPixels(a, noRail), 'toggling surface-rail-metropolitan changes the picture').toBeGreaterThanOrEqual(0.005);
@@ -521,7 +529,8 @@ test('T-R3: no bore ribbon from 300 m above Amersham: the lines cull hides line:
     const la = await lb.evaluate(PIXELS, { hide: [], mode: 'app' }), lnb = await lb.evaluate(PIXELS, { hide: ['line:metropolitan'], mode: 'app' });
     const before = diffPixels(la, lnb, 0);
     console.log('[termini] before (e0675d7): toggling line:metropolitan changes', (100 * before).toFixed(3), '% of pixels');
-    expect(before, 'on e0675d7 the bore ribbon is drawn here').toBeGreaterThan(0);
+    // s14:F: as above, e0675d7's premise (the ribbon is drawn from above beyond the edge): lane T's cull already hides it on bf10309.
+    if (!(await lb.evaluate(() => !!window.__ug.termini))) expect(before, 'on e0675d7 the bore ribbon is drawn here').toBeGreaterThan(0);
     await thaw(lb);
   }
   expect(errors.length).toBe(errs0);
