@@ -228,6 +228,11 @@ function towerPlan(rec, frameLength) {
   return out;
 }
 
+function frameLengthOf(rec) {
+  const a = bngToScene(rec.data.axis.a), b = bngToScene(rec.data.axis.b);
+  return Math.hypot(b.x - a.x, b.z - a.z);
+}
+
 function buildBridgeLayer(ctx) {
   const { group, getGroundY, VE, errors } = ctx;
   const reg = group?.userData?.registry;
@@ -287,9 +292,27 @@ function buildBridgeLayer(ctx) {
         { drawn: true, slug }));
       counts.piers++;
     }
+    // Cantilever bearers (Wandsworth): the 28 m blocks drawn under the deck at each interior pier hang below its
+    // underside. Their bottom is read from the drawn mesh (the vertices at the block's two ends), not derived.
+    if (rec.data.archetype === 'cantilever') {
+      const pos = rec.deckMesh?.geometry?.attributes?.position;
+      const isRail = rec.data.kind.includes('rail');
+      const width = Math.max(rec.data.deckWidthM, isRail ? 11 : 9);
+      const half = Math.min(28, frameLengthOf(rec) * 0.16) / 2, hv = (width + 1.5) / 2;
+      if (pos) for (const p of bridgePierAnchors(rec.data)) {
+        let bottom = Infinity;
+        for (let i = 0; i < pos.count; i++) {
+          if (Math.abs(Math.abs(pos.getX(i) - p.localX) - half) < 0.05 && Math.abs(pos.getZ(i)) <= hv + 0.05 && pos.getY(i) < bottom) bottom = pos.getY(i);
+        }
+        const under = profAt(deck0, deck0.under, p.localX);
+        if (Number.isFinite(bottom) && bottom < under - 0.05) {
+          ribbons.push(flat('bearer', p.x, p.z, p.ux, p.uz, -half, half, -hv, hv, under, bottom, { drawn: true, ceil: true, slug }));
+          counts.piers++;
+        }
+      }
+    }
     // Towers and pylons: collected, then given a passage if they stand on a deck.
-    const a = bngToScene(rec.data.axis.a), b = bngToScene(rec.data.axis.b);
-    const frameLength = Math.hypot(b.x - a.x, b.z - a.z);
+    const frameLength = frameLengthOf(rec);
     for (const t of towerPlan(rec, frameLength)) towers.push({ rec, slug, gx, gz, ux, uz, ...t });
   }
   // Towers.
