@@ -452,41 +452,44 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   let motorSegments = 0;
   let errors = [];
   let version = 0, buildMs = 0;
-  let sig = null, recList = [], recFor = null;
   let scale = 1;
   const gather = { rects: [], prisms: [] };
 
-  // The signature is compared in place as the sources are read, so the common case (nothing changed)
-  // allocates nothing: group identities, visibility, the motorway's height scale and each bridge deck's
-  // position-attribute version (a Master morph bumps it).
-  let cmpAt = 0, cmpOk = true;
-  const cmp = (v) => { if (cmpOk) { if (!sig || sig[cmpAt] !== v) cmpOk = false; } cmpAt++; };
+  // The source check runs on every query, so it allocates nothing and does the least that is exact: the three
+  // source objects by identity, their shown flags, the motorway's height scale, and for each bridge deck its
+  // group's visibility and its position attribute's version (a Master morph bumps it).
+  let last = { bg: null, mw: null, index: null, meshes: null, b: false, m: false, s: false, mScale: 0, reg: null }, built = false;
+  let watch = [], canary = null;
   function compareSources() {
-    cmpAt = 0; cmpOk = !!sig;
     const bg = sources.bridges?.() ?? null, mw = sources.motorway?.() ?? null, sb = sources.stationBuildings?.() ?? null;
     const bShown = shown(bg), mShown = shown(mw), sShown = !!sb && shown(sb.meshes?.group);
-    cmp(idOf(bg)); cmp(bShown ? 1 : 0); cmp(idOf(mw)); cmp(mShown ? 1 : 0); cmp(mShown ? getHeightScale() : 0);
-    cmp(idOf(sb?.index)); cmp(idOf(sb?.meshes)); cmp(sShown ? 1 : 0);
+    const s = { bg, mw, sb, bShown, mShown, sShown, same: false };
+    const mScale = mShown ? getHeightScale() : 0;
+    if (!built || bg !== last.bg || mw !== last.mw || (sb?.index ?? null) !== last.index || (sb?.meshes ?? null) !== last.meshes
+      || bShown !== last.b || mShown !== last.m || sShown !== last.s || mScale !== last.mScale) return s;
     if (bShown) {
-      const reg = bg.userData?.registry;
-      if (recFor !== reg || recList.length !== (reg?.size ?? 0)) { recFor = reg; recList = reg ? [...reg.values()] : []; cmpOk = false; }
-      cmp(recList.length);
-      for (let i = 0; i < recList.length; i++) {
-        const rec = recList[i];
-        cmp(rec.group?.visible === false ? 0 : 1); cmp(rec.deckMesh?.geometry?.attributes?.position?.version ?? -1);
+      const reg = bg.userData?.registry ?? null;
+      if (reg !== last.reg || (reg?.size ?? 0) !== watch.length) return s;
+      // One morph rewrites every deck in a single synchronous call, so the last deck's position-attribute
+      // version stands for all of them; each group's visibility is read on its own.
+      if (canary && (canary.attr.version !== canary.ver || canary.rec.deckMesh !== canary.mesh)) return s;
+      for (let i = 0; i < watch.length; i++) if (watch[i].group.visible !== watch[i].vis) return s;
+    }
+    s.same = true;
+    return s;
+  }
+  function remember(s) {
+    last = { bg: s.bg, mw: s.mw, index: s.sb?.index ?? null, meshes: s.sb?.meshes ?? null, b: s.bShown, m: s.mShown, s: s.sShown,
+      mScale: s.mShown ? getHeightScale() : 0, reg: s.bShown ? (s.bg.userData?.registry ?? null) : null };
+    watch = []; canary = null;
+    if (s.bShown && last.reg) {
+      for (const rec of last.reg.values()) {
+        watch.push({ group: rec.group, vis: rec.group?.visible });
+        const attr = rec.deckMesh?.geometry?.attributes?.position;
+        canary = { rec, attr: attr ?? { version: -1 }, ver: attr ? attr.version : -1, mesh: rec.deckMesh };
       }
     }
-    if (sig && cmpAt !== sig.length) cmpOk = false;
-    return { bg, mw, sb, bShown, mShown, sShown };
-  }
-  function writeSignature(s) {
-    const out = [idOf(s.bg), s.bShown ? 1 : 0, idOf(s.mw), s.mShown ? 1 : 0, s.mShown ? getHeightScale() : 0,
-      idOf(s.sb?.index), idOf(s.sb?.meshes), s.sShown ? 1 : 0];
-    if (s.bShown) {
-      out.push(recList.length);
-      for (const rec of recList) out.push(rec.group?.visible === false ? 0 : 1, rec.deckMesh?.geometry?.attributes?.position?.version ?? -1);
-    }
-    sig = out;
+    built = true;
   }
 
   function rebuild(s) {
@@ -515,12 +518,12 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     buildMs = (globalThis.performance ?? Date).now() - t0;
   }
 
-  /** Re-read the sources; rebuild only if the signature moved. Returns true if rebuilt. */
+  /** Re-read the sources; rebuild only if they moved. Returns true if rebuilt. */
   function update() {
     scale = getHeightScale();
     const s = compareSources();
-    if (cmpOk) return false;
-    writeSignature(s);
+    if (s.same) return false;
+    remember(s);
     rebuild(s);
     return true;
   }
@@ -757,7 +760,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   }
 
   return {
-    setSources(next) { sources = { ...sources, ...next }; sig = null; },
+    setSources(next) { sources = { ...sources, ...next }; built = false; },
     update, corridorsAt, boxTouches, standOn, ceilingAt, gatherFor, resolveSubstep, segmentHits,
     stats() {
       update();
