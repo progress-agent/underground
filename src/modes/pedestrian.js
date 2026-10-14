@@ -418,6 +418,9 @@ export function createPedestrianMode(ctx) {
       right: (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0),
       sprint: k.has('shift'),
       jumpHeld: k.has(' '),
+      // ── s14:M ── Q dives when swimming (D-053 item 6); it means nothing out of the water.
+      dive: k.has('q'),
+      // ── /s14:M ──
     };
   }
 
@@ -488,8 +491,12 @@ export function createPedestrianMode(ctx) {
     const m = readMove();
     lastEvents = [];
     const s02bX = body.x, s02bZ = body.z; // s02:B
-    stepBody(body, { forward: m.forward, right: m.right, yaw, pitch, jumpPressed: jump, jumpHeld: m.jumpHeld },
+    // ── s14:M ── dive (Q) and levelSwim (third person: W swims level) join the body's input; ctx.playerView is lane P's
+    // and is absent until it lands, which reads as first person.
+    stepBody(body, { forward: m.forward, right: m.right, yaw, pitch, jumpPressed: jump, jumpHeld: m.jumpHeld,
+      dive: m.dive, levelSwim: !!ctx.playerView?.isThirdPerson?.() },
       dt, world, P, VE, lastEvents);
+    // ── /s14:M ──
     // ── s02:T ── beyond the M25 the walker may walk the hidden ground (D-048 item 7); the only hold is a
     // soft one at the terrain grid's bounds inset 200 m (ctx.walkHoldBox): clamped back in, the outward
     // velocity dropped, and the hint says so.

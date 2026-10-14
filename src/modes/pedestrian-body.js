@@ -26,6 +26,17 @@
 //   pitch                DISPLAY pitch in radians (what the viewer sees at the current Master)
 //   jumpPressed          Space went down since the last frame (edge)
 //   jumpHeld             Space is held
+//   dive                 Q is held (s14:M); swims down, means nothing out of the water
+//   levelSwim            true in third person (s14:M): W swims level whatever the pitch
+//
+// Space (s14:M, D-053 item 5): the press always jumps on its own frame. While Space stays
+// held in the air, gravity is suspended for the first `jetDelay` s (the jump keeps rising at
+// take-off speed: no stall), then the jetpack takes over with its support starting at exactly
+// gravity and rising linearly to full thrust over `jetSpool` s (no dip, no jolt). The
+// velocity is integrated exactly over each frame, so the path is the same at 30, 60 and 120 Hz.
+// Output `body.jetLevel` (0..1): 0 when the jetpack is not firing, then the ramp up to 1.
+// Swimming (D-053 item 6): holding Space swims up (`swimUp`), holding Q dives (`swimDive`);
+// with `levelSwim`, W holds depth exactly. Without it, W follows the view as it always did.
 //
 // Events pushed to `events` (the mode turns them into sound):
 //   { type: 'splash', intensity }   entered the water
@@ -41,15 +52,19 @@ export const PEDESTRIAN_TUNABLES = Object.freeze([
   { key: 'jump', label: 'Jump speed', unit: 'm/s', min: 1, max: 15, step: 0.1, default: 4.5 },
   { key: 'airControl', label: 'Air control', unit: 'm/s²', min: 0, max: 30, step: 0.5, default: 4 },
   { key: 'jetThrust', label: 'Jetpack thrust', unit: 'm/s²', min: 2, max: 60, step: 0.5, default: 17 },
-  { key: 'jetControl', label: 'Jetpack steer', unit: 'm/s²', min: 0, max: 40, step: 0.5, default: 8 },
+  // s14:M (D-053 item 7): steering four times stronger (8 to 32); turning round from full speed takes about a second.
+  { key: 'jetControl', label: 'Jetpack steer', unit: 'm/s²', min: 0, max: 80, step: 0.5, default: 32 },
   { key: 'jetMaxRise', label: 'Jetpack max climb', unit: 'm/s', min: 2, max: 60, step: 1, default: 18 },
-  { key: 'jetDelay', label: 'Jetpack hold delay', unit: 's', min: 0, max: 1, step: 0.05, default: 0.2 },
+  { key: 'jetDelay', label: 'Jetpack hold delay', unit: 's', min: 0, max: 1, step: 0.05, default: 0.15 },
+  { key: 'jetSpool', label: 'Jetpack spool-up', unit: 's', min: 0, max: 1, step: 0.05, default: 0.15 },
   // s30:P (D-041 item 5): the tunnel walk is 10x the 6 m/s run, Shift faster still.
   { key: 'tunnelWalk', label: 'Tunnel walk', unit: 'm/s', min: 1, max: 120, step: 1, default: 60 },
   { key: 'tunnelSprint', label: 'Tunnel sprint', unit: 'm/s', min: 5, max: 400, step: 1, default: 200 },
   { key: 'shaftSpeed', label: 'Shaft speed', unit: 'm/s', min: 1, max: 200, step: 1, default: 8 },
   { key: 'swimSpeed', label: 'Swim speed', unit: 'm/s', min: 0.3, max: 6, step: 0.1, default: 1.6 },
   { key: 'strokeUp', label: 'Stroke lift', unit: 'm/s', min: 0.5, max: 8, step: 0.1, default: 2.4 },
+  { key: 'swimUp', label: 'Swim up speed', unit: 'm/s', min: 0.3, max: 6, step: 0.1, default: 1.6 },
+  { key: 'swimDive', label: 'Dive speed', unit: 'm/s', min: 0.3, max: 6, step: 0.1, default: 1.6 },
   { key: 'sink', label: 'Sink speed', unit: 'm/s', min: 0.05, max: 3, step: 0.05, default: 0.55 },
   { key: 'waterDrag', label: 'Water drag', unit: '/s', min: 0.1, max: 6, step: 0.1, default: 1.4 },
   { key: 'climb', label: 'Bank climb reach', unit: 'm', min: 0.3, max: 6, step: 0.1, default: 2.5 },
@@ -68,12 +83,21 @@ export const BODY = Object.freeze({
   swimSink: 1.4,       // m/s² gentle gravity in water (Mario-swim), capped at the sink speed
   strokeFwd: 0.9,      // m/s forward kick added by a stroke
   strokeCooldown: 0.22,
+  swimAccel: 5,        // m/s² to reach a held vertical swim command (s14:M)
   airDrag: 0.12,       // /s horizontal drag in the air with no input (inertia)
   terminal: 55,        // m/s fall cap
 });
 
 export function createBody() {
-  return { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, state: 'ground', airTime: 0, jet: false, strokeCd: 0 };
+  return {
+    x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, state: 'ground', airTime: 0, jet: false, strokeCd: 0,
+    jetT: 0,     // s the jetpack has been firing (s14:M)
+    jetRamp: 0,  // 0..1 thrust above hover while firing (s14:M)
+    // 0 when the jetpack is not firing, rising to 1 as it takes over. A pair, so the mode's own
+    // `body.jet = false` reads 0 at once and Object.assign(body, {...copy}) cannot throw.
+    get jetLevel() { return this.jet ? this.jetRamp : 0; },
+    set jetLevel(v) { this.jetRamp = v; },
+  };
 }
 
 function approach2(body, tx, tz, maxDv) {
@@ -125,9 +149,26 @@ function stepLand(body, input, dt, world, P, VE, events) {
     body.airTime = 0;
   }
   const inAir = body.state === 'air';
+  const a0 = body.airTime;
   if (inAir) body.airTime += dt;
-  // Jetpack: Space held in the air beyond the hold delay (a tap is just a jump).
-  body.jet = inAir && !!input.jumpHeld && body.airTime >= P.jetDelay;
+  // Jetpack (s14:M): Space held in the air. The first `jetDelay` s of the hold keep the jump rising
+  // (gravity suspended); after that the jetpack's support runs from exactly gravity up to full
+  // thrust over `jetSpool` s. The change in vy over the frame is integrated exactly, so the
+  // hand-over time and the spool do not depend on where the frame boundaries fall.
+  const held = inAir && !!input.jumpHeld;
+  let dvyHeld = 0;
+  if (held) {
+    const holdS = Math.min(dt, Math.max(0, P.jetDelay - a0));
+    const jetS = dt - holdS;
+    const u0 = body.jetT, u1 = u0 + jetS, s = P.jetSpool;
+    const F = (u) => (s > 0 ? (u <= s ? u * u / (2 * s) : u - s / 2) : u);
+    dvyHeld = (P.jetThrust - P.gravity) * (F(u1) - F(u0));
+    body.jet = jetS > 1e-9;
+    body.jetT = body.jet ? u1 : 0;
+    body.jetRamp = body.jet ? (s > 0 ? Math.min(1, u1 / s) : 1) : 0;
+  } else {
+    body.jet = false; body.jetT = 0; body.jetRamp = 0;
+  }
 
   // Horizontal velocity.
   if (!inAir) {
@@ -148,8 +189,9 @@ function stepLand(body, input, dt, world, P, VE, events) {
   }
 
   // Vertical velocity.
+  const vy0 = body.vy;
   if (inAir) {
-    body.vy += (-P.gravity + (body.jet ? P.jetThrust : 0)) * dt;
+    body.vy += held ? dvyHeld : -P.gravity * dt;
     if (body.jet && body.vy > P.jetMaxRise) body.vy = P.jetMaxRise;
     if (body.vy < -BODY.terminal) body.vy = -BODY.terminal;
   }
@@ -179,10 +221,11 @@ function stepLand(body, input, dt, world, P, VE, events) {
     }
   }
   if (body.state === 'air') {
-    const ny = body.y + body.vy * dt * VE;
+    // Mean of the frame's start and end velocity: exact under constant acceleration (s14:M).
+    const ny = body.y + 0.5 * (vy0 + body.vy) * dt * VE;
     if (stand !== null && stand !== undefined && ny <= stand && body.vy <= 0) {
       events.push({ type: 'land', speed: -body.vy });
-      body.y = stand; body.vy = 0; body.state = 'ground'; body.jet = false;
+      body.y = stand; body.vy = 0; body.state = 'ground'; body.jet = false; body.jetT = 0; body.jetRamp = 0;
     } else {
       body.y = ny;
     }
@@ -193,7 +236,7 @@ function stepLand(body, input, dt, world, P, VE, events) {
   if (water && body.y < water.surfaceY - BODY.wade * VE) {
     events.push({ type: 'splash', intensity: Math.min(1.5, Math.max(0.3, Math.hypot(body.vy, body.vx, body.vz) / 6)) });
     body.state = 'swim';
-    body.jet = false;
+    body.jet = false; body.jetT = 0; body.jetRamp = 0;
     body.vy *= 0.25; body.vx *= 0.5; body.vz *= 0.5;
   }
   return body;
@@ -201,23 +244,40 @@ function stepLand(body, input, dt, world, P, VE, events) {
 
 function stepSwim(body, input, dt, world, P, VE, events) {
   const water = world.waterAt(body.x, body.z);
-  if (!water) { body.state = 'air'; body.airTime = P.jetDelay; return body; }
+  if (!water) { body.state = 'air'; body.airTime = P.jetDelay; body.jet = false; body.jetT = 0; body.jetRamp = 0; return body; }
   const w = wishVector(input);
   const pitch = input.pitch || 0;
   const cp = Math.cos(pitch), sp = Math.sin(pitch);
   const f = input.forward || 0;
 
+  // s14:M (D-053 item 6): the vertical command T. Space held swims up, Q held dives, both or
+  // neither is no command; in third person (levelSwim) moving holds depth. T null leaves the
+  // swim exactly as it was (drag, gentle sink, W follows the view).
+  const upHeld = !!input.jumpHeld, downHeld = !!input.dive;
+  let T = null;
+  if (upHeld && !downHeld) T = P.swimUp;
+  else if (downHeld && !upHeld) T = -P.swimDive;
+  const levelHold = T === null && !!input.levelSwim && w.any;
+  if (levelHold) T = 0;
+
   // W / mouse direct: swim along the look direction, including up and down.
   if (w.any) {
     const r = input.right || 0;
-    let dx = w.fx * cp * f + w.rx * r, dy = sp * f, dz = w.fz * cp * f + w.rz * r;
+    const cpw = input.levelSwim ? 1 : cp;   // third person: the horizontal look vector
+    let dx = w.fx * cpw * f + w.rx * r, dy = input.levelSwim ? 0 : sp * f, dz = w.fz * cpw * f + w.rz * r;
     const len = Math.hypot(dx, dy, dz) || 1;
     dx /= len; dy /= len; dz /= len;
     const a = P.swimSpeed * 3 * dt; // reach swim speed in about a third of a second
     body.vx += dx * a; body.vy += dy * a; body.vz += dz * a;
-    const n = Math.hypot(body.vx, body.vy, body.vz);
     const cap = Math.max(P.swimSpeed, P.strokeUp);
-    if (n > cap) { body.vx *= cap / n; body.vy *= cap / n; body.vz *= cap / n; }
+    if (T !== null) {
+      // A held vertical command is not forward speed: cap the horizontal part only.
+      const nh = Math.hypot(body.vx, body.vz);
+      if (nh > cap) { body.vx *= cap / nh; body.vz *= cap / nh; }
+    } else {
+      const n = Math.hypot(body.vx, body.vy, body.vz);
+      if (n > cap) { body.vx *= cap / n; body.vy *= cap / n; body.vz *= cap / n; }
+    }
   }
   // Space strokes upward (Mario), with a small kick along the view.
   if (input.jumpPressed && body.strokeCd <= 0) {
@@ -228,11 +288,21 @@ function stepSwim(body, input, dt, world, P, VE, events) {
   }
   // Buoyant drift: everything decays slowly (floaty inertia) ...
   const drag = Math.exp(-P.waterDrag * dt);
-  body.vx *= drag; body.vz *= drag; body.vy *= drag;
-  // ... and a gentle gravity settles into a slow sink.
-  body.vy -= BODY.swimSink * dt;
-  // (Diving with W and the view pointed down may go faster than the sink.)
-  if (body.vy < -P.sink && !(w.any && f * sp < 0)) body.vy = -P.sink;
+  body.vx *= drag; body.vz *= drag;
+  if (T === null) {
+    body.vy *= drag;
+    // ... and a gentle gravity settles into a slow sink.
+    body.vy -= BODY.swimSink * dt;
+    // (Diving with W and the view pointed down may go faster than the sink.)
+    if (body.vy < -P.sink && !(w.any && f * sp < 0)) body.vy = -P.sink;
+  } else if (levelHold) {
+    body.vy = 0;   // depth held exactly
+  } else if (T > 0) {
+    // A stroke faster than the held rise eases down to it; otherwise reach it at swimAccel.
+    body.vy = body.vy > T ? Math.max(T, body.vy * drag) : Math.min(T, body.vy + BODY.swimAccel * dt);
+  } else {
+    body.vy = body.vy < T ? Math.min(T, body.vy * drag) : Math.max(T, body.vy - BODY.swimAccel * dt);
+  }
 
   // Horizontal, with the bank test.
   const nx = body.x + body.vx * dt, nz = body.z + body.vz * dt;
