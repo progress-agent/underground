@@ -4498,6 +4498,16 @@ modeSystem.ctx.stationBuildings = () => {
     contactAt: (x, z, r) => idx.contactAt(x, z, r), distanceTo: (b, x, z) => idx.distanceTo(b, x, z), roofOf: (b) => m?.roofOf(b) ?? null };
 };
 // ── /s02:B ──
+// ── s14:S ── Solid bridges and station buildings (D-053 item 8). The collision service reads three getters, so the
+// Walker, the Drone and the Balloon collide with the 41 Thames bridges, the M25's crossings (the motorway while it is
+// drawn, else the registry deck) and the station buildings through the calls they already make (src/modes/solids.js).
+modeSystem.collision.setSolidSources({
+  bridges: () => bridgesGroup,
+  motorway: () => motorwayGroup,
+  stationBuildings: () => (stationBuildingState.index && stationBuildingsMesh
+    ? { index: stationBuildingState.index, meshes: stationBuildingsMesh, VE: VERTICAL_EXAGGERATION } : null),
+});
+// ── /s14:S ──
 // ── s25:P ──
 // Pedestrian underground (Lane P, Jordan's note 10): the inside of the walker's
 // bore (tube-interior.js). Invisible until Pedestrian mode shows it; the map

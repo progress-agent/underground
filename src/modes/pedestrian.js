@@ -502,6 +502,12 @@ export function createPedestrianMode(ctx) {
       else if (body.z > s02Box.maxZ) { body.z = s02Box.maxZ; if (body.vz > 0) body.vz = 0; s02Held = true; }
     }
     // ── /s02:T ──
+    // ── s14:S ── a deck's underside, or a tower's, is a ceiling: a jetpacking or swimming body stops under it.
+    const s14Ceil = ctx.collision.ceilingAt ? ctx.collision.ceilingAt(body.x, body.z, body.y) : null;
+    if (s14Ceil !== null && body.vy > 0 && body.y + (P.eye + BODY.headroom) * VE > s14Ceil) {
+      body.y = s14Ceil - (P.eye + BODY.headroom) * VE; body.vy = 0;
+    }
+    // ── /s14:S ──
     placeCamera(body.x, body.y + P.eye * VE, body.z);
     contactStep(s02bX, s02bZ); // s02:B
 

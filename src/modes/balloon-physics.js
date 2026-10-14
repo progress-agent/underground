@@ -152,6 +152,10 @@ function substep(s, dt, P, world) {
 
   // 5. Vertical move; ground, roofs and the water surface are floors.
   let y = s.pos.y + s.vy * dt * VE;
+  // ── s14:S ── a deck's underside, or a tower's, is a ceiling: the basket cannot rise through it.
+  const s14Ceil = col?.ceilingAt ? col.ceilingAt(s.pos.x, s.pos.z, feet) : null;
+  if (s14Ceil !== null && s.vy > 0 && y - eye + BASKET_HEIGHT_M * VE > s14Ceil) { y = s14Ceil - BASKET_HEIGHT_M * VE + eye; s.vy = 0; }
+  // ── /s14:S ──
   let floor = col?.standHeightAt ? col.standHeightAt(s.pos.x, s.pos.z, feet, 0.3 * VE)
     : (Number.isFinite(ground) ? ground : null);
   const water = world.waterSurfaceY?.(s.pos.x, s.pos.z);
