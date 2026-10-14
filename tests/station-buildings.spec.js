@@ -70,7 +70,9 @@ test('the station buildings are built from the tracked data: two meshes, no per-
   });
   console.log('station buildings', JSON.stringify(r));
   expect(r.parent, 'a direct child of the scene (never a line group, so the D-040 cull leaves it drawn)').toBe(true);
-  expect(r.names.sort()).toEqual(['station-buildings-walls', 'station-roundels']);
+  // Sprint 14Oct26w: a third mesh, station-host-skirts, closes the gap under a host map box that stands on a slope (Fulham Broadway,
+  // North Greenwich): three draws, inside the cap of three.
+  expect(r.names.sort()).toEqual(['station-buildings-walls', 'station-host-skirts', 'station-roundels']);
   expect(r.instanced).toBe(0);
   expect(r.buildings).toBe(DATA.buildings.length);
   expect(r.stats.draws).toBeLessThanOrEqual(3);

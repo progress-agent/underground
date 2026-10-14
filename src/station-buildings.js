@@ -252,6 +252,7 @@ const RING_INDEX = { underground: 0, overground: 1, dlr: 2 };
 export const RING_COLOUR = { underground: ROUNDEL.red, overground: '#EE7623', dlr: '#00AFAD' };
 const NAME_COLOUR = '#d4d4d4';          // under the bloom threshold with room to spare: in sun the street view's lettering read 0.84 at #e6e6e6
 const WALL_COLOUR = 0xdcdad4;            // white, kept under the bloom threshold through AgX
+const HOST_SKIRT_COLOUR = 0x8a8580;      // the map boxes' own grey (surface-geometry.js)
 const SKIRT_M = 0.5;
 const ATLAS_W = 4096, ATLAS_CAP_H = 4096;
 const BAR_TEXT_FRAC = 0.66, BAR_TEXT_MAX_W = 450;   // the name's em on the bar and its widest extent (roundelTexture's)
@@ -531,13 +532,53 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   roundels.frustumCulled = false;
   roundels.customDepthMaterial = depthMat;
 
+  // ── Host skirts (sprint 14Oct26w) ──
+  // A baked map box stands at the ground under its CENTRE, so a 90 m box on a slope floats over the street on its low side: Fulham
+  // Broadway's host is 2.8 m above the street at its north face (and North Greenwich's 0.7 m at its west). Where a building has a
+  // `host`, a thin wall in the map boxes' grey closes the gap, from the host's base down to the ground along each face. Its vertices
+  // are in canonical Y with no height law, so it follows Master exactly as the terrain and the box's own base do.
+  const skirtP = [], skirtN = [];
+  for (const b of buildings) {
+    if (!b.host) continue;
+    const h = b.host, half = h.side / 2, top = h.baseM * VE, sx = [-1, 1, 1, -1], sz = [-1, -1, 1, 1];
+    for (let f = 0; f < 4; f++) {
+      const ax = h.x + sx[f] * half, az = h.z + sz[f] * half, bx = h.x + sx[(f + 1) % 4] * half, bz = h.z + sz[(f + 1) % 4] * half;
+      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 3)), nx = (bz - az) / L, nz = -(bx - ax) / L;   // outward (the ring runs clockwise in x, z)
+      const pt = (t) => { const x = ax + (bx - ax) * t, z = az + (bz - az) * t, g = getStructuralY?.(x, z); return { x, z, y: Number.isFinite(g) ? g - 0.3 * VE : top }; };
+      let prev = pt(0);
+      for (let i = 1; i <= n; i++) {
+        const cur = pt(i / n);
+        if (prev.y < top - 1e-6 || cur.y < top - 1e-6) {
+          const y0 = Math.min(prev.y, top), y1 = Math.min(cur.y, top);
+          // two triangles, counter-clockwise seen from outside (the ring runs x, then z, so outside is -z on the first face)
+          skirtP.push(prev.x, y0, prev.z, cur.x, top, cur.z, cur.x, y1, cur.z, prev.x, y0, prev.z, prev.x, top, prev.z, cur.x, top, cur.z);
+          for (let k = 0; k < 6; k++) skirtN.push(nx, 0, nz);
+        }
+        prev = cur;
+      }
+    }
+  }
+  let skirts = null, skirtGeo = null, skirtMat = null;
+  if (skirtP.length) {
+    skirtGeo = new THREE.BufferGeometry();
+    skirtGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skirtP), 3));
+    skirtGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(skirtN), 3));
+    skirtGeo.computeBoundingSphere();
+    skirtMat = new THREE.MeshStandardMaterial({ color: HOST_SKIRT_COLOUR, roughness: 0.9, metalness: 0 });
+    skirts = new THREE.Mesh(skirtGeo, skirtMat);
+    skirts.name = 'station-host-skirts';
+    skirts.userData.kind = 'station-host-skirts';
+    skirts.frustumCulled = false;
+  }
+
   const group = new THREE.Group();
   group.name = 'station-buildings';
   group.add(walls, roundels);
+  if (skirts) group.add(skirts);
 
-  const triangles = (wIdx.length + rIdx.length) / 3;
+  const triangles = (wIdx.length + rIdx.length) / 3 + skirtP.length / 9;
   const textureBytes = atlas?.bytes ?? 0;
-  const stats = { draws: 2, triangles, textureBytes, atlasMs: atlas?.ms ?? 0, geometryMs: performance.now() - t0, atlas: atlas ? { width: atlas.width, height: atlas.height, glyph: atlas.glyph } : null,
+  const stats = { draws: skirts ? 3 : 2, triangles, textureBytes, atlasMs: atlas?.ms ?? 0, geometryMs: performance.now() - t0, atlas: atlas ? { width: atlas.width, height: atlas.height, glyph: atlas.glyph } : null,
     walls: wIdx.length / 3, roundelTriangles: rIdx.length / 3 };
 
   function buildingAtFace(mesh, faceIndex) {
@@ -650,7 +691,7 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   /** Running totals of the label occluder (written by the app's occluder, main.js): frames, tests, ms, labels hidden. */
   const labelOcclusion = { frames: 0, tests: 0, ms: 0, hidden: 0 };
   function dispose() {
-    wallGeo.dispose(); rGeo.dispose(); wallMat.dispose(); roundelMat.dispose(); depthMat.dispose(); blank.dispose(); atlas?.texture.dispose();
+    wallGeo.dispose(); rGeo.dispose(); wallMat.dispose(); roundelMat.dispose(); depthMat.dispose(); blank.dispose(); atlas?.texture.dispose(); skirtGeo?.dispose(); skirtMat?.dispose();
   }
   const api = { group, walls, roundels, bases, stats, buildingAtFace, setRoundelsVisible, roofOf, labelAnchor, pickRay, pickRayRaw, segmentHitsStation, setOccluder, roundelExtents, labelOcclusion, dispose, atlas, index };
   Object.defineProperty(api, 'lastOcclusion', { get: () => meshesApi.lastOcclusion, set: (v) => { meshesApi.lastOcclusion = v; }, enumerable: true });

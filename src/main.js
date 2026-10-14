@@ -4124,7 +4124,10 @@ function s14bInFront(ox, oy, oz, dx, dy, dz, far) {
 // to the distance of its anchor) is behind a station building other than its own, a map box or a landmark. The ground, bridges,
 // trains and aircraft do not hide a name. Results are cached per name and re-tested only when the camera has moved more than a
 // unit or the building-height scale changed, at most 16 fresh tests a frame (never-tested names first): a still camera costs nothing.
-const S14B_NEAR = 750, S14B_MOVE = 1.0, S14B_FRESH = 16, S14B_STALE = 12;
+const S14B_NEAR = 750, S14B_MOVE = 1.0, S14B_FRESH = 16, S14B_STALE = 12, S14B_OWN_M = 200;
+// (A station's OWN name, from within 200 m of its building, is not hidden by the map boxes or landmarks in front of it: the box between
+// the walker and a 250 m terminus's roof hid King's Cross's name from 50 m away, where it is the one name that belongs. Only another
+// station's building hides it. Every other name is tested against all three.)
 const s14bCache = new Map();
 let s14bFrame = -1, s14bFreshN = 0, s14bNear = false;
 function s14bLabelOccluded(rect, cam, info) {
@@ -4153,7 +4156,8 @@ function s14bLabelOccluded(rect, cam, info) {
     if (tMax > 0) {
       const own = info.building?.key ?? null;
       hit = m.segmentHitsStation(cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, own, scale);
-      if (!hit && surfaceGeometryGroup?.visible) {
+      const atOwn = own !== null && m.index.distanceTo(info.building, cx, cz) <= S14B_OWN_M;
+      if (!hit && !atOwn && surfaceGeometryGroup?.visible) {
         s02bBoxMeshes.length = 0;
         for (const g of surfaceGeometryGroup.children) if (g.isInstancedMesh && /^(baked-)?buildings-/.test(g.name || '')) s02bBoxMeshes.push(g);
         hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax + 0.75, scale);
