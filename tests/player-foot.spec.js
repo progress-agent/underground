@@ -410,45 +410,330 @@ test.describe('the view rules, with the figure held back and in the tunnel', () 
     } finally { await p.close(); }
   });
 
-  test('stations: first person in the shaft and the tunnel whatever V says; the street returns the choice', async ({ browser }) => {
-    const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    try {
-      await p.goto('/?fast=1&buildings=baked');
-      await p.waitForFunction(() => {
-        const b = window.__ug?.bakedStats;
-        return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal && window.__ug.groundReady && window.__ug.lineBranchCenterPts.size > 5;
-      }, null, { timeout: 240000 });
-      await p.evaluate(() => window.__ug.modes.activate('pedestrian'));
-      await p.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 30000 });
-      await p.waitForFunction(() => window.__ug.modes.ctx.playerView.figureLoaded(), null, { timeout: 30000 });
-      // a real station: stand at its entrance, E opens the chooser, row 1 is the first platform
-      const at = await p.evaluate(() => {
-        const ped = window.__ug.modes.registry.get('pedestrian'), n = ped.network;
-        const stop = n.paths.find((q) => !q.lineId.startsWith('og:') && q.stops.length)?.stops.find((x) => x.stop.depthM > 10)?.stop;
-        return stop ? { x: stop.x, z: stop.z } : null;
-      });
-      expect(at).not.toBeNull();
-      await p.evaluate(({ x, z }) => window.__ug.modes.registry.get('pedestrian').place(x, z, { yaw: 0 }), at);
-      await p.waitForTimeout(800);
-      expect(await p.evaluate(() => window.__ug.modes.registry.get('pedestrian').isThirdPerson())).toBe(true);
-      await p.keyboard.press('e');
-      await p.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'shaft', null, { timeout: 10000 });
-      await p.evaluate(() => window.__ug.modes.registry.get('pedestrian').chooseRow(0));
-      const seen = [];
-      for (let i = 0; i < 200; i++) {
-        await p.waitForTimeout(40);
-        const s = await p.evaluate(() => { const ped = window.__ug.modes.registry.get('pedestrian'); return { phase: ped.debug().phase, third: ped.isThirdPerson() }; });
-        seen.push(s);
-        if (s.phase === 'tunnel') break;
+  for (const pressV of [false, true]) {
+    test(`stations: first person in the shaft and the tunnel whatever V says; the street returns the choice (V ${pressV ? 'pressed first' : 'untouched'})`, async ({ browser }) => {
+      const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+      const third = () => p.evaluate(() => window.__ug.modes.registry.get('pedestrian').isThirdPerson());
+      const phase = () => p.evaluate(() => window.__ug.modes.registry.get('pedestrian').debug().phase);
+      try {
+        await p.goto('/?fast=1&buildings=baked');
+        await p.waitForFunction(() => {
+          const b = window.__ug?.bakedStats;
+          return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal && window.__ug.groundReady && window.__ug.lineBranchCenterPts.size > 5;
+        }, null, { timeout: 240000 });
+        await p.evaluate(() => window.__ug.modes.activate('pedestrian'));
+        await p.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 30000 });
+        await p.waitForFunction(() => window.__ug.modes.ctx.playerView.figureLoaded(), null, { timeout: 30000 });
+        // a real station: stand at its entrance, E opens the chooser, row 1 is the first platform
+        const at = await p.evaluate(() => {
+          const ped = window.__ug.modes.registry.get('pedestrian'), n = ped.network;
+          const stop = n.paths.find((q) => !q.lineId.startsWith('og:') && q.stops.length)?.stops.find((x) => x.stop.depthM > 10)?.stop;
+          return stop ? { x: stop.x, z: stop.z } : null;
+        });
+        expect(at).not.toBeNull();
+        await p.evaluate(({ x, z }) => window.__ug.modes.registry.get('pedestrian').place(x, z, { yaw: 0 }), at);
+        await p.waitForTimeout(800);
+        if (pressV) { await p.keyboard.press('v'); await p.waitForTimeout(500); expect(await third()).toBe(false); } else expect(await third()).toBe(true);
+        await p.keyboard.press('e');
+        await p.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'shaft', null, { timeout: 10000 });
+        await p.evaluate(() => window.__ug.modes.registry.get('pedestrian').chooseRow(0));
+        const seen = [];
+        for (let i = 0; i < 400; i++) {
+          await p.waitForTimeout(40);
+          const s = { phase: await phase(), third: await third() };
+          seen.push(s);
+          if (s.phase === 'tunnel') break;
+        }
+        expect(seen.at(-1).phase).toBe('tunnel');
+        const firstShaft = seen.findIndex((s) => s.phase === 'shaft');
+        expect(firstShaft).toBeGreaterThanOrEqual(0);
+        expect(seen.slice(firstShaft).some((s) => s.third), 'first person on every sampled frame of the shaft and the tunnel').toBe(false);
+        // V in the tunnel changes the choice and nothing else
+        await p.keyboard.press('v');
+        await p.keyboard.press('v');
+        await p.waitForTimeout(200);
+        expect(await third()).toBe(false);
+        // up to the street: the arrival card's first row
+        await p.keyboard.press('e');
+        await p.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'arrival', null, { timeout: 15000 });
+        await p.evaluate(() => window.__ug.modes.registry.get('pedestrian').chooseRow(0));
+        await p.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
+        await p.waitForTimeout(1000);
+        expect(await third(), 'back at the street: the choice').toBe(!pressV);
+      } finally { await p.close(); }
+    });
+  }
+});
+
+// ── the rest of lane P: line of sight, the shadow, the flames and the flying pose, the label cover ─────────────
+test.describe('the figure in the street', () => {
+  const errors = [];
+  let pg;
+  const pev = (fn, arg) => pg.evaluate(fn, arg);
+  const pwait = (ms) => pg.waitForTimeout(ms);
+  const pplace = async (name) => {
+    const [x, z, yaw] = POSES[name];
+    await pev(([x, z, yaw]) => window.__ug.modes.registry.get('pedestrian').place(x, z, { yaw }), [x, z, yaw]);
+    await pwait(1000);
+  };
+  /** One frame of flame and pose data per animation frame. */
+  const sample = (frames) => pev(async (n) => {
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const d = window.__ug.player.debug(), ped = window.__ug.modes.registry.get('pedestrian'), st = ped.playerState();
+      rows.push({ state: st.state, jet: ped.body.jet, count: d.flames.count, lengths: d.flames.lengthM.slice(), fly: d.poseWeights.fly, clip: d.clip });
+    }
+    return rows;
+  }, frames);
+
+  test.beforeAll(async ({ browser }) => {
+    pg = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    pg.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+    pg.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+    await pg.goto('/?fast=1&buildings=baked');
+    await pg.waitForFunction(() => {
+      const b = window.__ug?.bakedStats;
+      return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal && window.__ug.groundReady;
+    }, null, { timeout: 240000 });
+    await pev(() => window.__ug.modes.activate('pedestrian'));
+    await pg.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 30000 });
+    await pg.waitForFunction(() => window.__ug.modes.ctx.playerView.figureLoaded(), null, { timeout: 30000 });
+  });
+  test.afterAll(async () => { expect(errors, 'no console or page errors').toEqual([]); await pg.close(); });
+
+  test('line of sight: in a narrow street the camera is pulled in and never inside or behind a facade', async () => {
+    await pplace('ALLEY');
+    const probe = () => pev(() => {
+      const u = window.__ug, T = window.__ugTHREE, ratio = u.masterHeight.ratio, c = u.modes.collision, cp = u.camera.position;
+      const nk = new T.Vector3(); u.player.figure.boneWorldPosition('neck_01', nk);
+      const inside = c.buildingsNear(cp.x, cp.z, 2).some((b) => cp.x >= b.minX && cp.x <= b.maxX && cp.z >= b.minZ && cp.z <= b.maxZ && cp.y >= b.baseY && cp.y <= b.roofY);
+      const half = Math.hypot(cp.x - nk.x, cp.z - nk.z) / 2 + 2;
+      const d = [nk.x - cp.x, nk.y - cp.y, nk.z - cp.z], f = [cp.x, cp.y, cp.z];
+      let crosses = false;
+      for (const b of c.buildingsNear((cp.x + nk.x) / 2, (cp.z + nk.z) / 2, half)) {
+        const lo = [b.minX, b.baseY, b.minZ], hi = [b.maxX, b.roofY, b.maxZ];
+        let t0 = 0, t1 = 1, ok = true;
+        for (let a = 0; a < 3; a++) {
+          if (Math.abs(d[a]) < 1e-12) { if (f[a] < lo[a] || f[a] > hi[a]) ok = false; continue; }
+          let s = (lo[a] - f[a]) / d[a], e = (hi[a] - f[a]) / d[a];
+          if (s > e) [s, e] = [e, s];
+          t0 = Math.max(t0, s); t1 = Math.min(t1, e);
+          if (t0 > t1) ok = false;
+        }
+        if (ok) crosses = true;
       }
-      expect(seen.some((s) => s.phase === 'shaft')).toBe(true);
-      // never third person once the shaft has begun (the first frames of the descent may still be the street's)
-      const firstShaft = seen.findIndex((s) => s.phase === 'shaft');
-      expect(seen.slice(firstShaft).every((s) => s.phase !== 'shaft' && s.phase !== 'tunnel' ? true : !s.third)).toBe(true);
-      expect(seen.at(-1).phase).toBe('tunnel');
-      await p.keyboard.press('v');
-      await p.keyboard.press('v');
-      expect(await p.evaluate(() => window.__ug.modes.registry.get('pedestrian').isThirdPerson())).toBe(false);
-    } finally { await p.close(); }
+      return { inside, crosses, dist: new T.Vector3(cp.x, cp.y * ratio, cp.z).distanceTo(new T.Vector3(nk.x, nk.y * ratio, nk.z)) };
+    });
+    const first = await probe();
+    expect(first.inside).toBe(false);
+    expect(first.crosses).toBe(false);
+    expect(first.dist, 'pulled in').toBeGreaterThan(0.45);
+    expect(first.dist).toBeLessThan(3.9);
+    // a full turn in 24 drags: the camera never enters a box and never loses the figure behind one
+    for (let k = 0; k < 24; k++) {
+      await pg.mouse.move(864, 450); await pg.mouse.down();
+      for (let i = 1; i <= 5; i++) await pg.mouse.move(864 + 10 * i, 450);
+      await pg.mouse.up(); await pwait(120);
+      const r = await probe();
+      expect(r.inside, `turn ${k}`).toBe(false);
+      expect(r.crosses, `turn ${k}`).toBe(false);
+    }
+  });
+
+  test('line of sight: lane S\'s hook can shorten the view', async () => {
+    await pplace('KX');
+    const r = await pev(() => {
+      const c = window.__ug.modes.collision, a = { x: 164.9, y: 130, z: -2507.9 }, b = { x: 164.9, y: 130, z: -2497.9 };
+      const open = c.lineOfSight(a, b);
+      c.setExtraSegmentHit(() => 0.5);
+      const hooked = c.lineOfSight(a, b);
+      c.setExtraSegmentHit(() => false);
+      return { open: open.clear, hookedClear: hooked.clear, t: hooked.t, after: c.lineOfSight(a, b).clear };
+    });
+    expect(r.open).toBe(true);
+    expect(r.hookedClear).toBe(false);
+    expect(r.t).toBeLessThanOrEqual(0.5 + 1e-6);
+    expect(r.after).toBe(true);
+  });
+
+  test('the shadow: visible on the street at noon, off in first person and in the river', async () => {
+    await pev(() => { window.__ugSun.setTime(0.5, { persist: false }); window.__ug.setRenderQualityMode('manual'); });
+    await pplace('KX');
+    await pwait(1000);
+    const r = await pev(() => {
+      const u = window.__ug, gl = u.composer.renderer.getContext(), cv = u.composer.renderer.domElement;
+      const read = () => { u.composer.render(); const px = new Uint8Array(cv.width * cv.height * 4); gl.readPixels(0, 0, cv.width, cv.height, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
+      u.player.setShadowEnabled(true); const A = read();
+      u.player.setShadowEnabled(false); const B = read();
+      u.player.setShadowEnabled(true);
+      let n = 0, sx = 0, sy = 0;
+      for (let i = 0; i < cv.width * cv.height; i++) {
+        const la = A[i * 4] + A[i * 4 + 1] + A[i * 4 + 2], lb = B[i * 4] + B[i * 4 + 1] + B[i * 4 + 2];
+        if (lb > 30 && la < lb * 0.92) { n++; sx += i % cv.width; sy += Math.floor(i / cv.width); }
+      }
+      const st = u.modes.registry.get('pedestrian').playerState();
+      const v = new window.__ugTHREE.Vector3(st.x, st.y, st.z).project(u.camera);
+      return { n, cx: sx / Math.max(1, n), cy: cv.height - sy / Math.max(1, n), fx: (v.x * 0.5 + 0.5) * cv.width, fy: (1 - (v.y * 0.5 + 0.5)) * cv.height };
+    });
+    expect(r.n, 'darker pixels with the shadow on').toBeGreaterThanOrEqual(400);
+    expect(r.n).toBeLessThanOrEqual(60000);
+    expect(Math.hypot(r.cx - r.fx, r.cy - r.fy)).toBeLessThan(250);
+    expect((await pev(() => window.__ug.player.debug().shadow)).visible).toBe(true);
+    await pg.keyboard.press('v');
+    await pwait(500);
+    expect((await pev(() => window.__ug.player.debug().shadow)).visible).toBe(false);
+    await pg.keyboard.press('v');
+    await pplace('THAMES');
+    expect((await pev(() => window.__ug.player.debug().shadow)).visible).toBe(false);
+  });
+
+  test('the figure costs about 13.7k triangles, and its shadow about as many again', async () => {
+    await pplace('KX');
+    const r = await pev(async () => {
+      const u = window.__ug, rr = u.composer.renderer;
+      rr.info.autoReset = false;
+      const count = async () => { rr.info.reset(); for (let i = 0; i < 20; i++) await new Promise((x) => requestAnimationFrame(x)); return rr.info.render.triangles / 20; };
+      u.player.setShadowEnabled(false);
+      const withFigure = await count();
+      u.player.group.visible = false;
+      const without = await count();
+      u.player.group.visible = true;
+      u.player.setShadowEnabled(true);
+      await new Promise((x) => requestAnimationFrame(x)); await new Promise((x) => requestAnimationFrame(x));
+      const withShadow = await count();
+      rr.info.autoReset = true;
+      return { figure: withFigure - without, shadow: withShadow - withFigure };
+    });
+    expect(r.figure).toBeGreaterThan(13000);
+    expect(r.figure).toBeLessThan(15000);
+    expect(r.shadow).toBeGreaterThan(12000);
+    expect(r.shadow).toBeLessThan(15500);
+  });
+
+  test('flames: none on a tap of Space; four, sized by thrust, on both hands and both feet while it fires', async () => {
+    await pplace('KX');
+    await pg.keyboard.down(' '); await pwait(80); await pg.keyboard.up(' ');
+    const tap = await sample(90);
+    expect(tap.some((r) => r.state === 'air')).toBe(true);
+    expect(tap.every((r) => r.count === 0)).toBe(true);
+    expect(tap.some((r) => r.jet)).toBe(false);
+    await pwait(1000);
+    await pg.keyboard.down(' ');
+    await pwait(1000);
+    const hold = await pev(async () => {
+      const u = window.__ug, T = window.__ugTHREE, v = new T.Vector3(), names = ['hand_l', 'hand_r', 'foot_l', 'foot_r'], rows = [];
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        const d = u.player.debug(), ratio = u.masterHeight.ratio;
+        rows.push({ jet: u.modes.registry.get('pedestrian').body.jet, count: d.flames.count, lengths: d.flames.lengthM,
+          off: d.flames.base.map((b, k) => { u.player.figure.boneWorldPosition(names[k], v); return Math.hypot(b[0] - v.x, (b[1] - v.y) * ratio, b[2] - v.z); }),
+          dirY: d.flames.dir.map((x) => x[1]) });
+      }
+      return rows;
+    });
+    for (const r of hold) {
+      expect(r.jet).toBe(true);
+      expect(r.count).toBe(4);
+      for (const l of r.lengths) expect(l).toBeGreaterThanOrEqual(0.12);
+      for (const o of r.off) expect(o).toBeLessThan(0.2);
+      for (const y of r.dirY) expect(y).toBeLessThan(-0.8);
+    }
+    // thrust: the level the body reports sizes the flame
+    const mean = (lvl) => pev(async (l) => {
+      const ls = [];
+      for (let i = 0; i < 60; i++) {
+        const ped = window.__ug.modes.registry.get('pedestrian');
+        ped.body.jetLevel = l;
+        await new Promise((r) => requestAnimationFrame(r));
+        if (ped.body.jet) ls.push(window.__ug.player.debug().flames.lengthM.reduce((a, b) => a + b, 0) / 4);
+      }
+      return ls.reduce((a, b) => a + b, 0) / Math.max(1, ls.length);
+    }, lvl);
+    const low = await mean(0.3), high = await mean(1.0);
+    await pev(() => { delete window.__ug.modes.registry.get('pedestrian').body.jetLevel; });
+    expect(low).toBeGreaterThan(0);
+    expect(low).toBeLessThanOrEqual(0.8 * high);
+    await pg.keyboard.up(' ');
+  });
+
+  test('flying pose: held while firing, arms down and palms to the ground, held until landing, gone after', async () => {
+    await pg.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').playerState().state === 'ground', null, { timeout: 60000 });
+    await pplace('KX');
+    await pg.keyboard.down(' ');
+    await pwait(900);
+    const pose = await pev(() => {
+      const u = window.__ug, T = window.__ugTHREE, r = u.masterHeight.ratio, st = u.modes.registry.get('pedestrian').playerState(), v = new T.Vector3();
+      const h = (n) => { u.player.figure.boneWorldPosition(n, v); return (v.y - st.y) * r; };
+      return { fly: u.player.debug().poseWeights.fly, clip: u.player.debug().clip, hl: h('hand_l'), hr: h('hand_r'), ual: h('upperarm_l'), uar: h('upperarm_r'),
+        foot: Math.max(h('foot_l'), h('foot_r')), lowestOther: Math.min(h('hand_l'), h('hand_r'), h('pelvis')) };
+    });
+    expect(pose.fly).toBeGreaterThanOrEqual(0.95);
+    expect(pose.clip).toBe('Jump_Loop');
+    for (const [hand, arm] of [[pose.hl, pose.ual], [pose.hr, pose.uar]]) {
+      expect(hand).toBeGreaterThan(0.45);
+      expect(hand).toBeLessThan(1.1);
+      expect(arm - hand).toBeGreaterThanOrEqual(0.25);
+    }
+    expect(pose.foot, 'the feet are the lowest').toBeLessThan(pose.lowestOther);
+    await pwait(700);
+    await pg.keyboard.up(' ');
+    const rows = await pev(async () => {
+      const ped = window.__ug.modes.registry.get('pedestrian'), rows = [];
+      for (let i = 0; i < 1500; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        rows.push({ state: ped.playerState().state, jet: ped.body.jet, fly: window.__ug.player.debug().poseWeights.fly });
+        if (rows.filter((x) => x.state === 'ground').length > 50) break;
+      }
+      return rows;
+    });
+    const landed = rows.findIndex((r) => r.state === 'ground');
+    expect(landed).toBeGreaterThan(0);
+    for (const r of rows.filter((x) => x.state === 'air' && !x.jet)) expect(r.fly, 'held until landing').toBeGreaterThanOrEqual(0.95);
+    const after = rows.slice(landed);
+    for (let i = 1; i < after.length; i++) expect(after[i].fly).toBeLessThanOrEqual(after[i - 1].fly + 1e-9);
+    expect(after[Math.min(after.length - 1, 40)].fly, 'gone within 0.6 s of landing').toBeLessThanOrEqual(0.05);
+    // a plain jump never fires it
+    await pwait(500);
+    await pg.keyboard.down(' '); await pwait(80); await pg.keyboard.up(' ');
+    const plain = await sample(100);
+    expect(Math.max(...plain.map((r) => r.fly))).toBe(0);
+  });
+
+  test('no flames in the river', async () => {
+    await pplace('THAMES');
+    await pg.keyboard.down(' ');
+    const rows = await sample(90);
+    await pg.keyboard.up(' ');
+    expect(rows.every((r) => r.count === 0)).toBe(true);
+  });
+
+  test('label cover: the figure\'s rectangle contains it, the cover hides a name behind it, and V clears it', async () => {
+    await pplace('KX');
+    await pwait(500);
+    const r = await pev(() => {
+      const u = window.__ug, T = window.__ugTHREE, rect = u.player.screenRect;
+      if (!rect) return null;
+      const proj = (n) => { const v = new T.Vector3(); u.player.figure.boneWorldPosition(n, v); v.project(u.camera); return [(v.x * 0.5 + 0.5) * innerWidth, (1 - (v.y * 0.5 + 0.5)) * innerHeight]; };
+      const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2, cover = u.s14pLabelCover;
+      return { rect, pts: ['Head', 'foot_l', 'foot_r'].map(proj), hit: cover({ x: cx - 10, y: cy - 5, w: 20, h: 10 }, u.camera), miss: cover({ x: cx + 300, y: cy, w: 20, h: 10 }, u.camera) };
+    });
+    expect(r).not.toBeNull();
+    expect(r.rect.w).toBeGreaterThan(40);
+    expect(r.rect.w).toBeLessThan(600);
+    expect(r.rect.h).toBeGreaterThan(100);
+    expect(r.rect.h).toBeLessThan(900);
+    for (const [x, y] of r.pts) {
+      expect(x).toBeGreaterThanOrEqual(r.rect.x - 12);
+      expect(x).toBeLessThanOrEqual(r.rect.x + r.rect.w + 12);
+      expect(y).toBeGreaterThanOrEqual(r.rect.y - 12);
+      expect(y).toBeLessThanOrEqual(r.rect.y + r.rect.h + 12);
+    }
+    expect(r.hit).toBe(true);
+    expect(r.miss).toBe(false);
+    await pg.keyboard.press('v');
+    await pwait(500);
+    expect(await pev(() => window.__ug.player.screenRect)).toBeNull();
+    await pg.keyboard.press('v');
   });
 });
