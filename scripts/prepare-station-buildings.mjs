@@ -9,6 +9,7 @@
 // ones in Working/sprint-02Oct26f/B/design.md sections 1 to 4 and 6.
 //
 // Run: node scripts/prepare-station-buildings.mjs [--out <file>] [--review <file> | --no-review] [--refetch]
+// (Sprint 14Oct26w, lane B: the review is written only with --review <file>; there is no default path.)
 //
 // DETERMINISTIC: two runs write byte-identical files. The Overpass answer is a
 // pinned cache (scripts/.cache/station-buildings-overpass.json, untracked and
@@ -36,7 +37,8 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 export const PINNED_SHA256 = '884400d1e7da4b2be6ad3e9591721e3de5d8e5d22c33b45f17bdfb64ec1c0ed2';
 export const OVERPASS_FILE = path.join(ROOT, 'scripts/.cache/station-buildings-overpass.json');
 export const DEFAULT_OUT = path.join(ROOT, 'public/data/station-buildings.json');
-export const DEFAULT_REVIEW = '/Users/macstudio_1/Wisdom/WORK/PROJECTS/UnderGround/Working/sprint-02Oct26f/B/assignments-review.md';
+/** Building key -> height in the 02Oct26f data (bf10309), so the review can list every height this round changed. Tracked. */
+export const PRIOR_HEIGHTS = path.join(ROOT, 'scripts/station-building-heights-bf10309.json');
 const OVERPASS_QUERY = `[out:json][timeout:240];
 (
   way["building"="train_station"](51.25,-0.65,51.75,0.35);
@@ -70,7 +72,16 @@ export const RULES = Object.freeze({
   // showed only its lower rim there. `groundOffM` samples the street outside a wall at these distances; `clearM` is the
   // ring's clearance above the highest street under it; `minRingD` the smallest ring.
   roundel: { wallFrac: 0.8, wallMaxD: 6, fitFrac: 0.85, roofShortFrac: 0.6, roofEdgeFrac: 1.8, roofMaxD: 80, proud: 0.05, maxPerFront: 6, maxPerBuilding: 32,
-    designMaster: 1.1, clearM: 0.4, groundOffM: [0.05, 1, 3], minRingD: 3.4 },
+    designMaster: 1.1, clearM: 0.4, groundOffM: [0.05, 1, 3, 6, 6.5], minRingD: 3.4,
+    // Sprint 14Oct26w: the street lattice (one definition for the builder and the checker): vertices, centroid, every edge at
+    // <= latticeStepM steps (ends included), at each groundOffM outward. riseStreetM: a building is at least this much taller
+    // than 1.1 x its highest street above the base, so its roof stands clear of the street at every Master from 1.1 up.
+    latticeStepM: 1, riseStreetM: 2 },
+  // Sprint 14Oct26w (D-052 item 2): the two sites whose shopping-centre / arena box returns, with a marked entrance block.
+  // `face` is the host face (outward normal) the entrance block stands against; w along the face, d out from it, minH the
+  // block's least height, roofD the host roof's roundel, hostRingGapM the host-wall rings either side of the block.
+  boxEntrance: { sites: { 'fulham-broadway': { face: [0, -1] }, 'north-greenwich': { face: [0, -1] } },
+    w: 24, d: 7, minH: 7, roofD: 16, hostRingGapM: 20, endClearM: 6, faceGapM: 0.02, roofInsetM: 8, slideStepM: 2, slideMaxM: 20, hostFarM: 30 },
 });
 const TERRAIN_BNG = [490000, 151093.75, 560000, 205000]; // [minE, minN, maxE, maxN], the terrain grid
 const NETS = ['dlr', 'og', 'tube'];
@@ -151,7 +162,7 @@ export async function loadBakedBoxes(points, reach = 700, root = ROOT) {
     for (let k = 0, o = off; k < cnt; k++, o += 10) {
       const x = minX + v.getUint16(o, true) * 0.1, z = minZ + v.getUint16(o + 2, true) * 0.1;
       if (!wanted.has(`${Math.floor(x / cell)},${Math.floor(z / cell)}`)) continue;
-      boxes.push({ x, z, h: v.getUint16(o + 4, true) * 0.1, side: v.getUint16(o + 6, true) * 0.1, hidden: false });
+      boxes.push({ x, z, h: v.getUint16(o + 4, true) * 0.1, side: v.getUint16(o + 6, true) * 0.1, baseM: v.getInt16(o + 8, true) * 0.1, hidden: false });
     }
   }
   let meta = {};
@@ -211,7 +222,7 @@ export function parseOverpass(answer) {
  *   lifted clear of the street in front of it and a building is made tall enough to carry one on its high side.
  * @returns {{ json: object, review: object[], counts: object, hidden: number }}
  */
-export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null, groundOf = null }) {
+export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null, groundOf = null, priorHeights = null }) {
   const { blds, areas, ents } = parseOverpass(overpass);
   const R = RULES;
   const siteList = [...sites.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
@@ -343,7 +354,76 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   };
   const dirs = Array.from({ length: 8 }, (_, k) => [Math.cos(k * Math.PI / 4), -Math.sin(k * Math.PI / 4)]);
 
-  const pavilionSites = siteList.filter(s => !picks.has(s.key));
+  // ── Box-entrance sites (sprint 14Oct26w, D-052 item 2) ──
+  // Fulham Broadway and North Greenwich keep the big map box (the shopping centre, the flat arena box beside the O2). The
+  // station is one marked part of it: a white entrance block standing against one face, a footprint like any other (an
+  // ordinary 4-point outline, so every reader needs nothing new). The rule names the two sites; the other 395 are untouched.
+  const BE = R.boxEntrance;
+  const boxEntranceRecs = [];
+  for (const [siteKey, rule] of Object.entries(BE.sites)) {
+    const s = sites.get(siteKey);
+    if (!s) continue;   // (a synthetic world without the site: the tracked data's tests hold that the real run builds both)
+    if (picks.has(siteKey)) throw new Error(`box-entrance site ${siteKey} has an OSM outline pick`);
+    // The entrance the block stands by: the first, in the pavilion path's own ordering (named first, then unnamed, then the rest;
+    // nearest first), that lies in a baked box (the largest side wins) and whose nearest face of that box is the rule's face (the
+    // street side). North Greenwich's nearest node is by the arena's east face, so its second node, by the north face, is taken.
+    const grp = (x) => (x.named ? 0 : x.e.toks.length === 0 ? 1 : 2);
+    const ordered = ents.filter(e => Math.hypot(e.p[0] - s.p[0], e.p[1] - s.p[1]) <= R.nameRadiusM)
+      .map(e => ({ e, d: Math.hypot(e.p[0] - s.p[0], e.p[1] - s.p[1]), named: contains(e.toks, s.toks) }))
+      .sort((a, b) => (grp(a) - grp(b)) || (a.d - b.d) || (a.e.id < b.e.id ? -1 : 1));
+    const [nx, nz] = rule.face, ux = -nz, uz = nx;                 // face normal and the tangent along it
+    let host = null, ax = 0, az = 0;
+    for (const { e } of ordered) {
+      const hb = boxes.filter(q => Math.abs(q.x - e.p[0]) <= q.side / 2 && Math.abs(q.z - e.p[1]) <= q.side / 2)
+        .sort((p, q) => (q.side - p.side) || (p.x - q.x) || (p.z - q.z))[0];
+      if (!hb) continue;
+      const nearest = [[0, -1], [0, 1], [1, 0], [-1, 0]].map(f => ({ f, d: hb.side / 2 - ((e.p[0] - hb.x) * f[0] + (e.p[1] - hb.z) * f[1]) })).sort((p, q) => p.d - q.d)[0];
+      if (nearest.f[0] === nx && nearest.f[1] === nz) { host = hb; [ax, az] = e.p; break; }
+    }
+    if (!host) throw new Error(`box-entrance site ${siteKey}: no entrance node lies in a baked box with ${rule.face} as its nearest face (the data changed: a person must look)`);
+    const mid = [host.x + nx * host.side / 2, host.z + nz * host.side / 2];
+    const alongMax = host.side / 2 - BE.endClearM - BE.w / 2;
+    const along0 = Math.max(-alongMax, Math.min(alongMax, (ax - mid[0]) * ux + (az - mid[1]) * uz));
+    const blockAt = (along) => {
+      const c = [mid[0] + ux * along + nx * (BE.faceGapM + BE.d / 2), mid[1] + uz * along + nz * (BE.faceGapM + BE.d / 2)];
+      const corner = (a, b) => [c[0] + ux * a * BE.w / 2 + nx * b * BE.d / 2, c[1] + uz * a * BE.w / 2 + nz * b * BE.d / 2];
+      return { c, ring: orient([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)]) };
+    };
+    const clearBlock = (blk) => {
+      const infl = (() => { // inflated 0.5 m on every side
+        const cx = blk.c[0], cz = blk.c[1], hw = BE.w / 2 + 0.5, hd = BE.d / 2 + 0.5;
+        const k = (a, b) => [cx + ux * a * hw + nx * b * hd, cz + uz * a * hw + nz * b * hd];
+        return orient([k(-1, -1), k(1, -1), k(1, 1), k(-1, 1)]);
+      })();
+      const b = bounds(infl);
+      for (const q of boxGrid.near(b.x0, b.z0, b.x1, b.z1)) if (q.box !== host && convexOverlap(infl, q.ring)) return false;
+      if (blk.ring.some(p => inWater(p[0], p[1])) || inWater(blk.c[0], blk.c[1])) return false;
+      if (blk.ring.some(p => !inTerrain(p[0], p[1]))) return false;
+      for (const f of footprints) {
+        if (f.bounds.x1 < b.x0 || f.bounds.x0 > b.x1 || f.bounds.z1 < b.z0 || f.bounds.z0 > b.z1) continue;
+        if (ringsOverlap(infl, f.ring)) return false;
+      }
+      return true;
+    };
+    let blk = null, along = along0, slid = 0;
+    const order = [0]; for (let k = BE.slideStepM; k <= BE.slideMaxM; k += BE.slideStepM) order.push(k, -k);
+    for (const dk of order) {
+      const a = Math.max(-alongMax, Math.min(alongMax, along0 + dk));
+      const cand = blockAt(a);
+      if (clearBlock(cand)) { blk = cand; along = a; slid = dk; break; }
+    }
+    if (!blk) throw new Error(`box-entrance site ${siteKey}: no clear place for the entrance block within ${BE.slideMaxM} m of the entrance`);
+    const bc = centroid(blk.ring);
+    if (Math.hypot(host.x - bc[0], host.z - bc[1]) < BE.hostFarM) throw new Error(`box-entrance site ${siteKey}: the host centre is within ${BE.hostFarM} m of the block (it would be hidden)`);
+    const rec = { key: `be-${siteKey}`, kind: 'box-entrance', outline: blk.ring, sites: [s], flags: new Set(), areaOnly: false, ring: blk.ring, bounds: bounds(blk.ring),
+      host: { x: r2(host.x), z: r2(host.z), side: r2(host.side), h: r2(host.h), baseM: r2(host.baseM), face: [nx, nz] }, hostBox: host, boxEntrance: { mid, ux, uz, nx, nz, along, slid } };
+    if (slid) rec.flags.add('entrance-slid');
+    buildingsById.set(rec.key, rec);
+    boxEntranceRecs.push(rec);
+    footprints.push({ ring: rec.ring, rec, bounds: rec.bounds });
+  }
+
+  const pavilionSites = siteList.filter(s => !picks.has(s.key) && !BE.sites[s.key]);
   const pavilionRecs = [];
   for (const s of pavilionSites) {
     const grp = (x) => (x.named ? 0 : x.e.toks.length === 0 ? 1 : 2);
@@ -470,7 +550,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   };
   /** The highest ground (above the base, at the design Master) in front of a front between s0 and s1 metres along it. */
   const frontGround = (rec, f, s0, s1) => {
-    const ux = (f.b[0] - f.a[0]) / f.L, uz = (f.b[1] - f.a[1]) / f.L, n = Math.max(2, Math.ceil((s1 - s0) / 2));
+    const ux = (f.b[0] - f.a[0]) / f.L, uz = (f.b[1] - f.a[1]) / f.L, n = Math.max(2, Math.ceil((s1 - s0) / RK.latticeStepM));
     let m = -Infinity;
     for (let i = 0; i <= n; i++) {
       const s = s0 + (s1 - s0) * i / n;
@@ -499,24 +579,48 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   };
   for (const rec of buildingsById.values()) { rec.baseM = baseOf(rec); rec.fronts = frontsOf(rec); }
 
+  // The street lattice (sprint 14Oct26w): the highest ground (true metres above the base, Master 1) over the footprint's vertices and
+  // centroid and over every edge at <= latticeStepM steps, at each groundOffM outward. A station keeps, at every Master, the wall
+  // it has above this street at Master 1.1 (the runtime lifts the roof with `riseM`), so no street rises over its roof.
+  const latticeRise = (rec) => {
+    if (!groundOf) return 0;
+    let m = -Infinity;
+    const take = (x, z) => { const y = groundOf(x, z); if (Number.isFinite(y) && y - rec.baseM > m) m = y - rec.baseM; };
+    for (const p of rec.ring) take(p[0], p[1]);
+    const c = centroid(rec.ring); take(c[0], c[1]);
+    for (let i = 0; i < rec.ring.length; i++) {
+      const a = rec.ring[i], b = rec.ring[(i + 1) % rec.ring.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 1e-6) continue;
+      const n = edgeNormal(rec.ring, i), k = Math.max(1, Math.ceil(L / RK.latticeStepM));
+      for (let j = 0; j <= k; j++) for (const off of RK.groundOffM) take(a[0] + (b[0] - a[0]) * j / k + n[0] * off, a[1] + (b[1] - a[1]) * j / k + n[1] * off);
+    }
+    return Number.isFinite(m) ? Math.max(0, m) : 0;
+  };
+  for (const rec of buildingsById.values()) rec.latticeRise = latticeRise(rec);
+
   // ── Heights ──
-  for (const rec of outlineRecs) {
+  for (const rec of [...outlineRecs, ...boxEntranceRecs]) {
+    let h, src;
+    if (rec.kind === 'box-entrance') {
+      // The block stands as high as the box it is part of, and at least minH (North Greenwich's host is a 3.2 m canopy).
+      h = Math.max(rec.host.h, R.boxEntrance.minH); src = rec.host.h >= R.boxEntrance.minH ? 'host' : 'minimum';
+    } else {
     const tags = rec.osm.tags, area = rec.osm.area;
     const matched = rec.hides.filter(q => q.side * q.side >= 0.5 * area && q.side * q.side <= 2 * area)
       .sort((a, b) => Math.abs(a.side * a.side - area) - Math.abs(b.side * b.side - area) || a.x - b.x || a.z - b.z)[0];
-    let h, src;
     const tagH = parseFloat(String(tags.height ?? '').replace(',', '.'));
     const lv = parseFloat(tags['building:levels']);
     if (matched && matched.h > 0) { h = matched.h; src = 'box'; }
     else if (Number.isFinite(tagH) && tagH > 0) { h = tagH; src = 'height-tag'; }
     else if (Number.isFinite(lv) && lv > 0) { h = lv * 3.2; src = 'levels'; }
     else { h = R.heightDefault; src = 'default'; }
+    }
     h = Math.min(R.heightMax, Math.max(R.heightMin, h));
     // A building on a slope is buried on its high side (its base is the lowest ground under it): 7 of the 396, all big
     // termini (Waterloo, Victoria, King's Cross, Euston, Paddington...), had the street above their roof at one wall.
     // Where the ground rises more than the building is tall less RISE_CLEAR_M, it is made as tall as the rise plus that,
     // never above heightMax, so its high-side wall still stands RISE_CLEAR_M above the street.
-    const rise = riseOf ? riseOf(rec.outline) : null;
+    const rise = riseOf ? riseOf(rec.outline) : null;   // (the footprint's own interior rise, as before)
     const riseM = rise === null ? null : rise * RK.designMaster;
     if (riseM !== null && riseM + R.riseClearM > h) { h = Math.min(R.heightMax, riseM + R.riseClearM); src += '+rise'; }
     // ... and tall enough for a roundel on the highest street in front of any walkable front (a ring of at least
@@ -525,8 +629,19 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       const need = highestRoundelGround(rec) + RK.minRingD / RK.wallFrac + 0.05;
       if (need > h) { h = Math.min(R.heightMax, need); if (!src.endsWith('+rise')) src += '+rise'; }
     }
+    // ... and, sprint 14Oct26w, tall enough that at the default Master 1.1 its roof clears the highest street of its lattice by
+    // riseStreetM (the runtime lifts the roof with the street above 1.1). The 30 m cap can stop it: that building is flagged.
+    if (groundOf) {
+      const need = R.roundel.designMaster * rec.latticeRise + RK.riseStreetM;
+      if (need > h + 1e-9) { h = Math.min(R.heightMax, need); if (!src.endsWith('+rise')) src += '+rise'; }
+      if (R.roundel.designMaster * rec.latticeRise + RK.riseStreetM > R.heightMax + 1e-9) rec.flags.add('street-near-roof');
+    }
     rec.height = r2(h);
     rec.heightSource = src;
+  }
+  // (Pavilions stay 16 x 12 x 7: a pavilion the street is near the roof of is flagged, not grown.)
+  for (const rec of pavilionRecs) {
+    if (groundOf && R.roundel.designMaster * rec.latticeRise + 0.5 > rec.height) rec.flags.add('street-near-roof');
   }
 
 
@@ -583,6 +698,42 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     while (roundels.length > RK.maxPerBuilding) roundels.pop();
     for (const r of roundels) { const m = meta.get(r); m.f.rt.push({ s: m.s, W: m.W }); }
     // Roof: one, centred on the label point.
+    if (rec.kind === 'box-entrance') {
+      // Sprint 14Oct26w: the label hangs over the entrance block; the one roof roundel is on the HOST's roof, level with the block,
+      // BE.roofInsetM from the host face, bar parallel to the face and upright from the street side; the host's grey wall carries
+      // a ring each side of the block (Fulham Broadway; North Greenwich's 3.2 m canopy holds none).
+      const be = rec.boxEntrance, hs = rec.host, BE2 = R.boxEntrance;
+      const cc = centroid(rec.ring);
+      rec.label = { x: r2(cc[0]), z: r2(cc[1]) };
+      const along = (cc[0] - be.mid[0]) * be.ux + (cc[1] - be.mid[1]) * be.uz;
+      const inward = BE2.roofInsetM + BE2.roofD / 2;
+      roundels.push({ on: 'roof', host: true, x: r2(be.mid[0] + be.ux * along - be.nx * inward), z: r2(be.mid[1] + be.uz * along - be.nz * inward), yM: hs.h,
+        D: BE2.roofD, ax: r4(be.nz), az: r4(-be.nx), ring: rings[0] });
+      for (const sgn of [-1, 1]) {
+        const a0 = along + sgn * BE2.hostRingGapM;
+        const groundIn = (aC, W) => {
+          let m = 0;
+          for (let t = aC - W / 2; t <= aC + W / 2 + 1e-9; t += RK.latticeStepM) for (const off of RK.groundOffM) {
+            const y = groundOf ? groundOf(be.mid[0] + be.ux * t + be.nx * off, be.mid[1] + be.uz * t + be.nz * off) : null;
+            if (Number.isFinite(y)) m = Math.max(m, y - hs.baseM);
+          }
+          return m;
+        };
+        let D = 6, g = 0;
+        for (let it = 0; it < 4; it++) {
+          g = groundIn(a0, D * widthPerD);
+          const Dn = Math.min(RK.wallMaxD, RK.wallFrac * (hs.h - RK.designMaster * g), hs.h - RK.clearM - 3 * g);
+          if (Math.abs(Dn - D) < 0.005) { D = Dn; break; }
+          D = Dn;
+        }
+        g = groundIn(a0, D * widthPerD);
+        D = Math.min(RK.wallMaxD, RK.wallFrac * (hs.h - RK.designMaster * g), hs.h - RK.clearM - 3 * g);
+        const W = D * widthPerD;
+        if (D < RK.minRingD || Math.abs(a0) + W / 2 > hs.side / 2 - 1) continue;
+        roundels.push({ on: 'wall', host: true, x: r2(be.mid[0] + be.ux * a0 + be.nx * RK.proud), z: r2(be.mid[1] + be.uz * a0 + be.nz * RK.proud),
+          yM: r2(RK.designMaster * g + RK.clearM + D / 2), gM: r2(g), D: r2(D), nx: r4(be.nx), nz: r4(be.nz), ring: rings[0] });
+      }
+    } else {
     const lp = rec.outline ? labelPoint(rec.outline) : { x: rec.pavilion.cx, z: rec.pavilion.cz, d: Math.min(rec.pavilion.w, rec.pavilion.d) / 2 };
     rec.label = { x: r2(lp.x), z: r2(lp.z) };
     const mar = minAreaRect(rec.ring);
@@ -590,7 +741,11 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     const roofD = Math.min(RK.roofShortFrac * mar.d, RK.roofEdgeFrac * lp.d, RK.roofMaxD);
     const bar = longest ? [longest.n[1], -longest.n[0]] : [Math.cos(mar.angle), Math.sin(mar.angle)];
     roundels.push({ on: 'roof', x: rec.label.x, z: rec.label.z, yM: H, D: r2(Math.max(3.4, roofD)), ax: r4(bar[0]), az: r4(bar[1]), ring: rings[0] });
+    }
     rec.roundels = roundels;
+    // riseM: the lattice rise, and never less than a wall ring's own street (the rings are placed at <= 1 m steps, the lattice's
+    // edges too, but a ring slides): rounded UP to the data's 0.01 m so riseM >= every gM as written.
+    rec.riseM = Math.ceil(Math.max(rec.latticeRise ?? 0, ...roundels.filter(q => q.on === 'wall' && !q.host).map(q => q.gM ?? 0)) * 100 - 1e-6) / 100;
     if (!rec.fronts.length) rec.flags.add('no-walkable-front');
   }
 
@@ -648,6 +803,12 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
         const sa = a.n[0] * (mid(a)[0] - sp[0]) + a.n[1] * (mid(a)[1] - sp[1]), sb = b.n[0] * (mid(b)[0] - sp[0]) + b.n[1] * (mid(b)[1] - sp[1]);
         return (sb - sa) || (a.i - b.i);
       });
+    } else if (rec.kind === 'box-entrance') {
+      // The exit is on the block's FRONT face (the one facing the street, parallel to the host's), never a side.
+      const fc = rec.host.face, facing = (f) => f.n[0] * fc[0] + f.n[1] * fc[1];
+      fronts.sort((a, b) => (facing(b) - facing(a)) || (b.L - a.L) || (a.i - b.i));
+      if (fronts.length && facing(fronts[0]) < 0.99) throw new Error(`${rec.key}: the block has no free front face`);
+      fronts = fronts.filter(f => facing(f) > 0.99).concat(fronts.filter(f => facing(f) <= 0.99));
     } else {
       const dseg = (f) => nearestOnSegment(sp[0], sp[1], f.a[0], f.a[1], f.b[0], f.b[1]).d;
       fronts.sort((a, b) => (dseg(a) - dseg(b)) || (a.i - b.i));
@@ -736,6 +897,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       rec.flags.add('exit-fallback');
     }
     rec.exit = { x: r2(exit.x), z: r2(exit.z), yaw: r4(exit.yaw) };
+    if (rec.kind === 'box-entrance' && (rec.flags.has('exit-fallback') || rec.flags.has('exit-street'))) throw new Error(`${rec.key}: its exit is a fallback (${[...rec.flags]}); look at the site`);
   }
 
   // ── Sites table, review rows, counts ──
@@ -748,7 +910,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       rec = outlineOf.get(p.b.id);
       if (p.low || p.rule === 'distance' && p.d > R.distLowConfM) { conf = 'low'; note(s, p.rule === 'name' ? 'name pick beyond 150 m' : 'distance pick beyond 60 m', p.b, { detail: `${Math.round(p.d)} m, ${Math.round(p.b.area)} m2` }); }
       else if (p.rule === 'distance' && p.d > R.distLowConfM) conf = 'low';
-    } else rec = pavilionRecs.find(r => r.pavilionSite === s);
+    } else rec = boxEntranceRecs.find(r => r.sites[0] === s) ?? pavilionRecs.find(r => r.pavilionSite === s);
     if (!rec) throw new Error(`site ${s.key} has no building`);
     if (rec.areaOnly) { conf = 'low'; note(s, 'area-only site', null, { detail: 'only a public_transport=station area is mapped near it: a pavilion, no hide' }); }
     siteTable[s.key] = { name: s.name, nets: NETS.filter(n => s.nets.has(n)), building: rec.key, confidence: conf };
@@ -758,18 +920,32 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   for (const rec of buildingsById.values()) if (rec.sites.length > 1) shared.set(rec.key, rec);
   for (const rec of shared.values()) note(rec.sites[0], 'building shared by sites', rec.osm, { detail: rec.sites.map(s => s.name).join(', ') });
   for (const rec of buildingsById.values()) for (const f of rec.flags) {
-    if (/^(landmark-overlap|no-walkable-front|exit-fallback|exit-fan-blocked|exit-street|dual-roundel|overlap|substituted)/.test(f)) note(rec.sites[0], `flag ${f}`, rec.osm, { detail: `building ${rec.key}` });
+    if (/^(landmark-overlap|no-walkable-front|exit-fallback|exit-fan-blocked|exit-street|dual-roundel|overlap|substituted|street-near-roof|entrance-slid)/.test(f)) note(rec.sites[0], `flag ${f}`, rec.osm, { detail: `building ${rec.key}` });
+  }
+  // Sprint 14Oct26w: the two box-entrance sites (the host box that stays, and the entrance block), and every height that changed
+  // from the 02Oct26f data (the tracked scripts/station-building-heights-bf10309.json: building key -> height).
+  for (const rec of boxEntranceRecs) {
+    const h = rec.host;
+    note(rec.sites[0], 'box-entrance host', null, { building: rec.key, detail: `host box centre (${h.x}, ${h.z}), side ${h.side} m, ${h.h} m tall, base ${h.baseM} m; it stays an ordinary map box (not hidden)` });
+    note(rec.sites[0], 'box-entrance block', null, { building: rec.key, detail: `${R.boxEntrance.w} x ${R.boxEntrance.d} m against the host's ${h.face[1] < 0 ? 'north' : 'other'} face, ${rec.height} m tall, ${rec.roundels.filter(q => q.on === 'wall').length} wall roundels, exit (${rec.exit.x}, ${rec.exit.z})` });
+  }
+  const heightChanges = [];
+  if (priorHeights) for (const rec of buildingsById.values()) {
+    const old = priorHeights[rec.key];
+    if (old === undefined) { if (rec.kind === 'box-entrance') heightChanges.push({ key: rec.key, old: null, new: rec.height }); continue; }
+    if (Math.abs(old - rec.height) > 0.005) { heightChanges.push({ key: rec.key, old, new: rec.height }); note(rec.sites[0], 'height changed', rec.osm, { building: rec.key, detail: `${old} m to ${rec.height} m (${rec.heightSource})` }); }
   }
 
   const outBuildings = [...buildingsById.values()].sort((a, b) => (a.key < b.key ? -1 : 1)).map(rec => {
     const o = { key: rec.key, title: rec.title, names: rec.names, nets: rec.nets, kind: rec.kind, areaOnly: !!rec.areaOnly };
     if (rec.outline) o.outline = rec.outline.map(p => [r2(p[0]), r2(p[1])]); else o.pavilion = rec.pavilion;
-    o.height = rec.height; o.heightSource = rec.heightSource;
+    if (rec.host) o.host = rec.host;
+    o.height = rec.height; o.heightSource = rec.heightSource; o.riseM = rec.riseM;
     o.label = rec.label; o.exit = rec.exit; o.roundels = rec.roundels; o.flags = [...rec.flags].sort();
     if (rec.osm) o.source = { osm: rec.osm.id, name: rec.osm.name || undefined, areaM2: Math.round(rec.osm.area) };
     return o;
   });
-  const counts = { sites: siteList.length, buildings: outBuildings.length, outlineSites: 0, outlineBuildings: outlineRecs.length, 'pavilion-entrance': 0, 'pavilion-point': 0, 'pavilion-viaduct': 0, areaOnly: 0 };
+  const counts = { sites: siteList.length, buildings: outBuildings.length, outlineSites: 0, outlineBuildings: outlineRecs.length, 'pavilion-entrance': 0, 'pavilion-point': 0, 'pavilion-viaduct': 0, 'box-entrance': 0, areaOnly: 0 };
   for (const s of siteList) {
     const b = buildingsById.get(siteTable[s.key].building);
     if (b.kind === 'outline') counts.outlineSites++; else counts[b.kind]++;
@@ -792,7 +968,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     buildings: outBuildings,
     stats: { ...counts, hiddenBakedBoxes: hiddenCount, lowConfidenceSites: lowConf.size },
   };
-  return { json, review, counts, hidden: hiddenCount };
+  return { json, review, counts, hidden: hiddenCount, heightChanges };
 }
 
 function segmentsCross(a, b, c, d) {
@@ -802,6 +978,7 @@ function segmentsCross(a, b, c, d) {
 }
 
 export function reviewMarkdown(review, counts, json) {
+  const flagged = (f) => json.buildings.filter(b => (b.flags || []).includes(f)).length;
   const rows = review.slice().sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.kind < b.kind ? -1 : 1));
   const esc = (s) => String(s ?? '').replace(/\|/g, '/');
   const lines = [
@@ -810,7 +987,8 @@ export function reviewMarkdown(review, counts, json) {
     'Written by `scripts/prepare-station-buildings.mjs` (deterministic; do not edit by hand).',
     `Overpass source sha256 \`${json.source.overpassSha256}\`; baked payload \`${json.source.bakedPayloadSha256}\`.`,
     '',
-    `Sites ${counts.sites}; buildings ${counts.buildings}; sites on a true outline ${counts.outlineSites} (${counts.outlineBuildings} distinct buildings); entrance pavilions ${counts['pavilion-entrance']}; point pavilions ${counts['pavilion-point']}; viaduct pavilions ${counts['pavilion-viaduct']}; area-only sites ${counts.areaOnly}; baked boxes hidden ${json.stats.hiddenBakedBoxes}.`,
+    `Sites ${counts.sites}; buildings ${counts.buildings}; sites on a true outline ${counts.outlineSites} (${counts.outlineBuildings} distinct buildings); entrance pavilions ${counts['pavilion-entrance']}; point pavilions ${counts['pavilion-point']}; viaduct pavilions ${counts['pavilion-viaduct']}; box-entrance sites ${counts['box-entrance'] ?? 0}; area-only sites ${counts.areaOnly}; baked boxes hidden ${json.stats.hiddenBakedBoxes}.`,
+    `Flags in the data: exit-fallback ${flagged('exit-fallback')}; exit-street ${flagged('exit-street')}; street-near-roof ${flagged('street-near-roof')}.`,
     '',
     '| Site | Kind | Building | Name | Detail |', '|---|---|---|---|---|',
     ...rows.map(r => `| ${esc(r.site)} | ${esc(r.kind)} | ${esc(r.building)} | ${esc(r.bname)} | ${esc(r.detail)} |`),
@@ -855,7 +1033,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const arg = (k) => { const i = argv.indexOf(k); return i > -1 ? argv[i + 1] : null; };
   const out = arg('--out') ? path.resolve(arg('--out')) : DEFAULT_OUT;
-  const reviewPath = argv.includes('--no-review') ? null : (arg('--review') ?? DEFAULT_REVIEW);
+  const reviewPath = argv.includes('--no-review') ? null : arg('--review');
   let raw;
   if (argv.includes('--refetch')) {
     const res = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(OVERPASS_QUERY), headers: { 'content-type': 'application/x-www-form-urlencoded' } });
@@ -875,12 +1053,13 @@ async function main() {
   const dlrTrack = await loadDlrTrack();
   const { boxes, payloadSha256 } = await loadBakedBoxes([...sites.values()].map(s => s.p));
   const { riseOf, groundOf } = await terrainRise();
-  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf, groundOf });
+  const priorHeights = await readFile(PRIOR_HEIGHTS, 'utf8').then(JSON.parse).catch(() => null);
+  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf, groundOf, priorHeights });
   await writeFile(out, JSON.stringify(res.json) + '\n');
   if (reviewPath) await writeFile(reviewPath, reviewMarkdown(res.review, res.counts, res.json));
   console.log('sites', res.counts.sites, JSON.stringify(res.counts));
   console.log('hidden baked boxes', res.hidden, '; wrote', out, `(${(JSON.stringify(res.json).length / 1024).toFixed(0)} KiB)`);
-  if (reviewPath) console.log('review', reviewPath, res.review.length, 'rows');
+  console.log(reviewPath ? `review ${reviewPath} ${res.review.length} rows` : 'review: skipped');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {

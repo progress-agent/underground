@@ -19,7 +19,8 @@ import {
   shoelace, orient, ringArea, centroid, pointInRing, nearestOnRing, simplifyRing, rectRing, convexOverlap, boxRing, footprintOf,
   distToRing, edgeNormal, yawFacing, minAreaRect, labelPoint,
 } from '../src/station-building-geometry.js';
-import { createStationBuildingIndex, entrancesForBuilding, siteKeyOf, networksLine, rayBlockedByBoxes, rayBlockedByGround } from '../src/station-buildings.js';
+import { createStationBuildingIndex, entrancesForBuilding, siteKeyOf, networksLine, rayBlockedByBoxes, rayBlockedByGround, displayedRoofY, roundelExtent } from '../src/station-buildings.js';
+import * as builder from '../scripts/prepare-station-buildings.mjs';
 import { compileStationBuildings, RULES, nameTokens, llToXZ } from '../scripts/prepare-station-buildings.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -434,11 +435,14 @@ test('data: counts by kind (B1.4) and the named sites (B1.5)', { skip: !have }, 
   }
   assert.ok(outlineSites >= 265 && outlineSites <= 305, `outline sites ${outlineSites}`);
   assert.ok(data.buildings.filter(b => b.outline).length >= 260);
-  assert.ok(by['pavilion-entrance'] >= 45 && by['pavilion-entrance'] <= 80, JSON.stringify(by));
+  // Sprint 14Oct26w (D-052 item 2): Fulham Broadway and North Greenwich leave the entrance pavilions for a `box-entrance`
+  // building each: 62 entrance pavilions on bf10309, 60 now, and exactly two box-entrance (the acceptance's B14-1.3 range 43 to 78).
+  assert.ok(by['pavilion-entrance'] >= 43 && by['pavilion-entrance'] <= 78, JSON.stringify(by));
+  assert.equal(by['box-entrance'], 2, JSON.stringify(by));
   assert.ok(by['pavilion-point'] >= 20 && by['pavilion-point'] <= 45, JSON.stringify(by));
   assert.ok(by['pavilion-viaduct'] >= 9 && by['pavilion-viaduct'] <= 14, JSON.stringify(by));
   assert.ok(areaOnly >= 8 && areaOnly <= 16, `area-only ${areaOnly}`);
-  assert.equal(outlineSites + by['pavilion-entrance'] + by['pavilion-point'] + by['pavilion-viaduct'], Object.keys(data.sites).length);
+  assert.equal(outlineSites + by['pavilion-entrance'] + by['pavilion-point'] + by['pavilion-viaduct'] + by['box-entrance'], Object.keys(data.sites).length);
   const B = (k) => data.buildings.find(b => b.key === data.sites[k].building);
   const area = (k) => { const b = B(k); return b.outline ? ringArea(b.outline) : 0; };
   assert.ok(B('kings-cross-st-pancras').outline && B('kings-cross-st-pancras').source.areaM2 >= 20000);
@@ -522,4 +526,106 @@ test('data: the builder reproduces the tracked file byte for byte (B1.2)', { ski
 test('data: llToXZ is the app projection (the Trafalgar origin maps to 0, 0)', () => {
   const [x, z] = llToXZ(51.5074, -0.1278);
   assert.ok(Math.abs(x) < 1e-6 && Math.abs(z) < 1e-6);
+});
+
+// ── 5. Sprint 14Oct26w, lane B: the box-entrance sites, the rise, the review, the displayed extents ──────────────
+
+test('data: Fulham Broadway and North Greenwich are box-entrance buildings and nothing else is (B14-2.1, B14-1.3)', { skip: !have }, () => {
+  const be = data.buildings.filter(b => b.kind === 'box-entrance');
+  assert.deepEqual(be.map(b => b.key).sort(), ['be-fulham-broadway', 'be-north-greenwich']);
+  assert.deepEqual(data.buildings.filter(b => b.host).map(b => b.key).sort(), be.map(b => b.key).sort(), 'only they carry a host');
+  assert.equal(data.buildings.filter(b => b.kind !== 'box-entrance' && b.kind !== 'outline' && !/^pavilion-/.test(b.kind)).length, 0);
+  const want = { 'fulham-broadway': { x: -4556.0, z: 3090.0, side: 90.6, h: 10.0 }, 'north-greenwich': { x: 9138.0, z: 555.0, side: 85.5, h: 3.2 } };
+  for (const [site, w] of Object.entries(want)) {
+    const b = data.buildings.find(q => q.key === data.sites[site].building);
+    assert.equal(b.kind, 'box-entrance');
+    const xs = b.outline.map(p => p[0]), zs = b.outline.map(p => p[1]);
+    const sx = Math.max(...xs) - Math.min(...xs), sz = Math.max(...zs) - Math.min(...zs);
+    assert.ok(Math.abs(sx - 24) <= 0.1 && Math.abs(sz - 7) <= 0.1, `${site}: ${sx} x ${sz}`);
+    assert.ok(Math.abs(b.host.x - w.x) <= 0.2 && Math.abs(b.host.z - w.z) <= 0.2 && Math.abs(b.host.side - w.side) <= 0.2 && Math.abs(b.host.h - w.h) <= 0.1, JSON.stringify(b.host));
+    const half = b.host.side / 2;
+    for (const [x, z] of b.outline) assert.ok(Math.abs(x - b.host.x) >= half - 0.1 || Math.abs(z - b.host.z) >= half - 0.1, `${site}: a vertex inside the host`);
+    const c = centroid(b.outline);
+    assert.ok(c[1] < b.host.z - half, `${site}: the block is north of the host`);
+    assert.ok(b.height >= 7 && b.height <= 30);
+    // the host stays a map box: its centre is in no footprint, so it is not hidden; the block hides nothing of it
+    const idx = createStationBuildingIndex(data);
+    assert.equal(idx.hidesBox({ x: b.host.x, z: b.host.z }), false, `${site}: the host box is hidden`);
+    assert.ok(Math.hypot(c[0] - b.host.x, c[1] - b.host.z) >= 30);
+    // roundels on part of its sides (the block's three outside faces and, at Fulham Broadway, the host's wall) and one on the host roof
+    const walls = b.roundels.filter(r => r.on === 'wall'), roofs = b.roundels.filter(r => r.on === 'roof');
+    assert.equal(roofs.length, 1);
+    assert.ok(roofs[0].host && roofs[0].D >= 7 && roofs[0].D <= 24 && Math.abs(roofs[0].yM - b.host.h) <= 0.05);
+    assert.ok(Math.abs(roofs[0].x - b.host.x) <= half && Math.abs(roofs[0].z - b.host.z) <= half, 'the roof roundel is on the host');
+    assert.ok(walls.length >= (site === 'fulham-broadway' ? 5 : 3), `${site}: ${walls.length} wall roundels`);
+    for (const r of walls) {
+      assert.ok(r.D >= 3.4 && r.D <= 6, `${site}: ring ${r.D}`);
+      assert.ok(Math.hypot(r.x - c[0], r.z - c[1]) <= 32);
+      if (Math.abs(r.nx) > 0.5) assert.ok(!r.host, `${site}: a ring on the host's east or west face`);
+      if (!r.host) assert.ok(r.gM <= b.riseM + 1e-9);
+    }
+    assert.equal(b.flags.includes('exit-fallback'), false);
+    const d = distToRing(b.exit.x, b.exit.z, b.outline);
+    assert.ok(d >= 5.5 && d <= 7.0, `${site}: exit ${d}`);
+    assert.ok(Math.abs(Math.cos(b.exit.yaw) + 1) < 1e-3 || Math.abs(b.exit.yaw) < 1e-3, `${site}: the exit faces north, away from the host (yaw 0)`);
+  }
+  assert.equal(data.stats['box-entrance'], 2);
+});
+
+test('data: riseM on every building, heights 6 to 30, and the lift is zero at the design Master (B14-1.4, B14-5.5)', { skip: !have }, () => {
+  for (const b of data.buildings) {
+    assert.ok(Number.isFinite(b.riseM) && b.riseM >= 0, `${b.key} has riseM`);
+    for (const r of b.roundels) if (r.on === 'wall' && !r.host) assert.ok(b.riseM >= r.gM - 1e-9, `${b.key}: riseM ${b.riseM} < gM ${r.gM}`);
+    assert.ok(b.height >= 6 && b.height <= 30, `${b.key}: ${b.height}`);
+    // a building the street is near the roof of has a flag; the others stand 2 m over 1.1 x their highest street at 1.1
+    if (!b.flags.includes('street-near-roof') && !b.pavilion) assert.ok(b.height >= 1.1 * b.riseM + 2 - 0.01, `${b.key}: height ${b.height} for rise ${b.riseM}`);
+    // no lift at 1.0 or 1.1: the displayed roof is the plain height, and every roundel is where the data put it
+    for (const M of [1, 1.1]) assert.ok(Math.abs(displayedRoofY(b, 0, 1 / M) - b.height * 5 / M) < 1e-9);
+  }
+  assert.ok(data.buildings.filter(b => b.flags.includes('street-near-roof')).length <= 3);
+  // the 02Oct26f heights are tracked; the review lists what changed
+  const prior = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/station-building-heights-bf10309.json'), 'utf8'));
+  assert.equal(Object.keys(prior).length, 396);
+  for (const b of data.buildings) if (prior[b.key] !== undefined) assert.ok(b.height >= prior[b.key] - 1e-9, `${b.key}: a height only ever grows (${prior[b.key]} to ${b.height})`);
+});
+
+test('displayedRoofY and roundelExtent: the roof and the rings rise with the street above 1.1, never below the plain height', () => {
+  const b = { height: 10, riseM: 4, host: null };
+  assert.equal(displayedRoofY(b, 100, 1 / 1.1), 100 + 10 * 5 / 1.1);
+  const r15 = displayedRoofY(b, 100, 1 / 1.5) - (100 + 10 * 5 / 1.5);
+  assert.ok(Math.abs(r15 - 4 * 0.4 * 5 / 1.5) < 1e-9, 'rises riseM x (1.5 - 1.1) true metres');
+  assert.ok(Math.abs(displayedRoofY(b, 100, 1 / 3) - (100 + 10 * 5 / 3) - 4 * 1.9 * 5 / 3) < 1e-9);
+  const ring = { on: 'wall', yM: 4, gM: 2, D: 4 };
+  const at11 = roundelExtent(b, ring, 100, 1 / 1.1), at3 = roundelExtent(b, ring, 100, 1 / 3);
+  // true metres above the base: 2 to 6 at 1.1; at 3 the ring has risen by gM x 1.9
+  assert.ok(Math.abs((at11.bottomY - 100) / (5 / 1.1) - 2) < 1e-9);
+  assert.ok(Math.abs((at3.bottomY - 100) / (5 / 3) - (2 + 2 * 1.9)) < 1e-9);
+  // a host ring is capped by the wall left above it (the box does not grow)
+  const hostB = { height: 7, riseM: 0, host: { h: 10, baseM: 3 } };
+  const hr = { on: 'wall', host: true, yM: 3.4, gM: 5, D: 6 };
+  const h3 = roundelExtent(hostB, hr, 0, 1 / 3);
+  assert.ok(Math.abs((h3.topY - 15) / (5 / 3) - 10) < 1e-9, 'its top stops at the host roof');
+  const roof = roundelExtent(b, { on: 'roof', yM: 10, D: 7 }, 100, 1 / 1.5);
+  assert.ok(Math.abs(roof.bottomY - (100 + (10 + 0.05) * 5 / 1.5 + 4 * 0.4 * 5 / 1.5)) < 1e-9);
+});
+
+test('the review is written only with --review (no default path), and its header counts equal the data (B14-7.1)', { skip: !have || !fs.existsSync(bakedFile) || !fs.existsSync(cacheFile), timeout: 180000 }, () => {
+  assert.equal(builder.DEFAULT_REVIEW, undefined, 'the Studio path that does not exist on the laptop is gone');
+  const tmp = path.join(process.env.TMPDIR || '/tmp', `sb-review-${process.pid}`);
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    const none = execFileSync(process.execPath, [path.join(ROOT, 'scripts/prepare-station-buildings.mjs'), '--out', path.join(tmp, 'a.json')], { cwd: tmp, stdio: 'pipe' }).toString();
+    assert.match(none, /review: skipped/);
+    assert.deepEqual(fs.readdirSync(tmp), ['a.json'], 'nothing but the data was written');
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts/prepare-station-buildings.mjs'), '--out', path.join(tmp, 'b.json'), '--review', path.join(tmp, 'r.md')], { cwd: tmp, stdio: 'pipe' });
+    assert.ok(fs.readFileSync(path.join(tmp, 'a.json')).equals(fs.readFileSync(JSON_PATH)) && fs.readFileSync(path.join(tmp, 'b.json')).equals(fs.readFileSync(JSON_PATH)));
+    const md = fs.readFileSync(path.join(tmp, 'r.md'), 'utf8'), st = data.stats;
+    assert.ok(md.includes(`Sites ${st.sites}; buildings ${st.buildings}; sites on a true outline ${st.outlineSites} (${st.outlineBuildings} distinct buildings); entrance pavilions ${st['pavilion-entrance']}; point pavilions ${st['pavilion-point']}; viaduct pavilions ${st['pavilion-viaduct']}; box-entrance sites ${st['box-entrance']}; area-only sites ${st.areaOnly}; baked boxes hidden ${st.hiddenBakedBoxes}.`), 'the header counts');
+    const flagged = (f) => data.buildings.filter(b => b.flags.includes(f)).length;
+    assert.ok(md.includes(`exit-fallback ${flagged('exit-fallback')}; exit-street ${flagged('exit-street')}; street-near-roof ${flagged('street-near-roof')}.`));
+    assert.match(md, /box-entrance host/); assert.match(md, /box-entrance block/);
+    const prior = JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts/station-building-heights-bf10309.json'), 'utf8'));
+    for (const b of data.buildings) if (prior[b.key] !== undefined && Math.abs(prior[b.key] - b.height) > 0.005) assert.ok(md.includes(`${prior[b.key]} m to ${b.height} m`), `a row for the height change of ${b.key}`);
+    // the 02Oct26f review file, left alone, still says what it said
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
