@@ -333,8 +333,8 @@ export function createCollisionService({
   return {
     // ── s14:S ──
     setSolidSources: (sources) => solidWorld.setSources(sources || {}),
-    ceilingAt: (x, z, feetY) => solidWorld.ceilingAt(x, z, feetY),
-    segmentHitsSolids: (a, b) => solidWorld.segmentHits(a.x, a.y, a.z, b.x, b.y, b.z),
+    ceilingAt: (x, z, feetY) => { solidWorld.update(); return solidWorld.ceilingAt(x, z, feetY); },
+    segmentHitsSolids: (a, b) => { solidWorld.update(); return solidWorld.segmentHits(a.x, a.y, a.z, b.x, b.y, b.z); },
     solidStats: () => solidWorld.stats(),
     // ── /s14:S ──
     sync,

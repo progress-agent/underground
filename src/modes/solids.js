@@ -429,24 +429,41 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   let motorSegments = 0;
   let errors = [];
   let version = 0, buildMs = 0;
-  let sig = null, sigNow = [], recList = [], recFor = null;
+  let sig = null, recList = [], recFor = null;
   let scale = 1;
   const gather = { rects: [], prisms: [] };
 
-  function snapshot() {
-    const out = sigNow; out.length = 0;
+  // The signature is compared in place as the sources are read, so the common case (nothing changed)
+  // allocates nothing: group identities, visibility, the motorway's height scale and each bridge deck's
+  // position-attribute version (a Master morph bumps it).
+  let cmpAt = 0, cmpOk = true;
+  const cmp = (v) => { if (cmpOk) { if (!sig || sig[cmpAt] !== v) cmpOk = false; } cmpAt++; };
+  function compareSources() {
+    cmpAt = 0; cmpOk = !!sig;
     const bg = sources.bridges?.() ?? null, mw = sources.motorway?.() ?? null, sb = sources.stationBuildings?.() ?? null;
     const bShown = shown(bg), mShown = shown(mw), sShown = !!sb && shown(sb.meshes?.group);
-    out.push(idOf(bg), bShown ? 1 : 0, idOf(mw), mShown ? 1 : 0, mShown ? getHeightScale() : 0,
-      idOf(sb?.index), idOf(sb?.meshes), sShown ? 1 : 0);
+    cmp(idOf(bg)); cmp(bShown ? 1 : 0); cmp(idOf(mw)); cmp(mShown ? 1 : 0); cmp(mShown ? getHeightScale() : 0);
+    cmp(idOf(sb?.index)); cmp(idOf(sb?.meshes)); cmp(sShown ? 1 : 0);
     if (bShown) {
       const reg = bg.userData?.registry;
-      if (recFor !== reg || recList.length !== (reg?.size ?? 0)) { recFor = reg; recList = reg ? [...reg.values()] : []; }
-      for (const rec of recList) {
-        out.push(rec.group?.visible === false ? 0 : 1, rec.deckMesh?.geometry?.attributes?.position?.version ?? -1);
+      if (recFor !== reg || recList.length !== (reg?.size ?? 0)) { recFor = reg; recList = reg ? [...reg.values()] : []; cmpOk = false; }
+      cmp(recList.length);
+      for (let i = 0; i < recList.length; i++) {
+        const rec = recList[i];
+        cmp(rec.group?.visible === false ? 0 : 1); cmp(rec.deckMesh?.geometry?.attributes?.position?.version ?? -1);
       }
     }
-    return { out, bg, mw, sb, bShown, mShown, sShown };
+    if (sig && cmpAt !== sig.length) cmpOk = false;
+    return { bg, mw, sb, bShown, mShown, sShown };
+  }
+  function writeSignature(s) {
+    const out = [idOf(s.bg), s.bShown ? 1 : 0, idOf(s.mw), s.mShown ? 1 : 0, s.mShown ? getHeightScale() : 0,
+      idOf(s.sb?.index), idOf(s.sb?.meshes), s.sShown ? 1 : 0];
+    if (s.bShown) {
+      out.push(recList.length);
+      for (const rec of recList) out.push(rec.group?.visible === false ? 0 : 1, rec.deckMesh?.geometry?.attributes?.position?.version ?? -1);
+    }
+    sig = out;
   }
 
   function rebuild(s) {
@@ -477,13 +494,10 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   /** Re-read the sources; rebuild only if the signature moved. Returns true if rebuilt. */
   function update() {
-    const s = snapshot();
     scale = getHeightScale();
-    const o = s.out;
-    let same = sig && sig.length === o.length;
-    if (same) for (let i = 0; i < o.length; i++) if (sig[i] !== o[i]) { same = false; break; }
-    if (same) return false;
-    sig = o.slice();
+    const s = compareSources();
+    if (cmpOk) return false;
+    writeSignature(s);
     rebuild(s);
     return true;
   }
@@ -522,7 +536,6 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   /** What a body can stand on from the new solids: the highest top at (x, z), or NEG. */
   function standOn(x, z, feetY, step) {
-    update();
     let best = NEG;
     for (const layer of layers()) {
       if (!layer.grid) continue;
@@ -547,7 +560,6 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   /** The lowest underside above feetY over (x, z), or null. */
   function ceilingAt(x, z, feetY) {
-    update();
     let best = Infinity;
     for (const layer of [bridgeLayer, motorLayer]) {
       if (!layer.grid) continue;
@@ -568,7 +580,6 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
    * station prisms (gather.prisms), for the body span [F, H] and the swept AABB [x0,x1]x[z0,z1].
    */
   function gatherFor(x0, x1, z0, z1, px, pz, radius, F, H, step) {
-    update();
     const rects = gather.rects, prisms = gather.prisms;
     rects.length = 0; prisms.length = 0;
     for (const layer of layers()) {
@@ -648,7 +659,6 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
    * First hit fraction of the segment a -> b over the DRAWN new solids, in [1e-6, 1], or null.
    */
   function segmentHits(ax, ay, az, bx, by, bz) {
-    update();
     const dx = bx - ax, dy = by - ay, dz = bz - az;
     const minX = Math.min(ax, bx), maxX = Math.max(ax, bx), minZ = Math.min(az, bz), maxZ = Math.max(az, bz);
     let best = Infinity;
