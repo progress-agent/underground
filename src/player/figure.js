@@ -14,9 +14,10 @@
 // `heightM` tall on screen at every Master. Original glTF materials are untouched (original colours, D-049).
 //
 // ANIMATION. A clip is chosen from the state (ground speed bands, air, swim), cross-faded, and time-scaled to
-// the ground speed so the feet do not skate. Procedural poses (lane D's stance and push, the flying pose later in
-// this lane) are registered with registerPose and blend in over the clip after the mixer has run.
+// the ground speed so the feet do not skate. Procedural poses (the flying pose here, lane D's stance and push)
+// are registered with registerPose and blend in over the clip after the mixer has run.
 import { composeTrueProportionMatrix } from '../true-proportion.js';
+import { registerFlyPose } from './fly-pose.js';
 
 const damp = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -130,6 +131,9 @@ export function createFigure({ THREE, gltf, manifest }) {
     get heading() { return heading; },
     debug: () => ({ clip: currentName, lift, poseWeights: Object.fromEntries([...poses].map(([n, p]) => [n, p.w])) }),
   };
+
+  // The flying pose reads the bind pose (the hands' rest orientation), so it registers before anything poses.
+  registerFlyPose(figure, THREE);
 
   // Stand it in its idle pose, measure it, scale it to a person and put its feet on y = 0 (as the mock does).
   const idle = actions.get(manifest.clips.idle);

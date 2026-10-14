@@ -362,6 +362,11 @@ buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale
 
 const CAST_AND_RECEIVE_GROUPS = new Set(['landmarks', 'bridges', 'station-buildings']);
 const RECEIVE_GROUPS = new Set(['overground', 'm25Motorway', 'airports']);
+// ── s14:P ── the player (src/player/): the figure takes building shadows and casts none into the sun's map (its own
+// shadow is a planar projection, figure-shadow.js: the 2048-texel map is about 1.5 m a texel). Without this line
+// applyShadowPolicy would force the group out of the shadow pass.
+RECEIVE_GROUPS.add('player');
+// ── /s14:P ──
 
 /**
  * Decide castShadow/receiveShadow for one top-level scene child and its
