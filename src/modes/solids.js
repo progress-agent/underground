@@ -455,32 +455,34 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   let scale = 1;
   const gather = { rects: [], prisms: [] };
 
-  // The source check runs on every query, so it allocates nothing and does the least that is exact: the three
-  // source objects by identity, their shown flags, the motorway's height scale, and for each bridge deck its
-  // group's visibility and its position attribute's version (a Master morph bumps it).
+  // The source check runs on every query, so it allocates nothing it can avoid and does the least that is exact: the
+  // three source objects by identity, their shown flags, the motorway's height scale, and for the bridges each
+  // group's visibility plus the position-attribute version of the last deck (one Master morph rewrites every deck in a
+  // single synchronous call, so that one version stands for all 41). Each layer rebuilds on its own: a Master morph
+  // rebuilds the bridges and the motorway but never the 396 station prisms.
   let last = { bg: null, mw: null, index: null, meshes: null, b: false, m: false, s: false, mScale: 0, reg: null }, built = false;
   let watch = [], canary = null;
   function compareSources() {
     const bg = sources.bridges?.() ?? null, mw = sources.motorway?.() ?? null, sb = sources.stationBuildings?.() ?? null;
     const bShown = shown(bg), mShown = shown(mw), sShown = !!sb && shown(sb.meshes?.group);
-    const s = { bg, mw, sb, bShown, mShown, sShown, same: false };
     const mScale = mShown ? getHeightScale() : 0;
-    if (!built || bg !== last.bg || mw !== last.mw || (sb?.index ?? null) !== last.index || (sb?.meshes ?? null) !== last.meshes
-      || bShown !== last.b || mShown !== last.m || sShown !== last.s || mScale !== last.mScale) return s;
-    if (bShown) {
+    const s = { bg, mw, sb, bShown, mShown, sShown, mScale, b: !built, m: !built, s: !built, same: false };
+    if (!built) return s;
+    if (bg !== last.bg || bShown !== last.b) s.b = true;
+    else if (bShown) {
       const reg = bg.userData?.registry ?? null;
-      if (reg !== last.reg || (reg?.size ?? 0) !== watch.length) return s;
-      // One morph rewrites every deck in a single synchronous call, so the last deck's position-attribute
-      // version stands for all of them; each group's visibility is read on its own.
-      if (canary && (canary.attr.version !== canary.ver || canary.rec.deckMesh !== canary.mesh)) return s;
-      for (let i = 0; i < watch.length; i++) if (watch[i].group.visible !== watch[i].vis) return s;
+      if (reg !== last.reg || (reg?.size ?? 0) !== watch.length) s.b = true;
+      else if (canary && (canary.attr.version !== canary.ver || canary.rec.deckMesh !== canary.mesh)) s.b = true;
+      else for (let i = 0; i < watch.length; i++) if (watch[i].group.visible !== watch[i].vis) { s.b = true; break; }
     }
-    s.same = true;
+    if (mw !== last.mw || mShown !== last.m || mScale !== last.mScale) s.m = true;
+    if ((sb?.index ?? null) !== last.index || (sb?.meshes ?? null) !== last.meshes || sShown !== last.s) s.s = true;
+    s.same = !(s.b || s.m || s.s);
     return s;
   }
   function remember(s) {
     last = { bg: s.bg, mw: s.mw, index: s.sb?.index ?? null, meshes: s.sb?.meshes ?? null, b: s.bShown, m: s.mShown, s: s.sShown,
-      mScale: s.mShown ? getHeightScale() : 0, reg: s.bShown ? (s.bg.userData?.registry ?? null) : null };
+      mScale: s.mScale, reg: s.bShown ? (s.bg.userData?.registry ?? null) : null };
     watch = []; canary = null;
     if (s.bShown && last.reg) {
       for (const rec of last.reg.values()) {
@@ -494,31 +496,37 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   function rebuild(s) {
     const t0 = (globalThis.performance ?? Date).now();
-    errors = [];
     scale = getHeightScale();
-    if (s.bShown) {
-      const r = buildBridgeLayer({ group: s.bg, getGroundY, VE, errors });
-      bridgeLayer = layerOf(r.ribbons); bridgeCounts = r.counts;
-    } else { bridgeLayer = emptyLayer(); bridgeCounts = { bridges: 0, decks: 0, ramps: 0, parapets: 0, piers: 0, towers: 0 }; }
-    if (s.mShown) {
-      const r = buildMotorwayLayer({ group: s.mw, getWaterSurfaceY, VE, scale });
-      motorLayer = layerOf(r.ribbons); motorSegments = r.segments;
-    } else { motorLayer = emptyLayer(); motorSegments = 0; }
-    if (s.sShown) {
-      const items = [];
-      const bases = s.sb.meshes.bases, sbVE = s.sb.VE ?? VE;
-      for (const it of s.sb.index.items) {
-        const base = bases?.get(it.building.key);
-        if (!Number.isFinite(base)) continue;
-        items.push(prismOf(it, base, it.building.height * sbVE, 0.5 * sbVE));
-      }
-      stationLayer = layerOf(items);
-    } else stationLayer = emptyLayer();
+    if (s.b) {
+      errors = [];
+      if (s.bShown) {
+        const r = buildBridgeLayer({ group: s.bg, getGroundY, VE, errors });
+        bridgeLayer = layerOf(r.ribbons); bridgeCounts = r.counts;
+      } else { bridgeLayer = emptyLayer(); bridgeCounts = { bridges: 0, decks: 0, ramps: 0, parapets: 0, piers: 0, towers: 0 }; }
+    }
+    if (s.m) {
+      if (s.mShown) {
+        const r = buildMotorwayLayer({ group: s.mw, getWaterSurfaceY, VE, scale });
+        motorLayer = layerOf(r.ribbons); motorSegments = r.segments;
+      } else { motorLayer = emptyLayer(); motorSegments = 0; }
+    }
+    if (s.s) {
+      if (s.sShown) {
+        const items = [];
+        const bases = s.sb.meshes.bases, sbVE = s.sb.VE ?? VE;
+        for (const it of s.sb.index.items) {
+          const base = bases?.get(it.building.key);
+          if (!Number.isFinite(base)) continue;
+          items.push(prismOf(it, base, it.building.height * sbVE, 0.5 * sbVE));
+        }
+        stationLayer = layerOf(items);
+      } else stationLayer = emptyLayer();
+    }
     version++;
     buildMs = (globalThis.performance ?? Date).now() - t0;
   }
 
-  /** Re-read the sources; rebuild only if they moved. Returns true if rebuilt. */
+  /** Re-read the sources; rebuild what moved. Returns true if anything was rebuilt. */
   function update() {
     scale = getHeightScale();
     const s = compareSources();

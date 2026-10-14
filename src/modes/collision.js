@@ -174,7 +174,6 @@ export function createCollisionService({
       next.push(e);
     }
     current = next;
-    solidWorld.update(); // s14:S
     return current.length;
   }
 
