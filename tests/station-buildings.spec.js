@@ -470,31 +470,42 @@ test('roundel colours by network: red and blue at King\'s Cross and Highbury, or
   expect(hi.orange, 'Highbury no orange').toBeLessThan(50);
 });
 
-test('no wall roundel is under the street in front of it at Master 1.1 (fix round 1: 85 of 1,995 were)', async () => {
-  const r = await page.evaluate(() => {
-    const u = window.__ug, g = u.modes.ctx.getStructuralY, sc = u.getBuildingHeightScale(), VE = 5, sb = u.stationBuildings;
-    let n = 0, centreBelow = 0, bottomBelow = 0, topOverRoof = 0; const bad = [];
-    for (const b of sb.data.buildings) {
-      const base = sb.meshes.bases.get(b.key);
-      for (const q of b.roundels) {
-        if (q.on !== 'wall') continue;
+test('no wall roundel is under the street in front of it at Master 1.0, 1.1, 1.5 and 3, and every ring stays under its roof (D-053 item 9)', async () => {
+  // Sprint 14Oct26w. 02Oct26f held this at Master 1.1 over three street offsets (0, 1, 3 m); above 1.1 the street overtook the
+  // rings (bf10309: 15 rings dipped up to 0.28 m at 1.1, 148 at 1.5 and 583 at 3, up to 25.9 m). It now scans Masters 1.0, 1.1, 1.5
+  // and 3 over the DRAWN extents (meshes.roundelExtents(), the vertex shader's own formula) with the street at 0.05, 1, 3 and 6 m out
+  // across the ring's width, and a ring's top may not pass the displayed roof of its building (a host ring: of its map box).
+  const out = {};
+  for (const M of [1, 1.1, 1.5, 3]) {
+    out[M] = await page.evaluate(async (M) => {
+      const u = window.__ug, sb = u.stationBuildings, el = document.getElementById('masterHeight');
+      el.value = String(M); el.dispatchEvent(new Event('input', { bubbles: true })); u.structureMorph.flush();
+      await new Promise(r => setTimeout(r, 600));
+      const sc = u.getBuildingHeightScale(), VE = 5, g = u.modes.ctx.getStructuralY;
+      const byKey = new Map(sb.data.buildings.map(b => [b.key, b]));
+      let n = 0, dips = 0, topOver = 0; const rows = [];
+      for (const e of sb.meshes.roundelExtents()) {
+        if (e.on !== 'wall') continue;
         n++;
-        const c = base + q.yM * VE * sc, bottom = c - q.D / 2 * VE * sc, top = c + q.D / 2 * VE * sc, roof = base + b.height * VE * sc;
-        let gmax = -Infinity;
-        const half = q.D * 500 / 406.289 / 2, tx = q.nz, tz = -q.nx;
-        for (let s = -half; s <= half + 1e-9; s += half / 3) for (const off of [0, 1, 3]) gmax = Math.max(gmax, g(q.x + tx * s + q.nx * off, q.z + tz * s + q.nz * off));
-        if (g(q.x + q.nx, q.z + q.nz) > c) centreBelow++;
-        if (gmax > bottom) { bottomBelow++; if (bad.length < 5) bad.push({ title: b.title, D: q.D, below: +((gmax - bottom) / (VE * sc)).toFixed(2) }); }
-        if (top > roof + 1e-3) topOverRoof++;
+        const tx = e.nz, tz = -e.nx; let street = -Infinity;
+        for (const off of [0.05, 1, 3, 6]) for (let k = 0; k <= 8; k++) street = Math.max(street, g(e.x + e.nx * off + tx * (k / 8 - 0.5) * e.W, e.z + e.nz * off + tz * (k / 8 - 0.5) * e.W));
+        const dip = (street - e.bottomY) / (VE * sc);
+        rows.push([dip, e.title]);
+        if (dip > 0) dips++;
+        const b = byKey.get(e.key), roof = e.host ? b.host.baseM * VE + b.host.h * VE * sc : sb.meshes.roofOf(b, sc).roofY;
+        if (e.topY > roof + 0.01 * VE * sc) topOver++;
       }
-    }
-    return { n, centreBelow, bottomBelow, topOverRoof, bad };
-  });
-  console.log('roundels against the street', JSON.stringify(r));
-  expect(r.n).toBeGreaterThan(1900);
-  expect(r.centreBelow, 'no ring centre below the ground 1 m outside its wall').toBe(0);
-  expect(r.bottomBelow, `no ring dips under the street: ${JSON.stringify(r.bad)}`).toBe(0);
-  expect(r.topOverRoof).toBe(0);
+      rows.sort((p, q) => q[0] - p[0]);
+      return { sc, n, dips, topOver, worst: rows.slice(0, 3).map(r => [+r[0].toFixed(3), r[1]]) };
+    }, M);
+  }
+  console.log('roundels against the street, by Master', JSON.stringify(out));
+  for (const M of [1, 1.1, 1.5, 3]) {
+    expect(out[M].n, `Master ${M}: wall roundels`).toBeGreaterThan(1950);
+    expect(out[M].dips, `Master ${M}: no ring dips under the street: ${JSON.stringify(out[M].worst)}`).toBe(0);
+    expect(out[M].topOver, `Master ${M}: no ring top over its roof`).toBe(0);
+  }
+  await page.evaluate(() => { const el = document.getElementById('masterHeight'); el.value = '1.1'; el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); });
 });
 
 test('street view (fix round 1): from the King\'s Cross exit, turned to the building, the ring, the whole bar and the name are in the frame', async () => {
@@ -574,7 +585,10 @@ test('hover (fix round 1): a station is named only where its building is drawn: 
   expect(summary.kxStreet.rawOnly + summary.streetBank.rawOnly, 'at least one point where the building is hidden behind a box or the ground').toBeGreaterThan(0);
 });
 
-test('the height law: a station building and an ordinary box of equal height stay equal at Master 1, 1.1, 3 and 10', async () => {
+test('the height law: an ordinary box keeps its true height at every Master; a station building does at 1 and 1.1 and, on a slope, rises with the street above 1.1 (King\'s Cross: base + (h + riseM x max(0, M - 1.1)) x 5 x scale)', async () => {
+  // Sprint 14Oct26w (D-053 item 9): was "a station building and an ordinary box of equal height stay equal at every Master". At Master
+  // 1.0 and 1.1 they still do; above 1.1 a station on a slope keeps the wall it has over its highest street at 1.1, so its roof stands
+  // higher than a box of the same height by exactly riseM x (M - 1.1) true metres. The pixel row of the roof is checked as before.
   await installPixelHelpers();
   const out = [];
   for (const master of [1, 1.1, 3, 10]) {
@@ -585,6 +599,7 @@ test('the height law: a station building and an ordinary box of equal height sta
       const scale = u.getBuildingHeightScale(), VE = 5;
       const key = sb.siteKeyOf("King's Cross St. Pancras"), b = sb.data.buildings.find(q => q.key === sb.data.sites[key].building);
       const roof = sb.meshes.roofOf(b, scale);
+      const expectRoof = roof.base + (b.height + b.riseM * Math.max(0, master - 1.1)) * VE * scale;   // the law, written out
       // the longest wall roundel's front, 80 m out from its middle
       const walls = b.roundels.filter(r => r.on === 'wall').sort((p, q) => q.D - p.D);
       const level = (x, z, y, tx, tz) => { u.camera.position.set(x, y, z); u.controls.target.set(tx, y, tz); u.controls.update(); };
@@ -619,11 +634,12 @@ test('the height law: a station building and an ordinary box of equal height sta
       level(best.x, best.z + best.side / 2 + 80, boxRoof, best.x, best.z);
       const m4 = new window.__ugTHREE.Matrix4(); best.o.getMatrixAt(best.i, m4); const away = m4.clone(); away.setPosition(0, -1e6, 0);
       const boxTop = await topRow(() => { best.o.setMatrixAt(best.i, away); best.o.instanceMatrix.needsUpdate = true; }, () => { best.o.setMatrixAt(best.i, m4); best.o.instanceMatrix.needsUpdate = true; });
-      return { master, stationTop, front, boxTop, boxH: best.h / VE };
+      return { master, stationTop, front, boxTop, boxH: best.h / VE, roofErr: Math.abs(roof.roofY - expectRoof), riseM: b.riseM };
     }, master));
   }
   console.log('height law', JSON.stringify(out));
   for (const r of out) {
+    expect(r.roofErr, `Master ${r.master}: the displayed roof is base + (h + riseM x max(0, M - 1.1)) x 5 x scale`).toBeLessThan(1e-6);
     expect(r.stationTop, `Master ${r.master}: station roof row`).not.toBeNull();
     expect(Math.abs(r.stationTop - 450), `Master ${r.master}: station roof ${r.stationTop} vs the horizon row`).toBeLessThanOrEqual(3);
     expect(r.boxTop, `Master ${r.master}: box roof row`).not.toBeNull();

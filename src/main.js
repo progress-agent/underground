@@ -58,6 +58,9 @@ import { loadStationBuildings, stationBuildingState, buildStationBuildingsWhenRe
   stationExitPose as s02bStationExitPose, entrancesForBuilding as s02bEntrancesForBuilding, networksLine as s02bNetworksLine,
   rayBlockedByBoxes as s02bRayBlockedByBoxes, rayBlockedByGround as s02bRayBlockedByGround } from './station-buildings.js';
 // ── /s02:B ──
+// ── s14:B ──
+import { addSurfaceLabelOccluder } from './stations.js';
+// ── /s14:B ──
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M, WATER_TOP_Y, updateWater } from './thames.js';
@@ -3197,6 +3200,9 @@ let _clearHoverForMotion = null;
   function pickStationUnderPointer(ev) {
     getMouseNdc(ev);
     raycaster.setFromCamera(mouse, camera);
+    // ── s14:B ── (what stood in front of a building last time is forgotten)
+    if (stationBuildingsMesh) stationBuildingsMesh.lastOcclusion = null;
+    // ── /s14:B ──
     // ── s02:B ── Above ground a station is its building (the spheres retired): the displayed prism of the
     // building under the pointer (station-buildings.js pickRay; the merged geometry is authored at the unscaled
     // height, so a mesh raycast would hit air above the roof at Master > 1). Below ground this answers null and
@@ -3207,6 +3213,12 @@ let _clearHoverForMotion = null;
         const o = raycaster.ray.origin, d = raycaster.ray.direction;
         const hit = stationBuildingsMesh.pickRay(o.x, o.y, o.z, d.x, d.y, d.z);
         if (hit) return { name: hit.building.title, depthM: 0, network: 'building', networks: s02bNetworksLine(hit.building), building: hit.building };
+        // ── s14:B ── a bridge or a train in front of the building is named instead (an aircraft returns null here: the
+        // aircraft tier right after this one names it with its own label; a map box, the ground or a landmark stays unnamed)
+        const oc = stationBuildingsMesh.lastOcclusion;
+        if (oc?.kind === 'bridge') return { name: oc.name, depthM: 0, network: 'building', networks: 'Thames bridge' };
+        if (oc?.kind === 'train') return { name: 'Train', depthM: 0, network: 'building', networks: 'Surface train' };
+        // ── /s14:B ──
       }
     }
     // ── /s02:B ──
@@ -3998,19 +4010,23 @@ let stationBuildingsBuilding = false, stationLateRebuilt = false;
 // What is drawn in front of a station building hides it from hover (fix round 1): the ground, the map's own boxes (live
 // and baked, at the displayed height) and the landmark models. Canonical world space, as the hover raycaster's rays.
 const s02bBoxMeshes = [], s02bOccRay = new THREE.Raycaster(), s02bOccOrigin = new THREE.Vector3(), s02bOccDir = new THREE.Vector3();
+// Sprint 14Oct26w: returns false, or what stands in front: { kind: 'map' } (the ground, a box, a landmark: nothing is named) or
+// { kind: 'bridge', name } / { kind: 'train' } / { kind: 'aircraft' } (the nearest of those three; pickStationUnderPointer names it).
 function s02bOccluded(ox, oy, oz, dx, dy, dz, t, scale) {
-  if (s02bRayBlockedByGround(s02HiddenGround.terrainY, ox, oy, oz, dx, dy, dz, t)) return true; // integration: the hidden ground beyond the edge (the same call on the map)
+  if (s02bRayBlockedByGround(s02HiddenGround.terrainY, ox, oy, oz, dx, dy, dz, t)) return S14B_MAP; // integration: the hidden ground beyond the edge (the same call on the map)
   if (surfaceGeometryGroup?.visible) {
     s02bBoxMeshes.length = 0;
     for (const c of surfaceGeometryGroup.children) if (c.isInstancedMesh && /^(baked-)?buildings-/.test(c.name || '')) s02bBoxMeshes.push(c);
-    if (s02bRayBlockedByBoxes(s02bBoxMeshes, ox, oy, oz, dx, dy, dz, t, scale)) return true;
+    if (s02bRayBlockedByBoxes(s02bBoxMeshes, ox, oy, oz, dx, dy, dz, t, scale)) return S14B_MAP;
     if (landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
       s02bOccRay.set(s02bOccOrigin.set(ox, oy, oz), s02bOccDir.set(dx, dy, dz));
       s02bOccRay.far = Math.max(0, t - 0.75);
-      if (s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length) return true;
+      if (s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length) return S14B_MAP;
     }
   }
-  return false;
+  // ── s14:B ── bridges, surface trains and aircraft in front of the building (each only when drawn)
+  return s14bInFront(ox, oy, oz, dx, dy, dz, t - 0.75);
+  // ── /s14:B ──
 }
 function s02bFrame() {
   const idx = stationBuildingState.index;
@@ -4034,6 +4050,7 @@ function s02bFrame() {
       scene.add(m.group);
       m.setRoundelsVisible(stationsVisible);
       setSurfaceLabelAnchor((name) => m.labelAnchor(name));
+      addSurfaceLabelOccluder(s14bLabelOccluded);   // s14:B
     }).catch((err) => { stationBuildingsFailed = true; console.warn('Station buildings could not be built:', err.message); });
   }
   // The buildings stand in for the boxes they hid, so they are drawn exactly while the buildings are.
@@ -4043,6 +4060,117 @@ function s02bFrame() {
   }
 }
 // ── /s02:B ──
+// ── s14:B ── (sprint 14Oct26w, lane B) What stands in front of a station building, for hover; and the label occluder.
+const S14B_MAP = Object.freeze({ kind: 'map' });
+const s14bRay = new THREE.Raycaster(), s14bOrigin = new THREE.Vector3(), s14bDir = new THREE.Vector3(), s14bPt = new THREE.Vector3();
+const s14bInv = new THREE.Matrix4(), s14bMat = new THREE.Matrix4(), s14bLocal = new THREE.Ray(), s14bHit = new THREE.Vector3();
+const s14bTrainMeshes = [], s14bBridgeRes = [];
+const S14B_TRAIN_BODY = /^(surface-train-bodies|overground-train-bodies)/;
+const isDrawnChain = (o) => { for (let p = o; p; p = p.parent) if (p.visible === false) return false; return true; };
+/** The nearest drawn surface-train or Overground car the ray (origin o, unit direction d) enters before `far`: its distance, or Infinity. */
+function s14bTrainHit(ox, oy, oz, dx, dy, dz, far) {
+  s14bTrainMeshes.length = 0;
+  if (surfaceTrains?.group) surfaceTrains.group.traverse((c) => { if (c.isInstancedMesh && S14B_TRAIN_BODY.test(c.name || '')) s14bTrainMeshes.push(c); });
+  if (overgroundGroup) overgroundGroup.traverse((c) => { if (c.isInstancedMesh && S14B_TRAIN_BODY.test(c.name || '')) s14bTrainMeshes.push(c); });
+  let best = Infinity;
+  s14bOrigin.set(ox, oy, oz); s14bDir.set(dx, dy, dz);
+  for (const mesh of s14bTrainMeshes) {
+    if (!mesh.count || !isDrawnChain(mesh)) continue;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const a = mesh.instanceMatrix.array, bb = mesh.geometry.boundingBox;
+    for (let i = 0, o = 0; i < mesh.count; i++, o += 16) {
+      // a car whose centre is far from the ray cannot be hit (a car is under 30 m long); a hidden car is a zero-scale matrix
+      const vx = a[o + 12] - ox, vy = a[o + 13] - oy, vz = a[o + 14] - oz;
+      const u = vx * dx + vy * dy + vz * dz;
+      if (u < -30 || u > far + 30) continue;
+      const px = vx - dx * u, py = vy - dy * u, pz = vz - dz * u;
+      if (px * px + py * py + pz * pz > 900) continue;
+      s14bMat.fromArray(a, o);
+      if (Math.abs(s14bMat.determinant()) < 1e-12) continue;
+      s14bInv.copy(s14bMat).invert();
+      s14bLocal.origin.copy(s14bOrigin).applyMatrix4(s14bInv);
+      s14bLocal.direction.copy(s14bDir).transformDirection(s14bInv).normalize();
+      // (the instance matrix sits in the mesh's own space, which has no transform above it but the group's)
+      if (!s14bLocal.intersectBox(bb, s14bHit)) continue;
+      const d = s14bHit.applyMatrix4(s14bMat).sub(s14bOrigin).length();
+      if (d < far && d < best) best = d;
+    }
+  }
+  return best;
+}
+/** What is drawn in front of a building, nearer than `far` along the ray: { kind: 'bridge', name } | { kind: 'train' } | { kind: 'aircraft' } | false. */
+function s14bInFront(ox, oy, oz, dx, dy, dz, far) {
+  if (!(far > 0)) return false;
+  let kind = null, bestD = Infinity, name = '';
+  if (bridgesGroup?.visible) {
+    s14bRay.set(s14bOrigin.set(ox, oy, oz), s14bDir.set(dx, dy, dz)); s14bRay.far = far;
+    s14bBridgeRes.length = 0;
+    s14bRay.intersectObject(bridgesGroup, true, s14bBridgeRes);
+    for (const h of s14bBridgeRes) if (isDrawnChain(h.object)) { bestD = h.distance; kind = 'bridge'; name = h.object.userData?.name || h.object.parent?.userData?.name || 'Bridge'; break; }
+  }
+  const dTrain = s14bTrainHit(ox, oy, oz, dx, dy, dz, Math.min(far, bestD));
+  if (dTrain < bestD) { bestD = dTrain; kind = 'train'; }
+  if (flightsGroup?.visible) {
+    // the pointer's own pixel: any point of the ray, projected (flights are picked on the screen)
+    s14bPt.set(ox + dx * 10, oy + dy * 10, oz + dz * 10).project(camera);
+    const f = flightsGroup.userData.pick({ x: s14bPt.x, y: s14bPt.y }, camera, renderer.domElement.getBoundingClientRect());
+    if (f) { const d = Math.hypot(f.x - ox, f.y - oy, f.z - oz); if (d < far && d < bestD) { bestD = d; kind = 'aircraft'; } }
+  }
+  return kind ? { kind, name } : false;
+}
+
+// Names behind a station building (D-053 item 9, "names hanging over white walls"). Above ground and within 150 m of it, a surface
+// label is hidden when the point it HANGS at (the ray from the camera through the bottom centre of its placed rectangle, taken
+// to the distance of its anchor) is behind a station building other than its own, a map box or a landmark. The ground, bridges,
+// trains and aircraft do not hide a name. Results are cached per name and re-tested only when the camera has moved more than a
+// unit or the building-height scale changed, at most 16 fresh tests a frame (never-tested names first): a still camera costs nothing.
+const S14B_NEAR = 750, S14B_MOVE = 1.0, S14B_FRESH = 16, S14B_STALE = 12;
+const s14bCache = new Map();
+let s14bFrame = -1, s14bFreshN = 0, s14bNear = false;
+function s14bLabelOccluded(rect, cam, info) {
+  const m = stationBuildingsMesh;
+  if (!m || !m.group.visible) return false;
+  const stats = m.labelOcclusion, frame = renderer.info.render.frame;
+  if (frame !== s14bFrame) {
+    s14bFrame = frame; s14bFreshN = 0; stats.frames++;
+    const gy = getStructuralSurfaceY({ x: cam.position.x, z: cam.position.z });
+    s14bNear = Number.isFinite(gy) && cam.position.y > gy && cam.position.y - gy <= S14B_NEAR;
+  }
+  if (!s14bNear || !info) return false;
+  const scale = getBuildingHeightScale();
+  let c = s14bCache.get(info.name);
+  const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+  const fresh = !c ? true : (Math.hypot(c.cx - cx, c.cy - cy, c.cz - cz) > S14B_MOVE || Math.abs(c.scale - scale) > 1e-9);
+  if (fresh && s14bFreshN < (c ? S14B_STALE : S14B_FRESH)) {
+    s14bFreshN++;
+    const t0 = performance.now();
+    if (!c) s14bCache.set(info.name, c = { cx, cy, cz, scale, hidden: false });
+    c.cx = cx; c.cy = cy; c.cz = cz; c.scale = scale;
+    s14bPt.set(((rect.x + rect.w / 2) / info.vw) * 2 - 1, -((rect.y + rect.h) / info.vh) * 2 + 1, 0.5).unproject(cam);
+    s14bDir.copy(s14bPt).sub(cam.position).normalize();
+    const dist = Math.hypot(info.x - cx, info.y - cy, info.z - cz), tMax = dist - 2;
+    let hit = false;
+    if (tMax > 0) {
+      const own = info.building?.key ?? null;
+      hit = m.segmentHitsStation(cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, own, scale);
+      if (!hit && surfaceGeometryGroup?.visible) {
+        s02bBoxMeshes.length = 0;
+        for (const g of surfaceGeometryGroup.children) if (g.isInstancedMesh && /^(baked-)?buildings-/.test(g.name || '')) s02bBoxMeshes.push(g);
+        hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax + 0.75, scale);
+        if (!hit && landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
+          s02bOccRay.set(s02bOccOrigin.set(cx, cy, cz), s02bOccDir.copy(s14bDir));
+          s02bOccRay.far = tMax;
+          hit = s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length > 0;
+        }
+      }
+    }
+    c.hidden = hit;
+    stats.tests++; stats.ms += performance.now() - t0;
+  }
+  if (c?.hidden) { stats.hidden++; return true; }
+  return false;
+}
+// ── /s14:B ──
 
 function tick(frameTime) {
   // Integrate against the display frame, not callback scheduling jitter.

@@ -52,6 +52,19 @@ export function setSurfaceLabelAnchor(fn) { _surfaceLabelAnchor = typeof fn === 
 export const LABEL_ROOF_CLEAR_PX = 8;
 const _anchorPt = new THREE.Vector3();
 // ── /s02:B ──
+// ── s14:B ── Label occluders (sprint 14Oct26w, interface fixed by the plan). A function registered here is asked, for each
+// surface label that would otherwise be SHOWN this frame, whether to hide it: fn(labelRect, camera, info) returns true to hide.
+// labelRect = { x, y, w, h } in CSS px after placement; info = { name, x, y, z, building, vw, vh } is optional to read (the
+// anchor the label hangs from, in canonical world space, and the viewport size). They never run for labels the distance, the
+// priority or the screen already culled, nor underground, and an occluded label evicts no visible one. Returns an unsubscribe.
+const _labelOccluders = [];
+const _occRect = { x: 0, y: 0, w: 0, h: 0 };
+export function addSurfaceLabelOccluder(fn) {
+  if (typeof fn !== 'function') return () => {};
+  _labelOccluders.push(fn);
+  return () => { const i = _labelOccluders.indexOf(fn); if (i >= 0) _labelOccluders.splice(i, 1); };
+}
+// ── /s14:B ──
 
 export function stationApproachScale(distance) {
   const t = THREE.MathUtils.clamp((1400 - distance) / 1200, 0, 1);
@@ -87,7 +100,7 @@ function labelWidth(el,fontSize) {
   }
   return el._emWidth*fontSize;
 }
-function placeLabel(el,x,y,opacity,fontSize,distance) {
+function placeLabel(el,x,y,opacity,fontSize,distance,occ,camera) {
   const fs=fontSize.toFixed(1);
   if(el._fs!==fs) {el.style.fontSize=`${fs}px`;el._fs=fs;}
   const bounds=labelBounds(x,y,labelWidth(el,Number(fs)),Number(fs));
@@ -99,6 +112,16 @@ function placeLabel(el,x,y,opacity,fontSize,distance) {
       hideLabel(el);return;
     }
   }
+  // ── s14:B ── an occluded label is hidden before it evicts anything (only above ground passes `occ`)
+  if(occ && _labelOccluders.length) {
+    _occRect.x=bounds.left;_occRect.y=bounds.top;_occRect.w=bounds.right-bounds.left;_occRect.h=bounds.bottom-bounds.top;
+    for(const fn of _labelOccluders.slice()) {
+      let hide=false;
+      try {hide=fn(_occRect,camera,occ)===true;} catch(e) {console.warn('[stations] label occluder',e);}
+      if(hide) {hideLabel(el);return;}
+    }
+  }
+  // ── /s14:B ──
   for(const item of collisions) {hideLabel(item.el);_accepted.splice(_accepted.indexOf(item),1);}
   _accepted.push({el,bounds,rank});
   showLabel(el,x,y,opacity);
@@ -415,7 +438,17 @@ export function createStationMarkers({
       const fontPx = stationLabelFont(visualDistance,el._baseFontPx);
       // s02:B the clearance uses the font actually drawn this frame (it grows on approach)
       if (roofTopY !== null) y = roofTopY - (fontPx * 0.6 + LABEL_ROOF_CLEAR_PX);
-      placeLabel(el,x,y,alpha,fontPx,visualDistance);
+      // ── s14:B ── what the label hangs from, for the occluders (one object per label, rewritten in place)
+      let occ = null;
+      if (_labelOccluders.length) {
+        occ = el._occInfo || (el._occInfo = { name: '', x: 0, y: 0, z: 0, building: null, vw: 0, vh: 0 });
+        occ.name = el._cleanName;
+        if (anchor) { occ.x = anchor.x; occ.y = anchor.roofY; occ.z = anchor.z; occ.building = anchor.building ?? null; }
+        else { occ.x = st.pos.x; occ.y = st.surfaceY ?? 0; occ.z = st.pos.z; occ.building = null; }
+        occ.vw = w; occ.vh = h;
+      }
+      // ── /s14:B ──
+      placeLabel(el,x,y,alpha,fontPx,visualDistance,occ,camera);
     }
   }
 

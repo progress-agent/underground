@@ -24,6 +24,13 @@
 // roof) and patched with surface-geometry.js's patchBuildingHeight: y =
 // aBaseY + (y - aBaseY) x uHeightScale, the same uniform the map's boxes read,
 // so a box and a station building of equal height stay equal at every Master.
+//
+// ROUND TWO (sprint 14Oct26w, lane B). (1) Two sites, Fulham Broadway and North Greenwich, are a `box-entrance` building: a
+// 24 x 7 m entrance block against the face of the big map box (the `host`, which stays an ordinary grey box); roundels with
+// `host: true` stand on the host's wall or roof. (2) ON A SLOPE a station keeps, at every Master, the wall it has above its highest
+// street at Master 1.1: its roof rises with the street above 1.1 by `riseM` (true metres at Master 1) x (Master - 1.1), a wall
+// ring by its own street `gM` the same way, so nothing dips and no street stands over a roof; at 1.1 nothing moves. (3) The name
+// is read from the atlas in uniform control flow (the grey outline on the bar was a mip level picked at the name's edges).
 
 import * as THREE from 'three';
 import { cleanStationName } from './stations.js';
@@ -292,8 +299,37 @@ export function buildNameAtlas(names, { document = globalThis.document, family =
   texture.anisotropy = 4; texture.unpackAlignment = 1; texture.needsUpdate = true;
   texture.name = 'station-name-atlas';
   const rects = new Map();
-  for (const [n, r] of layout.rects) rects.set(n, { u0: r.x / W, v0: r.y / H, u1: (r.x + r.w) / W, v1: (r.y + r.h) / H, wPx: r.w - 8, hPx: r.h });
+  // (Sprint 14Oct26w: each rectangle is inset by half a texel, so a sample clamped to its edge never reads a neighbour.)
+  for (const [n, r] of layout.rects) rects.set(n, { u0: (r.x + 0.5) / W, v0: (r.y + 0.5) / H, u1: (r.x + r.w - 0.5) / W, v1: (r.y + r.h - 0.5) / H, wPx: r.w - 8, hPx: r.h });
   return { texture, rects, width: W, height: H, glyph: layout.glyph, bytes: Math.round(W * H * 4 / 3), ms: performance.now() - t0 };
+}
+
+/**
+ * The displayed roof of a building in canonical Y at height scale `scale` (= 1 / Master): the base plus the true height x VE x scale,
+ * plus, on a slope above the design Master, `riseM` x (Master - design Master) true metres (the street rises, the roof with it).
+ * Pure; the roof and the walls' top share it with the vertex shader.
+ */
+export function displayedRoofY(building, base, scale, { VE = 5, designMaster = 1.1 } = {}) {
+  return base + building.height * VE * scale + (building.riseM ?? 0) * Math.max(0, 1 / Math.max(scale, 0.05) - designMaster) * VE * scale;
+}
+
+/**
+ * The drawn extent of one roundel quad, canonical Y at height scale `scale`, by the same formula as the vertex shader:
+ * { bottomY, topY } (for a wall ring, vertically; for a roof roundel, both the flat quad's Y). `base` is the building's own base
+ * (a `host` roundel stands on `building.host.baseM x VE`, the map box's own).
+ */
+export function roundelExtent(building, r, base, scale, { VE = 5, designMaster = 1.1 } = {}) {
+  const M = 1 / Math.max(scale, 0.05), hostBase = building.host ? building.host.baseM * VE : base;
+  const b = r.host ? hostBase : base;
+  if (r.on === 'wall') {
+    const lift = r.host
+      ? Math.min((r.gM ?? 0) * (M - designMaster), Math.max(0, building.host.h - (r.yM + r.D / 2))) * VE * scale
+      : (r.gM ?? 0) * (M - designMaster) * VE * scale;
+    const c = b + r.yM * VE * scale + lift;
+    return { bottomY: c - r.D * VE * scale / 2, topY: c + r.D * VE * scale / 2 };
+  }
+  const y = b + (r.yM * VE + 0.05 * VE) * scale + (r.host ? 0 : (building.riseM ?? 0) * Math.max(0, M - designMaster) * VE * scale);
+  return { bottomY: y, topY: y };
 }
 
 /** Wait for the Railway face (at most `ms`), so the atlas measures with it. */
@@ -324,8 +360,17 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
   if (atlas === undefined) atlas = buildNameAtlas(buildings.map(b => b.title), { document });
   const t0 = performance.now();
 
+  // The roof follows the street above the design Master (see displayedRoofY): after the height law, in true metres.
+  const designMaster = Number.isFinite(json.roundelDesignMaster) ? json.roundelDesignMaster : 1.1;
+  const riseExtend = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aRise;')
+      .replace('transformed.y = aBaseY + ( transformed.y - aBaseY ) * uHeightScale;', `transformed.y = aBaseY + ( transformed.y - aBaseY ) * uHeightScale;
+\ttransformed.y += aRise * max( 0.0, 1.0 / max( uHeightScale, 0.05 ) - ${designMaster.toFixed(4)} ) * ${VE.toFixed(1)} * uHeightScale;`);
+  };
+
   // ── Walls and roofs ──
-  const wp = [], wn = [], wb = [], wIdx = [], triBuilding = [];
+  const wp = [], wn = [], wb = [], wr = [], wIdx = [], triBuilding = [];
   const bases = new Map();
   const pushTri = (a, b, c, bi) => { const n = wp.length / 3; wIdx.push(n + a, n + b, n + c); triBuilding.push(bi); };
   buildings.forEach((b, bi) => {
@@ -344,11 +389,11 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
       const o = wp.length / 3;
       // a-bottom, c-bottom, c-top, a-top: counter-clockwise seen from outside
       wp.push(a[0], bottom, a[1], c[0], bottom, c[1], c[0], roof, c[1], a[0], roof, a[1]);
-      for (let k = 0; k < 4; k++) { wn.push(nx, 0, nz); wb.push(base); }
+      for (let k = 0; k < 4; k++) { wn.push(nx, 0, nz); wb.push(base); wr.push(k < 2 ? 0 : (b.riseM ?? 0)); }   // aRise: the top follows the street above Master 1.1
       wIdx.push(o, o + 1, o + 2, o, o + 2, o + 3); triBuilding.push(bi, bi);
     }
     const o = wp.length / 3;
-    for (const [x, z] of fp) { wp.push(x, roof, z); wn.push(0, 1, 0); wb.push(base); }
+    for (const [x, z] of fp) { wp.push(x, roof, z); wn.push(0, 1, 0); wb.push(base); wr.push(b.riseM ?? 0); }
     for (const f of triangulateRoof(fp)) {
       let [i, j, k] = f;
       const A = fp[i], B = fp[j], C = fp[k];
@@ -360,10 +405,11 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
   wallGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wp), 3));
   wallGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(wn), 3));
   wallGeo.setAttribute('aBaseY', new THREE.BufferAttribute(new Float32Array(wb), 1));
+  wallGeo.setAttribute('aRise', new THREE.BufferAttribute(new Float32Array(wr), 1));
   wallGeo.setIndex(new THREE.BufferAttribute(wp.length / 3 > 65535 ? new Uint32Array(wIdx) : new Uint16Array(wIdx), 1));
   wallGeo.computeBoundingSphere(); wallGeo.computeBoundingBox();
   const wallMat = new THREE.MeshStandardMaterial({ color: WALL_COLOUR, roughness: 0.9, metalness: 0 });
-  patchBuildingHeight(wallMat, { key: 'station-walls' });
+  patchBuildingHeight(wallMat, { key: 'station-walls', extend: riseExtend });
   const walls = new THREE.Mesh(wallGeo, wallMat);
   walls.name = 'station-buildings-walls';
   walls.userData.kind = 'station-buildings';
@@ -371,16 +417,16 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
   walls.frustumCulled = false;
 
   const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-  patchBuildingHeight(depthMat, { key: 'station-depth' });
+  patchBuildingHeight(depthMat, { key: 'station-depth', extend: riseExtend });
   walls.customDepthMaterial = depthMat;
 
   // ── Roundels ──
-  const rp = [], rn = [], rq = [], rr = [], rrect = [], rsz = [], rb = [], rg = [], rroom = [], rIdx = [], rTriBuilding = [];
-  const designMaster = Number.isFinite(json.roundelDesignMaster) ? json.roundelDesignMaster : 1.1;
+  const rp = [], rn = [], rq = [], rr = [], rrect = [], rsz = [], rb = [], rg = [], rroom = [], rrise = [], rIdx = [], rTriBuilding = [];
   const wide = ROUNDEL.width / (2 * ROUNDEL.outerR);       // quad width over quad height
   const barH = ROUNDEL.barH / ROUNDEL.height;              // the bar as a fraction of the quad's height
   buildings.forEach((b, bi) => {
     const base = bases.get(b.key);
+    const hostBase = b.host ? b.host.baseM * VE : base;     // a `host` roundel stands on the map box's own base
     const rect = atlas?.rects.get(String(b.title).toUpperCase()) ?? null;
     // The name's extent on the bar in quad units (x across 0..500, y up 0..406.289), aspect kept.
     let nw = 0, nh = 0;
@@ -392,15 +438,20 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
       const D = r.D, W = D * wide, ring = RING_INDEX[r.ring] ?? 0;
       // A wall ring keeps its clearance from the street as Master moves (see the vertex shader): gM is the street's rise
       // above the base at Master 1, room the wall left above the ring at the design Master.
-      const gM = r.on === 'wall' ? (r.gM ?? 0) : 0, room = r.on === 'wall' ? Math.max(0, b.height - (r.yM + D / 2)) : 0;
+      // (Sprint 14Oct26w: a station ring rises with its street uncapped, since its roof rises at least as much; room is huge. A
+      // `host` ring hangs on a box that does not grow, so it keeps the wall left above it as its cap. aRise: the roof roundel's.)
+      const gM = r.on === 'wall' ? (r.gM ?? 0) : 0;
+      const room = r.on !== 'wall' ? 0 : r.host ? Math.max(0, b.host.h - (r.yM + D / 2)) : 1e3;
+      const rise = r.on === 'roof' && !r.host ? (b.riseM ?? 0) : 0;
+      const rBase = r.host ? hostBase : base;
       let rx, rz, ux, uz, uy = 0, nx = 0, ny = 0, nz = 0, cy;
-      if (r.on === 'wall') { rx = r.nz; rz = -r.nx; ux = 0; uz = 0; uy = 1; nx = r.nx; nz = r.nz; cy = base + r.yM * VE; }
-      else { rx = r.ax; rz = r.az; ux = r.az; uz = -r.ax; ny = 1; cy = base + r.yM * VE + 0.05 * VE; }
+      if (r.on === 'wall') { rx = r.nz; rz = -r.nx; ux = 0; uz = 0; uy = 1; nx = r.nx; nz = r.nz; cy = rBase + r.yM * VE; }
+      else { rx = r.ax; rz = r.az; ux = r.az; uz = -r.ax; ny = 1; cy = rBase + r.yM * VE + 0.05 * VE; }
       const o = rp.length / 3;
       for (const [sx, sy] of [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]) {
         const hx = rx * W * sx + ux * D * sy, hz = rz * W * sx + uz * D * sy, hy = uy * D * VE * sy;
         rp.push(r.x + hx, cy + hy, r.z + hz);
-        rn.push(nx, ny, nz); rq.push(sx, sy); rr.push(ring); rb.push(base); rg.push(gM); rroom.push(room);
+        rn.push(nx, ny, nz); rq.push(sx, sy); rr.push(ring); rb.push(rBase); rg.push(gM); rroom.push(room); rrise.push(rise);
         // Atlas rectangle as (u0, vTop, u1, vBottom): canvas row 0 is texture row 0 (the DataTexture is not flipped).
         if (rect) rrect.push(rect.u0, rect.v0, rect.u1, rect.v1); else rrect.push(0, 0, 0, 0);
         rsz.push(nw, nh);
@@ -418,6 +469,7 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
   rGeo.setAttribute('aBaseY', new THREE.BufferAttribute(new Float32Array(rb), 1));
   rGeo.setAttribute('aStreet', new THREE.BufferAttribute(new Float32Array(rg), 1));
   rGeo.setAttribute('aRoom', new THREE.BufferAttribute(new Float32Array(rroom), 1));
+  rGeo.setAttribute('aRise', new THREE.BufferAttribute(new Float32Array(rrise), 1));
   rGeo.setIndex(new THREE.BufferAttribute(rp.length / 3 > 65535 ? new Uint32Array(rIdx) : new Uint16Array(rIdx), 1));
   rGeo.computeBoundingSphere();
   const blank = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType); blank.needsUpdate = true;
@@ -432,14 +484,17 @@ export function createStationBuildingMeshes({ data, getStructuralY, VE = 5, atla
     Object.assign(shader.uniforms, colours, { uNames: names });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-attribute vec2 aQuad; attribute float aRing; attribute vec4 aNameRect; attribute vec2 aNameSize; attribute float aStreet; attribute float aRoom;
+attribute vec2 aQuad; attribute float aRing; attribute vec4 aNameRect; attribute vec2 aNameSize; attribute float aStreet; attribute float aRoom; attribute float aRise;
 varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vRQ = aQuad; vRRing = aRing; vRRect = aNameRect; vRSize = aNameSize;`)
       // After the height law (patchBuildingHeight's line): the street under a wall ring rises with Master (the ground
-      // relief is stretched, the building is not), so the ring moves with it, in true metres, up to the wall left above it.
+      // relief is stretched, the building is not), so the ring moves with it, in true metres. A station's ring is not capped
+      // (aRoom is huge: its roof rises with the street too); a `host` ring is capped at the wall left on a box that does not grow.
+      // A roof roundel follows the roof by aRise (above the design Master only).
       .replace('transformed.y = aBaseY + ( transformed.y - aBaseY ) * uHeightScale;', `transformed.y = aBaseY + ( transformed.y - aBaseY ) * uHeightScale;
-\ttransformed.y += min( aStreet * ( 1.0 / max( uHeightScale, 0.05 ) - ${designMaster.toFixed(4)} ), aRoom ) * ${VE.toFixed(1)} * uHeightScale;`);
+\ttransformed.y += min( aStreet * ( 1.0 / max( uHeightScale, 0.05 ) - ${designMaster.toFixed(4)} ), aRoom ) * ${VE.toFixed(1)} * uHeightScale;
+\ttransformed.y += aRise * max( 0.0, 1.0 / max( uHeightScale, 0.05 ) - ${designMaster.toFixed(4)} ) * ${VE.toFixed(1)} * uHeightScale;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform vec3 uRingRed; uniform vec3 uRingOrange; uniform vec3 uRingTeal; uniform vec3 uBar; uniform vec3 uName; uniform sampler2D uNames;
@@ -454,12 +509,18 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   float cover = max(ringM, barM);
   vec3 ringCol = vRRing < 0.5 ? uRingRed : (vRRing < 1.5 ? uRingOrange : uRingTeal);
   vec3 col = mix(ringCol, uBar, barM);
+  // The name is read from the atlas in UNIFORM control flow (sprint 14Oct26w). Sampled inside the old
+  // "if the pixel is on the name" branch, the 2 x 2 quads that straddled the name's edge had undefined derivatives and the GPU
+  // picked a coarse mip (the atlas average, grey): a thin grey outline all round the name on the bar. The coordinates are
+  // derived outside any branch, the gradients come from the unclamped ones, and the ink is masked afterwards.
   vec2 half_ = vRSize * 0.5;
-  if (vRSize.x > 0.0 && abs(p.x) < half_.x && abs(p.y) < half_.y) {
-    vec2 t = (p + half_) / vRSize;
-    vec2 uv = vec2(mix(vRRect.x, vRRect.z, t.x), mix(vRRect.w, vRRect.y, t.y));
-    col = mix(col, uName, texture2D(uNames, uv).r * barM);
-  }
+  vec2 tRaw = (p + half_) / max(vRSize, vec2(1e-3));
+  vec2 tIn = clamp(tRaw, 0.0, 1.0);
+  vec2 uvRaw = vec2(mix(vRRect.x, vRRect.z, tRaw.x), mix(vRRect.w, vRRect.y, tRaw.y));
+  vec2 uvIn = vec2(mix(vRRect.x, vRRect.z, tIn.x), mix(vRRect.w, vRRect.y, tIn.y));
+  float ink = textureGrad(uNames, uvIn, dFdx(uvRaw), dFdy(uvRaw)).r;
+  float inside = step(abs(p.x), half_.x) * step(abs(p.y), half_.y) * step(0.5, vRSize.x);
+  col = mix(col, uName, ink * inside * barM);
   diffuseColor = vec4(col, cover);
 }`);
   } });
@@ -490,7 +551,7 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   function roofOf(building, scale = getBuildingHeightScale()) {
     const base = bases.get(building.key);
     if (base === undefined) return null;
-    const roofY = base + building.height * VE * scale;
+    const roofY = displayedRoofY(building, base, scale, { VE, designMaster });
     const b = bounds(footprintOf(building));
     return { x: building.label.x, z: building.label.z, roofY, base, corners: [[b.x0, b.z0], [b.x1, b.z0], [b.x1, b.z1], [b.x0, b.z1]] };
   }
@@ -505,57 +566,95 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
       a = r ? { ...r, building: b, h: b.height * VE } : null;
       anchorByName.set(name, a);
     }
-    if (a) a.roofY = a.base + a.h * getBuildingHeightScale();
+    if (a) a.roofY = displayedRoofY(a.building, a.base, getBuildingHeightScale(), { VE, designMaster });
     return a;
   }
   // Hover: the displayed building is a vertical prism over its footprint, from the skirt to the roof at the current
   // Structure scale. The merged geometry is authored at the unscaled height, so a raycast against it would hit air
   // above the roof at Master > 1; this tests the displayed prism exactly instead.
-  const prisms = buildings.map((b) => { const ring = footprintOf(b), bb = bounds(ring); return { b, ring, bb, base: bases.get(b.key) ?? 0, h: b.height * VE }; });
+  const prisms = buildings.map((b) => { const ring = footprintOf(b), bb = bounds(ring); return { b, ring, bb, base: bases.get(b.key) ?? 0, h: b.height * VE, rise: b.riseM ?? 0 }; });
+  /** The distance at which the ray (canonical world space) first enters prism `p` before `tMax`, or null. */
+  function prismEntry(p, ox, oy, oz, dx, dy, dz, scale, tMax = Infinity) {
+    const Mrise = Math.max(0, 1 / Math.max(scale, 0.05) - designMaster);
+    const yb = p.base - SKIRT_M * VE * scale, yr = p.base + p.h * scale + p.rise * Mrise * VE * scale;
+    // the part of the ray inside the slab [yb, yr]
+    let t0 = 0, t1 = tMax;
+    if (Math.abs(dy) < 1e-12) { if (oy < yb || oy > yr) return null; }
+    else { const a = (yb - oy) / dy, c = (yr - oy) / dy; t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c)); }
+    if (!(t1 > t0)) return null;
+    if (t1 === Infinity) t1 = t0 + 1e5;
+    const ax = ox + dx * t0, az = oz + dz * t0, bx = ox + dx * t1, bz = oz + dz * t1;
+    // the 2D segment must reach the footprint's bounding box at all
+    if (Math.max(ax, bx) < p.bb.x0 || Math.min(ax, bx) > p.bb.x1 || Math.max(az, bz) < p.bb.z0 || Math.min(az, bz) > p.bb.z1) return null;
+    if (pointInRing(ax, az, p.ring)) return t0;
+    let t = null;
+    const ex = bx - ax, ez = bz - az;
+    for (let i = 0, n = p.ring.length; i < n; i++) {
+      const q = p.ring[i], r = p.ring[(i + 1) % n], fx = r[0] - q[0], fz = r[1] - q[1];
+      const den = ex * fz - ez * fx;
+      if (Math.abs(den) < 1e-12) continue;
+      const u = ((q[0] - ax) * fz - (q[1] - az) * fx) / den, v = ((q[0] - ax) * ez - (q[1] - az) * ex) / den;
+      if (u >= 0 && u <= 1 && v >= 0 && v <= 1) { const tt = t0 + u * (t1 - t0); if (t === null || tt < t) t = tt; }
+    }
+    return t;
+  }
   /** The nearest displayed building the ray (canonical world space) enters, ignoring what stands in front of it: { building, t } or null. */
   function pickRayRaw(ox, oy, oz, dx, dy, dz, scale = getBuildingHeightScale()) {
     let best = null;
     for (const p of prisms) {
-      const yb = p.base - SKIRT_M * VE * scale, yr = p.base + p.h * scale;
-      // the part of the ray inside the slab [yb, yr]
-      let t0 = 0, t1 = Infinity;
-      if (Math.abs(dy) < 1e-12) { if (oy < yb || oy > yr) continue; }
-      else { const a = (yb - oy) / dy, c = (yr - oy) / dy; t0 = Math.max(t0, Math.min(a, c)); t1 = Math.min(t1, Math.max(a, c)); }
-      if (!(t1 > t0)) continue;
-      if (t1 === Infinity) t1 = t0 + 1e5;
-      if (best && t0 >= best.t) continue;
-      const ax = ox + dx * t0, az = oz + dz * t0, bx = ox + dx * t1, bz = oz + dz * t1;
-      // the 2D segment must reach the footprint's bounding box at all
-      if (Math.max(ax, bx) < p.bb.x0 || Math.min(ax, bx) > p.bb.x1 || Math.max(az, bz) < p.bb.z0 || Math.min(az, bz) > p.bb.z1) continue;
-      let t = null;
-      if (pointInRing(ax, az, p.ring)) t = t0;
-      else {
-        const ex = bx - ax, ez = bz - az;
-        for (let i = 0, n = p.ring.length; i < n; i++) {
-          const q = p.ring[i], r = p.ring[(i + 1) % n], fx = r[0] - q[0], fz = r[1] - q[1];
-          const den = ex * fz - ez * fx;
-          if (Math.abs(den) < 1e-12) continue;
-          const u = ((q[0] - ax) * fz - (q[1] - az) * fx) / den, v = ((q[0] - ax) * ez - (q[1] - az) * ex) / den;
-          if (u >= 0 && u <= 1 && v >= 0 && v <= 1) { const tt = t0 + u * (t1 - t0); if (t === null || tt < t) t = tt; }
-        }
-      }
+      const t = prismEntry(p, ox, oy, oz, dx, dy, dz, scale);
       if (t !== null && (!best || t < best.t)) best = { building: p.b, t };
     }
     return best;
   }
-  // What is drawn in front of a station building hides it from hover: the app registers the test (ground, boxes, landmarks).
+  /**
+   * Does the segment (origin o, unit direction d, length tMax) enter the displayed prism of any station building other than
+   * `excludeKey`? (Sprint 14Oct26w: the name occluder's first test; prismEntry is pickRayRaw's own, with a length and a skip.)
+   */
+  function segmentHitsStation(ox, oy, oz, dx, dy, dz, tMax, excludeKey = null, scale = getBuildingHeightScale()) {
+    for (const p of prisms) {
+      if (p.b.key === excludeKey) continue;
+      if (prismEntry(p, ox, oy, oz, dx, dy, dz, scale, tMax) !== null) return true;
+    }
+    return false;
+  }
+  // What is drawn in front of a station building hides it from hover: the app registers the test (ground, boxes, landmarks, and,
+  // since 14Oct26w, bridges, trains and aircraft). It returns false, true (something unnamed) or a descriptor { kind, name? }.
   let occluder = null;
   function setOccluder(fn) { occluder = typeof fn === 'function' ? fn : null; }
+  const meshesApi = { lastOcclusion: null };
   /** The nearest displayed building the ray (canonical world space) enters and can SEE: { building, t } or null. */
   function pickRay(ox, oy, oz, dx, dy, dz, scale = getBuildingHeightScale()) {
     const hit = pickRayRaw(ox, oy, oz, dx, dy, dz, scale);
-    if (hit && occluder && occluder(ox, oy, oz, dx, dy, dz, hit.t, scale)) return null;
+    if (hit && occluder) {
+      const occ = occluder(ox, oy, oz, dx, dy, dz, hit.t, scale);
+      if (occ) { meshesApi.lastOcclusion = typeof occ === 'object' ? occ : { kind: 'map' }; return null; }
+    }
     return hit;
   }
+  /**
+   * Every roundel quad as it is drawn at the current Master, canonical Y (the vertex shader's own formula, roundelExtent):
+   * [{ key, title, on, host, x, z, nx, nz, D, W, bottomY, topY }]. For the checker.
+   */
+  function roundelExtents(scale = getBuildingHeightScale()) {
+    const out = [];
+    for (const b of buildings) {
+      const base = bases.get(b.key) ?? 0;
+      for (const r of b.roundels) {
+        const e = roundelExtent(b, r, base, scale, { VE, designMaster });
+        out.push({ key: b.key, title: b.title, on: r.on, host: !!r.host, x: r.x, z: r.z, nx: r.nx ?? 0, nz: r.nz ?? 0, D: r.D, W: r.D * wide, bottomY: e.bottomY, topY: e.topY });
+      }
+    }
+    return out;
+  }
+  /** Running totals of the label occluder (written by the app's occluder, main.js): frames, tests, ms, labels hidden. */
+  const labelOcclusion = { frames: 0, tests: 0, ms: 0, hidden: 0 };
   function dispose() {
     wallGeo.dispose(); rGeo.dispose(); wallMat.dispose(); roundelMat.dispose(); depthMat.dispose(); blank.dispose(); atlas?.texture.dispose();
   }
-  return { group, walls, roundels, bases, stats, buildingAtFace, setRoundelsVisible, roofOf, labelAnchor, pickRay, pickRayRaw, setOccluder, dispose, atlas, index };
+  const api = { group, walls, roundels, bases, stats, buildingAtFace, setRoundelsVisible, roofOf, labelAnchor, pickRay, pickRayRaw, segmentHitsStation, setOccluder, roundelExtents, labelOcclusion, dispose, atlas, index };
+  Object.defineProperty(api, 'lastOcclusion', { get: () => meshesApi.lastOcclusion, set: (v) => { meshesApi.lastOcclusion = v; }, enumerable: true });
+  return api;
 }
 
 /** Asynchronous wrapper: waits for the Railway face (at most 1.5 s), then builds. */
