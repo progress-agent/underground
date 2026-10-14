@@ -264,6 +264,80 @@ export function createCollisionService({
     return res;
   }
 
+  // ── s14:P ── line of sight (D-053 item 3: "line of sight in collision.js"): can a camera at `to` see a point at
+  // `from`? The over-the-shoulder camera pulls in rather than sit behind a facade. Canonical points {x, y, z}.
+  // Tests the instanced boxes (expanded by `pad` metres on X/Z and `padY` canonical units on Y) and the ground
+  // (`padY` above the terrain), then `extraSegmentHit(from, to)`: a function variable that defaults to "no hit";
+  // lane S supplies its solids' segment test (bridges, station buildings) through setExtraSegmentHit, and the
+  // integrator wires the two. A box that contains `from` is ignored, as moveAndSlide never traps a body.
+  let extraSegmentHit = () => false;
+  function setExtraSegmentHit(fn) { extraSegmentHit = typeof fn === 'function' ? fn : () => false; }
+  const losTo = { x: 0, y: 0, z: 0 };
+
+  /** Entry fraction of the segment f + t d into the box, or Infinity. A box containing f is Infinity. */
+  function segmentBoxEntry(fx, fy, fz, dx, dy, dz, x0, x1, y0, y1, z0, z1) {
+    if (fx >= x0 && fx <= x1 && fy >= y0 && fy <= y1 && fz >= z0 && fz <= z1) return Infinity;
+    let tmin = 0, tmax = 1;
+    for (let axis = 0; axis < 3; axis++) {
+      const f = axis === 0 ? fx : axis === 1 ? fy : fz, d = axis === 0 ? dx : axis === 1 ? dy : dz;
+      const lo = axis === 0 ? x0 : axis === 1 ? y0 : z0, hi = axis === 0 ? x1 : axis === 1 ? y1 : z1;
+      if (Math.abs(d) < 1e-12) { if (f < lo || f > hi) return Infinity; continue; }
+      let a = (lo - f) / d, b = (hi - f) / d;
+      if (a > b) { const t = a; a = b; b = t; }
+      if (a > tmin) tmin = a;
+      if (b < tmax) tmax = b;
+      if (tmin > tmax) return Infinity;
+    }
+    return tmin;
+  }
+
+  function lineOfSight(from, to, { pad = 0.25, padY = pad * 5 } = {}) {
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    let t = 1, what = null;
+    // the boxes
+    forEachBuilding(Math.min(from.x, to.x) - pad, Math.max(from.x, to.x) + pad,
+      Math.min(from.z, to.z) - pad, Math.max(from.z, to.z) + pad,
+      (minX, maxX, minZ, maxZ, baseY, roofY) => {
+        const e = segmentBoxEntry(from.x, from.y, from.z, dx, dy, dz,
+          minX - pad, maxX + pad, baseY - padY, roofY + padY, minZ - pad, maxZ + pad);
+        if (e < t) { t = e; what = 'box'; }
+      });
+    // the ground: the first crossing of the segment down through (terrain + padY)
+    const hl = Math.hypot(dx, dz);
+    const n = Math.min(48, Math.max(4, Math.ceil(hl / 2)));
+    let prev = null;
+    for (let i = 0; i <= n; i++) {
+      const u = i / n;
+      if (u >= t) break;
+      const g = getGroundY(from.x + dx * u, from.z + dz * u);
+      if (!Number.isFinite(g)) { prev = null; continue; }
+      const v = from.y + dy * u - g - padY;
+      if (prev !== null && prev.v > 0 && v <= 0) {
+        const u0 = prev.u + (u - prev.u) * (prev.v / (prev.v - v));
+        if (u0 < t) { t = u0; what = 'ground'; }
+        break;
+      }
+      prev = { u, v };
+    }
+    // anything else (lane S's bridges and station buildings), a hit fraction or a plain yes
+    const hit = extraSegmentHit(from, to);
+    if (typeof hit === 'number' && Number.isFinite(hit) && hit >= 0 && hit <= 1) {
+      if (hit < t) { t = hit; what = 'extra'; }
+    } else if (hit === true) {
+      let lo = 0, hi = Math.min(1, t);
+      for (let k = 0; k < 10; k++) {
+        const mid = (lo + hi) / 2;
+        losTo.x = from.x + dx * mid; losTo.y = from.y + dy * mid; losTo.z = from.z + dz * mid;
+        if (extraSegmentHit(from, losTo) === true) hi = mid; else lo = mid;
+      }
+      if (hi < t) { t = hi; what = 'extra'; }
+    }
+    const clear = what === null;
+    if (clear) t = 1;
+    return { clear, t, x: from.x + dx * t, y: from.y + dy * t, z: from.z + dz * t, what };
+  }
+  // ── /s14:P ──
+
   return {
     sync,
     buildingsNear,
@@ -273,6 +347,9 @@ export function createCollisionService({
     waterAt,
     isInWater: (x, y, z) => !!isSubmerged(x, y, z),
     moveAndSlide,
+    // ── s14:P ──
+    lineOfSight, setExtraSegmentHit,
+    // ── /s14:P ──
     stats: () => ({
       meshes: current.length,
       indexedMeshes: current.filter(e => e.grid).length,
