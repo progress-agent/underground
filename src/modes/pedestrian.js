@@ -125,6 +125,9 @@ import { createTunnelTrains, stepShake } from '../tunnel-trains.js';
 import { INTERIOR_LAYER } from '../tube-interior.js';
 import { PLATFORM } from '../platform-tunnel.js';
 // ── /s30:P ──
+// ── s14:P ──
+import { createOnFoot } from '../player/on-foot.js';
+// ── /s14:P ──
 
 export { PEDESTRIAN_TUNABLES };
 
@@ -227,6 +230,11 @@ export function createPedestrianMode(ctx) {
   let latch = null;                       // the held W/S (+1 / -1) that is ignored until released
   let lastForward = 0;                    // W/S as read this frame (the latch takes it)
   // ── /s01:P ──
+  // ── s14:P ── the figure and the over-the-shoulder camera (src/player/on-foot.js): the view, the rig, the
+  // figure's drawing and its look input. yaw/pitch are the walker's view; in third person they are the rig's.
+  const onFoot = createOnFoot({ ctx, body, P, VE, getPhase: () => phase, getRegime: () => regime,
+    look: { get: () => ({ yaw, pitch }), set: (y, p) => { yaw = y; pitch = p; } } });
+  // ── /s14:P ──
 
   // Edge-triggered keys are latched from keydown, so a tap shorter than a
   // frame is never lost. Held state comes from the shared ctx.keys set.
@@ -1202,7 +1210,7 @@ export function createPedestrianMode(ctx) {
     label: 'Pedestrian',
     key: '2',
     hint: HINT,
-    look: 'lock',
+    get look() { return onFoot.lookMode(); }, // s14:P 'drag' in third person, 'lock' in first (was: look: 'lock')
     solid: true,
     stub: false,
 
@@ -1231,6 +1239,9 @@ export function createPedestrianMode(ctx) {
       phase = 'enter';
       network();
       c?.setHint?.(null);
+      // ── s14:P ──
+      onFoot.activate();
+      // ── /s14:P ──
     },
 
     deactivate(c) {
@@ -1244,12 +1255,16 @@ export function createPedestrianMode(ctx) {
       if (savedNear !== null) setNear(savedNear);
       savedNear = null;
       ease.restore();
+      // ── s14:P ──
+      onFoot.deactivate();
+      // ── /s14:P ──
       body.jet = false;
       jumpLatch = useLatch = false;
       c?.setHint?.(null);
     },
 
     onLook(dx, dy) {
+      if (onFoot.onLook(dx, dy)) return; // s14:P third person: the rig takes the drag
       const k = P.look / 1000;
       yaw -= dx * k;
       pitch = Math.min(PITCH_LIMIT, Math.max(-PITCH_LIMIT, pitch - dy * k));
@@ -1261,6 +1276,7 @@ export function createPedestrianMode(ctx) {
       ease.update(dt, P.easeTime);
       const jump = jumpLatch, use = useLatch;
       jumpLatch = useLatch = false;
+      onFoot.preUpdate(dt); // s14:P V, and in third person the walker's view is the rig's
       // s30:P out of the bore (a transfer, the shaft, the street) a shake only dies away.
       if (phase !== 'tunnel' && shake > 0) ({ shake, passT } = stepShake({ shake, passT }, null, dt));
       // s01:P every other line is mapped onto its drawn track lazily, within a budget a frame; not while
@@ -1275,6 +1291,7 @@ export function createPedestrianMode(ctx) {
       else if (phase === 'step') updateStep(dt); // s01:P
       openAir.stepCut(dt); // s01:P the flare or the dip, on the mode clock
       syncUndergroundView();
+      onFoot.postUpdate(dt); // s14:P third person overwrites the camera and draws the figure
       return true;
     },
 
@@ -1320,6 +1337,7 @@ export function createPedestrianMode(ctx) {
           station: step.station ? { ...step.station } : null, stop: step.stop ? { name: cleanLabel(step.stop.name), path: step.stop.path, s: step.stop.s } : null } : null,
         openAir: openAir.debug(),
         contact: lastContact ? { ...lastContact } : null, latchB: latchB ? { ...latchB } : null, // s02:B
+        view: onFoot.debug(), // s14:P
         lastPass: lastPass ? { inside: !!lastPass.inside, insideSpeed: lastPass.insideSpeed ?? 0, rush: lastPass.rush ?? 0, rumble: lastPass.rumble ?? 0 } : null,
         // ── /s01:P ──
       };
@@ -1343,6 +1361,7 @@ export function createPedestrianMode(ctx) {
       settleAt(x, z, Infinity);
       phase = 'body';
       placeCamera(body.x, body.y + P.eye * VE, body.z);
+      onFoot.snap(); // s14:P
       return true;
     },
     press(which) { if (which === 'jump') jumpLatch = true; else if (which === 'use') useLatch = true; },
@@ -1385,6 +1404,12 @@ export function createPedestrianMode(ctx) {
     turn(dxRad, dyRad) { yaw += dxRad; pitch = Math.min(PITCH_LIMIT, Math.max(-PITCH_LIMIT, pitch + dyRad)); },
     get network() { return network(); },
     rebuildNetwork() { return network(true); },
+    // ── s14:P ── the third-person view (src/player/on-foot.js)
+    isThirdPerson: () => onFoot.isThirdPerson(),
+    setView: (v) => onFoot.setView(v),
+    playerState: () => onFoot.playerState(),
+    get onFoot() { return onFoot; },
+    // ── /s14:P ──
     body,
   };
 }
