@@ -159,7 +159,9 @@ export const TERRAIN_CLEAR_M = 1;      // every ease and the open-air camera sta
 const EDGE_HINT = 'The map ends here · S walks back';
 // ── /s01:P ──
 
-const HINT = 'WASD run · Space jump, hold to jetpack · E at a station chooses a platform';
+// ── s14:I ── the hint names the sprint's new keys: V the view, B the board, Q dives when swimming (integration, sprint 14Oct26w)
+const HINT = 'WASD run · Space jump, hold to jetpack · V view · B board · Q dive · E at a station chooses a platform';
+// ── /s14:I ──
 
 const easeOutCubic = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
 

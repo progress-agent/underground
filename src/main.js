@@ -4776,6 +4776,16 @@ const s14dVehicles = createVehicles({
 modeSystem.ctx.vehicles = s14dVehicles;
 const s14dLabelCover = createFigureLabelCover({ getFigureScreenRect: () => s14dVehicles.screenRect });
 // ── /s14:D ──
+// ── s14:I ── the seams between the sprint's lanes (integration, sprint 14Oct26w)
+// Line of sight: the over-the-shoulder camera's segment test (lane P, collision.lineOfSight) also sees the solid
+// bridges, M25 crossings and station buildings (lane S, collision.segmentHitsSolids), so it pulls in before them.
+modeSystem.collision.setExtraSegmentHit((a, b) => modeSystem.collision.segmentHitsSolids(a, b));
+// Label cover: a station name the figure (lane P), or the Drone or the Balloon (lane D), stands in front of is
+// hidden for that frame, through lane B's hook (stations.js). Each rectangle is null in first person, so neither hides
+// anything there; both run only for names that would otherwise show, above ground.
+addSurfaceLabelOccluder(s14pLabelCover);
+addSurfaceLabelOccluder(s14dLabelCover);
+// ── /s14:I ──
 
 requestAnimationFrame(tick);
 
