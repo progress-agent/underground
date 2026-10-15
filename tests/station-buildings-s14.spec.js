@@ -245,9 +245,9 @@ test('B14-2.5 touching the box elsewhere does not open the card, and never gets 
     await enterWalk();
     const host = BLOCK(site).host, half = host.side / 2;
     const placed = await placeAt(x, z, yaw);
-    // Is the host box standing on the street here? A baked box stands at the ground under its CENTRE, so a 90 m box on a slope floats
-    // over the street on its low side: at Fulham Broadway's north face the ground is 2.8 m under the box's base, the walker (1.7 m)
-    // walks under it, and collision.js (lane S's file) reads only the instanced box. Reported, not hidden: see the commit message.
+    // How far does the host float over the street here? A baked box stands at the ground under its CENTRE, so a 90 m box on a slope floats
+    // over the street on its low side (2.8 m at Fulham Broadway's north face). collision.js (lane S's file) reads only the instanced box, so
+    // the walker is held out of the host's square by the pedestrian's contact step (hostPushAt); logged here, and the assertions below hold at every start.
     const floatM = await page.evaluate(([host, x, z, yaw]) => {
       const u = window.__ug, g = u.modes.ctx.getStructuralY; let gMin = Infinity;
       for (let t = 0; t <= 8; t++) { const k = t * 5; gMin = Math.min(gMin, g(x - Math.sin(yaw) * k, z - Math.cos(yaw) * k) / 5); }
@@ -264,7 +264,7 @@ test('B14-2.5 touching the box elsewhere does not open the card, and never gets 
   console.log('touching the box elsewhere', JSON.stringify(out));
   for (const r of out) {
     expect(r.anyCard, `${r.site} (${r.x}, ${r.z}): no card at any frame`).toBe(false);
-    if (r.floatM > 1.5) { console.log(`${r.site} (${r.x}, ${r.z}): the host floats ${r.floatM.toFixed(2)} m over the street here; the walker passes under it (known, see the lane's summary)`); continue; }
+    // (no exemption where the host floats over the street: the walker is held out of the host's square there too, station-buildings.js hostPushAt)
     expect(r.minOutside, `${r.site}: the walker's centre never comes within 0.30 m of the host`).toBeGreaterThanOrEqual(0.30);
     expect(r.endOutside, `${r.site}: ends within 1.0 m outside the host square`).toBeLessThanOrEqual(1.0);
   }
@@ -386,22 +386,27 @@ test('B14-5.1 the reported extents are what is drawn: a ring\'s bottom and a roo
 // ── 4. King's Cross at Master 1.5 (C7) ─────────────────────────────────────
 
 test('B14-5.4 King\'s Cross at Master 1.5: its rings and bar are drawn, and the walker stands on the street, not on the roof', async () => {
+  // Entering Pedestrian eases Master back to 1 (pedestrian-scale.js), so Master 1.5 is set AFTER the walk has begun and the ease is done,
+  // then the walker is placed; the scale is read back at the pose, so this can never again test Master 1 (check round 1 found it had).
+  await enterWalk();
+  await page.waitForTimeout(2500);
   const scale = await setMaster(1.5);
   expect(scale).toBeCloseTo(1 / 1.5, 4);
-  await enterWalk();
   const pose = DATA.buildings.find(b => b.key === DATA.sites['kings-cross-st-pancras'].building).exit;
   await page.evaluate(([x, z, yaw]) => window.__ug.modes.registry.get('pedestrian').place(x, z, { yaw: yaw + Math.PI, pitch: 0 }), [pose.x, pose.z, pose.yaw]);
   await page.waitForTimeout(1500);
   const hues = await stationHues();
-  const st = await page.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z) }; });
+  const st = await page.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z), scale: u.getBuildingHeightScale() }; });
   console.log('King\'s Cross at Master 1.5', JSON.stringify({ hues, st }));
+  expect(st.scale, 'still at Master 1.5 where the walker stands').toBeCloseTo(1 / 1.5, 4);
   await snap(page, 'C7a-walker-kings-cross-master-1.5-after');
   const base = await withBase();
   if (base) {
     const A = onPage(base);
-    await base.evaluate(async () => { const el = document.getElementById('masterHeight'); el.value = '1.5'; el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); await new Promise(r => setTimeout(r, 600)); });
-    await A.walk(pose.x, pose.z, pose.yaw + Math.PI);
-    const bst = await base.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z) }; });
+    await A.walk(pose.x, pose.z, pose.yaw + Math.PI);       // enters the walk first (Master eases to 1) ...
+    await base.evaluate(async () => { const el = document.getElementById('masterHeight'); el.value = '1.5'; el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); await new Promise(r => setTimeout(r, 800)); });
+    await A.walk(pose.x, pose.z, pose.yaw + Math.PI);       // ... then Master 1.5, then the same pose again
+    const bst = await base.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z), scale: u.getBuildingHeightScale() }; });
     console.log('the same pose on bf10309 at Master 1.5', JSON.stringify(bst));
     await snap(base, 'C7a-walker-kings-cross-master-1.5-before');
     await A.leaveWalk();

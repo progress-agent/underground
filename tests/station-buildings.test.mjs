@@ -589,6 +589,26 @@ test('data: riseM on every building, heights 6 to 30, and the lift is zero at th
   for (const b of data.buildings) if (prior[b.key] !== undefined) assert.ok(b.height >= prior[b.key] - 1e-9, `${b.key}: a height only ever grows (${prior[b.key]} to ${b.height})`);
 });
 
+test('hostPushAt: a walker under a floating host is held 0.36 m outside its square, from every side and from inside; on the roof or far away it is not held (fix round 1, B14-2.5)', { skip: !have }, () => {
+  const idx = createStationBuildingIndex(JSON.parse(fs.readFileSync(JSON_PATH, 'utf8')));
+  const VE = 5, margin = 0.36;
+  const hosts = idx.buildings.filter(b => b.host);
+  assert.equal(hosts.length, 2);
+  for (const b of hosts) {
+    const h = b.host, half = h.side / 2, under = (h.baseM - 1) * VE;
+    for (const [dx, dz, nx, nz] of [[half + 0.1, 3, 1, 0], [-(half + 0.1), -3, -1, 0], [4, half + 0.1, 0, 1], [-4, -(half + 0.1), 0, -1], [half - 3.58, 0, 1, 0], [0, 0, 1, 0]]) {
+      const p = idx.hostPushAt(h.x + dx, h.z + dz, under, VE, margin);
+      assert.ok(p, `${b.key}: held at (${dx}, ${dz})`);
+      assert.equal(p.building.key, b.key);
+      const ox = Math.abs(p.x - h.x) - half, oz = Math.abs(p.z - h.z) - half;
+      assert.ok(Math.abs(Math.max(ox, oz) - margin) < 1e-9, `${b.key}: pushed to ${margin} m outside the square, got ${Math.max(ox, oz)}`);
+      if (nx || nz) assert.ok(p.nx === nx || p.nz === nz || (dx === 0 && dz === 0), `${b.key}: ${JSON.stringify([p.nx, p.nz])}`);
+    }
+    assert.equal(idx.hostPushAt(h.x + half + margin + 0.01, h.z, under, VE, margin), null, 'just outside the margin: not held');
+    assert.equal(idx.hostPushAt(h.x, h.z, (h.baseM + h.h) * VE, VE, margin), null, 'on the roof: not held');
+  }
+});
+
 test('displayedRoofY and roundelExtent: the roof and the rings rise with the street above 1.1, never below the plain height', () => {
   const b = { height: 10, riseM: 4, host: null };
   assert.equal(displayedRoofY(b, 100, 1 / 1.1), 100 + 10 * 5 / 1.1);

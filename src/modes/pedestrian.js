@@ -923,6 +923,16 @@ export function createPedestrianMode(ctx) {
   function contactStep(px, pz) {
     const api = sbApi();
     if (!api) { lastContact = null; return; }
+    // ── s14:B ── a box-entrance host floats over the street on its low side: the walker is held out of its square (the skirt is only drawn)
+    if (body.state === 'ground' && api.hostPushAt) {
+      const hp = api.hostPushAt(body.x, body.z, body.y, VE, CONTACT_PUSH_M);
+      if (hp) {
+        body.x = hp.x; body.z = hp.z;
+        if (hp.nx !== 0) body.vx = 0; else body.vz = 0;
+        placeCamera(body.x, body.y + P.eye * VE, body.z);
+      }
+    }
+    // ── /s14:B ──
     if (latchB && sbDistance(api, latchB.key, body.x, body.z) >= latchB.d0 + CONTACT_REARM_M) latchB = null;
     const hit = api.contactAt(body.x, body.z, 30);
     lastContact = hit ? { key: hit.building.key, d: hit.d, latched: !!latchB && latchB.key === hit.building.key } : null;

@@ -114,7 +114,31 @@ export function createStationBuildingIndex(json) {
     return b ? { x: b.exit.x, z: b.exit.z, yaw: b.exit.yaw } : null;
   }
 
-  return { json, buildings: json.buildings, byKey, items, hidesBox, contactAt, distanceTo, buildingForSite, buildingForName, stationExitPose, siteKeyOf };
+  // ── s14:B ── (sprint 14Oct26w, fix round 1) The host box of a box-entrance station is a map box that stands on the ground under
+  // its centre, so on a slope its base floats over the street on the low side (2.85 m at Fulham Broadway's north face) and a
+  // walker's 1.7 m passes under it, where only the host's grey skirt (visual) closes the gap. collision.js reads the instanced
+  // box and is not this lane's file, so the walker is held out of the host's square HERE, as it is held out of the footprint:
+  // never closer than `margin` to the square's face, unless it is up on the roof.
+  const hosted = json.buildings.filter(b => b.host);
+  /**
+   * If (x, z) at height y (world units) is inside a host's square grown by `margin`, and below its roof, the nearest point
+   * `margin` outside the face: { building, x, z, nx, nz } (n = the face's outward normal), else null. Pure.
+   */
+  function hostPushAt(x, z, y, VE = 5, margin = 0.36) {
+    for (const b of hosted) {
+      const h = b.host, half = h.side / 2;
+      if (y >= (h.baseM + h.h) * VE - 0.2 * VE) continue;         // up on the roof (jetpack): not held
+      const dx = x - h.x, dz = z - h.z, ox = Math.abs(dx) - half, oz = Math.abs(dz) - half;
+      if (Math.max(ox, oz) >= margin) continue;
+      if (ox >= oz) { const s = dx < 0 ? -1 : 1; return { building: b, x: h.x + s * (half + margin), z, nx: s, nz: 0 }; }
+      const s = dz < 0 ? -1 : 1;
+      return { building: b, x, z: h.z + s * (half + margin), nx: 0, nz: s };
+    }
+    return null;
+  }
+  // ── /s14:B ──
+
+  return { json, buildings: json.buildings, byKey, items, hidesBox, contactAt, distanceTo, buildingForSite, buildingForName, stationExitPose, siteKeyOf, hostPushAt };
 }
 
 /**

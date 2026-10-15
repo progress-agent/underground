@@ -57,7 +57,7 @@ test('no wall roundel is under the street in front of it at Master 1.0, 1.1, 1.5
         for (const off of [0.05, 1, 3, 6]) for (let k = 0; k <= 8; k++) street = Math.max(street, Y(r.x + tx * (k / 8 - 0.5) * W + r.nx * off, r.z + tz * (k / 8 - 0.5) * W + r.nz * off));
         const d = (street - e.bottomY) / (5 * scale);
         worst[M] = Math.max(worst[M], d);
-        if (d > 0) dip[M]++;
+        if (d > -0.3) dip[M]++;           // 02Oct26f's margin: a ring's bottom stays 0.3 m clear of the street (d is negative when clear)
         const roofY = r.host ? b.host.baseM * VE + b.host.h * VE * scale : displayedRoofY(b, base, scale, { VE });
         assert.ok(e.topY <= roofY + 0.01 * 5 * scale, `${b.key} at Master ${M}: a ring's top is over the roof`);
       }
@@ -82,7 +82,7 @@ test('no wall roundel is under the street in front of it at Master 1.0, 1.1, 1.5
     }
   }
   console.log(`${rings} wall roundels; worst dip (m) at Master 1.0 ${worst[1].toFixed(3)}, 1.1 ${worst[1.1].toFixed(3)}, 1.5 ${worst[1.5].toFixed(3)}, 3 ${worst[3].toFixed(3)}; roofs not 0.5 m clear: ${lowRoof.length}`);
-  for (const M of [1, 1.1, 1.5, 3]) assert.equal(dip[M], 0, `Master ${M}: ${dip[M]} rings dip into the street (worst ${worst[M].toFixed(3)} m)`);
+  for (const M of [1, 1.1, 1.5, 3]) assert.equal(dip[M], 0, `Master ${M}: ${dip[M]} rings are not 0.3 m clear of the street (worst ${worst[M].toFixed(3)} m)`);
   assert.deepEqual(lowRoof, [], 'every roof stands 0.5 m over the highest street of its lattice at 1.1, 1.5 and 3');
 });
 

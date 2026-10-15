@@ -4637,6 +4637,7 @@ modeSystem.ctx.stationBuildings = () => {
   const idx = stationBuildingState.index, m = stationBuildingsMesh;
   if (!idx) return null;
   return { index: idx, mesh: m, siteKeyOf: s02bSiteKeyOf, stationExitPose: s02bStationExitPose, entrancesForBuilding: s02bEntrancesForBuilding,
+    hostPushAt: (x, z, y, VE, margin) => idx.hostPushAt(x, z, y, VE, margin), // s14:B
     contactAt: (x, z, r) => idx.contactAt(x, z, r), distanceTo: (b, x, z) => idx.distanceTo(b, x, z), roofOf: (b) => m?.roofOf(b) ?? null };
 };
 // ── /s02:B ──
