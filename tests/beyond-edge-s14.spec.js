@@ -272,6 +272,93 @@ test('S-6 Chesham at 8 km: the branch is drawn, not dashed away: the minimum-wid
   await thaw();
 });
 
+// ---- Chesham's drawn width (F-CH1 and F-CH3, re-specified on 15Oct26w after the checker's round 1) ----
+// The first acceptance compared Chesham with Amersham at the report's pose, where Amersham is seen end-on (15 px of screen length, its width
+// counting the junction and the station), so that yardstick was invalid. The pass is Chesham's own line pixels per pixel of its projected
+// length, at two poses and two Masters: P1 (the report's) and P2 (a diagonal pose with both branches broadside), against the same
+// measure with the minimum-width line hidden (which is what bf10309 draws there). The figures from the round (head / bf10309):
+//   P1 Master 1.1 1.26 / 0.10;  P1 Master 2.0 0.80 / 0.23;  P2 Master 1.1 2.88 / 0.11;  P2 Master 2.0 2.75 / 0.05.
+const CHESHAM_MIN_WIDTH_PX = 0.6;
+const P1_POSE = () => {
+  const u = window.__ug, c = u.llToXZ(51.6610, -0.5400), g = (x, z) => u.getTerrainMeshSurfaceY({ x, z }) ?? 0;
+  const paths = u.surfaceRail.paths.get('metropolitan').filter(Boolean);
+  let best = null;
+  for (const path of paths) for (let i = 1; i < path.length - 1; i++) { if (path[i].cls === 'tunnel') continue; const d = Math.hypot(path[i].x - c.x, path[i].z - c.z); if (!best || d < best.d) best = { d, path, i }; }
+  const { path, i } = best, a = path[Math.max(0, i - 3)], b = path[Math.min(path.length - 1, i + 3)];
+  let dx = b.x - a.x, dz = b.z - a.z; const l = Math.hypot(dx, dz); dx /= l; dz /= l;
+  const p = path[i], cx = p.x - dz * 2500 - dx * 2500, cz = p.z + dx * 2500 - dz * 2500, tx = p.x + dx * 2000, tz = p.z + dz * 2000;
+  return { p: [cx, g(cx, cz) + 500 * 5, cz], t: [tx, g(tx, tz) + 10, tz] };
+};
+// Both branches broadside: 8 km out to the south-west of the point between the two termini's branches, 2.5 km up, looking north-east.
+const P2_POSE = () => {
+  const u = window.__ug, am = u.llToXZ(51.674126, -0.607714);
+  const ap = u.surfaceRail.paths.get('metropolitan').filter(Boolean).find(p => [p[0], p[p.length - 1]].some(e => Math.hypot(e.x - am.x, e.z - am.z) <= 40));
+  const J = Math.hypot(ap[0].x - am.x, ap[0].z - am.z) <= 40 ? ap[ap.length - 1] : ap[0];
+  const mid = { x: J.x - 975, z: J.z - 1400 }, C = { x: mid.x - 5657, z: mid.z + 5657 }, g = (x, z) => u.termini.hiddenGround.terrainY(x, z);
+  return { p: [C.x, g(C.x, C.z) + 2500, C.z], t: [mid.x, g(mid.x, mid.z), mid.z] };
+};
+/** Chesham's open samples between `lo` and `hi` metres of horizontal range, away from every station by 400 m and from the junction by 600 m, projected to the screen. */
+const CHESHAM_SEGMENTS = ({ ST, lo, hi }) => {
+  const u = window.__ug, cam = u.camera, V = new window.__ugTHREE.Vector3(), gl = u.composer.renderer.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+  const pts = Object.fromEntries(Object.entries(ST).map(([k, [la, lo2]]) => [k, u.llToXZ(la, lo2)]));
+  const paths = u.surfaceRail.paths.get('metropolitan').filter(Boolean);
+  const endNear = (path, q) => [path[0], path[path.length - 1]].some(e => Math.hypot(e.x - q.x, e.z - q.z) <= 40);
+  const ches = paths.filter(p => endNear(p, pts.chesham)), amer = paths.filter(p => endNear(p, pts.amersham));
+  if (!ches.length || !amer.length) return { n: 0, segs: [] };
+  const ae = [amer[0][0], amer[0][amer[0].length - 1]], other = Math.hypot(ae[0].x - pts.amersham.x, ae[0].z - pts.amersham.z) <= 40 ? ae[1] : ae[0];
+  const segs = []; let n = 0; const path = ches[0];
+  for (let i = 0; i + 1 < path.length; i++) {
+    const p = path[i], q = path[i + 1]; if (p.cls === 'tunnel') continue;
+    const d = Math.hypot(p.x - cam.position.x, p.z - cam.position.z); if (d < lo || d > hi) continue;
+    if (Object.values(pts).some(s => Math.hypot(p.x - s.x, p.z - s.z) <= 400)) continue;
+    if (Math.hypot(p.x - other.x, p.z - other.z) <= 600) continue;
+    n++;
+    V.set(p.x, p.y, p.z).project(cam); const a = [(V.x + 1) / 2 * W, (1 - V.y) / 2 * H];
+    V.set(q.x, q.y, q.z).project(cam); const b = [(V.x + 1) / 2 * W, (1 - V.y) / 2 * H];
+    segs.push([a, b]);
+  }
+  return { n, segs };
+};
+/** Line pixels per pixel of projected length: pixels within 4 px of a segment whose largest channel differs from the median of the pixels 8 to 14 px either side by more than 12 levels. */
+function lineWidth(img, segs) {
+  const { W, H, buf } = img; const get = (x, y) => { const i = ((H - 1 - y) * W + x) * 4; return [buf[i], buf[i + 1], buf[i + 2]]; };
+  let L = 0, count = 0; const seen = new Set();
+  for (const [[ax, ay], [bx, by]] of segs) {
+    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy); L += len; if (len < 1e-6) continue;
+    const nx = -dy / len, ny = dx / len, mx = (ax + bx) / 2, my = (ay + by) / 2, bgs = [[], [], []];
+    for (const sgn of [-1, 1]) for (let k = 8; k <= 14; k++) { const x = Math.round(mx + sgn * nx * k), y = Math.round(my + sgn * ny * k); if (x < 0 || y < 0 || x >= W || y >= H) continue; const c = get(x, y); for (let ch = 0; ch < 3; ch++) bgs[ch].push(c[ch]); }
+    if (!bgs[0].length) continue;
+    const bg = bgs.map(v => { v.sort((p, q) => p - q); return v[v.length >> 1]; });
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - 4)), x1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx) + 4)), y0 = Math.max(0, Math.floor(Math.min(ay, by) - 4)), y1 = Math.min(H - 1, Math.ceil(Math.max(ay, by) + 4));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const t = Math.max(0, Math.min(1, ((x + 0.5 - ax) * dx + (y + 0.5 - ay) * dy) / (len * len))), qx = ax + t * dx - x - 0.5, qy = ay + t * dy - y - 0.5;
+      if (qx * qx + qy * qy > 16) continue; const key = y * W + x; if (seen.has(key)) continue;
+      const c = get(x, y); if (Math.max(Math.abs(c[0] - bg[0]), Math.abs(c[1] - bg[1]), Math.abs(c[2] - bg[2])) > 12) { seen.add(key); count++; }
+    }
+  }
+  return L > 0 ? count / L : 0;
+}
+const setMaster = (v) => page.evaluate(async (v) => { const el = document.getElementById('masterHeight'); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); await new Promise(r => setTimeout(r, 400)); }, v);
+
+test('S-8 Chesham is a continuous line on the head and not without the minimum-width line: from the report\'s pose and from a diagonal pose, at Master 1.1 and 2.0', async () => {
+  const out = {};
+  try {
+    for (const mh of [1.1, 2.0]) {
+      await setMaster(mh);
+      for (const [name, fn, lo, hi] of [['P1', P1_POSE, 7000, 9000], ['P2', P2_POSE, 6000, 10000]]) {
+        const v = await page.evaluate(fn); await pose(v.p, v.t);
+        const b = await page.evaluate(CHESHAM_SEGMENTS, { ST, lo, hi });
+        expect(b.n, `${name} at Master ${mh}: enough of Chesham's branch in the band to measure`).toBeGreaterThanOrEqual(20);
+        const withLine = lineWidth(await px([]), b.segs), without = lineWidth(await px(['beyond-edge-track-lines']), b.segs);
+        out[`${name}@${mh}`] = { samples: b.n, withLine: +withLine.toFixed(2), without: +without.toFixed(2) };
+        expect(withLine, `${name} at Master ${mh}: Chesham is drawn at least ${CHESHAM_MIN_WIDTH_PX} px wide`).toBeGreaterThanOrEqual(CHESHAM_MIN_WIDTH_PX);
+        expect(without, `${name} at Master ${mh}: hiding the minimum-width line leaves the dashed branch (under ${CHESHAM_MIN_WIDTH_PX} px), so this measure can tell the two apart`).toBeLessThan(CHESHAM_MIN_WIDTH_PX);
+        await thaw();
+      }
+    }
+  } finally { await setMaster(1.1); await thaw(); console.log('[beyond-edge] Chesham line pixels per pixel of length', JSON.stringify(out)); }
+});
+
 test('S-7 no console error across the poses above', async () => {
   expect(errors).toEqual([]);
 });
