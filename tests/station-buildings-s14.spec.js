@@ -395,7 +395,7 @@ test('B14-5.4 King\'s Cross at Master 1.5: its rings and bar are drawn, and the 
   const hues = await stationHues();
   const st = await page.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z) }; });
   console.log('King\'s Cross at Master 1.5', JSON.stringify({ hues, st }));
-  await snap(page, 'C7-kings-cross-master-1.5-after');
+  await snap(page, 'C7a-walker-kings-cross-master-1.5-after');
   const base = await withBase();
   if (base) {
     const A = onPage(base);
@@ -403,7 +403,7 @@ test('B14-5.4 King\'s Cross at Master 1.5: its rings and bar are drawn, and the 
     await A.walk(pose.x, pose.z, pose.yaw + Math.PI);
     const bst = await base.evaluate(() => { const u = window.__ug, d = u.modes.registry.get('pedestrian').debug(); return { dy: d.y - u.modes.collision.groundHeightAt(d.x, d.z) }; });
     console.log('the same pose on bf10309 at Master 1.5', JSON.stringify(bst));
-    await snap(base, 'C7-kings-cross-master-1.5-before');
+    await snap(base, 'C7a-walker-kings-cross-master-1.5-before');
     await A.leaveWalk();
     await base.evaluate(async () => { const el = document.getElementById('masterHeight'); el.value = '1.1'; el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); await new Promise(r => setTimeout(r, 600)); });
   }
@@ -510,7 +510,7 @@ async function segmentBlocked(p, label) {
       const a = m.instanceMatrix.array;
       for (let i = 0; i < m.count && !blocked; i++) {
         const O = i * 16, cx = a[O + 12], cz = a[O + 14];
-        if (Math.abs(cx - o.x) > 3000 || Math.abs(cz - o.z) > 3000) continue;
+        if (Math.abs(cx - o.x) > 9000 || Math.abs(cz - o.z) > 9000) continue;   // (the labels reach 4 km and more at this height)
         const r = box(cx - Math.abs(a[O]) / 2, cx + Math.abs(a[O]) / 2, a[O + 13], a[O + 13] + Math.abs(a[O + 5]) * scale, cz - Math.abs(a[O + 10]) / 2, cz + Math.abs(a[O + 10]) / 2, end);
         if (r && r[0] < end - 0.75) blocked = true;
       }
@@ -568,12 +568,15 @@ test('B14-3.1 / 3.3 names: nothing of another station draws over King\'s Cross\'
         const pad = 8, covered = hiddenOnB.some(h => lb.x - pad < h.x + h.w + pad && lb.x + lb.w + pad > h.x - pad && lb.y - pad < h.y + h.h + pad && lb.y + lb.h + pad > h.y - pad);
         expect(covered, `${name}: ${n} is shown on B only because an occluded name no longer pushes it out`).toBe(true);
       }
-      let blocked = 0, nB = 0;
-      for (const l of hiddenOnB) { const b = await segmentBlocked(page, { ...l }); if (b === null) continue; nB++; if (b) blocked++; }
-      expect(blocked, `${name}: of the ${nB} names hidden on B the segment test calls ${blocked} blocked`).toBeGreaterThanOrEqual(nB < 10 ? nB - 1 : Math.ceil(0.9 * nB));
-      let clear = 0, nC = 0;
-      for (const l of r.labels) { const b = await segmentBlocked(page, { ...l }); if (b === null) continue; nC++; if (!b) clear++; }
-      expect(clear, `${name}: of the ${nC} names shown on B the segment test calls ${clear} clear`).toBeGreaterThanOrEqual(nC < 10 ? nC - 1 : Math.ceil(0.9 * nC));
+      let blocked = 0, nB = 0; const unblocked = [];
+      for (const l of hiddenOnB) { const b = await segmentBlocked(page, { ...l }); if (b === null) continue; nB++; if (b) blocked++; else unblocked.push(l.name); }
+      const why = await page.evaluate((names) => Object.fromEntries(names.map(n => [n, window.__ug.stationBuildings.meshes.labelOcclusion.byName?.get(n)?.why ?? null])), unblocked);
+      console.log(`${name}: hidden on B and not blocked by the segment test (the app's reason): ${JSON.stringify(why)}`);
+      expect(blocked, `${name}: of the ${nB} names hidden on B the segment test calls ${blocked} blocked (${unblocked})`).toBeGreaterThanOrEqual(nB < 10 ? nB - 1 : Math.ceil(0.9 * nB));
+      let clear = 0, nC = 0; const blockedShown = [];
+      for (const l of r.labels) { const b = await segmentBlocked(page, { ...l }); if (b === null) continue; nC++; if (!b) clear++; else blockedShown.push(l.name); }
+      console.log(`${name}: shown on B and blocked by the segment test: ${JSON.stringify(blockedShown)}`);
+      expect(clear, `${name}: of the ${nC} names shown on B the segment test calls ${clear} clear (${blockedShown})`).toBeGreaterThanOrEqual(nC < 10 ? nC - 1 : Math.ceil(0.9 * nC));
     }
   }
 });
@@ -674,7 +677,8 @@ const BAR_MEASURE = `(A) => {
   if (rows.length < 8) return { error: 'no bar band', rows: rows.length };
   const top = rows[0], bottom = rows.at(-1);
   let bl = W, br = -1; for (let y = top; y <= bottom; y++) for (let x = 0; x < W; x++) if (isBar(x, y)) { if (x < bl) bl = x; if (x > br) br = x; }
-  const bandPx = []; for (let y = top; y <= bottom; y++) for (let x = bl; x <= br; x++) bandPx.push([x, y, luma(px(x, y)), px(x, y)]);
+  // (the band's own edge rows and columns are blended with the wall behind them, so the lettering is looked for 4 px inside the band)
+  const bandPx = []; for (let y = top + 4; y <= bottom - 4; y++) for (let x = bl + 4; x <= br - 4; x++) bandPx.push([x, y, luma(px(x, y)), px(x, y)]);
   const med = (a) => { const s = a.slice().sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
   const ml = med(bandPx.map(p => p[2])), near = bandPx.filter(p => Math.abs(p[2] - ml) <= 0.1);
   const fill = [0, 1, 2].map(i => med(near.map(p => p[3][i]))), fl = luma(fill);

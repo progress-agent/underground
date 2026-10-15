@@ -4136,6 +4136,7 @@ function s14bLabelOccluded(rect, cam, info) {
   const m = stationBuildingsMesh;
   if (!m || !m.group.visible) return false;
   const stats = m.labelOcclusion, frame = renderer.info.render.frame;
+  stats.byName = s14bCache;   // (introspection: name -> { hidden, why: 'station' | 'box' | 'landmark' | null, px, py } of the last test)
   if (frame !== s14bFrame) {
     s14bFrame = frame; s14bFreshN = 0; stats.frames++;
     s14bNearestName = s14bAskedBest; s14bAskedBest = null; s14bAskedD = Infinity;
@@ -4155,25 +4156,29 @@ function s14bLabelOccluded(rect, cam, info) {
     const t0 = performance.now();
     if (!c) s14bCache.set(info.name, c = { cx, cy, cz, scale, hidden: false, exempt });
     c.cx = cx; c.cy = cy; c.cz = cz; c.scale = scale; c.exempt = exempt;
-    s14bPt.set(((rect.x + rect.w / 2) / info.vw) * 2 - 1, -((rect.y + rect.h) / info.vh) * 2 + 1, 0.5).unproject(cam);
+    // (the bottom of the label's TEXT: the placed rectangle carries 3 px of padding below it)
+    s14bPt.set(((rect.x + rect.w / 2) / info.vw) * 2 - 1, -((rect.y + rect.h - 3) / info.vh) * 2 + 1, 0.5).unproject(cam);
     s14bDir.copy(s14bPt).sub(cam.position).normalize();
     const tMax = dAnchor - 2;
-    let hit = false;
+    let hit = false, why = null;
     if (tMax > 0) {
       const own = info.building?.key ?? null;
       hit = m.segmentHitsStation(cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, own, scale);
+      if (hit) why = 'station';
       if (!hit && !exempt && surfaceGeometryGroup?.visible) {
         s02bBoxMeshes.length = 0;
         for (const g of surfaceGeometryGroup.children) if (g.isInstancedMesh && /^(baked-)?buildings-/.test(g.name || '')) s02bBoxMeshes.push(g);
-        hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax + 0.75, scale);
+        hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, scale);   // (rayBlockedByBoxes ignores a box that starts within 0.75 m of the end: the acceptance's own slack)
+        if (hit) why = 'box';
         if (!hit && landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
           s02bOccRay.set(s02bOccOrigin.set(cx, cy, cz), s02bOccDir.copy(s14bDir));
           s02bOccRay.far = tMax;
           hit = s02bOccRay.intersectObjects(landmarkGroup.userData.pickables, true).length > 0;
+          if (hit) why = 'landmark';
         }
       }
     }
-    c.hidden = hit;
+    c.hidden = hit; c.why = why; c.px = (rect.x + rect.w / 2) | 0; c.py = (rect.y + rect.h) | 0;
     stats.tests++; stats.ms += performance.now() - t0;
   }
   if (c?.hidden) { stats.hidden++; return true; }

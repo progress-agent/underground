@@ -655,7 +655,9 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   function segmentHitsStation(ox, oy, oz, dx, dy, dz, tMax, excludeKey = null, scale = getBuildingHeightScale()) {
     for (const p of prisms) {
       if (p.b.key === excludeKey) continue;
-      if (prismEntry(p, ox, oy, oz, dx, dy, dz, scale, tMax) !== null) return true;
+      // (A prism the segment STARTS inside is the building the viewer stands in or under, as at a platform in the open: it is not in front.)
+      const t = prismEntry(p, ox, oy, oz, dx, dy, dz, scale, tMax);
+      if (t !== null && t > 1e-6) return true;
     }
     return false;
   }
