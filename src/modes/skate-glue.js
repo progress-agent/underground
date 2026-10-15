@@ -15,6 +15,7 @@
 // `pending`, and the board goes on when it has arrived, if the walker is still eligible.
 import { SKATE, createSkate, stepSkate, canBoard } from './skate-body.js';
 import { registerSkatePose } from '../vehicles/skate-pose.js';
+import { BODY } from './pedestrian-body.js';
 
 const TAU = Math.PI * 2;
 const wrap = (a) => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
@@ -236,7 +237,17 @@ export function createBoardController({ ctx, body, P, VE, K, world, hooks }) {
       const faceTo = sk.heading - Math.PI / 2;
       sk.facing = faceTo + wrap(sk.facing - faceTo) * Math.exp(-FACING_RATE * dt);
       hooks.placeCamera(body.x, body.y + (P.eye + SKATE.deckTopM) * VE, body.z);
-      hooks.contactStep(px, pz);
+      // ── s14:I ── the rider is held to the on-foot frame's rules from lane S: a deck's or a tower's underside is a
+      // ceiling (an ollie stops under it), and on a station roof the touch rule (push, card) does not apply, because
+      // the rider is above the wall, not at it. Without the guard the rider was pushed 14 m out of King's Cross's
+      // footprint and dropped off the roof.
+      const ceil = ctx.collision.ceilingAt ? ctx.collision.ceilingAt(body.x, body.z, body.y) : null;
+      if (ceil !== null && body.vy > 0 && body.y + (P.eye + SKATE.deckTopM + BODY.headroom) * VE > ceil) {
+        body.y = ceil - (P.eye + SKATE.deckTopM + BODY.headroom) * VE; body.vy = 0;
+      }
+      const onRoof = !!(ctx.collision.onStationRoof && ctx.collision.onStationRoof(body.x, body.z, body.y));
+      // ── /s14:I ──
+      if (!onRoof) hooks.contactStep(px, pz); // s14:I (roof guard)
       if (hooks.card()) { off('card'); return true; }
 
       // the figure's pose reads these

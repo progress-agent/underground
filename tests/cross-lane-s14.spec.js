@@ -23,6 +23,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { installLib } from './s14-helpers.js';
+import { FLAME } from '../src/player/flames.js';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(600000);
@@ -332,7 +333,9 @@ test('4 jetpack: a tap jumps with no flames; a hold fires at about 0.15 s with n
   const lateFly = jetRows.filter((r) => r.t >= first.t + 0.5).map((r) => r.fly);
   const out = {
     tap: { air: tap.some((r) => r.state === 'air'), jet: tap.some((r) => r.jet), flames: Math.max(...tap.map((r) => r.count)) },
-    hold: { firstJetT: first?.t ?? null, dips, count: [...new Set(jetRows.map((r) => r.count))], lowLen: avg(low), fullLen: avg(full), nLow: low.length, nFull: full.length,
+    // Flames show only above FLAME.minLevel (flames.js flameVisible): the first jet frame can sit below it and the flames then
+    // appear a frame later. The count is read over the frames that are above the threshold; the rule itself is unchanged.
+    hold: { firstJetT: first?.t ?? null, dips, count: [...new Set(jetRows.filter((r) => r.jl !== null && r.jl > FLAME.minLevel).map((r) => r.count))], lowLen: avg(low), fullLen: avg(full), nLow: low.length, nFull: full.length,
       flyMinLate: lateFly.length ? Math.min(...lateFly) : null, jlMonotone: jetRows.every((r, i) => i === 0 || (r.jl ?? 1) >= (jetRows[i - 1].jl ?? 1) - 1e-9) },
     river: { states: [...new Set(river.map((r) => r.state))], flames: Math.max(...river.map((r) => r.count)) },
   };
@@ -405,6 +408,63 @@ test('5 board on a bridge: the skateboard rides across Westminster Bridge on its
   expect(r.minRel, 'never below the deck').toBeGreaterThanOrEqual(-0.15);
   expect(r.maxRel, 'never floating off it').toBeLessThanOrEqual(0.6);
   expect(r.maxOff, 'inside the deck\'s width').toBeLessThan(r.hw);
+});
+
+// ── 5b. the board on a station roof (D+S) ───────────────────────────────────────────────────────────────────────
+// Added after the integration verifier found the rider thrown off: skate-glue.js called the touch rule directly and
+// bypassed lane S's on-foot roof guard. A rider on a station roof is above the wall, not at it.
+test('5b board on a roof: the skateboard on King\'s Cross\'s roof stays on the roof, with no push and no card', async () => {
+  await toPedestrian();
+  await ev(() => window.__ug.modes.registry.get('pedestrian').setView('third'));
+  await ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(false));
+  const r = await ev(async () => {
+    const u = window.__ug, m = u.modes.registry.get('pedestrian'), sb = u.stationBuildings, keys = u.fpsControls.keys, VE = 5;
+    const site = 'kings-cross-st-pancras';
+    const b = sb.index.buildingForSite(site), exit = sb.index.stationExitPose(site);
+    const c = sb.contactAt(exit.x, exit.z, 200), roofY = sb.meshes.roofOf(b).roofY;
+    m.place(c.x + c.nx * 1.5, c.z + c.nz * 1.5, { yaw: Math.atan2(c.nx, c.nz), pitch: 0 });
+    for (let i = 0; i < 5; i++) u.modes.update(1 / 60);
+    m.press('jump'); keys.add(' '); keys.add('w');
+    let phase = 'climb', above = null, landed = null;
+    for (let i = 0; i < 1200; i++) {
+      if (phase === 'climb' && m.debug().y > roofY + 2 * VE) { keys.delete(' '); phase = 'over'; above = i; }
+      if (phase === 'over' && i - above > 40) { keys.delete('w'); phase = 'land'; }
+      u.modes.update(1 / 60);
+      const d = m.debug();
+      if (phase === 'land' && d.state === 'ground' && Math.abs(d.y - roofY) < 0.25) { landed = i; break; }
+    }
+    keys.clear();
+    for (let i = 0; i < 30; i++) u.modes.update(1 / 60);
+    const foot = m.debug();
+    const footOnRoof = Math.abs(foot.y - roofY) < 0.25 && !!sb.contactAt(foot.x, foot.z, 1)?.inside;
+    m.setBoard(true);
+    for (let i = 0; i < 400 && !m.debug().board.on; i++) await new Promise((res) => requestAnimationFrame(res));
+    const on = m.debug().board.on;
+    const x0 = foot.x, z0 = foot.z;
+    let maxMoved = 0, minRel = Infinity, maxRel = -Infinity, card = null;
+    for (let i = 0; i < 120; i++) {
+      u.modes.update(1 / 60);
+      const d = m.debug();
+      maxMoved = Math.max(maxMoved, Math.hypot(d.x - x0, d.z - z0));
+      minRel = Math.min(minRel, (d.y - roofY) / VE); maxRel = Math.max(maxRel, (d.y - roofY) / VE);
+      card = card ?? (d.card?.kind ?? null);
+    }
+    const d = m.debug();
+    return { landed, footOnRoof, on, maxMoved, minRel, maxRel, card, stillOn: d.board.on, inside: !!sb.contactAt(d.x, d.z, 1)?.inside, state: d.state };
+  });
+  await wait(600);
+  await snap('5b-board-kings-cross-roof');
+  await ev(() => { window.__ug.modes.registry.get('pedestrian').setBoard(false); });
+  record('5b-board-roof', r);
+  expect(r.landed, 'the walker reached the roof').not.toBeNull();
+  expect(r.footOnRoof, 'on foot the walker stands on the roof').toBe(true);
+  expect(r.on, 'the board went on').toBe(true);
+  expect(r.maxMoved, 'the touch rule does not push a rider on the roof').toBeLessThan(0.5);
+  expect(r.minRel, 'not dropped off the roof').toBeGreaterThanOrEqual(-0.3);
+  expect(r.maxRel).toBeLessThanOrEqual(0.3);
+  expect(r.card, 'no station card on the roof').toBeNull();
+  expect(r.stillOn).toBe(true);
+  expect(r.inside, 'still over the building').toBe(true);
 });
 
 // ── 6. the Drone and the Balloon against buildings (D+S+B) ─────────────────────────────────────────────────────
@@ -530,7 +590,10 @@ test('7 the walker\'s touch: King\'s Cross stops the walker 0.36 m out and opens
       if (d.chooser.open) break;
     }
     u.fpsControls.keys.delete('w');
-    const i = log.findIndex((f) => f.d !== null && f.d <= 0.40);
+    // A contact is a footprint within the rule's trigger distance (0.42 m, CONTACT_TRIGGER_M in pedestrian.js); the first frame under
+    // it can land anywhere between 0.36 and 0.42 m, according to the frame step, so 'reached' is read at 0.42 (it was 0.40 and
+    // missed a 0.4015 m opening frame once under load: the card did open).
+    const i = log.findIndex((f) => f.d !== null && f.d <= 0.42);
     return { kind: b.kind, key: b.key, reached: i, open: log.some((f) => f.open), rows: log.at(-1).rows, dMin: Math.min(...log.filter((f) => f.d !== null).map((f) => f.d)) };
   });
   await snap('7-touch-fulham-broadway');
