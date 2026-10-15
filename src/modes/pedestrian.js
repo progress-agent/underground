@@ -1352,6 +1352,10 @@ export function createPedestrianMode(ctx) {
       // ── /s14:D ──
       openAir.stepCut(dt); // s01:P the flare or the dip, on the mode clock
       syncUndergroundView();
+      // ── s14:I ── the host hold (lane B) acts on the body here, before the over-the-shoulder rig places the camera from it:
+      // run later, from the frame tick, it wrote the camera onto the body and put it inside the figure (integration round 2)
+      ctx.s14iHold?.();
+      // ── /s14:I ──
       // ── s14:P ── third person overwrites the camera and draws the figure
       onFoot.postUpdate(dt);
       // ── /s14:P ──

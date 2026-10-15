@@ -4462,8 +4462,7 @@ function tick(frameTime) {
     ? (_s24Viewport.w = renderer.domElement.clientWidth, _s24Viewport.h = renderer.domElement.clientHeight, _s24Viewport)
     : null;
   // ── /s24:R ──
-  // ── s14:B ── (after the modes have moved the walker, before anything reads the camera for labels)
-  s14bHoldWalker();
+  // ── s14:B ── (the walker's hold runs inside the Pedestrian's update, ctx.s14iHold, before the rig places the camera; see s14:I)
   // ── /s14:B ──
   s02bFrame(); // s02:B
   // Update station label projections for ALL lines
@@ -4785,6 +4784,11 @@ modeSystem.collision.setExtraSegmentHit((a, b) => modeSystem.collision.segmentHi
 // anything there; both run only for names that would otherwise show, above ground.
 addSurfaceLabelOccluder(s14pLabelCover);
 addSurfaceLabelOccluder(s14dLabelCover);
+// Host hold (lane B) and the third-person camera (lane P): s14bHoldWalker moves the body out of a box-entrance host's square and
+// writes the camera's x, z to it. Called after the modes had run, that put the camera inside the figure in third person (also after
+// W was let go, and on the board). It now runs from the Pedestrian's update between the body's step and onFoot.postUpdate, so the
+// rig places the camera from the held body and, in first person, the camera it writes is the one drawn (as before).
+modeSystem.ctx.s14iHold = s14bHoldWalker;
 // ── /s14:I ──
 
 requestAnimationFrame(tick);

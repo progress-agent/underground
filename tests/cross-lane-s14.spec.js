@@ -1,4 +1,4 @@
-// cross-lane-s14.spec.js: the nine cross-lane checks of sprint 14Oct26w's integration (I/brief.md section 1).
+// cross-lane-s14.spec.js: the ten cross-lane checks of sprint 14Oct26w's integration (I/brief.md section 1).
 // Each check exercises two or more lanes together in the real app (dev mode, real GPU):
 //   1 label cover (P+B)        the figure hides a station name behind it through lane B's hook; names clear of it show
 //   2 line of sight (P+S)      the over-the-shoulder camera, orbited behind a walker at King's Cross's wall and at a bridge
@@ -13,6 +13,8 @@
 //                              marked entrance opens its card
 //   8 views by place (P+D)     third person above ground on foot, board, Drone and Balloon; first person in the shaft,
 //                              the tunnel and the open-air ride; the street returns the chosen view
+//  10 host hold (B+P)         touching Fulham Broadway's or North Greenwich's box in third person never puts the camera on the
+//                              figure: on foot, after W is let go, and on the board
 //   9 the opening              a cold default-URL load runs the opening as the live build does (UG_LB, default
 //                              http://localhost:5268), the figure fetched only after the landing, zero console errors
 //
@@ -606,6 +608,65 @@ test('7 the walker\'s touch: King\'s Cross stops the walker 0.36 m out and opens
   expect(fb.reached, 'reached Fulham Broadway\'s entrance block').toBeGreaterThan(-1);
   expect(fb.open, 'its card opens').toBe(true);
   expect(fb.rows.some((r) => /District/.test(r)), JSON.stringify(fb.rows)).toBe(true);
+});
+
+// ── 10. the host hold against the third-person camera (B+P) ───────────────────────────────────────────────────
+// Lane B's hold keeps a walker out of a box-entrance host's square (Fulham Broadway's and North Greenwich's big map boxes). It
+// used to write the camera's x, z onto the body after the camera rig had placed it, so in third person a touch put the camera
+// inside the figure (0.00 m from it for two frames in three), also after W was let go and on the board. The hold now runs
+// before the rig places the camera. Real frames; the camera is read in a rAF callback registered after the app's.
+test('10 the host hold: touching Fulham Broadway\'s or North Greenwich\'s box in third person keeps the camera off the figure, on foot, after W is let go and on the board', async () => {
+  await toPedestrian();
+  const starts = [
+    { label: 'fulham-broadway north', x: -4520.3, z: 3036.7, yaw: Math.PI },
+    { label: 'fulham-broadway east', x: -4502.7, z: 3100.0, yaw: Math.PI / 2 },
+    { label: 'north-greenwich north', x: 9116.1, z: 504.2, yaw: Math.PI },
+    { label: 'north-greenwich west', x: 9087.2, z: 570.0, yaw: -Math.PI / 2 },
+  ];
+  const runs = [];
+  for (const s of starts) {
+    for (const board of [false, true]) {
+      if (board && !/ north$/.test(s.label)) continue;   // the board once at each host
+      await ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(false));
+      const r = await ev(async ({ s, board }) => {
+        const u = window.__ug, m = u.modes.registry.get('pedestrian'), keys = u.fpsControls.keys, cam = u.camera, T = window.__ugTHREE;
+        keys.clear();
+        m.place(s.x, s.z, { yaw: s.yaw, pitch: 0 });
+        m.setView('third');
+        for (let i = 0; i < 40; i++) await new Promise((res) => requestAnimationFrame(res));
+        if (board) { m.setBoard(true); for (let i = 0; i < 400 && !m.debug().board.on; i++) await new Promise((res) => requestAnimationFrame(res)); }
+        const v = new T.Vector3(), rows = [];
+        const sample = (held) => {
+          const b = m.body;
+          let neck = null;
+          if (u.player?.figure?.boneWorldPosition) { u.player.figure.boneWorldPosition('neck_01', v); neck = Math.hypot(cam.position.x - v.x, cam.position.z - v.z); }
+          rows.push({ held, body: Math.hypot(cam.position.x - b.x, cam.position.z - b.z), neck, third: m.isThirdPerson(), card: m.debug().card?.kind ?? null });
+        };
+        keys.add('w');
+        const t0 = performance.now();
+        while (performance.now() - t0 < 4500) { await new Promise((res) => requestAnimationFrame(res)); sample(true); }
+        keys.delete('w');
+        for (let i = 0; i < 45; i++) { await new Promise((res) => requestAnimationFrame(res)); sample(false); }
+        const d = m.debug();
+        const live = rows.filter((r) => r.third);
+        const min = (k) => Math.min(...live.map((r) => r[k]).filter((x) => x !== null));
+        return { label: s.label + (board ? ' on the board' : ''), board: !!d.board?.on, frames: rows.length, third: live.length,
+          minBody: min('body'), minNeck: live.some((r) => r.neck !== null) ? min('neck') : null, releasedMinBody: Math.min(...live.filter((r) => !r.held).map((r) => r.body)),
+          end: { x: d.x, z: d.z } };
+      }, { s, board });
+      runs.push(r);
+    }
+  }
+  await ev(() => { const m = window.__ug.modes.registry.get('pedestrian'); m.setBoard(false); window.__ug.fpsControls.keys.clear(); });
+  await snap('10-host-hold-camera');
+  record('10-host-hold-camera', { runs });
+  for (const r of runs) {
+    expect(r.third, `${r.label}: in third person throughout`).toBe(r.frames);
+    expect(r.minBody, `${r.label}: the camera is never on the body (horizontal, metres)`).toBeGreaterThan(1);
+    if (r.minNeck !== null) expect(r.minNeck, `${r.label}: nor at the figure's neck`).toBeGreaterThan(1);
+    expect(r.releasedMinBody, `${r.label}: still clear after W is let go`).toBeGreaterThan(1);
+  }
+  expect(runs.some((r) => r.board), 'the board went on in at least one run').toBe(true);
 });
 
 // ── 8. views by place (P+D) ─────────────────────────────────────────────────────────────────────────────────────
