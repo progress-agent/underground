@@ -168,6 +168,11 @@ function substep(s, input, dt, P, world) {
 
   // 4. Vertical move; ground, roofs and water are floors.
   let y = s.pos.y + s.vel.y * dt * VE;
+  // ── s14:S ── a deck's underside, or a tower's, is a ceiling: the drone cannot rise through it
+  // (a floor still wins below, so the clamp comes first).
+  const s14Ceil = col?.ceilingAt ? col.ceilingAt(s.pos.x, s.pos.z, oldFeet) : null;
+  if (s14Ceil !== null && s.vel.y > 0 && y + halfH > s14Ceil) { y = s14Ceil - halfH; s.vel.y = 0; }
+  // ── /s14:S ──
   let floor = col?.standHeightAt ? col.standHeightAt(s.pos.x, s.pos.z, oldFeet, 0.2 * VE) : null;
   const water = world.waterSurfaceY?.(s.pos.x, s.pos.z);
   if (Number.isFinite(water) && (floor === null || water > floor)) floor = water;
