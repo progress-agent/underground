@@ -50,6 +50,14 @@ async function enter(page) {
   await page.keyboard.press('2');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body',
     null, { timeout: 30000 });
+  await firstPerson(page);
+}
+
+// s14:P (D-053 item 3): Pedestrian above ground now opens in third person once the figure has loaded, so every check
+// below that reads the first-person camera selects first person after activation. No numeric pin changes.
+async function firstPerson(page) {
+  await page.evaluate(() => window.__ug.modes.registry.get('pedestrian').setView('first'));
+  await frames(page, 3);
 }
 
 test.describe('Pedestrian mode', () => {
@@ -67,6 +75,7 @@ test.describe('Pedestrian mode', () => {
     });
     await page.keyboard.press('2');
     expect(await page.evaluate(() => window.__ug.modes.activeId)).toBe('pedestrian');
+    await firstPerson(page); // s14:P
     await page.waitForFunction(() => {
       const d = window.__ug.modes.registry.get('pedestrian').debug();
       return d.phase === 'body' && !d.ease.running;

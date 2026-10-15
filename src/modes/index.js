@@ -142,6 +142,16 @@ export function installModes({
     onLookMode: (m) => look.setMode(m),
     onSilence: () => sfx.silence(),
   });
+  // ── s14:P ── the player (src/player/): main.js sets ctx.player and ctx.lens after the scene exists. playerView is the
+  // read-only face lane M and the label hook use: whether the walker is in third person and whether the figure loaded.
+  ctx.player = null;
+  ctx.lens = null;
+  ctx.refreshHud = () => hud?.render();
+  ctx.playerView = Object.freeze({
+    isThirdPerson: () => !!registry.active?.isThirdPerson?.(),
+    figureLoaded: () => !!ctx.player?.loaded,
+  });
+  // ── /s14:P ──
   registry.register(createDeityMode({ fpsControls, physics }));
   for (const factory of [createPedestrianMode, createDroneMode, createBalloonMode]) {
     try { registry.register(factory(ctx)); } catch (err) { console.warn('[modes] failed to register a mode', err); }

@@ -76,6 +76,49 @@ const resolvePose = async (page, pose) => (!pose?.station ? pose : page.evaluate
   const g = u.getTerrainMeshSurfaceY({ x: b.label.x, z: b.label.z });
   return { p: [b.label.x + dx, g + upM * 5, b.label.z + dz], t: [b.label.x, g + 10 * 5, b.label.z] };
 }, pose));
+// ── s14:P ── the body views (sprint 14Oct26w, D-053 item 10: gate 3 holds at the figure's views too). A `player`
+// pose is not a camera pose: the page activates the Pedestrian, waits for the figure (where this build has one:
+// `ctx.playerView`), places the walker at (x, z) facing `yaw`, chooses third person (`setView`, absent on a build
+// without the figure, which then measures the same pose in first person), and walks a shuttle through the held
+// keys (W for `shuttleS` seconds, then S, repeating) so the figure is animated and the street moves. The
+// measure loop takes the camera it returns. Lane D appends its three views (skateboard, Drone, Balloon).
+//   playerFoot            third person, walking back and forth past Bank at street level, the figure in frame
+//   playerFootNoShadow    the same with the figure's planar shadow off (the shadow's cost is the difference)
+export const PLAYER_VIEWS = {
+  playerFoot: { player: 'foot', x: 2743.9, z: -760.9, yaw: Math.PI, shuttleS: 3 },
+  playerFootNoShadow: { player: 'foot', x: 2743.9, z: -760.9, yaw: Math.PI, shuttleS: 3, shadow: false },
+};
+Object.assign(ALL_VIEWS, PLAYER_VIEWS);
+const resolveAnyPose = async (page, pose) => {
+  if (pose?.player !== 'foot') {
+    // any other pose first ends a running shuttle and returns to Deity (the camera is Deity's to set)
+    await page.evaluate(() => { window.__ugShuttle?.(); window.__ugShuttle = null; if (window.__ug.modes.activeId !== 'deity') window.__ug.modes.activate('deity'); });
+    return resolvePose(page, pose);
+  }
+  await page.evaluate(() => { window.__ugShuttle?.(); window.__ugShuttle = null; });
+  await page.evaluate(() => window.__ug.modes.activate('pedestrian'));
+  await page.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 60000 });
+  await page.waitForFunction(() => { const v = window.__ug.modes.ctx.playerView; return !v || v.figureLoaded(); }, null, { timeout: 30000 });
+  await page.evaluate(({ x, z, yaw, shuttleS, shadow }) => {
+    const u = window.__ug, ped = u.modes.registry.get('pedestrian');
+    ped.place(x, z, { yaw });
+    ped.setView?.('third');
+    u.player?.setShadowEnabled?.(shadow !== false);
+    const keys = u.fpsControls.keys, t0 = performance.now();
+    const id = setInterval(() => {
+      const first = Math.floor((performance.now() - t0) / (shuttleS * 1000)) % 2 === 0;
+      if (first) { keys.add('w'); keys.delete('s'); } else { keys.add('s'); keys.delete('w'); }
+    }, 100);
+    window.__ugShuttle = () => { clearInterval(id); keys.delete('w'); keys.delete('s'); };
+  }, pose);
+  await page.waitForTimeout(1500);
+  return page.evaluate(() => {
+    const c = window.__ug.camera, f = new window.__ugTHREE.Vector3();
+    c.getWorldDirection(f);
+    return { p: c.position.toArray(), t: [c.position.x + f.x * 50, c.position.y + f.y * 50, c.position.z + f.z * 50] };
+  });
+};
+// ── /s14:P ──
 export const SETUPS = {
   'as-lived': { dpr: 2, cpuThrottle: 1 },
   weak: { dpr: 1, cpuThrottle: 4 },
@@ -181,14 +224,14 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
     // Warm-up: visit every standard view once so programs and uploads are settled.
     for (const [name, v0] of Object.entries(ALL_VIEWS)) {
       if (!v0 || !views.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
-      const v = await resolvePose(page, v0);
+      const v = await resolveAnyPose(page, v0); // s14:P (was resolvePose)
       await page.evaluate(pose => { const u = window.__ug; u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update(); }, v);
       await page.waitForTimeout(1500);
     }
     const results = {};
     for (const name of views) {
       if (!(name in ALL_VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
-      const arrival = ALL_VIEWS[name] === null, pose = await resolvePose(page, ALL_VIEWS[name] ?? VIEWS.riverGreenwich);
+      const arrival = ALL_VIEWS[name] === null, pose = await resolveAnyPose(page, ALL_VIEWS[name] ?? VIEWS.riverGreenwich); // s14:P (was resolvePose)
       const ticks = Math.round((arrival ? arrivalS : settleS) * 4);
       const r = await page.evaluate(async ({ pose, arrival, street, ticks }) => {
         const u = window.__ug, sleep = ms => new Promise(res => setTimeout(res, ms));

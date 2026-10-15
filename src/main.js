@@ -181,6 +181,11 @@ import { createTubeInterior } from './tube-interior.js';
 import { createOvergroundNetworkSource, OG_PREFIX } from './modes/overground-network.js';
 // ── /s02:O ──
 // ── /s25:P ──
+// ── s14:P ── the player: the figure, its camera rig, flames and shadow (src/player/)
+import { createPlayer } from './player/index.js';
+import { createFigureLabelCover } from './player/label-cover.js';
+import { SUN_CONFIG } from './sun.js';
+// ── /s14:P ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -4706,6 +4711,52 @@ function s25InteriorHidesLabels(lineId) {
 // the slider never reaches night), so the opening matches the time of day.
 modeSystem.ctx.tubeInterior.setDaylight(() => sunSystem.state.skyColor);
 // ── /s30:P ──
+// ── s14:P ──
+// The player (D-053 items 2 to 4): the Quaternius mannequin as the Pedestrian's body above ground, drawn from
+// over its shoulder, with its own planar shadow, jetpack flames and a rectangle the station-name hook can read.
+// The model is fetched only after the opening has landed, so the opening's main-thread work does not grow, and
+// the view stays first person until it has arrived (no stand-in).
+const s14pSunDir = new THREE.Vector3();
+const s14pPlayer = createPlayer({
+  THREE, scene, masterHeight, collision: modeSystem.collision, isSubmergedAt,
+  distortNdc: (x, y) => lensSystem.distortNdc(x, y),
+  sunInfo: () => {
+    const L = atmosphereLights.sun;
+    s14pSunDir.copy(L.position).sub(L.target.position).normalize();
+    return { direction: s14pSunDir, strengthRatio: sunSystem.status.strength / SUN_CONFIG.shadowStrength, elevationDeg: sunSystem.state.elevationDeg };
+  },
+});
+modeSystem.ctx.player = s14pPlayer;
+// The lens as the modes use it: 22 mm in third person, the player's own (the HUD slider) otherwise. lens.js
+// setFocalLength dollies the camera towards the (stale) OrbitControls target, hundreds of metres from a walker,
+// so every change made by a mode puts the camera back where it was.
+modeSystem.ctx.lens = {
+  get: () => lensSystem.getFocalLength(),
+  set: (mm) => {
+    const px = camera.position.x, py = camera.position.y, pz = camera.position.z;
+    lensSystem.setFocalLength(mm);
+    camera.position.set(px, py, pz);
+  },
+  preferred: () => {
+    const v = Number(document.getElementById('focalLength')?.value);
+    return Number.isFinite(v) && v > 0 ? v : (prefs.focalLength ?? 30);
+  },
+};
+// Station names hidden where the figure covers them: the function lane B's hook (stations.js
+// addSurfaceLabelOccluder) takes. P does not register it; the integrator does.
+const s14pLabelCover = createFigureLabelCover({ getFigureScreenRect: () => s14pPlayer.screenRect });
+{
+  const load = () => { s14pPlayer.load(); };
+  const schedule = () => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(load, { timeout: 4000 });
+    else setTimeout(load, 500);
+  };
+  // intro.run() may have fired its bypass event long before this block runs, so the phase is checked first.
+  const ph = intro.getPhase();
+  if (ph === 'done' || ph === 'bypassed') schedule();
+  else window.addEventListener('ug:intro-done', schedule, { once: true });
+}
+// ── /s14:P ──
 
 requestAnimationFrame(tick);
 
@@ -4748,6 +4799,9 @@ if (import.meta.env.DEV) {
     // ── sprint:A1 ──
     get modes() { return modeSystem; },
     // ── /sprint:A1 ──
+    // ── s14:P ──
+    player: s14pPlayer, s14pLabelCover,
+    // ── /s14:P ──
     nearestThamesSegment, getZoneAt,
     isInThames,
     // Submerged regime (12Jul26u): shared inside-the-river predicate + signals.
