@@ -90,6 +90,9 @@ export const PLAYER_VIEWS = {
 };
 Object.assign(ALL_VIEWS, PLAYER_VIEWS);
 const resolveAnyPose = async (page, pose) => {
+  // ── s14:D ── the vehicle views (lane D) are resolved by their own function
+  if (pose?.player && pose.player !== 'foot') return s14dResolveVehicle(page, pose);
+  // ── /s14:D ──
   if (pose?.player !== 'foot') {
     // any other pose first ends a running shuttle and returns to Deity (the camera is Deity's to set)
     await page.evaluate(() => { window.__ugShuttle?.(); window.__ugShuttle = null; if (window.__ug.modes.activeId !== 'deity') window.__ug.modes.activate('deity'); });
@@ -119,6 +122,67 @@ const resolveAnyPose = async (page, pose) => {
   });
 };
 // ── /s14:P ──
+// ── s14:D ── the other bodies' views (sprint 14Oct26w, lane D, D-053 item 10): the skateboard, the Drone and the Balloon.
+// Like `playerFoot`, a pose here is a body, not a camera: the page activates the mode, waits for the figure where the
+// build has one, places the body, chooses third person (`setView`, absent on a build without it, which then measures the
+// same pose in first person), and keeps it moving through the held keys.
+//   playerSkate    third person, riding the street past Bank: on the board (`setBoard`), W held, put back at the start
+//                  every `replaceS` seconds so the ride stays in view
+//   playerDrone    third person, the Drone `upM` metres over the same street, W for `shuttleS` seconds and then S
+//   playerBalloon  third person, the Balloon `upM` metres over the Thames at Waterloo Bridge, the figure in its basket
+export const PLAYER_VIEWS_D = {
+  playerSkate: { player: 'skate', x: 2743.9, z: -760.9, yaw: Math.PI, replaceS: 3 },
+  playerDrone: { player: 'drone', x: 2743.9, z: -760.9, upM: 5, yaw: Math.PI, shuttleS: 2 },
+  playerBalloon: { player: 'balloon', x: 885.1, z: -145.1, upM: 150 },
+};
+Object.assign(ALL_VIEWS, PLAYER_VIEWS_D);
+const s14dResolveVehicle = async (page, pose) => {
+  // end a running shuttle (P's, or this resolver's) before the next body takes the camera
+  await page.evaluate(() => { window.__ugShuttle?.(); window.__ugShuttle = null; });
+  const mode = pose.player === 'skate' ? 'pedestrian' : pose.player;
+  await page.evaluate((id) => window.__ug.modes.activate(id), mode);
+  if (mode === 'pedestrian') {
+    await page.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 60000 });
+  }
+  await page.waitForFunction(() => { const v = window.__ug.modes.ctx.playerView; return !v || v.figureLoaded(); }, null, { timeout: 30000 });
+  await page.evaluate(async ({ player, x, z, yaw, upM, shuttleS, replaceS }) => {
+    const u = window.__ug, reg = u.modes.registry, keys = u.fpsControls.keys, t0 = performance.now();
+    const timers = [];
+    window.__ugShuttle = () => { timers.forEach(clearInterval); keys.delete('w'); keys.delete('s'); };
+    if (player === 'skate') {
+      const ped = reg.get('pedestrian');
+      ped.place(x, z, { yaw });
+      ped.setView?.('third');
+      u.player?.setShadowEnabled?.(true);
+      ped.setBoard?.(true);
+      // the board is fetched on the first B: wait for it where this build has one
+      for (let i = 0; i < 100 && ped.debug().board && !ped.debug().board.on; i++) await new Promise((r) => setTimeout(r, 50));
+      keys.add('w');
+      timers.push(setInterval(() => { ped.place(x, z, { yaw }); keys.add('w'); }, (replaceS ?? 3) * 1000));
+    } else if (player === 'drone') {
+      const d = reg.get('drone');
+      const g = u.modes.collision.groundHeightAt(x, z) ?? 0;
+      d.place({ x, y: g + upM * 5, z, yaw, pitch: 0 });
+      d.setView?.('third');
+      timers.push(setInterval(() => {
+        const first = Math.floor((performance.now() - t0) / ((shuttleS ?? 2) * 1000)) % 2 === 0;
+        if (first) { keys.add('w'); keys.delete('s'); } else { keys.add('s'); keys.delete('w'); }
+      }, 100));
+    } else {
+      const b = reg.get('balloon');
+      const water = u.modes.ctx.waterSurfaceAt(x, z) ?? 0;
+      b.place({ x, y: water + (upM + 1.5) * 5, z, dT: 60, vy: 0 });
+      b.setView?.('third');
+    }
+  }, pose);
+  await page.waitForTimeout(1500);
+  return page.evaluate(() => {
+    const c = window.__ug.camera, f = new window.__ugTHREE.Vector3();
+    c.getWorldDirection(f);
+    return { p: c.position.toArray(), t: [c.position.x + f.x * 50, c.position.y + f.y * 50, c.position.z + f.z * 50] };
+  });
+};
+// ── /s14:D ──
 export const SETUPS = {
   'as-lived': { dpr: 2, cpuThrottle: 1 },
   weak: { dpr: 1, cpuThrottle: 4 },

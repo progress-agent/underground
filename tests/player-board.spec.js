@@ -1,0 +1,536 @@
+// player-board.spec.js: the skateboard (sprint 14Oct26w, lane D, D-053 item 2). B puts a Kenney board under the figure
+// above ground, W pushes it to 12 m/s in 1.71 s (Shift 18), A/D steer with lean, Space is an ollie, a facade stops it,
+// the Thames drops it and the figure swims, and B steps off. The stance and the push are posed on the mannequin in code.
+//
+// One page boots once and the tests share it (serial). Timing is on the mode clock (ctx.time), sampled every
+// requestAnimationFrame; keys are injected through fpsControls.keys so a press lands at an exact simulated time.
+// Poses are fixed places in the real baked city (yaw 0 faces north, -Z).
+import { test, expect } from '@playwright/test';
+import { POSES, api } from './player-vehicles-helpers.mjs';
+
+test.describe.configure({ mode: 'serial' });
+
+let page, h;
+const errors = [], requests = [];
+const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+const dbgBoard = () => h.ev(() => window.__ug.modes.registry.get('pedestrian').debug().board);
+const pstate = () => h.ev(() => ({ ...window.__ug.modes.registry.get('pedestrian').playerState() }));
+/** Everything off, Master 1, the walker placed, the board on (when asked) and at rest. */
+async function start(name, { board = true, yaw, settle = 500 } = {}) {
+  await h.releaseKeys();
+  await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(false));
+  await h.place(name, { yaw, settle });
+  if (board) {
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().board.on, null, { timeout: 8000 });
+    await h.wait(300);
+  }
+}
+const SPEED_PROBE = `const p = ped.playerState(), b = ped.body; return { t, speed: p.speed, vx: b.vx, vz: b.vz, lean: p.lean, state: p.state, push: p.push, board: p.board, jet: b.jet, y: b.y, x: b.x, z: b.z };`;
+const headingOf = (s) => Math.atan2(-s.vx, -s.vz);
+
+test.describe('the skateboard', () => {
+  test.beforeAll(async ({ browser }) => {
+    page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    h = api(page);
+    page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+    page.on('response', (r) => { if (/\/models\/player\//.test(r.url())) requests.push({ url: new URL(r.url()).pathname, status: r.status(), type: r.headers()['content-type'] }); });
+    await h.boot();
+    await h.activatePedestrian();
+  });
+  test.afterAll(async () => { expect(errors, 'no console or page errors').toEqual([]); await page.close(); });
+
+  // ── board ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  test('board 1: a cold load fetches no skateboard and exactly one player model', async ({ browser }) => {
+    test.setTimeout(150000);
+    const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const urls = [];
+    p.on('request', (r) => urls.push(r.url()));
+    await p.goto('/');
+    await p.waitForTimeout(45000);
+    await p.close();
+    expect(urls.filter((u) => /skateboard\.glb|Textures\/colormap\.png/.test(u))).toEqual([]);
+    expect(urls.filter((u) => /\/models\/player\/.*\.glb/.test(u)).length).toBe(1);
+  });
+
+  test('board 2: B puts the board under the figure; its model and its texture are served', async () => {
+    await start('BANK', { board: false });
+    expect(await h.ev(() => window.__ug.modes.registry.get('pedestrian').isThirdPerson())).toBe(true);
+    await page.keyboard.press('b');
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').playerState().board, null, { timeout: 5000 });
+    await h.wait(400);
+    expect(await h.visibleUnder('player-board')).toBeGreaterThan(0);
+    const glb = requests.find((r) => r.url === '/models/player/skateboard.glb');
+    const tex = requests.find((r) => r.url === '/models/player/Textures/colormap.png');
+    expect(glb?.status).toBe(200);
+    expect(tex?.status).toBe(200);
+    expect(tex?.type).toBe('image/png');
+    expect((await dbgBoard()).refused).toBeNull();
+  });
+
+  test('board 3: the board is 0.80 m long at its true size at Master 1 and 1.5, under the figure', async () => {
+    for (const master of [1, 1.5]) {
+      await h.setMaster(master);
+      await h.wait(900);
+      const b = await h.groupBox('player-board');
+      const body = await h.ev(() => { const p = window.__ug.modes.registry.get('pedestrian'); return { x: p.body.x, y: p.body.y, z: p.body.z }; });
+      expect(Math.max(b.dx, b.dz), `long at Master ${master}`).toBeGreaterThanOrEqual(0.76);
+      expect(Math.max(b.dx, b.dz)).toBeLessThanOrEqual(0.84);
+      expect(b.dyDisplay).toBeGreaterThanOrEqual(0.12);
+      expect(b.dyDisplay).toBeLessThanOrEqual(0.19);
+      expect(Math.abs((b.min[1] - body.y) * b.ratio), 'wheels on the ground').toBeLessThanOrEqual(0.03);
+      expect(Math.abs(b.centre[0] - body.x)).toBeLessThan(0.15);
+      expect(Math.abs(b.centre[2] - body.z)).toBeLessThan(0.15);
+    }
+    await h.setMaster(1);
+    await h.wait(500);
+  });
+
+  test('board 4: the board carries its texture (a map at least 16 px wide)', async () => {
+    const w = await h.ev(() => {
+      let width = 0;
+      window.__ug.scene.children.find((c) => c.name === 'player').traverse((g) => {
+        if (g.name !== 'player-board') return;
+        g.traverse((o) => { if (o.isMesh && o.material?.map?.image) width = Math.max(width, o.material.map.image.width || 0); });
+      });
+      return width;
+    });
+    expect(w).toBeGreaterThanOrEqual(16);
+  });
+
+  test('board 5: B again steps off within two frames and the board is gone', async () => {
+    await page.keyboard.press('b');
+    await h.ev(async () => { for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r)); });
+    expect((await pstate()).board).toBe(false);
+    expect(await h.visibleUnder('player-board')).toBe(0);
+  });
+
+  // ── handling ───────────────────────────────────────────────────────────────────────────────────────────────────
+  test('handling 1: W from rest reaches 12 m/s in 1.55 to 1.95 s and no more, going straight', async () => {
+    await start('BANK');
+    const s = await h.sample(3, SPEED_PROBE, [{ t: 0, down: ['w'] }]);
+    await h.releaseKeys();
+    const first = s.find((r) => r.speed >= 11.9);
+    expect(first, 'reached 11.9 m/s').toBeTruthy();
+    expect(first.t).toBeGreaterThanOrEqual(1.55);
+    expect(first.t).toBeLessThanOrEqual(1.95);
+    expect(Math.max(...s.map((r) => r.speed))).toBeLessThanOrEqual(12.05);
+    for (const r of s.filter((q) => q.speed > 1)) expect(Math.abs(wrap(headingOf(r) - Math.PI)), `heading at ${r.t}`).toBeLessThan(0.05);
+  });
+
+  test('handling 2: Shift with W reaches 18 m/s by 2.9 s and no more', async () => {
+    await start('BANK');
+    const s = await h.sample(3.2, SPEED_PROBE, [{ t: 0, down: ['shift', 'w'] }]);
+    await h.releaseKeys();
+    expect(s.find((r) => r.speed >= 17.8)?.t).toBeLessThanOrEqual(2.9);
+    expect(Math.max(...s.map((r) => r.speed))).toBeLessThanOrEqual(18.05);
+  });
+
+  test('handling 3: coasting loses 0.9 m/s each second', async () => {
+    await start('BANK');
+    const s = await h.sample(4.6, SPEED_PROBE, [{ t: 0, down: ['w'] }, { t: 2.5, up: ['w'] }]);
+    await h.releaseKeys();
+    const at = s.find((r) => r.t >= 4.5);
+    expect(at.speed).toBeGreaterThanOrEqual(9.8);
+    expect(at.speed).toBeLessThanOrEqual(10.6);
+  });
+
+  test('handling 4: S stops 12 m/s in 0.8 to 1.3 s', async () => {
+    await start('BANK');
+    const s = await h.sample(4.2, SPEED_PROBE, [{ t: 0, down: ['w'] }, { t: 2.4, up: ['w'], down: ['s'] }]);
+    await h.releaseKeys();
+    const stop = s.find((r) => r.t > 2.4 && r.speed <= 0.1);
+    expect(stop, 'stopped').toBeTruthy();
+    expect(stop.t - 2.4).toBeGreaterThanOrEqual(0.8);
+    expect(stop.t - 2.4).toBeLessThanOrEqual(1.3);
+  });
+
+  for (const [key, sign] of [['a', 1], ['d', -1]]) {
+    test(`handling 5: ${key.toUpperCase()} turns ${sign > 0 ? 'left' : 'right'} by about a radian and leans into it, the head over the turn`, async () => {
+      await start('KX');
+      const probe = `${SPEED_PROBE.replace('return {', 'const bone = (n) => { const v = new T.Vector3(); u.player.figure.boneWorldPosition(n, v); return v; }; const fl = bone("foot_l"), fr = bone("foot_r"), hd = bone("Head"); const sp = Math.hypot(b.vx, b.vz) || 1; const lx = b.vz / sp, lz = -b.vx / sp; return { headSide: (hd.x - (fl.x + fr.x) / 2) * lx + (hd.z - (fl.z + fr.z) / 2) * lz,')}`;
+      const s = await h.sample(2.75, probe, [{ t: 0, down: ['w'] }, { t: 2.2, down: [key] }]);
+      await h.releaseKeys();
+      const before = s.find((r) => r.t >= 2.2), end = s[s.length - 1];
+      const turned = sign * wrap(headingOf(end) - headingOf(before));
+      expect(turned, 'heading change').toBeGreaterThanOrEqual(0.85);
+      expect(turned).toBeLessThanOrEqual(1.25);
+      expect(sign * end.lean).toBeGreaterThanOrEqual(0.28);
+      expect(sign * end.lean).toBeLessThanOrEqual(0.36);
+      expect(sign * end.headSide, 'head offset towards the turn').toBeGreaterThanOrEqual(0.20);
+    });
+  }
+
+  test('handling 6: Space is an ollie: 0.70 to 0.95 m high, 0.70 to 0.95 s in the air, no jetpack, the board stays', async () => {
+    await start('KX');
+    const s = await h.sample(2.6, SPEED_PROBE, [{ t: 0, down: ['w'] }, { t: 1.3, press: 'jump' }]);
+    await h.releaseKeys();
+    const takeoff = s.findIndex((r) => r.t >= 1.3 && r.state === 'air');
+    expect(takeoff, 'airborne').toBeGreaterThan(0);
+    expect(takeoff - s.findIndex((r) => r.t >= 1.3)).toBeLessThanOrEqual(3);
+    const air = [];
+    for (let i = takeoff; i < s.length && s[i].state === 'air'; i++) air.push(s[i]);
+    const y0 = s[takeoff - 1].y;
+    const peak = Math.max(...air.map((r) => (r.y - y0) / 5));
+    const dur = air[air.length - 1].t - air[0].t;
+    expect(peak).toBeGreaterThanOrEqual(0.70);
+    expect(peak).toBeLessThanOrEqual(0.95);
+    expect(dur).toBeGreaterThanOrEqual(0.70);
+    expect(dur).toBeLessThanOrEqual(0.95);
+    expect(s.every((r) => !r.jet && r.board)).toBe(true);
+    const speed0 = s[takeoff - 1].speed;
+    const landed = s.find((r) => r.t >= air[air.length - 1].t + 0.2);
+    expect(landed.speed).toBeGreaterThanOrEqual(0.85 * speed0);
+  });
+
+  test('handling 7: a facade stops the board; it stays on and never gets inside the box', async () => {
+    // A pose 12 to 20 m from an ordinary box face along a clear, flat, dry line with no station building near: found by a
+    // slab test over the collision boxes (BANK's "face" to the north is a building raised 6 m on a deck the walker passes under).
+    const pose = await h.ev(() => {
+      const u = window.__ug, c = u.modes.collision, sb = u.modes.ctx.stationBuildings?.();
+      c.sync();
+      const R = 0.35, collidable = (b, y) => b.baseY < y + 1.85 * 5 && b.roofY > y + 3 * 5;
+      for (let r = 0; r <= 240; r += 10) {
+        for (let k = 0; k < Math.max(1, Math.round(r / 10) * 4); k++) {
+          const a0 = (k / Math.max(1, Math.round(r / 10) * 4)) * Math.PI * 2;
+          const x = 2743.9 + Math.cos(a0) * r, z = -760.9 + Math.sin(a0) * r;
+          const y = c.standHeightAt(x, z, Infinity, 0);
+          if (!Number.isFinite(y) || c.waterAt(x, z)) continue;
+          for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+            const dx = -Math.sin(yaw), dz = -Math.cos(yaw);
+            let best = Infinity;
+            for (const b of c.buildingsNear(x + dx * 12, z + dz * 12, 16)) {
+              if (!collidable(b, y)) continue;
+              let t0 = 0, t1 = 40;
+              for (const [p, d, lo, hi] of [[x, dx, b.minX - R, b.maxX + R], [z, dz, b.minZ - R, b.maxZ + R]]) {
+                if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) { t0 = 1e9; break; } continue; }
+                let ta = (lo - p) / d, tb = (hi - p) / d; if (ta > tb) [ta, tb] = [tb, ta];
+                t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+              }
+              if (t0 < t1) best = Math.min(best, t0);
+            }
+            if (!(best >= 12 && best <= 20)) continue;
+            // flat and clear to the face, and no station building within 45 m of the line
+            let ok = true;
+            for (let t = 0; t <= best; t += 1) {
+              const px = x + dx * t, pz = z + dz * t, py = c.standHeightAt(px, pz, y + 1, 0);
+              if (!Number.isFinite(py) || Math.abs(py - y) > 0.4 * 5 || c.waterAt(px, pz)) { ok = false; break; }
+              if (sb?.contactAt(px, pz, 45)) { ok = false; break; }
+            }
+            if (ok) return { x, z, yaw, face: best };
+          }
+        }
+      }
+      return null;
+    });
+    expect(pose, 'a facade 12 to 20 m ahead of a clear line').not.toBeNull();
+    await start('BANK', { board: false });
+    await h.place('BANK', { x: pose.x, z: pose.z, yaw: pose.yaw });
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await h.wait(400);
+    const probe = `${SPEED_PROBE.replace('return {', 'const c = u.modes.collision; let inside = Infinity; for (const bx of c.buildingsNear(b.x, b.z, 3)) { if (!(bx.baseY < b.y + 1.85 * 5 && bx.roofY > b.y + 3 * 5)) continue; const dx = Math.min(b.x - bx.minX, bx.maxX - b.x), dz = Math.min(b.z - bx.minZ, bx.maxZ - b.z); if (dx > 0 && dz > 0) inside = Math.min(inside, dx, dz); } return { inside, card: ped.debug().card?.kind ?? null,')}`;
+    const s = await h.sample(4, probe, [{ t: 0, down: ['w'] }]);
+    await h.releaseKeys();
+    const fall = s.findIndex((r, i) => i > 0 && r.speed < s[i - 1].speed - 3);
+    expect(fall, 'the speed fell off at the wall').toBeGreaterThan(0);
+    expect(s[fall - 1].speed).toBeGreaterThanOrEqual(6);
+    expect(s.slice(fall, fall + 3).some((r) => r.speed <= 0.5)).toBe(true);
+    expect(s.every((r) => r.board && r.card === null), 'the board stays on and no card opens').toBe(true);
+    expect(Math.min(...s.map((r) => r.inside)), 'never within 0.3 m inside a box').toBeGreaterThanOrEqual(-1e-9);
+    expect(s.filter((r) => r.inside !== Infinity).length, 'never inside a box at all').toBe(0);
+  });
+
+  test('handling 8: riding into the Thames drops the board; the figure swims and the board floats where it fell', async () => {
+    const spot = await h.ev(() => {
+      const u = window.__ug, c = u.modes.collision;
+      for (const x0 of [885.1, 600, 300, -200]) {
+        for (let z = -145.1, n = 0; n < 40; n++, z -= 5) {
+          if (!c.waterAt(x0, z) && Number.isFinite(c.standHeightAt(x0, z, Infinity, 0)) && c.waterAt(x0, z + 5)) return { x: x0, z: z - 15, bank: z };
+        }
+      }
+      return null;
+    });
+    expect(spot, 'a bank north of the river').not.toBeNull();
+    await start('THAMES', { board: false });
+    await h.place('THAMES', { x: spot.x, z: spot.z, yaw: Math.PI });
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await h.wait(400);
+    const probe = `const p = ped.playerState(), d = ped.debug(); const w = u.modes.collision.waterAt(ped.body.x, ped.body.z); return { t, state: p.state, board: p.board, lastDrop: d.board.lastDrop, floating: d.board.floating, clip: u.player.debug().clip, x: ped.body.x, z: ped.body.z, vis: u.vehicles.debug().board.visible };`;
+    const s = await h.sample(10, probe, [{ t: 0, down: ['w'] }]);
+    await h.releaseKeys();
+    const swim = s.findIndex((r) => r.state === 'swim');
+    expect(swim, 'swimming').toBeGreaterThan(0);
+    expect(s[swim].board || s[swim + 1]?.board).toBeFalsy();
+    expect(s[swim + 1].lastDrop).toBe('water');
+    const fl = s[swim + 1].floating;
+    expect(fl, 'floating').toBeTruthy();
+    const box = await h.groupBox('player-board');
+    expect(await h.visibleUnder('player-board')).toBeGreaterThan(0);
+    expect(Math.hypot(box.centre[0] - fl.x, box.centre[2] - fl.z)).toBeLessThan(15);
+    const top = await h.ev(([x, z]) => window.__ug.modes.ctx.waterSurfaceAt(x, z), [fl.x, fl.z]);
+    expect(Math.abs((box.min[1] - top) * box.ratio)).toBeLessThan(0.3);
+    expect(['Swim_Idle_Loop', 'Swim_Fwd_Loop']).toContain(s[s.length - 1].clip);
+    await page.keyboard.press('b');
+    await h.wait(200);
+    const after = await dbgBoard();
+    expect(after.on).toBe(false);
+    expect(after.refused).toBe('water');
+  });
+
+  // ── pose ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  const BONES = `const bone = (n) => { const v = new T.Vector3(); u.player.figure.boneWorldPosition(n, v); return v; }; const by = ped.body.y; const hy = (n) => (bone(n).y - by) * ratio;`;
+  test('pose 1: the stance is sideways with bent knees, at Master 1 and 1.5', async () => {
+    for (const master of [1, 1.5]) {
+      await start('KX');
+      await h.setMaster(master);
+      await h.wait(700);
+      const probe = `${BONES} const fl = bone("foot_l"), fr = bone("foot_r"), th = bone("thigh_l"), ca = bone("calf_l"), thr = bone("thigh_r"), car = bone("calf_r");
+        const v = new T.Vector3(ped.body.vx, 0, ped.body.vz); const sp = v.length() || 1; v.divideScalar(sp);
+        const sep = new T.Vector3(fl.x - fr.x, 0, fl.z - fr.z); const sepLen = sep.length(); sep.divideScalar(sepLen || 1);
+        const disp = (v) => new T.Vector3(v.x, v.y * ratio, v.z);   // the viewer's metres: canonical Y is stretched by Master / 5
+        const knee = (a, b, c) => { const d1 = disp(b).sub(disp(a)).normalize(), d2 = disp(c).sub(disp(b)).normalize(); return Math.acos(Math.min(1, d1.dot(d2))) * 180 / Math.PI; };
+        const box = new T.Box3(); u.player.figure.box(box);
+        return { t, push: ped.playerState().push, speed: sp, hl: hy("foot_l"), hr: hy("foot_r"), sepLen, cos: Math.abs(sep.dot(v)), ahead: new T.Vector3(fl.x - fr.x, 0, fl.z - fr.z).dot(v), kl: knee(th, ca, fl), kr: knee(thr, car, fr), pelvis: hy("pelvis"), head: hy("Head"), minY: (box.min.y - by) * ratio };`;
+      const s = await h.sample(2.4, probe, [{ t: 0, down: ['w'] }, { t: 1.8, up: ['w'] }]);
+      await h.releaseKeys();
+      const r = s.find((q) => q.t >= 2.3);
+      expect(r.speed, 'still riding').toBeGreaterThanOrEqual(6);
+      expect(r.push).toBeLessThanOrEqual(0.01);
+      expect(r.hl).toBeGreaterThanOrEqual(0.20); expect(r.hl).toBeLessThanOrEqual(0.34);
+      expect(r.hr).toBeGreaterThanOrEqual(0.20); expect(r.hr).toBeLessThanOrEqual(0.34);
+      expect(r.sepLen).toBeGreaterThanOrEqual(0.30); expect(r.sepLen).toBeLessThanOrEqual(0.60);
+      expect(r.cos).toBeGreaterThanOrEqual(0.85);
+      expect(r.ahead, 'the left foot is ahead').toBeGreaterThan(0);
+      for (const k of [r.kl, r.kr]) { expect(k).toBeGreaterThanOrEqual(15); expect(k).toBeLessThanOrEqual(65); }
+      expect(r.pelvis).toBeGreaterThanOrEqual(0.88); expect(r.pelvis).toBeLessThanOrEqual(1.05);
+      expect(r.head).toBeGreaterThanOrEqual(1.50); expect(r.head).toBeLessThanOrEqual(1.80);
+      expect(r.minY).toBeGreaterThanOrEqual(0.08); expect(r.minY).toBeLessThanOrEqual(0.22);
+    }
+    await h.setMaster(1);
+    await h.wait(400);
+  });
+
+  test('pose 2: the push puts the back foot down and kicks, then rests once at the top speed', async () => {
+    await start('KX');
+    const probe = `${BONES} const pel = bone("pelvis"), fr = bone("foot_r"); const sp = Math.hypot(ped.body.vx, ped.body.vz) || 1; const tx = ped.body.vx / sp, tz = ped.body.vz / sp;
+      return { t, push: ped.playerState().push, hr: hy("foot_r"), hl: hy("foot_l"), along: (fr.x - pel.x) * tx + (fr.z - pel.z) * tz, speed: sp };`;
+    const s = await h.sample(3, probe, [{ t: 0, down: ['w'] }]);
+    await h.releaseKeys();
+    expect(Math.max(...s.map((r) => r.push))).toBeGreaterThanOrEqual(0.9);
+    const full = s.filter((r) => r.push >= 0.9);
+    const t0 = full[0].t;
+    const win = full.filter((r) => r.t >= t0 && r.t < t0 + 0.9);
+    expect(win[win.length - 1].t - win[0].t, 'a full 0.9 s window at full push').toBeGreaterThanOrEqual(0.8);
+    expect(Math.min(...win.map((r) => r.hr))).toBeLessThanOrEqual(0.14);
+    expect(Math.max(...win.map((r) => r.hr))).toBeGreaterThanOrEqual(0.24);
+    expect(Math.max(...win.map((r) => r.along)) - Math.min(...win.map((r) => r.along))).toBeGreaterThanOrEqual(0.35);
+    for (const r of win) { expect(r.hl).toBeGreaterThanOrEqual(0.18); expect(r.hl).toBeLessThanOrEqual(0.36); }
+    const top = s.find((r) => r.speed >= 11.95);
+    const later = s.find((r) => r.t >= top.t + 0.4);
+    expect(later.push).toBeLessThanOrEqual(0.05);
+  });
+
+  test('pose 3: in the air the feet stay near the board and the board stays under the figure', async () => {
+    await start('KX');
+    const probe = `${BONES} const b = u.vehicles.board.group; const bb = new T.Box3().expandByObject(b, true); const c = bb.getCenter(new T.Vector3());
+      return { t, air: ped.playerState().state === 'air', hl: hy("foot_l"), hr: hy("foot_r"), off: Math.hypot(c.x - ped.body.x, c.z - ped.body.z) };`;
+    const s = await h.sample(2.2, probe, [{ t: 0, down: ['w'] }, { t: 1.4, press: 'jump' }]);
+    await h.releaseKeys();
+    const air = s.filter((r) => r.air);
+    expect(air.length).toBeGreaterThan(10);
+    for (const r of air) {
+      expect(r.hl).toBeGreaterThanOrEqual(0.15); expect(r.hl).toBeLessThanOrEqual(0.50);
+      expect(r.hr).toBeGreaterThanOrEqual(0.15); expect(r.hr).toBeLessThanOrEqual(0.50);
+      expect(r.off).toBeLessThanOrEqual(0.2);
+    }
+  });
+
+  // ── boardrules ─────────────────────────────────────────────────────────────────────────────────────────────────
+  test('boardrules 1: B at the top of a jump on foot is refused (air)', async () => {
+    await start('BANK', { board: false });
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').press('jump'));
+    await h.wait(250);
+    await page.keyboard.press('b');
+    const b = await dbgBoard();
+    expect(b.on).toBe(false);
+    expect(b.refused).toBe('air');
+    await h.wait(1200);
+  });
+
+  test('boardrules 2: B in the air on the board is refused and the board stays; after landing B takes it off', async () => {
+    await start('KX');
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').press('jump'));
+    await h.wait(250);
+    await page.keyboard.press('b');
+    let b = await dbgBoard();
+    expect(b.on).toBe(true);
+    expect(b.refused).toBe('air');
+    await h.wait(1300);
+    await page.keyboard.press('b');
+    b = await dbgBoard();
+    expect(b.on).toBe(false);
+  });
+
+  test('boardrules 3: below ground the board is refused (below) and a placement in a tunnel drops it', async () => {
+    await start('BANK', { board: false });
+    const st = await h.ev(() => {
+      const ug = window.__ug, m = ug.modes.registry.get('pedestrian');
+      const net = m.rebuildNetwork();
+      const e = net.entrances.filter((en) => en.stops.length === 1 && en.stops[0].depthM > 20).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
+      ug.modes.physics.set('pedestrian', 'shaftSpeed', 200, { save: false });
+      m.place(e.x + 12, e.z + 5, { yaw: 0 });
+      return { x: e.x, z: e.z, path: e.stops[0].path, s: e.stops[0].s };
+    });
+    await page.keyboard.press('e');
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind === 'shaft', null, { timeout: 30000 });
+    await page.keyboard.press('1');
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'tunnel', null, { timeout: 30000 });
+    await page.keyboard.press('b');
+    let b = await dbgBoard();
+    expect(b.on).toBe(false);
+    expect(b.refused).toBe('below');
+    await h.ev(() => window.__ug.modes.physics.set('pedestrian', 'shaftSpeed', 8, { save: false }));
+    // back to the street, board on, and a placement in the bore drops it
+    await h.place('BANK', { board: false });
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().board.on, null, { timeout: 8000 });
+    await h.ev((st) => window.__ug.modes.registry.get('pedestrian').placeInTunnel({ path: st.path, s: st.s, dir: 1 }), st);
+    await h.wait(300);
+    b = await dbgBoard();
+    expect(b.on).toBe(false);
+    await h.place('BANK');
+  });
+
+  test('boardrules 4: E at a station steps off and opens its card; with the card open B is refused (card)', async () => {
+    await start('BANK');
+    const e = await h.ev(() => {
+      const m = window.__ug.modes.registry.get('pedestrian');
+      const net = m.rebuildNetwork();
+      const en = net.entrances.filter((q) => q.stops.length === 1 && q.stops[0].depthM > 20).sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z))[0];
+      m.place(en.x + 12, en.z + 5, { yaw: 0 });
+      return { x: en.x, z: en.z };
+    });
+    expect(e.x).toBeDefined();
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().board.on, null, { timeout: 8000 });
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').press('use'));
+    await h.ev(async () => { for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r)); });
+    expect(await h.ev(() => window.__ug.modes.registry.get('pedestrian').debug().card?.kind)).toBe('shaft');
+    expect((await dbgBoard()).on).toBe(false);
+    await page.keyboard.press('b');
+    expect((await dbgBoard()).refused).toBe('card');
+    await page.keyboard.press('Escape');
+    await h.wait(300);
+  });
+
+  test('boardrules 5: switching mode takes the board off', async () => {
+    await start('KX');
+    await page.keyboard.press('3');
+    await h.wait(200);
+    await page.keyboard.press('2');
+    await h.wait(500);
+    await page.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body'; }, null, { timeout: 20000 });
+    expect((await dbgBoard()).on).toBe(false);
+  });
+
+  test('boardrules 6: place() keeps the board on dry ground and drops it into the river', async () => {
+    await start('KX');
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').place(2743.9, -760.9, { yaw: Math.PI }));
+    await h.wait(300);
+    expect((await dbgBoard()).on).toBe(true);
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').place(885.1, -145.1, { yaw: 0 }));
+    await h.wait(300);
+    const b = await dbgBoard();
+    expect(b.on).toBe(false);
+    expect(b.lastDrop).toBe('water');
+  });
+
+  test('boardrules 7: riding, the hint names the skateboard and B', async () => {
+    await start('KX');
+    await h.wait(300);
+    const hint = await page.locator('#ug-mode-hint').innerText();
+    expect(hint).toContain('Skateboard');
+    expect(hint).toContain('B');
+  });
+
+  test('boardrules 8: the Physics panel carries the skateboard section and it drives the top speed', async () => {
+    await start('KX');
+    await page.click('#ug-mode-bar button.physics');
+    await expect(page.locator('#ug-physics-panel section[data-mode="pedestrian"]')).toBeVisible();
+    await expect(page.locator('#ug-physics-panel section[data-mode="skate"]')).toBeVisible();
+    for (const key of ['top', 'boost', 'push', 'coast', 'brake', 'steer', 'lean', 'maxLean', 'ollie']) {
+      await expect(page.locator(`#ug-physics-panel section[data-mode="skate"] input[data-key="${key}"]`)).toHaveCount(1);
+    }
+    await page.click('#ug-mode-bar button.physics');
+    await h.ev(() => window.__ug.modes.physics.set('skate', 'top', 8, { save: false }));
+    await h.place('KX');
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await h.wait(300);
+    const s = await h.sample(3, SPEED_PROBE, [{ t: 0, down: ['w'] }]);
+    await h.releaseKeys();
+    expect(Math.max(...s.map((r) => r.speed))).toBeLessThanOrEqual(8.05);
+    await h.ev(() => window.__ug.modes.physics.reset('skate'));
+  });
+
+  test('boardrules 9: V on the board gives the first-person eye 1.86 m up with the board still drawn, V again is third person at 22 mm', async () => {
+    await start('KX');
+    await page.keyboard.press('v');
+    await h.wait(700);
+    const c = await h.ev(() => {
+      const u = window.__ug, ped = u.modes.registry.get('pedestrian'), cam = u.camera, b = ped.body;
+      return { third: ped.isThirdPerson(), eye: (cam.position.y - b.y) / 5, dx: Math.abs(cam.position.x - b.x), dz: Math.abs(cam.position.z - b.z),
+        look: u.modes.look.mode, focal: u.lensSystem.getFocalLength(), pref: Number(document.getElementById('focalLength').value) };
+    });
+    expect(c.third).toBe(false);
+    expect(c.eye).toBeGreaterThanOrEqual(1.84); expect(c.eye).toBeLessThanOrEqual(1.88);
+    expect(c.dx).toBeLessThan(0.05); expect(c.dz).toBeLessThan(0.05);
+    expect(await h.figureVisible()).toBe(false);
+    expect(await h.visibleUnder('player-board')).toBeGreaterThan(0);
+    expect(c.look).toBe('lock');
+    expect(Math.abs(c.focal - c.pref)).toBeLessThan(0.01);
+    await page.keyboard.press('v');
+    await h.wait(700);
+    const t = await h.ev(() => ({ third: window.__ug.modes.registry.get('pedestrian').isThirdPerson(), focal: window.__ug.lensSystem.getFocalLength() }));
+    expect(t.third).toBe(true);
+    expect(Math.abs(t.focal - 22)).toBeLessThan(0.01);
+  });
+
+  test('boardrules 10: the camera on the board is 4.4 to 5.8 m from the neck, eases behind the travel, and a drag holds it', async () => {
+    await start('BANK', { yaw: Math.PI });
+    await h.wait(800);
+    const rest = await h.ev(() => {
+      const u = window.__ug, T = window.__ugTHREE, ratio = u.masterHeight.ratio, cam = u.camera, v = new T.Vector3();
+      u.player.figure.boneWorldPosition('neck_01', v);
+      const d = Math.hypot(cam.position.x - v.x, (cam.position.y - v.y) * ratio, cam.position.z - v.z);
+      const f = new T.Vector3(); cam.getWorldDirection(f);
+      const b = u.modes.registry.get('pedestrian').body;
+      const hx = b.x - cam.position.x, hz = b.z - cam.position.z, hl = Math.hypot(hx, hz), fl = Math.hypot(f.x, f.z);
+      return { d, dot: (f.x * hx + f.z * hz) / (fl * hl) };
+    });
+    expect(rest.d).toBeGreaterThanOrEqual(4.4); expect(rest.d).toBeLessThanOrEqual(5.8);
+    expect(rest.dot).toBeGreaterThan(0.9);
+    // turn left at speed, then straight with no mouse: the camera ends along the travel
+    await start('KX');
+    const yawProbe = `const f = new T.Vector3(); u.camera.getWorldDirection(f); const b = ped.body; return { t, cam: Math.atan2(-f.x, -f.z), trav: Math.atan2(-b.vx, -b.vz), speed: Math.hypot(b.vx, b.vz) };`;
+    const s = await h.sample(6.2, yawProbe, [{ t: 0, down: ['w'] }, { t: 2, down: ['a'] }, { t: 3, up: ['a'] }]);
+    await h.releaseKeys();
+    const end = s[s.length - 1];
+    expect(Math.abs(wrap(end.cam - end.trav))).toBeLessThan(0.35);
+    // a drag holds the camera for 1.5 s except by the drag itself
+    await start('KX');
+    await h.keysDown('w');
+    await h.wait(2500);
+    const y0 = (await h.sample(0.05, yawProbe))[0].cam;
+    await h.drag(100, 0);
+    const after = await h.sample(1.3, yawProbe);
+    await h.releaseKeys();
+    const drift = after.map((r) => Math.abs(wrap(r.cam - after[0].cam)));
+    expect(Math.max(...drift)).toBeLessThan(0.1);
+    expect(Math.abs(wrap(after[0].cam - y0))).toBeGreaterThan(0.3);
+  });
+
+  test('boardrules 11: no console or page errors across the board', async () => {
+    expect(errors).toEqual([]);
+  });
+});

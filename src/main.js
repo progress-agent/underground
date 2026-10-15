@@ -186,6 +186,9 @@ import { createPlayer } from './player/index.js';
 import { createFigureLabelCover } from './player/label-cover.js';
 import { SUN_CONFIG } from './sun.js';
 // ── /s14:P ──
+// ── s14:D ── the skateboard, the Drone and the Balloon seen from outside (src/vehicles/)
+import { createVehicles } from './vehicles/index.js';
+// ── /s14:D ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -4757,6 +4760,22 @@ const s14pLabelCover = createFigureLabelCover({ getFigureScreenRect: () => s14pP
   else window.addEventListener('ug:intro-done', schedule, { once: true });
 }
 // ── /s14:P ──
+// ── s14:D ──
+// The vehicles (D-053 items 2 and 3): the skateboard (its model is fetched the first time B is pressed, so the cold load
+// fetches no extra file), the Drone and the Balloon seen from outside. They live under lane P's top-level `player` group
+// and are built at their true size (D-039). The names hidden behind the Drone or the Balloon: s14dLabelCover, the same
+// function shape as P's, for the integrator to register with lane B's hook (stations.js addSurfaceLabelOccluder).
+const s14dVehicles = createVehicles({
+  THREE, parent: s14pPlayer.group, ratio: () => masterHeight?.ratio ?? 1,
+  distortNdc: (x, y) => lensSystem.distortNdc(x, y),
+  loadGLTF: async (url) => {
+    const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+    return new GLTFLoader().loadAsync(url);
+  },
+});
+modeSystem.ctx.vehicles = s14dVehicles;
+const s14dLabelCover = createFigureLabelCover({ getFigureScreenRect: () => s14dVehicles.screenRect });
+// ── /s14:D ──
 
 requestAnimationFrame(tick);
 
@@ -4802,6 +4821,9 @@ if (import.meta.env.DEV) {
     // ── s14:P ──
     player: s14pPlayer, s14pLabelCover,
     // ── /s14:P ──
+    // ── s14:D ──
+    vehicles: s14dVehicles, s14dLabelCover,
+    // ── /s14:D ──
     nearestThamesSegment, getZoneAt,
     isInThames,
     // Submerged regime (12Jul26u): shared inside-the-river predicate + signals.

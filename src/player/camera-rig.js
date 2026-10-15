@@ -24,6 +24,25 @@ export const RIG_TABLE = Object.freeze({
   }),
 });
 
+// ── s14:D ── lane D's rows (sprint 14Oct26w, D-053 items 2 and 3), appended: the skateboard, the Drone and the Balloon.
+// RIG_TABLE is frozen, so the three rows live in RIG_TABLE_D (a copy of P's rows plus D's); createCameraRig below takes
+// RIG_TABLE_D whenever it is given the default table. Display metres and radians.
+//   skate    pivot 1.50 above the wheels' contact point (the rider's chest on the deck), distance 5.0
+//   drone    pivot 0.15 above the drone's centre, 2.2 m behind it (min 1.4 keeps the 0.54 m drone clear of the near plane)
+//   balloon  pivot 0 (the mode passes a pivot that rises with the distance), 40 m behind the basket
+export const RIG_TABLE_D = Object.freeze({
+  ...RIG_TABLE,
+  skate: Object.freeze({
+    pivot: 1.50, shoulder: 0.45, distance: 5.0, min: 2.0, max: 12, pitch: -0.18, pitchMin: -1.20, pitchMax: 0.70,
+  }),
+  drone: Object.freeze({
+    pivot: 0.15, shoulder: 0, distance: 2.2, min: 1.4, max: 12, pitch: -0.20, pitchMin: -1.20, pitchMax: 0.90,
+  }),
+  balloon: Object.freeze({
+    pivot: 0, shoulder: 0, distance: 40, min: 4.5, max: 120, pitch: -0.12, pitchMin: -0.50, pitchMax: 0.90,
+  }),
+});
+// ── /s14:D ──
 export const RIG = Object.freeze({
   dragRadPerPx: 0.005,
   pivotRateXZ: 18,       // /s, how fast the pivot catches the body horizontally
@@ -51,6 +70,9 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  * @param {object} [o.table]
  */
 export function createCameraRig({ THREE, ratio = 1, lineOfSight = null, groundY = null, waterY = null, table = RIG_TABLE }) {
+  // ── s14:D ── the default table gains lane D's rows
+  if (table === RIG_TABLE) table = RIG_TABLE_D;
+  // ── /s14:D ──
   const getRatio = typeof ratio === 'function' ? ratio : () => ratio;
   let bodyName = 'foot';
   let yaw = 0, pitch = RIG_TABLE.foot.pitch, zoomF = 1;

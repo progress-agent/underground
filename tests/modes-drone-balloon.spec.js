@@ -18,6 +18,11 @@
 
 import { test, expect } from '@playwright/test';
 
+// Sprint 14Oct26w, D-053 item 3: the Drone and the Balloon now open in third person (the Drone at once, the Balloon once
+// the figure has arrived), seen from over the shoulder. This spec pins the FIRST-PERSON flight models (the camera, the
+// FOV, the pointer look), which V still gives exactly as before, so each test chooses first person right after the
+// mode is on. Lane D's spec (player-vehicles.spec.js) covers the third-person views. No numeric pin changes.
+
 async function boot(page, url = '/?skip=1') {
   await page.goto(url);
   await page.waitForFunction(() => !!(window.__ug && window.__ug.modes && window.__ug.intro
@@ -43,6 +48,7 @@ test.describe('Drone and Balloon modes', () => {
     await boot(page);
     const fov0 = await page.evaluate(() => window.__ug.camera.fov);
     await page.keyboard.press('3');
+    await page.evaluate(() => window.__ug.modes.registry.get('drone').setView('first')); // D-053 item 3
     await frames(page, 3);
     const r = await page.evaluate(() => {
       const ug = window.__ug, cam = ug.camera;
@@ -85,6 +91,7 @@ test.describe('Drone and Balloon modes', () => {
   test('Drone flight: W thrusts, the view pitches forward and banks into a mouse turn, idle hovers', async ({ page }) => {
     await boot(page);
     await page.keyboard.press('3');
+    await page.evaluate(() => window.__ug.modes.registry.get('drone').setView('first')); // D-053 item 3
     await frames(page, 2);
     // Put the drone 400 m above the ground where it is, facing north, level.
     await page.evaluate(() => {
@@ -135,6 +142,7 @@ test.describe('Drone and Balloon modes', () => {
     await boot(page, '/?skip=1&buildings=baked');
     await page.waitForFunction(() => window.__ug.buildingInstanceCount > 100000, null, { timeout: 90000 });
     await page.keyboard.press('3');
+    await page.evaluate(() => window.__ug.modes.registry.get('drone').setView('first')); // D-053 item 3
     await frames(page, 2);
     const setup = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision, p = ug.camera.position;
@@ -178,6 +186,7 @@ test.describe('Drone and Balloon modes', () => {
   test('Balloon: key 4, drag look, drift follows the wind layer, T time-warps x10, burner heats', async ({ page }) => {
     await boot(page);
     await page.keyboard.press('4');
+    await page.evaluate(() => window.__ug.modes.registry.get('balloon').setView('first')); // D-053 item 3
     await frames(page, 2);
     expect(await page.evaluate(() => ({ id: window.__ug.modes.activeId, look: window.__ug.modes.look.mode,
       orbit: window.__ug.controls.enabled }))).toEqual({ id: 'balloon', look: 'drag', orbit: false });
@@ -241,6 +250,7 @@ test.describe('Drone and Balloon modes', () => {
     await boot(page, '/?skip=1&buildings=baked');
     await page.waitForFunction(() => window.__ug.buildingInstanceCount > 100000, null, { timeout: 90000 });
     await page.keyboard.press('4');
+    await page.evaluate(() => window.__ug.modes.registry.get('balloon').setView('first')); // D-053 item 3
     await frames(page, 2);
     const roof = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision, p = ug.camera.position;

@@ -128,6 +128,10 @@ import { PLATFORM } from '../platform-tunnel.js';
 // ── s14:P ──
 import { createOnFoot } from '../player/on-foot.js';
 // ── /s14:P ──
+// ── s14:D ── the skateboard (lane D, D-053 item 2): its tunables and its controller (skate-glue.js)
+import { SKATE_TUNABLES } from './skate-body.js';
+import { createBoardController } from './skate-glue.js';
+// ── /s14:D ──
 
 export { PEDESTRIAN_TUNABLES };
 
@@ -249,6 +253,30 @@ export function createPedestrianMode(ctx) {
     standHeightAt: (x, z, feetY, step) => ctx.collision.standHeightAt(x, z, feetY, step),
     waterAt: (x, z) => ctx.collision.waterAt(x, z),
   };
+  // ── s14:D ── the skateboard (lane D, D-053 item 2): B puts the board under the walker above ground, B again steps off.
+  // The board's rules are skate-glue.js's and skate-body.js's; these closures are what it needs of this file. Its
+  // tunables are the Physics panel's "Skateboard" section (a companion of this mode's, physics-panel.js).
+  const SK = ctx.physics.register('skate', 'Skateboard', SKATE_TUNABLES);
+  const s14dBoard = createBoardController({ ctx, body, P, VE, K: SK, world, hooks: {
+    placeCamera: (x, y, z) => placeCamera(x, y, z),
+    contactStep: (px, pz) => contactStep(px, pz),
+    hint: (t) => hint(t),
+    sound: (v) => sound(v),
+    setEvents: (a) => { lastEvents = a; },
+    card: () => card,
+    phase: () => phase,
+    holdBox: () => ctx.walkHoldBox,
+    setHeld: (b) => { s02Held = b; },
+    figureHeading: () => onFoot.playerState().heading,
+    lookYaw: () => yaw,
+    onFoot,
+  } });
+  onFoot.setBoardSource(() => s14dBoard.figureState());
+  globalThis.addEventListener?.('keydown', (e) => {
+    if (!active || e.repeat || e.metaKey || e.ctrlKey || e.altKey || isFormInput(e.target)) return;
+    if (String(e.key).toLowerCase() === 'b') s14dBoard.press();
+  });
+  // ── /s14:D ──
 
   function network(force = false) {
     // ── s02:O ── a network built before the Overground existed gains it as soon as it does.
@@ -496,6 +524,9 @@ export function createPedestrianMode(ctx) {
   }
 
   function updateBody(dt, use, jump) {
+    // ── s14:D ── on the board the frame is the board's (skate-glue.js); E steps off and then falls through to the on-foot frame
+    if (s14dBoard.frame(dt, use, jump)) return;
+    // ── /s14:D ──
     const m = readMove();
     lastEvents = [];
     const s02bX = body.x, s02bZ = body.z; // s02:B
@@ -1252,6 +1283,9 @@ export function createPedestrianMode(ctx) {
       settleAt(cam.position.x, cam.position.z, fromY);
       enter = { from: cam.position.clone(), fromQ: cam.quaternion.clone(), t: 0 };
       phase = 'enter';
+      // ── s14:D ──
+      s14dBoard.off('mode');
+      // ── /s14:D ──
       network();
       c?.setHint?.(null);
       // ── s14:P ──
@@ -1270,6 +1304,9 @@ export function createPedestrianMode(ctx) {
       if (savedNear !== null) setNear(savedNear);
       savedNear = null;
       ease.restore();
+      // ── s14:D ──
+      s14dBoard.off('mode');
+      // ── /s14:D ──
       // ── s14:P ──
       onFoot.deactivate();
       // ── /s14:P ──
@@ -1308,6 +1345,9 @@ export function createPedestrianMode(ctx) {
       else if (phase === 'tunnel') updateTunnel(dt, use);
       else if (phase === 'transfer') updateTransfer(dt); // s30:P
       else if (phase === 'step') updateStep(dt); // s01:P
+      // ── s14:D ── a board refusal's hint stays up for two seconds
+      s14dBoard.post();
+      // ── /s14:D ──
       openAir.stepCut(dt); // s01:P the flare or the dip, on the mode clock
       syncUndergroundView();
       // ── s14:P ── third person overwrites the camera and draws the figure
@@ -1361,6 +1401,9 @@ export function createPedestrianMode(ctx) {
         // ── s14:P ──
         view: onFoot.debug(),
         // ── /s14:P ──
+        // ── s14:D ──
+        board: s14dBoard.debug(),
+        // ── /s14:D ──
         lastPass: lastPass ? { inside: !!lastPass.inside, insideSpeed: lastPass.insideSpeed ?? 0, rush: lastPass.rush ?? 0, rumble: lastPass.rumble ?? 0 } : null,
         // ── /s01:P ──
       };
@@ -1387,6 +1430,9 @@ export function createPedestrianMode(ctx) {
       // ── s14:P ──
       onFoot.snap();
       // ── /s14:P ──
+      // ── s14:D ── a teleport keeps the board on dry ground and drops it into water
+      s14dBoard.afterPlace();
+      // ── /s14:D ──
       return true;
     },
     press(which) { if (which === 'jump') jumpLatch = true; else if (which === 'use') useLatch = true; },
@@ -1409,6 +1455,9 @@ export function createPedestrianMode(ctx) {
       phase = 'tunnel';
       const q = walkerPoint(tunnel);
       placeCamera(q.x, q.y, q.z);
+      // ── s14:D ──
+      s14dBoard.off('phase');
+      // ── /s14:D ──
       return true;
     },
     // ── s01:P ── test surface
@@ -1435,6 +1484,10 @@ export function createPedestrianMode(ctx) {
     playerState: () => onFoot.playerState(),
     get onFoot() { return onFoot; },
     // ── /s14:P ──
+    // ── s14:D ── the skateboard's test surface
+    setBoard: (on) => s14dBoard.set(on),
+    get board() { return s14dBoard; },
+    // ── /s14:D ──
     body,
   };
 }
