@@ -670,19 +670,26 @@ test.describe('the figure in the street', () => {
       for (const o of r.off) expect(o).toBeLessThan(0.2);
       for (const y of r.dirY) expect(y).toBeLessThan(-0.8);
     }
-    // thrust: the level the body reports sizes the flame
+    // thrust: the level the body reports sizes the flame. Integration (sprint 14Oct26w): lane M's body now writes
+    // jetLevel itself on every step (its spool), so a plain assignment before the frame was overwritten before the
+    // flames read it; the level is pinned for the measurement by a property that ignores the body's writes, and the
+    // body's own property is put back afterwards.
     const mean = (lvl) => pev(async (l) => {
       const ls = [];
-      for (let i = 0; i < 60; i++) {
-        const ped = window.__ug.modes.registry.get('pedestrian');
-        ped.body.jetLevel = l;
-        await new Promise((r) => requestAnimationFrame(r));
-        if (ped.body.jet) ls.push(window.__ug.player.debug().flames.lengthM.reduce((a, b) => a + b, 0) / 4);
+      const body = window.__ug.modes.registry.get('pedestrian').body;
+      const own = Object.getOwnPropertyDescriptor(body, 'jetLevel');
+      Object.defineProperty(body, 'jetLevel', { configurable: true, enumerable: true, get: () => l, set: () => {} });
+      try {
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => requestAnimationFrame(r));
+          if (body.jet) ls.push(window.__ug.player.debug().flames.lengthM.reduce((a, b) => a + b, 0) / 4);
+        }
+      } finally {
+        if (own) Object.defineProperty(body, 'jetLevel', own); else delete body.jetLevel;
       }
       return ls.reduce((a, b) => a + b, 0) / Math.max(1, ls.length);
     }, lvl);
     const low = await mean(0.3), high = await mean(1.0);
-    await pev(() => { delete window.__ug.modes.registry.get('pedestrian').body.jetLevel; });
     expect(low).toBeGreaterThan(0);
     expect(low).toBeLessThanOrEqual(0.8 * high);
     await pg.keyboard.up(' ');
