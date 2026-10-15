@@ -325,7 +325,7 @@ test('S-19 the walker\'s touch still stops 0.36 m from the wall and opens the ca
     if (ok) {
       const p2 = await page.context().browser().newPage();
       await p2.goto(`${live}/?skip=1&buildings=baked`);
-      await p2.waitForFunction(() => !!(window.__ug && window.__ug.modes && !window.__ug.intro.isRunning() && window.__ug.stationBuildings.ready && window.__ug.bakedStats?.tilesBuilt === window.__ug.bakedStats?.tilesTotal), null, { timeout: 150000 });
+      await p2.waitForFunction(() => !!(window.__ug && window.__ug.modes && !window.__ug.intro.isRunning() && window.__ug.stationBuildings.ready && (() => { const b = window.__ug.bakedStats; return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal; })()), null, { timeout: 150000 });
       await p2.keyboard.press('2');
       await p2.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
       liveRows = [];

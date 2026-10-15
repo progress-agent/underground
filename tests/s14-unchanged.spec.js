@@ -40,7 +40,7 @@ async function locate(page) {
       }
       best.sort((a, b) => a.d - b.d);
       return best[0] ?? null;
-    }, [s, s.group.toString()]);
+    }, [{ centre: s.centre, radius: s.radius }, s.group.toString()]);
     if (pt) found.push({ id: s.id, ...pt });
   }
   return found;
@@ -55,14 +55,13 @@ async function traces(page, points) {
       for (const yaw of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
         m.place(p.x, p.z, { yaw, pitch: 0 });
         const d0 = m.debug();
-        const ys = [d0.y];
+        const ys = [[d0.y, d0.x, d0.z, d0.state]];
         ug.fpsControls.keys.add('w');
-        for (let i = 0; i < 300; i++) { ug.modes.update(1 / 60); ys.push(m.debug().y); }
+        for (let i = 0; i < 300; i++) { ug.modes.update(1 / 60); const d = m.debug(); ys.push([d.y, d.x, d.z, d.state]); }
         ug.fpsControls.keys.delete('w');
         runs.push(ys);
       }
-      const d = m.debug();
-      out[p.id] = { runs, placedErr: Math.abs(runs[0][0] - c.groundHeightAt(p.x, p.z)) / VE };
+      out[p.id] = { runs, placedErr: Math.abs(runs[0][0][0] - c.groundHeightAt(p.x, p.z)) / VE };
     }
     return out;
   }, points);
@@ -84,14 +83,22 @@ test('S-20 viaducts and the DLR deck stay unwalkable, exactly as on bf10309', as
   const live = await browser.newPage();
   await live.goto(`${base}/?skip=1&buildings=baked`);
   await live.waitForFunction(() => !!(window.__ug && window.__ug.modes && !window.__ug.intro.isRunning() && window.__ug.stationBuildings.ready
-    && window.__ug.bakedStats?.tilesBuilt === window.__ug.bakedStats?.tilesTotal), null, { timeout: 180000 });
+    && (() => { const b = window.__ug.bakedStats; return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal; })()), null, { timeout: 180000 });
   await live.keyboard.press('2');
   await live.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
   const liveTraces = await traces(live, points);
   await live.close();
   for (const p of points) {
-    let worst = 0;
-    laneTraces[p.id].runs.forEach((ys, r) => ys.forEach((y, i) => { worst = Math.max(worst, Math.abs(y - liveTraces[p.id].runs[r][i]) / 5); }));
+    let worst = 0, first = null, firstXZ = null;
+    laneTraces[p.id].runs.forEach((ys, r) => ys.forEach((a, i) => {
+      const b = liveTraces[p.id].runs[r][i], dy = Math.abs(a[0] - b[0]) / 5;
+      if (dy > worst) worst = dy;
+      if (dy > 0.05 && !first) first = { run: r, step: i, lane: a, live: b };
+      const dxz = Math.hypot(a[1] - b[1], a[2] - b[2]);
+      if (dxz > 0.02 && !firstXZ) firstXZ = { run: r, step: i, lane: a, live: b, dxz };
+    }));
+    if (first) console.log(`# S-20 ${p.id}: first divergence ${JSON.stringify(first)}`);
+    if (firstXZ) console.log(`# S-20 ${p.id}: first plan divergence ${JSON.stringify(firstXZ)}`);
     console.log(`# S-20 ${p.id}: worst feet difference against bf10309 ${worst.toFixed(4)} m`);
     expect(worst, p.id).toBeLessThanOrEqual(0.05);
   }
