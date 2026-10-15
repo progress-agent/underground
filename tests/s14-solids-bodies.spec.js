@@ -292,6 +292,54 @@ test('S-18 a walker jetpacking into a wall is stopped', async () => {
   expect(far.minD).toBeGreaterThanOrEqual(0.33);
 });
 
+test('S-18b a walker jetpacked onto a station roof stands on it: no push, no card, then walks off and falls', async () => {
+  await setMaster(page, 1);
+  await enter(page, '2');
+  const r = await withLib((arg, L) => {
+    const ug = window.__ug, k = L.king(), VE = 5;
+    const m = ug.modes.registry.get('pedestrian');
+    const sx = k.c.x + k.c.nx * 1.5, sz = k.c.z + k.c.nz * 1.5;
+    m.place(sx, sz, { yaw: window.__s14.yawOf(-k.c.nx, -k.c.nz), pitch: 0 });
+    m.press('jump'); ug.fpsControls.keys.add(' '); ug.fpsControls.keys.add('w');
+    let phase = 'climb', above = null, landedAt = null, standSteps = 0, pushed = false, card = false, maxDev = 0, sawInside = false;
+    for (let i = 0; i < 900; i++) {
+      if (phase === 'climb' && m.debug().y > k.roofY + 2 * VE) { ug.fpsControls.keys.delete(' '); phase = 'over'; above = i; }
+      if (phase === 'over' && i - above > 40) { ug.fpsControls.keys.delete('w'); phase = 'land'; }
+      ug.modes.update(1 / 60);
+      const d = m.debug();
+      if (phase === 'land' && landedAt === null && d.state === 'ground' && Math.abs(d.y - k.roofY) < 0.25) landedAt = i;
+      if (landedAt !== null && i >= landedAt && i < landedAt + 120) {
+        // 2 s on the roof with nothing held: still on it, no card, not pushed out of the footprint.
+        standSteps++;
+        maxDev = Math.max(maxDev, Math.abs(d.y - k.roofY) / VE);
+        if (d.card) card = true;
+        if (!k.sb.contactAt(d.x, d.z, 1)?.inside) pushed = true; else sawInside = true;
+      }
+    }
+    ug.fpsControls.keys.delete(' '); ug.fpsControls.keys.delete('w');
+    // Walk off the edge (back the way it came, toward the nearest wall): it falls to the street.
+    ug.fpsControls.keys.add('s');
+    let fellAt = null, minAbove = 0;
+    for (let i = 0; i < 1500 && fellAt === null; i++) {
+      ug.modes.update(1 / 60);
+      const dd = m.debug();
+      minAbove = Math.min(minAbove, (dd.y - k.roofY) / VE);
+      if (dd.y < k.roofY - 2 * VE) fellAt = i;
+    }
+    ug.fpsControls.keys.delete('s');
+    const d0 = m.debug();
+    return { landedAt, standSteps, card, pushed, sawInside, maxDevM: maxDev, lastState: d0.state, endAboveRoofM: (d0.y - k.roofY) / VE, endInside: !!k.sb.contactAt(d0.x, d0.z, 1)?.inside, fellAt, minAboveM: minAbove };
+  }, null);
+  await leave();
+  console.log('# S-18b', JSON.stringify(r));
+  expect(r.landedAt).not.toBeNull();
+  expect(r.sawInside).toBe(true);
+  expect(r.pushed).toBe(false);
+  expect(r.card).toBe(false);
+  expect(r.maxDevM).toBeLessThanOrEqual(0.05);
+  expect(r.fellAt, 'walking off the roof edge drops the walker to the street').not.toBeNull();
+});
+
 test('S-19 the walker\'s touch still stops 0.36 m from the wall and opens the card', async () => {
   await setMaster(page, 1);
   await enter(page, '2');

@@ -592,6 +592,23 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     return best;
   }
 
+  /**
+   * Is a body whose feet are at feetY on a station roof? True when (x, z) is inside a prism's footprint, or within
+   * `margin` of its wall, and the feet are within `tol` of the drawn roof or higher: a body at roof level cannot be
+   * touching the wall below it, so the walker's touch rule (card, push) must not fire there.
+   */
+  function onStationRoof(x, z, feetY, tol = 0.25, margin = 0.5) {
+    let found = false;
+    visit(stationLayer, x - margin, x + margin, z - margin, z + margin, (it) => {
+      if (!it.ring) return false;
+      const top = it.base + it.h * scale;
+      if (feetY < top - tol) return false;
+      if (pointInRing(x, z, it.ring) || nearestOnRing(x, z, it.ring).d <= margin) { found = true; return true; }
+      return false;
+    });
+    return found;
+  }
+
   /** The lowest underside above feetY over (x, z), or null. */
   function ceilingAt(x, z, feetY) {
     let best = Infinity;
@@ -769,7 +786,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   return {
     setSources(next) { sources = { ...sources, ...next }; built = false; },
-    update, corridorsAt, boxTouches, standOn, ceilingAt, gatherFor, resolveSubstep, segmentHits,
+    update, corridorsAt, boxTouches, standOn, onStationRoof, ceilingAt, gatherFor, resolveSubstep, segmentHits,
     stats() {
       update();
       const rib = bridgeLayer.items.length + motorLayer.items.length;

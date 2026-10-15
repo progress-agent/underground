@@ -370,3 +370,16 @@ test('per-frame queries stay far inside the budget on a deck and beside a 28-ver
   console.log(`# per-frame queries (us): deck ${onDeck.toFixed(2)}, prism ${byPrism.toFixed(2)}, away ${away.toFixed(2)}`);
   assert.ok(onDeck < 100 && byPrism < 100 && away < 20);
 });
+
+// ── (9) the roof test the walker's touch rule uses ───────────────────────
+
+test('onStationRoof is true at roof level over the footprint (and within 0.5 m of the wall), false below it or away', () => {
+  const ring = [[10, -10], [30, -10], [30, 10], [10, 10]];
+  const { svc } = world({ stations: stationsOf([ring], { heightM: 10 }) }); // roof at y = 50
+  assert.equal(svc.onStationRoof(20, 0, 50), true, 'standing on the roof');
+  assert.equal(svc.onStationRoof(20, 0, 55), true, 'above the roof (a jetpack pass)');
+  assert.equal(svc.onStationRoof(9.7, 0, 50), true, 'just off the edge at roof level: still above the wall');
+  assert.equal(svc.onStationRoof(20, 0, 30), false, 'inside the footprint but well below the roof');
+  assert.equal(svc.onStationRoof(9.7, 0, 0), false, 'on the ground at the wall: the touch rule applies');
+  assert.equal(svc.onStationRoof(5, 0, 50), false, 'clear of the wall');
+});

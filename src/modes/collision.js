@@ -82,6 +82,7 @@ import { createSolidWorld } from './solids.js';
 //   collision.ceilingAt(x, z, feetY)     the lowest deck / tower underside above feetY, or null
 //   collision.segmentHitsSolids(from, to)  { x, y, z } pair -> first hit fraction in [1e-6, 1]
 //       over the DRAWN new solids (not ramps or parapets), or null. For the camera's line of sight.
+//   collision.onStationRoof(x, z, feetY) true when the feet are at a station roof's level over (or 0.5 m of) its footprint
 //   collision.solidStats()               { version, bridges, decks, ramps, parapets, piers, towers,
 //       motorwaySegments, stations, ribbons, prisms, errors, buildMs }
 //   roofHeightAt and buildingsNear are unchanged: they read only the map boxes.
@@ -334,6 +335,7 @@ export function createCollisionService({
     setSolidSources: (sources) => solidWorld.setSources(sources || {}),
     ceilingAt: (x, z, feetY) => { solidWorld.update(); return solidWorld.ceilingAt(x, z, feetY); },
     segmentHitsSolids: (a, b) => { solidWorld.update(); return solidWorld.segmentHits(a.x, a.y, a.z, b.x, b.y, b.z); },
+    onStationRoof: (x, z, feetY) => { solidWorld.update(); return solidWorld.onStationRoof(x, z, feetY); },
     solidStats: () => solidWorld.stats(),
     // ── /s14:S ──
     sync,

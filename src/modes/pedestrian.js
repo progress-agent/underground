@@ -507,9 +507,11 @@ export function createPedestrianMode(ctx) {
     if (s14Ceil !== null && body.vy > 0 && body.y + (P.eye + BODY.headroom) * VE > s14Ceil) {
       body.y = s14Ceil - (P.eye + BODY.headroom) * VE; body.vy = 0;
     }
+    // A walker standing on a station roof is above the wall, not at it: the touch rule (push, card) does not apply there.
+    const s14OnRoof = !!(ctx.collision.onStationRoof && ctx.collision.onStationRoof(body.x, body.z, body.y));
     // ── /s14:S ──
     placeCamera(body.x, body.y + P.eye * VE, body.z);
-    contactStep(s02bX, s02bZ); // s02:B
+    if (!s14OnRoof) contactStep(s02bX, s02bZ); // s02:B (s14:S guard: not on a station roof)
 
     let text = null;
     if (body.state === 'ground') {
