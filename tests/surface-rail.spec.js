@@ -350,14 +350,15 @@ test('no per-instance colour anywhere in the scene (D-015); colour on the railwa
       else if (o.material.vertexColors || o.geometry.attributes.color) otherVertexColours++;
     });
     const markers = [...u.surfaceRail.stationLayers.values()].filter(l => l.stationsLayer.mesh.instanceColor).length;
-    // s02:B: the station buildings are two merged meshes, never instanced and never per-instance coloured.
+    // s02:B: the station buildings are merged meshes, never instanced and never per-instance coloured. (Sprint 14Oct26w: three, not two: the
+    // host skirts of Fulham Broadway and North Greenwich, a thin grey wall under the map box that floats over the street there.)
     const sb = []; u.scene.getObjectByName('station-buildings')?.traverse(o => { if (o.isMesh) sb.push(o); });
     return { instanced, coloured, railInstanced, otherVertexColours, baked, markers, stationMeshes: sb.length, stationInstanced: sb.filter(o => o.isInstancedMesh || o.instanceColor).length };
   });
   expect(r.instanced).toBeGreaterThan(10);
   expect(r.coloured).toBe(0);
   expect(r.markers).toBe(0);
-  expect(r.stationMeshes).toBe(2);
+  expect(r.stationMeshes).toBe(3);
   expect(r.stationInstanced).toBe(0);
   expect(r.railInstanced).toBe(0);
   // The four dressing archetypes are one mesh per line with their colours

@@ -4125,17 +4125,20 @@ function s14bInFront(ox, oy, oz, dx, dy, dz, far) {
 // trains and aircraft do not hide a name. Results are cached per name and re-tested only when the camera has moved more than a
 // unit or the building-height scale changed, at most 16 fresh tests a frame (never-tested names first): a still camera costs nothing.
 const S14B_NEAR = 750, S14B_MOVE = 1.0, S14B_FRESH = 16, S14B_STALE = 12, S14B_OWN_M = 200;
-// (A station's OWN name, from within 200 m of its building, is not hidden by the map boxes or landmarks in front of it: the box between
-// the walker and a 250 m terminus's roof hid King's Cross's name from 50 m away, where it is the one name that belongs. Only another
-// station's building hides it. Every other name is tested against all three.)
+// (Two names are not hidden by the map boxes or landmarks in front of them, only by another station's building: a station's OWN name from
+// within 200 m of its building, and the NEAREST name the declutter offers (the one asked about last frame whose anchor is closest). A box
+// between the walker and a 250 m terminus's roof hid King's Cross's name from 50 m away, where it is the one name that belongs; and at
+// 6 m over the street in the middle of the city every far name is behind some box, which left the view with no name at all. Every other
+// name is tested against all three.)
 const s14bCache = new Map();
-let s14bFrame = -1, s14bFreshN = 0, s14bNear = false;
+let s14bFrame = -1, s14bFreshN = 0, s14bNear = false, s14bNearestName = null, s14bAskedBest = null, s14bAskedD = Infinity;
 function s14bLabelOccluded(rect, cam, info) {
   const m = stationBuildingsMesh;
   if (!m || !m.group.visible) return false;
   const stats = m.labelOcclusion, frame = renderer.info.render.frame;
   if (frame !== s14bFrame) {
     s14bFrame = frame; s14bFreshN = 0; stats.frames++;
+    s14bNearestName = s14bAskedBest; s14bAskedBest = null; s14bAskedD = Infinity;
     const gy = getStructuralSurfaceY({ x: cam.position.x, z: cam.position.z });
     s14bNear = Number.isFinite(gy) && cam.position.y > gy && cam.position.y - gy <= S14B_NEAR;
   }
@@ -4143,21 +4146,23 @@ function s14bLabelOccluded(rect, cam, info) {
   const scale = getBuildingHeightScale();
   let c = s14bCache.get(info.name);
   const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
-  const fresh = !c ? true : (Math.hypot(c.cx - cx, c.cy - cy, c.cz - cz) > S14B_MOVE || Math.abs(c.scale - scale) > 1e-9);
+  const dAnchor = Math.hypot(info.x - cx, info.y - cy, info.z - cz);
+  if (dAnchor < s14bAskedD) { s14bAskedD = dAnchor; s14bAskedBest = info.name; }
+  const exempt = info.name === s14bNearestName || (info.building != null && m.index.distanceTo(info.building, cx, cz) <= S14B_OWN_M);
+  const fresh = !c ? true : (Math.hypot(c.cx - cx, c.cy - cy, c.cz - cz) > S14B_MOVE || Math.abs(c.scale - scale) > 1e-9 || c.exempt !== exempt);
   if (fresh && s14bFreshN < (c ? S14B_STALE : S14B_FRESH)) {
     s14bFreshN++;
     const t0 = performance.now();
-    if (!c) s14bCache.set(info.name, c = { cx, cy, cz, scale, hidden: false });
-    c.cx = cx; c.cy = cy; c.cz = cz; c.scale = scale;
+    if (!c) s14bCache.set(info.name, c = { cx, cy, cz, scale, hidden: false, exempt });
+    c.cx = cx; c.cy = cy; c.cz = cz; c.scale = scale; c.exempt = exempt;
     s14bPt.set(((rect.x + rect.w / 2) / info.vw) * 2 - 1, -((rect.y + rect.h) / info.vh) * 2 + 1, 0.5).unproject(cam);
     s14bDir.copy(s14bPt).sub(cam.position).normalize();
-    const dist = Math.hypot(info.x - cx, info.y - cy, info.z - cz), tMax = dist - 2;
+    const tMax = dAnchor - 2;
     let hit = false;
     if (tMax > 0) {
       const own = info.building?.key ?? null;
       hit = m.segmentHitsStation(cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, own, scale);
-      const atOwn = own !== null && m.index.distanceTo(info.building, cx, cz) <= S14B_OWN_M;
-      if (!hit && !atOwn && surfaceGeometryGroup?.visible) {
+      if (!hit && !exempt && surfaceGeometryGroup?.visible) {
         s02bBoxMeshes.length = 0;
         for (const g of surfaceGeometryGroup.children) if (g.isInstancedMesh && /^(baked-)?buildings-/.test(g.name || '')) s02bBoxMeshes.push(g);
         hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax + 0.75, scale);

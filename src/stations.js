@@ -115,9 +115,9 @@ function placeLabel(el,x,y,opacity,fontSize,distance,occ,camera) {
   // ── s14:B ── an occluded label is hidden before it evicts anything (only above ground passes `occ`)
   if(occ && _labelOccluders.length) {
     _occRect.x=bounds.left;_occRect.y=bounds.top;_occRect.w=bounds.right-bounds.left;_occRect.h=bounds.bottom-bounds.top;
-    for(const fn of _labelOccluders.slice()) {
+    for(let i=0;i<_labelOccluders.length;i++) {
       let hide=false;
-      try {hide=fn(_occRect,camera,occ)===true;} catch(e) {console.warn('[stations] label occluder',e);}
+      try {hide=_labelOccluders[i](_occRect,camera,occ)===true;} catch(e) {console.warn('[stations] label occluder',e);}
       if(hide) {hideLabel(el);return;}
     }
   }

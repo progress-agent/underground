@@ -926,7 +926,15 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   // from the 02Oct26f data (the tracked scripts/station-building-heights-bf10309.json: building key -> height).
   for (const rec of boxEntranceRecs) {
     const h = rec.host;
-    note(rec.sites[0], 'box-entrance host', null, { building: rec.key, detail: `host box centre (${h.x}, ${h.z}), side ${h.side} m, ${h.h} m tall, base ${h.baseM} m; it stays an ordinary map box (not hidden)` });
+    // (A baked box stands at the ground under its centre: on a slope it floats over the street on its low side. The runtime closes the gap with a skirt;
+    // the walker's collision is the baked box alone, so it can pass under where the gap is more than his height.)
+    let low = Infinity;
+    if (groundOf) for (let f = 0; f < 4; f++) for (let t = -h.side / 2; t <= h.side / 2 + 1e-9; t += 3) {
+      const x = f < 2 ? h.x + t : h.x + (f === 2 ? -1 : 1) * (h.side / 2 + 0.5), z = f < 2 ? h.z + (f === 0 ? -1 : 1) * (h.side / 2 + 0.5) : h.z + t;
+      const y = groundOf(x, z); if (Number.isFinite(y) && y < low) low = y;
+    }
+    const floatTxt = Number.isFinite(low) ? `; the street under its faces falls to ${r2(low)} m, ${r2(Math.max(0, h.baseM - low))} m under its base (a skirt closes the gap)` : '';
+    note(rec.sites[0], 'box-entrance host', null, { building: rec.key, detail: `host box centre (${h.x}, ${h.z}), side ${h.side} m, ${h.h} m tall, base ${h.baseM} m; it stays an ordinary map box (not hidden)${floatTxt}` });
     note(rec.sites[0], 'box-entrance block', null, { building: rec.key, detail: `${R.boxEntrance.w} x ${R.boxEntrance.d} m against the host's ${h.face[1] < 0 ? 'north' : 'other'} face, ${rec.height} m tall, ${rec.roundels.filter(q => q.on === 'wall').length} wall roundels, exit (${rec.exit.x}, ${rec.exit.z})` });
   }
   const heightChanges = [];
