@@ -64,7 +64,11 @@ test('licence and credits sit beside the file, CC0, and nothing mentions Mixamo'
   assert.match(credits, /Universal Animation Library/);
   assert.match(credits, /CC0 1\.0/);
   assert.match(credits, /https:\/\/quaternius\.com/);
-  for (const n of names) {
+  // Sprint 14Oct26w, lane D: the folder now has a Textures/ subfolder (the skateboard's texture, which its GLB names by that
+  // relative path), so every FILE under it is scanned, folders walked into instead of read. Nothing is loosened: the scan
+  // now covers the board, its texture and its licence as well.
+  const files = (d, rel = '') => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(d, e.name), `${rel}${e.name}/`) : [`${rel}${e.name}`]));
+  for (const n of files(dir)) {
     const body = readFileSync(path.join(dir, n));
     assert.ok(!/mixamo/i.test(n) && !/mixamo/i.test(body.toString('latin1')), `${n} has no Mixamo`);
   }

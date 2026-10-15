@@ -49,6 +49,11 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
   const lastFinal = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), mm: null };
   const tPos = new THREE.Vector3(), tQuat = new THREE.Quaternion();
 
+  // ── s14:D ── the skateboard (lane D, D-053 item 2): a source of { on, facing, liftM, rootRoll, lean, push, ... } the
+  // Pedestrian's board controller supplies; null until it does. While it says `on` the rig has its own row, the figure
+  // stands sideways on the deck, and the camera eases round behind the travel (the controller drives that).
+  let s14dBoardSource = null, s14dLastOrbitT = -1e9;
+  // ── /s14:D ──
   const lens = () => ctx.lens ?? null;
   const preferredMm = () => lens()?.preferred?.() ?? 30;
   const targetMm = (view) => (view === 'third' ? LENS_THIRD_MM : preferredMm());
@@ -100,6 +105,15 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
   void offKey; void offWheel;
 
   function figureState() {
+    // ── s14:D ── on the board: the figure stands sideways on the deck, at rest as far as its clip is concerned
+    const s14dB = s14dBoardSource?.();
+    if (s14dB?.on) {
+      return {
+        x: body.x, y: body.y, z: body.z, heading: s14dB.facing, state: 'ground', speed: 0, vx: 0, vz: 0,
+        jet: false, jetLevel: 0, clock: ctx.time ?? 0, liftM: s14dB.liftM, rootRoll: s14dB.rootRoll,
+      };
+    }
+    // ── /s14:D ──
     // the clip follows the HORIZONTAL speed: a swimmer at rest sinks slowly, and that is still "idle"
     return {
       x: body.x, y: body.y, z: body.z, heading, state: body.state, speed: Math.hypot(body.vx, body.vz), vx: body.vx, vz: body.vz,
@@ -178,6 +192,9 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
       const show = effective === 'third' && allowsThirdIn(phase);
       if (show) {
         rig.setBody(body.state === 'swim' ? 'swim' : 'foot');
+        // ── s14:D ── riding: the board's own camera row
+        if (s14dBoardSource?.()?.on) rig.setBody('skate');
+        // ── /s14:D ──
         rig.follow(body, dt, { snap: snapPending, underwater: underwater() });
         snapPending = false;
         rig.pose(tPos, tQuat);
@@ -260,5 +277,24 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
     get rig() { return rig; },
     get rules() { return rules; },
   };
+  // ── s14:D ── lane D's additions to the binding, as wrappers so P's lines stay as they are
+  {
+    const baseState = api.playerState, baseLook = api.onLook;
+    api.setBoardSource = (fn) => { s14dBoardSource = typeof fn === 'function' ? fn : null; };
+    /** A drag that orbits the rig stamps the mode clock: the board camera eases behind the travel only when it has been quiet. */
+    api.onLook = (dx, dy) => { const took = baseLook(dx, dy); if (took) s14dLastOrbitT = ctx.time ?? 0; return took; };
+    api.sinceOrbit = () => (ctx.time ?? 0) - s14dLastOrbitT;
+    api.playerState = () => {
+      const st = baseState();
+      const b = s14dBoardSource?.();
+      const on = !!b?.on;
+      return {
+        ...st, ...(on ? { heading: b.facing, speed: Math.hypot(body.vx, body.vz) } : {}),
+        board: on, lean: on ? b.lean : 0, push: on ? b.push : 0,
+        pushPhase: on ? b.pushPhase : 0, boardHeading: on ? b.heading : 0, liftM: on ? b.liftM : 0, rootRoll: on ? b.rootRoll : 0,
+      };
+    };
+  }
+  // ── /s14:D ──
   return api;
 }

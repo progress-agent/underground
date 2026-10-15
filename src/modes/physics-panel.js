@@ -32,6 +32,10 @@
 // windows and blocked storage fall back to defaults silently.
 
 export const PHYSICS_STORAGE_KEY = 'ug:physics:v1';
+// ── s14:D ── sections shown together with a mode's own (sprint 14Oct26w, D-053 item 2): the Pedestrian's panel also
+// carries the skateboard's tunables, which pedestrian.js registers as the mode id `skate` (pedestrian-body.js is lane M's).
+export const S14D_COMPANIONS = Object.freeze({ pedestrian: Object.freeze(['skate']) });
+// ── /s14:D ──
 
 function safeStorage(explicit) {
   if (explicit !== undefined) return explicit;
@@ -193,6 +197,9 @@ background:rgba(16,18,24,.92);border:1px solid rgba(255,255,255,.12);color:#eeea
       show(id) {
         openId = id;
         for (const [mid, s] of sections) s.sec.hidden = mid !== id;
+        // ── s14:D ── a mode's companion sections show with it
+        for (const c of S14D_COMPANIONS[id] ?? []) { const cs = sections.get(c); if (cs) cs.sec.hidden = false; }
+        // ── /s14:D ──
         root.hidden = !sections.has(id);
       },
       hide() { openId = null; root.hidden = true; },

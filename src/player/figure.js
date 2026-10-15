@@ -56,6 +56,9 @@ export function createFigure({ THREE, gltf, manifest }) {
 
   const poses = new Map();     // name -> { apply(figure, w, dt), w, target, riseS, fallS }
   const quat = new THREE.Quaternion(), yAxis = new THREE.Vector3(0, 1, 0);
+  // ── s14:D ── the roll into a turn (the board), about the figure's own +X
+  const s14dRoll = new THREE.Quaternion(), s14dX = new THREE.Vector3(1, 0, 0);
+  // ── /s14:D ──
   const tmpBox = new THREE.Box3();
   let current = null, currentName = null, lift = 0, heading = 0;
   const feet = new THREE.Vector3();
@@ -120,10 +123,16 @@ export function createFigure({ THREE, gltf, manifest }) {
       }
       lift = damp(lift, st.state === 'swim' ? manifest.swimLiftM : 0, 10, dt);
       poseGroup.position.y = lift;
+      // ── s14:D ── the board lifts the figure to the deck top: st.liftM, real metres (default 0)
+      if (st.liftM) poseGroup.position.y += st.liftM;
+      // ── /s14:D ──
       heading = st.heading ?? heading;
       feet.set(st.x, st.y, st.z);
       // glTF faces +Z; the walker's yaw 0 looks down -Z, so the figure turns by heading + PI about Y.
       quat.setFromAxisAngle(yAxis, heading + Math.PI);
+      // ── s14:D ── st.rootRoll (default 0): a lean into a turn, about the figure's local +X (the way the board runs)
+      if (st.rootRoll) quat.multiply(s14dRoll.setFromAxisAngle(s14dX, st.rootRoll));
+      // ── /s14:D ──
       composeTrueProportionMatrix(root.matrix, feet, quat);
       root.matrixWorldNeedsUpdate = true;
       root.updateWorldMatrix(true, true);
