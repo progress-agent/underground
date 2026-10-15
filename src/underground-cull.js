@@ -40,18 +40,39 @@ export const SEEN_FROM_ABOVE = new Set(['tideway-whirlpools']);
 /** How far inside the map edge the camera must be: M25 insideness 1 is at
  * least half the 1500m edge band (750m) inside the ring. */
 export const INSIDE_MIN = 0.999;
+/** s14:F: the `userData.kind` of the top-level group of minimum-width lines along the beyond-edge track
+ * (tube-surface-rail.js, BEYOND_EDGE_MIN_PX): seen from above, hidden from a camera below the hidden ground. */
+export const BEYOND_EDGE_KIND = 'beyond-edge-legibility';
 
 /**
  * The objects to leave undrawn above ground, refilled into `out`. With
  * `linesOnly` (s02:T, the 'lines' cull mode) only the top-level `line:*` groups:
  * the bores and ribbons of the lines, nothing of the geology, the cliff, the
- * skirt or the chalk column.
+ * skirt or the chalk column. s14:F (sprint 14Oct26w, D-053 item 9): the 'lines'
+ * mode also takes the unified glass-shaft group. Inside the ring every shaft lies
+ * under opaque terrain from any above-ground camera (so the full cull hides the
+ * group at no visible cost), and in the 750 m edge band the terrain is still
+ * there; the group is seen from above only where the ground is hidden, beyond the
+ * edge, where Epping's shaft hung under its building and Amersham's stood beside
+ * it. A camera below the hidden ground never gets 'lines', so it still sees them.
+ *
+ * `mode: 'below'` (s14:F) is the mirror for a camera below the hidden ground
+ * beyond the edge: the surface railway drawn there (the meshes flagged
+ * `userData.beyondEdge` in a `surface-rail` group, and the minimum-width line
+ * group) is hidden, because with no ground above the camera it would show as a
+ * large near-black band of ballast, skirt and deck seen from underneath. Nothing
+ * of the lines, shafts, geology, cliff or chalk column is in that set.
  */
-export function collectUndergroundLayers(scene, out = [], { linesOnly = false } = {}) {
+export function collectUndergroundLayers(scene, out = [], { linesOnly = false, mode = null } = {}) {
   out.length = 0;
   for (const c of scene.children) {
     const n = c.name || '';
-    if (linesOnly) { if (n.startsWith('line:')) out.push(c); continue; }
+    if (mode === 'below') {
+      if (c.userData?.kind === 'surface-rail') { for (const k of c.children) if (k.userData?.beyondEdge) out.push(k); }
+      else if (c.userData?.kind === BEYOND_EDGE_KIND) out.push(c);
+      continue;
+    }
+    if (linesOnly) { if (n.startsWith('line:') || c.userData?.kind === 'unified-shafts') out.push(c); continue; }
     if (UNDERGROUND_LAYER_NAMES.has(n) || n.startsWith('line:') || c.userData?.kind === 'unified-shafts') out.push(c);
     else if (n === 'tideway-system') { for (const k of c.children) if (!SEEN_FROM_ABOVE.has(k.name)) out.push(k); }
     else if (c.userData?.kind === 'station-markers' && !c.userData.surfaceOnly) out.push(c);
@@ -68,17 +89,22 @@ export function isAboveGroundView({ belowSurface, submerged, insideness }) {
  * s02:T (sprint 02Oct26f, D-048 item 7): which cull applies to this camera.
  *   'full'  the whole underground set (isAboveGroundView: above ground, out of the
  *           water and well inside the map edge, insideness at least INSIDE_MIN);
- *   'lines' only the top-level `line:*` groups, for any other above-ground camera
- *           out of the water: a bore beyond the edge (or inside the 750 m edge
- *           band) is visible from above wherever the camera is, and the track the
- *           line draws there is the surface railway. The cliff, clay skirt, chalk
- *           column and geology are never in that set, and the exterior views of
- *           them are taken from below the ground, so they are unchanged;
- *   null    nothing hidden (a camera below ground or in the water).
+ *   'lines' the top-level `line:*` groups and (s14:F) the glass-shaft group, for any
+ *           other above-ground camera out of the water: a bore beyond the edge (or
+ *           inside the 750 m edge band) is visible from above wherever the camera is,
+ *           and the track the line draws there is the surface railway; a shaft beyond
+ *           the edge has no ground over it. The cliff, clay skirt, chalk column and
+ *           geology are never in that set, and the exterior views of them are taken
+ *           from below the ground, so they are unchanged;
+ *   'below' (s14:F) a camera below the (hidden) ground, out of the water, short of
+ *           INSIDE_MIN: the surface railway beyond the edge is hidden (see
+ *           collectUndergroundLayers). Well inside the ring, below ground, stays null;
+ *   null    nothing hidden (a camera in the water, or below ground well inside the ring).
  */
 export function cullModeFor({ belowSurface, submerged, insideness }) {
   if (isAboveGroundView({ belowSurface, submerged, insideness })) return 'full';
   if (!belowSurface && !submerged) return 'lines';
+  if (belowSurface && !submerged && insideness < INSIDE_MIN) return 'below';
   return null;
 }
 
@@ -87,14 +113,16 @@ export function createUndergroundCull({ scene }) {
   const status = { active: false, mode: null, hidden: 0 };
   /**
    * Run `draw` with the underground set hidden when `mode` is set; restores it
-   * after. `mode` is `true` or 'full' (the whole set), 'lines' (s02:T) or falsy.
+   * after. `mode` is `true` or 'full' (the whole set), 'lines' (s02:T), 'below'
+   * (s14:F) or falsy. `status.active` keeps its meaning "the above-ground cull is
+   * active" (lane R's hover rule reads it): it is false in 'below' mode.
    */
   function render(mode, draw) {
-    const m = mode === true ? 'full' : mode === 'full' || mode === 'lines' ? mode : null;
-    status.active = !!m;
+    const m = mode === true ? 'full' : mode === 'full' || mode === 'lines' || mode === 'below' ? mode : null;
+    status.active = m === 'full' || m === 'lines';
     status.mode = m;
     if (!m) { status.hidden = 0; return draw(); }
-    collectUndergroundLayers(scene, set, { linesOnly: m === 'lines' });
+    collectUndergroundLayers(scene, set, { linesOnly: m === 'lines', mode: m });
     hidden.length = 0;
     for (const o of set) if (o.visible) { o.visible = false; hidden.push(o); }
     status.hidden = hidden.length;

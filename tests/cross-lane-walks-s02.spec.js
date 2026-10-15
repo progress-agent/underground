@@ -341,7 +341,15 @@ test('4b. the DLR from Stratford International through Stratford, and from Strat
       if (excess > worst) { worst = excess; at = { x: Math.round(f.x), z: Math.round(f.z), step, run }; }
     }
     console.log(`[xl-s02] DLR ${label}: worst height step beyond a 10% grade ${worst.toFixed(3)} m at ${JSON.stringify(at)}`);
-    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.5);
+    // s14:F (sprint 14Oct26w, D-053 item 9, round 2 of the fix): the limit was 0.5 m, over twice what the check had ever measured
+    // (0.23 m, one run). What the check reads is not a step: at Stratford the DLR climbs a ramp of about 40% (0.43 m of height over
+    // 1.08 m of walk, from about (7859, -4316) to (7883, -4356)), and "beyond a 10% grade" leaves 0.3 of every metre walked. The
+    // walker's run per frame is capped (the tick bounds interactive motion to 0.05 s, so a frame never runs more than 1.084 m), which
+    // makes the reading a fixed ceiling, not a spread: (0.396 - 0.1) x 1.084 = 0.32 m. Seventeen runs on this build read 0.284 to 0.321 m at that ramp
+    // (Canning Town 0.167 to 0.249 m); bf10309 reads the same. So the limit is that ceiling plus 0.03 m: 0.35 m, the acceptance's
+    // cap (1.2 x the worst, 0.39 m, cannot fit under it: the ramp is the DLR profile's and is not lane F's code, F/fix-1/notes.md).
+    // A real 0.5 m step in the walker's height still fails it (F/tests-broken.md).
+    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.35);
   }
 });
 

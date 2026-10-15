@@ -40,6 +40,22 @@
 //
 // Deliberately NOT measured: frames per second (the GPU is shared during the
 // sprint; the integrator measures serially).
+//
+// s14:F (sprint 14Oct26w, D-053 item 9): the climb used to fail now and then, with the puffs
+// drawn reading [4145, 4150] (2 of 3 runs on e0675d7, 1 of 1 at the dome commit, 0 of 3 on a
+// rerun, once in a full suite). It was a race in boot(), never a pop. The climb starts under
+// ground, where the air weight is 0, so clouds.update returns before it re-sorts and the
+// instance buffer keeps whatever set was last written above ground. boot() set the clock to
+// 900 s and returned; if the app drew a frame above ground before the flight moved the camera
+// under, the buffer held the t = 900 set (875 clouds, 4,150 puffs) and the test passed; if the
+// flight started first, the buffer still held the set from the clock the page had run on (about
+// 0 s: 887 clouds, 4,145 puffs, computed from buildCloudLayout and cloudDrift) and the first
+// frame above ground re-wrote it: five puffs "joined". Nothing was ever on screen in a stale
+// state (update re-sorts before the render), and the five belong to clouds at edge fade 0, so
+// src/clouds.js is unchanged. boot() now waits for the opening to finish, then brings the buffer
+// to the frozen clock itself (one update call with the air weight at 1) and pins that the buffer
+// holds exactly the puffs of the clouds the field model says are inside the map at 900 s. Pins 1
+// to 4 and every threshold are unchanged.
 
 import { test, expect } from '@playwright/test';
 import { waitForSceneLoaded } from './helpers/scene-loaded.js';
@@ -56,6 +72,8 @@ async function boot(page) {
   await page.waitForFunction(() => !!(window.__ug?.camera && window.__ugClouds && window.__ug.groundReady && window.__ug.intro),
     null, { timeout: 120000 });
   await waitForSceneLoaded(page, 120000);
+  // s14:F: the opening has landed (or was bypassed) before the clock is frozen.
+  await page.waitForFunction(() => ['done', 'bypassed'].includes(window.__ug.intro.getPhase()), null, { timeout: 120000 });
   await page.evaluate(() => {
     const u = window.__ug;
     u.fpsControls.enabled = false; u.controls.enableDamping = false;
@@ -65,7 +83,20 @@ async function boot(page) {
     // cheaply: the probe reads the shader's own decision, not the picture.
     u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 0.5, samples: 0 });
   });
-  return errors;
+  // s14:F: bring the instance buffer to the frozen clock now, whatever the app has or has not drawn since. (The flight
+  // starts under ground, where the app's own frames leave the buffer alone; see the header.) The app's next frame
+  // re-hides the layer with the real air weight before it renders anything.
+  const pre = await page.evaluate(() => {
+    const c = window.__ugClouds, u = window.__ug;
+    c.update({ camera: u.camera, airWeight: 1 });
+    const at = c.positionsAt(900); let expected = 0, clouds = 0;
+    c.layout.clouds.forEach((cl, i) => { if (c.edgeFadeAt(at[i][0], at[i][1]) > 0) { expected += cl.puffs.length; clouds++; } });
+    return { expected, clouds, drawn: c.mesh.geometry.instanceCount, visibleClouds: c.status.visibleClouds };
+  });
+  console.log('clouds at the frozen clock', JSON.stringify(pre));
+  expect(pre.drawn, 'the buffer holds exactly the puffs of the clouds inside the map at 900 s').toBe(pre.expected);
+  expect(pre.visibleClouds).toBe(pre.clouds);
+  return { errors, expected: pre.expected };
 }
 
 function expectNoPop(r, { airWeightOnly = false } = {}) {
@@ -94,9 +125,10 @@ function expectNoPop(r, { airWeightOnly = false } = {}) {
 
 test('the climb out of the opening to 3 km: no cloud appears or vanishes', async ({ page }) => {
   test.setTimeout(300000);
-  const errors = await boot(page);
+  const { errors, expected } = await boot(page);
   const r = await page.evaluate(flyLeg, { name: 'climb', kind: 'climb', DT, toAltM: 3000 });
   expectNoPop(r, { airWeightOnly: true });
+  expect(r.instances[0], 'the puffs drawn are those the field model puts inside the map at the frozen clock').toBe(expected);
   // It did start underground and climb through the whole fade above the layer.
   expect(r.startAltM).toBeLessThan(0);
   expect(r.endAltM).toBeGreaterThanOrEqual(3000);
@@ -108,11 +140,12 @@ test('the climb out of the opening to 3 km: no cloud appears or vanishes', async
 
 test('20 km level at about 1 km and at street height: no cloud appears or vanishes', async ({ page }) => {
   test.setTimeout(300000);
-  const errors = await boot(page);
+  const { errors, expected } = await boot(page);
   // West to east across the centre, north of the river at ~1 km (through the
   // cloud bases), then south of it at street height with Shift held.
   const high = await page.evaluate(flyLeg, { name: 'level-1km', kind: 'level', DT, start: [-10000, -4000], dir: [1, 0], distM: 20000, altM: 1000 });
   expectNoPop(high);
+  expect(high.instances[0], 'the puffs drawn are those the field model puts inside the map at the frozen clock').toBe(expected);
   expect(high.startAltM).toBeGreaterThan(900);
   const low = await page.evaluate(flyLeg, { name: 'street', kind: 'level', DT, start: [-10000, 2000], dir: [1, 0], distM: 20000, aboveGroundM: 15, sprint: true });
   expectNoPop(low);
@@ -124,7 +157,7 @@ test('20 km level at about 1 km and at street height: no cloud appears or vanish
 
 test('as the clouds drift across the map edge, they join and leave the drawn set invisibly', async ({ page }) => {
   test.setTimeout(300000);
-  const errors = await boot(page);
+  const { errors } = await boot(page);
   // A still camera over the City looking up; the world clock runs 10 s a frame
   // (50 minutes in all), so clouds drift a long way on the wind.
   const r = await page.evaluate(flyLeg, { name: 'drift', kind: 'drift', DT, start: [2952.9, 337.8, -732.9], look: [1900, 3300, -300],

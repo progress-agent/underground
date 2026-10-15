@@ -6,9 +6,16 @@
 //   1 ground  on the ground (feet within 0.5 m true of the terrain), not on a roof, not in water;
 //   2 box     not inside any collision box (and, in assert mode, no station-building footprint);
 //   3 near    within 25 m of the station (its building in assert mode, else the station's point);
-//   4 fan     no solid thing within 10 m in a fan of +-25 degrees ahead at eye height (collision
-//             boxes spanning the eye, and station structures in plan: surface station markers and
-//             glass shafts; in assert mode Lane B's buildings too);
+//   4 fan     no solid thing within 10 m in a fan of +-25 degrees ahead at eye height. What counts
+//             (the rule the fan code below applies; integration commit 7aec481 made it so):
+//               - collision boxes that span the eye (base at or under eye height, roof at or over it);
+//               - surface station markers, those whose centre is no more than 2 m true below the
+//                 street (the deep ones sit at their platforms), as circles in plan;
+//               - glass shafts ONLY where the shaft's top reaches eye height (1.7 m true above the
+//                 walker's feet; shafts.js tops every shaft at the ground, so one flush with the street counts), as circles in
+//                 plan, and never when the walker stands on the shaft's own flat top;
+//               - in assert mode, Lane B's station buildings, as footprint polygons (not their bounds).
+//             (Before 7aec481 shafts counted "in plan", whatever their height.)
 //   5 facing  facing away from the station, within 90 degrees of outward;
 //   6 rearm   the card does not re-open while the walker stands still at the exit (3 s).
 //
