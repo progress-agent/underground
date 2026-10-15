@@ -360,6 +360,9 @@ test.describe('the view rules, with the figure held back and in the tunnel', () 
         while (performance.now() - t0 < 5000) { await new Promise((r) => requestAnimationFrame(r)); out.push(ped.isThirdPerson()); }
         return out;
       });
+      // the state read just before the request was released leads the sequence: on a quick machine the figure
+      // lands before the first sampled frame, and the single change would otherwise fall before seq[0]
+      seq.unshift(before.third);
       let up = 0, down = 0;
       for (let i = 1; i < seq.length; i++) { if (!seq[i - 1] && seq[i]) up++; if (seq[i - 1] && !seq[i]) down++; }
       expect(up, 'one false-to-true change').toBe(1);
@@ -586,6 +589,34 @@ test.describe('the figure in the street', () => {
     await pg.keyboard.press('v');
     await pplace('THAMES');
     expect((await pev(() => window.__ug.player.debug().shadow)).visible).toBe(false);
+  });
+
+  test('the shadow is whole on a rising street: it reaches well past the feet seen from above (fix round 1)', async () => {
+    await pev(() => { window.__ugSun.setTime(0.5, { persist: false }); window.__ug.setRenderQualityMode('manual'); });
+    await pplace('KX');
+    await pev(() => { const r = window.__ug.modes.registry.get('pedestrian').onFoot.rig; r.pitch = -1.2; r.zoom(1.6); });
+    await pwait(1200);
+    const r = await pev(() => {
+      const u = window.__ug, T = window.__ugTHREE, gl = u.composer.renderer.getContext(), cv = u.composer.renderer.domElement;
+      const ped = u.modes.registry.get('pedestrian'), st = ped.playerState(), ratio = u.masterHeight.ratio;
+      const read = () => { u.composer.render(); const px = new Uint8Array(cv.width * cv.height * 4); gl.readPixels(0, 0, cv.width, cv.height, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
+      u.player.setShadowEnabled(true); const A = read();
+      u.player.setShadowEnabled(false); const B = read();
+      u.player.setShadowEnabled(true);
+      const scr = (x, y, z) => { const v = new T.Vector3(x, y, z).project(u.camera); return [(v.x * 0.5 + 0.5) * cv.width, (v.y * 0.5 + 0.5) * cv.height]; };
+      const [fx, fy] = scr(st.x, st.y, st.z), [ox, oy] = scr(st.x + 1, st.y, st.z);
+      const pxPerM = Math.hypot(ox - fx, oy - fy);
+      let n = 0, far = 0;
+      for (let i = 0; i < cv.width * cv.height; i++) {
+        const la = A[i * 4] + A[i * 4 + 1] + A[i * 4 + 2], lb = B[i * 4] + B[i * 4 + 1] + B[i * 4 + 2];
+        if (lb > 30 && la < lb * 0.92) { n++; far = Math.max(far, Math.hypot((i % cv.width) - fx, Math.floor(i / cv.width) - fy)); }
+      }
+      return { n, farM: far / Math.max(1e-6, pxPerM), pxPerM, ratio, sh: u.player.debug().shadow };
+    });
+    // The head's shadow lands about 1.4 figure heights (2.5 m) away; a buried shadow stops within about 0.5 m.
+    expect(r.farM, `shadow reach in metres (${JSON.stringify(r.sh)})`).toBeGreaterThan(1.3);
+    expect(r.farM).toBeLessThan(4);
+    await pev(() => window.__ug.modes.registry.get('pedestrian').onFoot.rig.reset({ yaw: window.__ug.modes.registry.get('pedestrian').onFoot.rig.yaw }));
   });
 
   test('the figure costs about 13.7k triangles, and its shadow about as many again', async () => {

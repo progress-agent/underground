@@ -10,7 +10,7 @@ import { composeTrueProportionMatrix } from '../true-proportion.js';
 import { MANNEQUIN } from './mannequin-manifest.js';
 import { createFigureLoader } from './figure-loader.js';
 import { createFlames } from './flames.js';
-import { createFigureShadow, shadowOpacity, SHADOW } from './figure-shadow.js';
+import { createFigureShadow, shadowOpacity, shadowLight, clampSlope, SHADOW } from './figure-shadow.js';
 import { displayedNdc } from './label-cover.js';
 
 const SCREEN_BONES = ['Head', 'hand_l', 'hand_r', 'foot_l', 'foot_r', 'pelvis', 'neck_01'];
@@ -40,6 +40,7 @@ export function createPlayer({
   let visible = false;
   let rect = null;
   const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+  const shadowDir = new THREE.Vector3();
   const ratio = () => masterHeight?.ratio ?? 1;
 
   function ensureShadow() {
@@ -82,7 +83,21 @@ export function createPlayer({
     const opacity = shadowOpacity({
       strengthRatio: sun.strengthRatio, heightM, elevationDeg: sun.elevationDeg, swimming: st.state === 'swim',
     });
-    shadow.update({ light: sun.direction, planeY, liftCanon: SHADOW.liftM / Math.max(1e-3, rat), opacity });
+    // The thrown direction is the sun's, shortened (a 6 degree displayed sun would throw 16 m), and the plane is
+    // tilted to the ground's slope under the feet (the ground, not a roof the body stands on).
+    shadowLight(sun.direction, rat, shadowDir);
+    let slopeX = 0, slopeZ = 0;
+    const g0 = collision?.groundHeightAt ? collision.groundHeightAt(st.x, st.z) : null;
+    if (g0 !== null && Math.abs(planeY - g0) < 0.05 / Math.max(1e-3, rat)) {
+      const d = SHADOW.slopeProbeM;
+      const gxp = collision.groundHeightAt(st.x + d, st.z), gxm = collision.groundHeightAt(st.x - d, st.z);
+      const gzp = collision.groundHeightAt(st.x, st.z + d), gzm = collision.groundHeightAt(st.x, st.z - d);
+      if (gxp !== null && gxm !== null) slopeX = (gxp - gxm) / (2 * d);
+      if (gzp !== null && gzm !== null) slopeZ = (gzp - gzm) / (2 * d);
+      const c = clampSlope(slopeX, slopeZ, shadowDir);
+      slopeX = c.gx; slopeZ = c.gz;
+    }
+    shadow.update({ light: shadowDir, planeY, x: st.x, z: st.z, slopeX, slopeZ, liftCanon: SHADOW.liftM / Math.max(1e-3, rat), opacity });
   }
 
   /** The figure's rectangle on screen (CSS px, as the lens pass draws it), or null. Call after the camera is placed. */
