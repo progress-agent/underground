@@ -247,7 +247,7 @@ test('B14-2.5 touching the box elsewhere does not open the card, and never gets 
     const placed = await placeAt(x, z, yaw);
     // How far does the host float over the street here? A baked box stands at the ground under its CENTRE, so a 90 m box on a slope floats
     // over the street on its low side (2.8 m at Fulham Broadway's north face). collision.js (lane S's file) reads only the instanced box, so
-    // the walker is held out of the host's square by the pedestrian's contact step (hostPushAt); logged here, and the assertions below hold at every start.
+    // the walker is held out of the host's square by the s14:B hold in main.js (station-buildings.js hostPushAt, once a frame after the modes); logged here, and the assertions below hold at every start.
     const floatM = await page.evaluate(([host, x, z, yaw]) => {
       const u = window.__ug, g = u.modes.ctx.getStructuralY; let gMin = Infinity;
       for (let t = 0; t <= 8; t++) { const k = t * 5; gMin = Math.min(gMin, g(x - Math.sin(yaw) * k, z - Math.cos(yaw) * k) / 5); }
@@ -268,6 +268,33 @@ test('B14-2.5 touching the box elsewhere does not open the card, and never gets 
     expect(r.minOutside, `${r.site}: the walker's centre never comes within 0.30 m of the host`).toBeGreaterThanOrEqual(0.30);
     expect(r.endOutside, `${r.site}: ends within 1.0 m outside the host square`).toBeLessThanOrEqual(1.0);
   }
+});
+
+test('B14-2.5 (fix round 2) a walker standing on the host roof stays there at Master 1 and 1.5; the hold only keeps him out from under it', async () => {
+  const out = [];
+  try {
+    for (const M of [1, 1.5]) {
+      await enterWalk();
+      await setMaster(M);
+      for (const site of ['fulham-broadway', 'north-greenwich']) {
+        const host = BLOCK(site).host, half = host.side / 2;
+        const r = await page.evaluate(async ({ host }) => {
+          const u = window.__ug, m = u.modes.registry.get('pedestrian');
+          const frame = () => new Promise(res => requestAnimationFrame(res));
+          m.place(host.x + 5, host.z + 5, { yaw: 0, pitch: 0 });
+          const s = [];
+          for (let i = 0; i < 90; i++) { await frame(); const d = m.debug(); if (i === 0 || i === 89) s.push({ x: d.x, y: d.y, z: d.z, state: d.state }); }
+          return { scale: u.getBuildingHeightScale(), roofDrawn: host.baseM * 5 + host.h * 5 * u.getBuildingHeightScale(), samples: s };
+        }, { host });
+        const a = r.samples[0], z = r.samples[1];
+        out.push({ M, site, scale: r.scale, roofDrawn: r.roofDrawn, start: a, end: z });
+        expect(Math.hypot(z.x - a.x, z.z - a.z), `${site} at Master ${M}: not moved off the roof`).toBeLessThan(0.5);
+        expect(Math.max(Math.abs(z.x - host.x), Math.abs(z.z - host.z)), `${site} at Master ${M}: still inside the host square`).toBeLessThan(half);
+        expect(z.y, `${site} at Master ${M}: on the roof as drawn (${r.roofDrawn.toFixed(2)})`).toBeGreaterThan(r.roofDrawn - 1);
+      }
+    }
+  } finally { await setMaster(1.1); }
+  console.log('host roof', JSON.stringify(out));
 });
 
 for (const [site, name, line, exitRows] of [['fulham-broadway', 'Fulham Broadway', 'district', /District/], ['north-greenwich', 'North Greenwich', 'jubilee', /Jubilee/]]) {

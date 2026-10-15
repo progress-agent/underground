@@ -606,6 +606,16 @@ test('hostPushAt: a walker under a floating host is held 0.36 m outside its squa
     }
     assert.equal(idx.hostPushAt(h.x + half + margin + 0.01, h.z, under, VE, margin), null, 'just outside the margin: not held');
     assert.equal(idx.hostPushAt(h.x, h.z, (h.baseM + h.h) * VE, VE, margin), null, 'on the roof: not held');
+    // fix round 2: the roof is the one DRAWN, baseM x VE + h x VE x scale (scale = 1 / Master), so a walker standing on it is never
+    // thrown off, at any Master; and one just under it (more than 0.2 m below) is still held
+    for (const master of [1, 1.1, 1.5, 3, 10]) {
+      const scale = 1 / master, roofY = h.baseM * VE + h.h * VE * scale;
+      assert.equal(idx.hostPushAt(h.x, h.z, roofY, VE, margin, scale), null, `${b.key}: on the roof at Master ${master}`);
+      assert.equal(idx.hostPushAt(h.x + half - 1, h.z, roofY, VE, margin, scale), null, `${b.key}: on the roof near the face at Master ${master}`);
+      assert.ok(idx.hostPushAt(h.x, h.z, roofY - 0.25 * VE, VE, margin, scale), `${b.key}: 0.25 m under the roof at Master ${master} is held`);
+    }
+    // (the plain-height roof, the round 1 test, would have held a walker on the Master 1.5 roof: it is lower than baseM + h)
+    assert.ok(idx.hostPushAt(h.x, h.z, h.baseM * VE + h.h * VE / 1.5, VE, margin), `${b.key}: the old default (scale 1) still holds at the shorter roof`);
   }
 });
 

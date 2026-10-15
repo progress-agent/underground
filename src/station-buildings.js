@@ -123,11 +123,14 @@ export function createStationBuildingIndex(json) {
   /**
    * If (x, z) at height y (world units) is inside a host's square grown by `margin`, and below its roof, the nearest point
    * `margin` outside the face: { building, x, z, nx, nz } (n = the face's outward normal), else null. Pure.
+   * `scale` is the building-height scale (1 / Master, as collision.js reads it): the box is DRAWN to baseM x VE + h x VE x scale,
+   * and a walker standing on that roof is not held, at any Master (fix round 2: the roof was tested at the plain height, so at
+   * Master 1.5 the roof the walker stood on counted as "below it" and threw him off).
    */
-  function hostPushAt(x, z, y, VE = 5, margin = 0.36) {
+  function hostPushAt(x, z, y, VE = 5, margin = 0.36, scale = 1) {
     for (const b of hosted) {
       const h = b.host, half = h.side / 2;
-      if (y >= (h.baseM + h.h) * VE - 0.2 * VE) continue;         // up on the roof (jetpack): not held
+      if (y >= h.baseM * VE + h.h * VE * scale - 0.2 * VE) continue;   // up on the roof (jetpack): not held
       const dx = x - h.x, dz = z - h.z, ox = Math.abs(dx) - half, oz = Math.abs(dz) - half;
       if (Math.max(ox, oz) >= margin) continue;
       if (ox >= oz) { const s = dx < 0 ? -1 : 1; return { building: b, x: h.x + s * (half + margin), z, nx: s, nz: 0 }; }

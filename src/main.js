@@ -4184,6 +4184,30 @@ function s14bLabelOccluded(rect, cam, info) {
   if (c?.hidden) { stats.hidden++; return true; }
   return false;
 }
+
+// The walker is held out of a box-entrance host's square (fix round 2; B14-2.5). The host is a map box that stands on the ground
+// under its centre, so on a slope its base floats over the street on the low side and a walker passes under it (only the host's grey
+// skirt, which is visual, closes the gap). collision.js and pedestrian.js are not this lane's files, so the hold is made HERE, once a
+// frame after the modes have moved the body (the call sits beside s02bFrame in tick): only a Pedestrian on the ground in its body
+// phase, only inside a host's square grown by the wall margin, only below the roof AS DRAWN (baseM x VE + h x VE x height scale, so
+// at Master 1.5 a walker on the roof is not thrown off). The body and the camera move together; the card is untouched.
+const S14B_HOLD_M = 0.36;   // the same stand-off the contact step keeps from a wall (BODY.radius 0.35 plus a hair)
+function s14bHoldWalker() {
+  const idx = stationBuildingState.index;
+  if (!idx?.hostPushAt || modeSystem?.registry.activeId !== 'pedestrian') return;
+  const ped = modeSystem.registry.get('pedestrian'), body = ped?.body;
+  if (!body || body.state !== 'ground') return;
+  const hp = idx.hostPushAt(body.x, body.z, body.y, VERTICAL_EXAGGERATION, S14B_HOLD_M, getBuildingHeightScale());
+  if (!hp || ped.debug().phase !== 'body') return;   // (debug() only for the rare frame inside a host's square: a walker in a bore keeps stale x, z)
+  let { x, z } = hp;
+  // (the entrance block stands against the host's face: what the push gives is kept out of its footprint too, as the contact step would)
+  const hit = idx.contactAt(x, z, 1);
+  if (hit && hit.d < S14B_HOLD_M) { x = hit.x + hit.nx * S14B_HOLD_M; z = hit.z + hit.nz * S14B_HOLD_M; }
+  body.x = x; body.z = z;
+  if (hp.nx !== 0) body.vx = 0; else body.vz = 0;
+  camera.position.x = x; camera.position.z = z;
+  camera.updateMatrixWorld(true);
+}
 // ── /s14:B ──
 
 function tick(frameTime) {
@@ -4430,6 +4454,9 @@ function tick(frameTime) {
     ? (_s24Viewport.w = renderer.domElement.clientWidth, _s24Viewport.h = renderer.domElement.clientHeight, _s24Viewport)
     : null;
   // ── /s24:R ──
+  // ── s14:B ── (after the modes have moved the walker, before anything reads the camera for labels)
+  s14bHoldWalker();
+  // ── /s14:B ──
   s02bFrame(); // s02:B
   // Update station label projections for ALL lines
   let updateCallCount = 0;
@@ -4637,7 +4664,6 @@ modeSystem.ctx.stationBuildings = () => {
   const idx = stationBuildingState.index, m = stationBuildingsMesh;
   if (!idx) return null;
   return { index: idx, mesh: m, siteKeyOf: s02bSiteKeyOf, stationExitPose: s02bStationExitPose, entrancesForBuilding: s02bEntrancesForBuilding,
-    hostPushAt: (x, z, y, VE, margin) => idx.hostPushAt(x, z, y, VE, margin), // s14:B
     contactAt: (x, z, r) => idx.contactAt(x, z, r), distanceTo: (b, x, z) => idx.distanceTo(b, x, z), roofOf: (b) => m?.roofOf(b) ?? null };
 };
 // ── /s02:B ──
