@@ -139,8 +139,11 @@ test('jump arcs under gravity; a tap does not fire the jetpack', () => {
     peak = Math.max(peak, b2.y);
     assert.equal(b2.jet, false);
   }
-  const apexM = peak / VE, expected = P.jump * P.jump / (2 * P.gravity);
-  assert.ok(Math.abs(apexM - expected) < 0.08, `apex ${apexM.toFixed(3)}m vs ${expected.toFixed(3)}m`);
+  // s14:M (D-053 item 5): gravity is suspended while Space is held inside the hold window so the jump
+  // keeps rising without a stall; this 3-frame (0.025 s) hold therefore adds jump x 0.025 s to the apex.
+  // A press already released by the next frame still gives exactly jump^2 / 2g (pedestrian-s14.test.mjs).
+  const apexM = peak / VE, expected = P.jump * P.jump / (2 * P.gravity) + P.jump * 3 / 120;
+  assert.ok(Math.abs(apexM - expected) < 0.02, `apex ${apexM.toFixed(3)}m vs ${expected.toFixed(3)}m`);
   assert.equal(b.state, 'ground');
   assert.equal(b.y, 0);
 });
