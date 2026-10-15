@@ -17,10 +17,22 @@ import {
 } from './balloon-physics.js';
 import { applyAttitude, yawPitchFromQuaternion } from './drone-camera.js';
 import { isFormInput, modeClaimsSpace } from './space-key.js';
+// ── s14:D ── the Balloon seen from outside, the figure in its basket (D-053 items 2 and 3): its over-the-shoulder view
+import { createVehicleView } from '../vehicles/vehicle-view.js';
+// ── /s14:D ──
 
 const DEG = Math.PI / 180;
 const PITCH_LIMIT = 85 * DEG;
 export const WARP_KEY = 't';
+// ── s14:D ──
+const FIGURE_TURN_RATE = 3;        // /s, the figure in the basket turns to look where the camera looks
+const BASKET_FLOOR_TOP_M = 0.06;   // the standing surface above the basket floor's underside (the model's floor thickness)
+/** The pivot's height above the basket floor (display metres) for the camera's distance: scrolling in brings the camera
+ *  down from the envelope (10.5 m at 26 m and beyond) to the figure's chest (1.3 m at 6 m and closer). */
+export const balloonPivotH = (d) => 1.3 + 9.2 * Math.min(1, Math.max(0, (d - 6) / 20));
+const THIRD_WARP_HINT = (warpOn, warp) => `E/Space burner · Q vent · drag to look · scroll to zoom · V first person · ${warpOn ? `T time warp ×${warp} ON (T for real time)` : `T time warp ×${warp}`}`;
+const wrapAngle = (a) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.PI * 2; return a - Math.PI; };
+// ── /s14:D ──
 
 /**
  * @param {object} ctx shared mode context (see src/modes/index.js)
@@ -35,6 +47,55 @@ export function createBalloonMode(ctx) {
   let warpOn = false;
   let activeCtx = null;
   let listening = false;
+  // ── s14:D ── the view: over the shoulder (the figure arrives, then it opens in third person) or the basket's own eye (V)
+  let view = null, figYaw = 0;
+  function ensureView(c) {
+    if (!view && c?.vehicles) {
+      view = createVehicleView({
+        ctx: c, row: 'balloon', loaded: () => !!c.playerView?.figureLoaded?.(), firstLook: 'drag', transitionS: 1.0,
+        onChange: ({ effective, rig, why }) => {
+          // entering: the view takes the heading the camera had and the row's own pitch; V and the figure's arrival keep both
+          if (effective === 'third') rig.reset(why === 'activate' ? { yaw } : { yaw, pitch: Math.max(-0.5, Math.min(0.9, pitch)) });
+          else { yaw = rig.yaw; pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, rig.pitch)); }
+        },
+      });
+    }
+    return view;
+  }
+  function basketOrigin(c) { return { x: state.pos.x, y: state.pos.y - BASKET_EYE_M * (c.VE ?? 5), z: state.pos.z }; }
+  /** The figure and the balloon for the frame: drawn in third person, gone in first. */
+  function drawModels(c, dt) {
+    const V = c.vehicles;
+    if (!V || !state) return;
+    const third = !!view?.isThirdPerson();
+    const rat = Math.max(1e-3, c.masterHeight?.ratio ?? 1);
+    const o = basketOrigin(c);
+    if (third) {
+      const m = V.getBalloon();
+      m.setVisible(true);
+      m.update({ x: o.x, y: o.y, z: o.z, swayRoll: state.swayRoll, swayPitch: state.swayPitch, burner: state.burner }, c.time ?? 0);
+      figYaw += wrapAngle(view.rig.yaw - figYaw) * (1 - Math.exp(-FIGURE_TURN_RATE * dt));
+      c.player?.update(dt, {
+        x: o.x, y: o.y + BASKET_FLOOR_TOP_M / rat, z: o.z, heading: figYaw, state: 'ground', speed: 0, vx: 0, vz: 0,
+        jet: false, jetLevel: 0, clock: c.time ?? 0,
+      }, true);
+      c.player?.shadow?.hide?.();
+      V.updateScreenRect(c.camera, 'balloon', o, 0);
+    } else {
+      V.balloon?.setVisible(false);
+      if (c.player?.visible) c.player.update(0, { x: o.x, y: o.y, z: o.z, heading: figYaw, state: 'ground', speed: 0 }, false);
+      V.clearScreenRect?.();
+    }
+  }
+  function playerStateOf(c) {
+    if (!state) return null;
+    const o = basketOrigin(c ?? activeCtx ?? {});
+    return {
+      x: o.x, y: o.y + BASKET_FLOOR_TOP_M * (c?.VE ?? 5), z: o.z, heading: figYaw, state: 'basket', speed: Math.hypot(state.vel.x, state.vel.z),
+      jet: false, jetLevel: 0, underwater: false, thirdPerson: !!view?.isThirdPerson(), board: false, lean: 0, push: 0,
+    };
+  }
+  // ── /s14:D ──
   // A tuned warp factor shows in the hint at once.
   ctx?.physics?.onChange?.((id) => { if (id === 'balloon') activeCtx?.setHint?.(null); });
 
@@ -73,6 +134,9 @@ export function createBalloonMode(ctx) {
     label: 'Balloon',
     key: '4',
     get hint() {
+      // ── s14:D ──
+      if (view?.isThirdPerson()) return THIRD_WARP_HINT(warpOn, params.warp);
+      // ── /s14:D ──
       const warp = warpOn ? `T time warp ×${params.warp} ON (T for real time)` : `T time warp ×${params.warp}`;
       return `E/Space burner · Q vent · drag to look · ${warp}`;
     },
@@ -103,16 +167,29 @@ export function createBalloonMode(ctx) {
       cam.position.set(state.pos.x, state.pos.y, state.pos.z);
       warpOn = false;
       listen(true);
+      // ── s14:D ──
+      figYaw = yaw;
+      if (ensureView(c)) view.activate();
+      // ── /s14:D ──
     },
 
     deactivate(c) {
       listen(false);
       warpOn = false;
+      // ── s14:D ── the view gives the lens back; the figure and the balloon go
+      view?.deactivate();
+      c.vehicles?.balloon?.setVisible(false);
+      c.vehicles?.clearScreenRect?.();
+      if (c.player?.visible) c.player.update(0, { x: 0, y: 0, z: 0, heading: figYaw, state: 'ground', speed: 0 }, false);
+      // ── /s14:D ──
       applyAttitude(c.camera, yaw, pitch, 0, c.VE ?? 5); // level for Deity
       activeCtx = null;
     },
 
     onLook(dx, dy) {
+      // ── s14:D ── third person: the drag orbits the view
+      if (view?.onLook(dx, dy)) return;
+      // ── /s14:D ──
       // Drag-to-look grabs the world, as Deity's orbit drag does.
       const s = params.sensitivity * DEG;
       yaw += dx * s;
@@ -129,9 +206,21 @@ export function createBalloonMode(ctx) {
       };
       stepBalloon(state, input, dt, params, world(c));
       const cam = c.camera;
-      cam.position.set(state.pos.x, state.pos.y, state.pos.z);
-      applyAttitude(cam, yaw, Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch + state.swayPitch)),
-        state.swayRoll, c.VE ?? 5);
+      // ── s14:D ── over the shoulder, or the basket's own eye (placed by the callback, today's camera)
+      const firstPerson = (camera) => {
+        camera.position.set(state.pos.x, state.pos.y, state.pos.z);
+        applyAttitude(camera, yaw, Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch + state.swayPitch)),
+          state.swayRoll, c.VE ?? 5);
+      };
+      if (view) {
+        view.preUpdate();
+        const rat = Math.max(1e-3, c.masterHeight?.ratio ?? 1);
+        const o = basketOrigin(c);
+        const pivot = { x: o.x, y: o.y + (BASKET_FLOOR_TOP_M + balloonPivotH(view.rig.wantedDistance)) / rat, z: o.z };
+        view.apply(cam, dt, { pivot, snap: true, firstPerson });
+        drawModels(c, dt);
+      } else firstPerson(cam);
+      // ── /s14:D ──
       c.sfx?.burner?.(state.burner ? 1 : 0);
       return true;
     },
@@ -152,8 +241,17 @@ export function createBalloonMode(ctx) {
         burner: state.burner, vent: state.vent, grounded: state.grounded, scraping: state.scraping,
         windTime: state.windTime, simTime: state.simTime, altitude: state.altitude, bumps: state.bumps,
         warp: warpOn, yaw, pitch,
+        // ── s14:D ──
+        view: view ? view.debug() : null,
+        // ── /s14:D ──
       };
     },
+    // ── s14:D ── the view's test surface (lane P's names)
+    isThirdPerson: () => !!view?.isThirdPerson(),
+    setView: (v) => view?.setView(v),
+    playerState: () => playerStateOf(activeCtx),
+    get view() { return view; },
+    // ── /s14:D ──
   };
   return mode;
 }
