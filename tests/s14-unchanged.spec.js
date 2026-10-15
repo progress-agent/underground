@@ -28,18 +28,23 @@ async function locate(page) {
       const meshes = [];
       for (const r of roots) r.traverse((o) => { if (o.isMesh && o.visible !== false) meshes.push(o); });
       const ray = new T.Raycaster();
-      const best = [];
-      for (let dx = -site.radius; dx <= site.radius; dx += 5) for (let dz = -site.radius; dz <= site.radius; dz += 5) {
+      // Integration (sprint 14Oct26w): the same answer, found sooner. The lattice is visited nearest first (a stable
+      // sort of the original dx-major, dz-minor scan order by distance, so ties fall as before) and the first point
+      // that passes every test is returned: exactly the original's best[0]. The original raycast all 58,081 points of
+      // each site and took 899 s of the 900 s limit on the Mac Studio.
+      const grid = [];
+      for (let dx = -site.radius; dx <= site.radius; dx += 5) for (let dz = -site.radius; dz <= site.radius; dz += 5) grid.push([dx, dz, Math.hypot(dx, dz)]);
+      grid.sort((a, b) => a[2] - b[2]);
+      for (const [dx, dz, d] of grid) {
         const x = site.centre.x + dx, z = site.centre.z + dz, g = c.groundHeightAt(x, z);
         if (g === null) continue;
         ray.set(new T.Vector3(x, g + 0.01, z), new T.Vector3(0, 1, 0)); ray.far = 400;
         const h = ray.intersectObjects(meshes, false)[0];
         if (!h || (h.point.y - g) / VE < 3.0) continue;
         if (c.buildingsNear(x, z, 0.4).length || ug.stationBuildings.contactAt(x, z, 40)) continue;
-        best.push({ x, z, d: Math.hypot(dx, dz), under: (h.point.y - g) / VE });
+        return { x, z, d, under: (h.point.y - g) / VE };
       }
-      best.sort((a, b) => a.d - b.d);
-      return best[0] ?? null;
+      return null;
     }, [{ centre: s.centre, radius: s.radius }, s.group.toString()]);
     if (pt) found.push({ id: s.id, ...pt });
   }
