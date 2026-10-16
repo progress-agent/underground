@@ -4451,6 +4451,9 @@ function tick(frameTime) {
   // Overground trains (simple ping-pong runners, distance-culled)
   const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
   if (overgroundGroup) overgroundGroup.userData.update(surfaceSimulationDt, camera);
+  // ── s16:R ── m25Chunks: a vehicle remembers its route chunk until it could have left it
+  motorwayGroup?.userData.setChunkMemory?.(economies.on('m25Chunks'));
+  // ── /s16:R ──
   motorwayGroup?.userData.update(surfaceSimulationDt, camera);
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });

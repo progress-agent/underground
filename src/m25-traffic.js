@@ -102,7 +102,7 @@ export function laneFor(type, lanePick, lanes) {
 export function chainageMap(refRoute, route, wayLength) {
   const starts = r => { const m = new Map(); let d = 0; for (const id of r.wayIds) { if (!m.has(id)) m.set(id, d); d += wayLength(id); } return { m, length: d }; };
   const a = starts(refRoute), b = starts(route);
-  if (refRoute === route) return { refLength: a.length, length: a.length, map: d => d };
+  if (refRoute === route) return { refLength: a.length, length: a.length, map: d => d, maxSlope: 1 }; // s16:R: maxSlope
   const pairs = [];
   for (const [id, d] of a.m) if (b.m.has(id)) pairs.push([d, b.m.get(id)]);
   pairs.sort((p, q) => p[0] - q[0]);
@@ -125,7 +125,11 @@ export function chainageMap(refRoute, route, wayLength) {
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (refs[m] <= d) lo = m; else hi = m; }
     return own[lo] + (d - refs[lo]) * (own[hi] - own[lo]) / (refs[hi] - refs[lo]);
   }
-  return { refLength: La, length: Lb, map };
+  // ── s16:R ── the steepest slope of the cyclic map (route chainage per reference chainage), for the M25 chunk memory
+  let maxSlope = (own[0] + Lb - own[n - 1]) / (refs[0] + La - refs[n - 1]); // the wrap segment
+  for (let k = 1; k < n; k++) maxSlope = Math.max(maxSlope, (own[k] - own[k - 1]) / (refs[k] - refs[k - 1]));
+  // ── /s16:R ──
+  return { refLength: La, length: Lb, map, maxSlope };
 }
 
 /**
@@ -179,7 +183,7 @@ export function buildTrafficLayout(carriers, wayLength) {
     o.type[i] = cls.type; o.colour[i] = cls.colour; o.lanePick[i] = cls.lanePick;
     d += minGap(k) + spare * e[k] / sumE;
   }
-  out.forEach((o, j) => { o.map = maps[j].map; o.length = maps[j].length; o.refLength = L; });
+  out.forEach((o, j) => { o.map = maps[j].map; o.length = maps[j].length; o.refLength = L; o.maxSlope = maps[j].maxSlope; }); // s16:R: maxSlope
   return out;
 }
 

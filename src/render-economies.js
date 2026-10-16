@@ -29,6 +29,7 @@ export const ECONOMIES = {
   shadowFloat: 'The shadow cache compares what the GPU receives (float32 light matrices), so a last-bit wobble does not repeat the shadow map',
   shadowSnap: 'The sun shadow fit snaps along the light as well as across it, so a moving body does not re-render the shadow map every frame',
   edgeLineSize: 'The beyond-the-edge track lines read the canvas height taken before the names were written (no forced layout inside the render)',
+  m25Chunks: 'M25 fleet: a vehicle remembers its route chunk until it could have left it, so culled vehicles cost no chainage and search',
   underAbove: 'Underground layers (lines, ribbons, trains, shafts, tunnels, geology, terrain underside) are not drawn from an above-ground camera (D-040: approved trade-offs 7 and 8)',
 };
 
