@@ -24,6 +24,8 @@ export const ECONOMIES = {
   labelViewport: 'Station labels read the canvas size once per frame',
   trainPose: 'Tube trains reuse their pose while dwelling and when their line is hidden',
   trainBatch: 'Tube trains drawn as one instanced body mesh and one instanced window mesh per line (per-line colour, no per-instance colour)',
+  // s16:R (sprint 16Oct26f, D-054): economies that leave the picture unchanged and cut the weak machine's cost
+  trainCull: 'Tube trains are not posed or batched for a frame whose render hides every line group (the underground cull)',
   underAbove: 'Underground layers (lines, ribbons, trains, shafts, tunnels, geology, terrain underside) are not drawn from an above-ground camera (D-040: approved trade-offs 7 and 8)',
 };
 

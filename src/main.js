@@ -189,6 +189,9 @@ import { SUN_CONFIG } from './sun.js';
 // ── s14:D ── the skateboard, the Drone and the Balloon seen from outside (src/vehicles/)
 import { createVehicles } from './vehicles/index.js';
 // ── /s14:D ──
+// ── s16:R ── render economies of sprint 16Oct26f (lane R): see economies in src/render-economies.js
+import { setTrainCulled, trainPoseStats } from './trains.js';
+// ── /s16:R ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -4434,6 +4437,10 @@ function tick(frameTime) {
   // ── s24:R ──
   applyLayerEconomies();
   // ── /s24:R ──
+  // ── s16:R ── trainCull: this frame's render hides every `line:*` group (and with it every tube train) in the
+  // 'full' and 'lines' cull modes, so the trains are not posed or batched for it (their curve position still advances)
+  setTrainCulled(economies.on('trainCull') && economies.on('underAbove') && (s02CullMode === 'full' || s02CullMode === 'lines'));
+  // ── /s16:R ──
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
   // ── s30:T ── the same trains on the open-air track, from the clock just advanced
@@ -4954,6 +4961,7 @@ if (import.meta.env.DEV) {
   window.__ug.trainBatchStats = trainBatchStats;
   window.__ug.doubleSideSplit = doubleSideSplit;
   window.__ug.shadowCache = shadowCache;
+  window.__ug.trainPoseStats = trainPoseStats; // s16:R: posed / reused / hidden / culled, for the trainCull checks
   window.__ug.isShown = isShown;
   // ── /s24:R ──
   // ── s02:B ──
