@@ -371,19 +371,19 @@ export function createCollisionService({
     // the ground: the first crossing of the segment down through (terrain + padY)
     const hl = Math.hypot(dx, dz);
     const n = Math.min(48, Math.max(4, Math.ceil(hl / 2)));
-    let prev = null;
+    let hasPrev = false, pu = 0, pv = 0; // s16:R: scalars, no { u, v } allocated per sample
     for (let i = 0; i <= n; i++) {
       const u = i / n;
       if (u >= t) break;
       const g = getGroundY(from.x + dx * u, from.z + dz * u);
-      if (!Number.isFinite(g)) { prev = null; continue; }
+      if (!Number.isFinite(g)) { hasPrev = false; continue; } // s16:R
       const v = from.y + dy * u - g - padY;
-      if (prev !== null && prev.v > 0 && v <= 0) {
-        const u0 = prev.u + (u - prev.u) * (prev.v / (prev.v - v));
+      if (hasPrev && pv > 0 && v <= 0) { // s16:R
+        const u0 = pu + (u - pu) * (pv / (pv - v)); // s16:R
         if (u0 < t) { t = u0; what = 'ground'; }
         break;
       }
-      prev = { u, v };
+      hasPrev = true; pu = u; pv = v; // s16:R
     }
     // anything else (lane S's bridges and station buildings), a hit fraction or a plain yes
     const hit = extraSegmentHit(from, to);

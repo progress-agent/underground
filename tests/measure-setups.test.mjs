@@ -4,7 +4,8 @@
 // before/after numbers depend on.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VIEWS, EXTRA_VIEWS, SETUPS, WEAK_FPS_BAR, summariseTrace, compareRuns, parseArgs } from '../scripts/measure-setups.mjs';
+import { VIEWS, EXTRA_VIEWS, PLAYER_VIEWS, PLAYER_VIEWS_D, PLAYER_VIEWS_S16, SETUPS, WEAK_FPS_BAR, summariseTrace, compareRuns, parseArgs, parseQuality } from '../scripts/measure-setups.mjs';
+import { QUALITY_LEVELS } from '../src/adaptive-quality.js';
 
 test('the agreed setups and the five standard views plus arrival', () => {
   assert.deepEqual(SETUPS.weak, { dpr: 1, cpuThrottle: 4 });
@@ -53,3 +54,25 @@ test('arguments: positionals, options and --files', () => {
     { pos: ['weak', 'http://x'], opt: { views: 'arrival', settle: '60' } });
   assert.deepEqual(parseArgs(['--files', 'a.json', 'b.json']).opt.files, ['a.json', 'b.json']);
 });
+
+// ── s16:R ── the two report presets and the --quality pin (sprint 16Oct26f, lane R)
+test('s16:R: the King\'s Cross street and Westminster walk presets exist outside every other set', () => {
+  assert.deepEqual(Object.keys(PLAYER_VIEWS_S16), ['kingsCrossStreet', 'westminsterWalk']);
+  assert.deepEqual(PLAYER_VIEWS_S16.kingsCrossStreet, { player: 'foot', station: "King's Cross St. Pancras", back: 30, shuttleS: 2 });
+  assert.deepEqual(PLAYER_VIEWS_S16.westminsterWalk, { player: 'foot', bridge: 'westminster', shuttleS: 'deck' });
+  for (const k of Object.keys(PLAYER_VIEWS_S16)) {
+    assert.ok(!(k in VIEWS) && !(k in EXTRA_VIEWS) && !(k in PLAYER_VIEWS) && !(k in PLAYER_VIEWS_D), `${k} must stay out of the other lists`);
+  }
+  assert.deepEqual(Object.keys(VIEWS), ['overview', 'streetBank', 'riverGreenwich', 'm25Edge', 'heathrow', 'arrival'], 'the default set keeps its six');
+});
+
+test('s16:R: --quality is a ladder rung, read as an integer and refused outside the ladder', () => {
+  assert.equal(parseQuality(undefined), null);
+  assert.equal(parseArgs(['weak', 'http://x', '--quality', '3']).opt.quality, '3');
+  assert.equal(parseQuality('3'), 3);
+  assert.equal(parseQuality('0'), 0);
+  assert.equal(parseQuality(String(QUALITY_LEVELS.length - 1)), QUALITY_LEVELS.length - 1);
+  assert.deepEqual(QUALITY_LEVELS[3], { scale: 0.85, samples: 4, shadows: false }, 'rung 3 is 85%, 4x, no shadows (the acceptance names it)');
+  for (const bad of ['-1', '15', '2.5', 'abc', '']) assert.throws(() => parseQuality(bad), /--quality takes a rung/);
+});
+// ── /s16:R ──

@@ -262,6 +262,7 @@ export function fitShadowFrustum({
   halfExtent = SUN_CONFIG.shadowHalfExtent, mapSize = SUN_CONFIG.shadowMapSize,
   below = SUN_CONFIG.shadowBelow, above = SUN_CONFIG.shadowAbove,
   upsunReach = SUN_CONFIG.shadowUpsunReach,
+  alongSnap = false, // s16:R shadowSnap: also snap along the light (see below)
 }) {
   const d = direction.clone().normalize();
   // Light basis: camera looks along -d. right is horizontal, up completes it.
@@ -296,6 +297,18 @@ export function fitShadowFrustum({
   const sx = target.dot(right), sy = target.dot(up);
   target.addScaledVector(right, Math.round(sx / texelX) * texelX - sx);
   target.addScaledVector(up, Math.round(sy / texelY) * texelY - sy);
+  // ── s16:R ── shadowSnap (sprint 16Oct26f, D-054): the fit was snapped across the light but not along it, so a
+  // body walking along the sun's azimuth moved the target (and with it the shadow camera) continuously and the
+  // cache re-rendered the shadow map every frame. An orthographic map moved along its own axis holds the same
+  // image; only the stored depths shift, by less than one texel, and the main pass samples with the matching
+  // matrix. Snapped, the target is built from its three whole-texel coordinates alone, so it is bitwise the same
+  // for every focus inside one cell. Off (the default of this function), the line above is the whole snap.
+  if (alongSnap) {
+    const sz = target.dot(d);
+    const qx = Math.round(sx / texelX) * texelX, qy = Math.round(sy / texelY) * texelY, qz = Math.round(sz / texelX) * texelX;
+    target.set(0, 0, 0).addScaledVector(right, qx).addScaledVector(up, qy).addScaledVector(d, qz);
+  }
+  // ── /s16:R ──
   // Camera sits up-sun of the target; the near plane reaches upsunReach
   // beyond the square so tall up-sun casters still land shadows inside it.
   const distance = maxZ + upsunReach;
@@ -439,6 +452,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
   };
   const forward = new THREE.Vector3(), focus = new THREE.Vector3(), dir = new THREE.Vector3();
   let frame = 0;
+  let alongSnap = false; // s16:R: shadowSnap
 
   function notify() { for (const fn of listeners) fn(api); }
 
@@ -492,7 +506,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
 
     setAirSun({ weight: w, state });
     resolveSunDirection(dir);
-    const fit = fitShadowFrustum({ focus, groundY, direction: dir });
+    const fit = fitShadowFrustum({ focus, groundY, direction: dir, alongSnap }); // s16:R: alongSnap
     status.fit = fit;
     sun.target.position.copy(fit.target);
     sun.target.updateMatrixWorld();
@@ -524,6 +538,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
     get state() { return state; },
     status,
     setTime, setShadowsEnabled, update,
+    setAlongSnap(on) { alongSnap = !!on; return alongSnap; }, // s16:R: shadowSnap
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mountControls: anchor => mountSunControls(api, anchor),
     DEFAULT_SUN_TIME,

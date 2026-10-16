@@ -18,6 +18,27 @@ function weights(tri,p){
   return [cross(b,c,p)/det,cross(c,a,p)/det,cross(a,b,p)/det];
 }
 const height=(tri,p)=>weights(tri,p).reduce((s,w,i)=>s+w*tri[i].y,0);
+// ── s16:R ── sample(x, z) without allocating (sprint 16Oct26f, D-054). The line of sight samples the river bed up to
+// 48 times a frame over the Thames; each call made a barycentric array, a point object, closures and a reduce
+// (460 KB of garbage a frame at the Balloon, about 0.3 ms plus the collector). The three weights, the tolerance test and
+// the sum are the same operations in the same order as weights() above, so the result is bitwise the same
+// (tests/s16-r-exact.test.mjs compares it with a copy of the 07391f3 code over random cases).
+const crossXZ=(ax,az,bx,bz,px,pz)=>(bx-ax)*(pz-az)-(bz-az)*(px-ax);
+export function bedValueAt(bedBuckets,bedTriangles,bucketSize,x,z){
+  const list=bedBuckets.get(`${Math.floor(x/bucketSize)},${Math.floor(z/bucketSize)}`);
+  if(!list)return null;
+  let y=null;
+  for(let i=0;i<list.length;i++){
+    const tri=bedTriangles[list[i]],a=tri[0],b=tri[1],c=tri[2],det=crossXZ(a.x,a.z,b.x,b.z,c.x,c.z);
+    const w0=crossXZ(b.x,b.z,c.x,c.z,x,z)/det,w1=crossXZ(c.x,c.z,a.x,a.z,x,z)/det,w2=crossXZ(a.x,a.z,b.x,b.z,x,z)/det;
+    if(w0>=-1e-7&&w0<=1+1e-7&&w1>=-1e-7&&w1<=1+1e-7&&w2>=-1e-7&&w2<=1+1e-7){
+      let value=0;value+=w0*a.y;value+=w1*b.y;value+=w2*c.y;
+      y=y===null?value:Math.min(y,value);
+    }
+  }
+  return y;
+}
+// ── /s16:R ──
 const bounds=tri=>({minX:Math.min(...tri.map(p=>p.x)),maxX:Math.max(...tri.map(p=>p.x)),
   minZ:Math.min(...tri.map(p=>p.z)),maxZ:Math.max(...tri.map(p=>p.z))});
 
@@ -117,14 +138,7 @@ export function refineTerrainRiverBed(geometry,sections,{centerX=0,centerZ=0}={}
     // Use precisely the same footprint/tolerance as navigation. Independent
     // clipped-triangle tolerances otherwise create a microscopic AIR slit.
     if(!footprint.containsXZ(x,z))return null;
-    let y=null;
-    for(const k of bedBuckets.get(`${Math.floor(x/bucketSize)},${Math.floor(z/bucketSize)}`)||[]){
-      const tri=bedTriangles[k],bary=weights(tri,{x,z});
-      if(bary.every(w=>w>=-1e-7&&w<=1+1e-7)){
-        const value=bary.reduce((s,w,i)=>s+w*tri[i].y,0);y=y===null?value:Math.min(y,value);
-      }
-    }
-    return y;
+    return bedValueAt(bedBuckets,bedTriangles,bucketSize,x,z); // s16:R: the same arithmetic, no allocation
   }
   function segmentMinimum(a,b){
     const box=bounds([a,b]),candidates=new Set();let minimum=null;

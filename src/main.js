@@ -189,6 +189,10 @@ import { SUN_CONFIG } from './sun.js';
 // ── s14:D ── the skateboard, the Drone and the Balloon seen from outside (src/vehicles/)
 import { createVehicles } from './vehicles/index.js';
 // ── /s14:D ──
+// ── s16:R ── render economies of sprint 16Oct26f (lane R): see economies in src/render-economies.js
+import { setTrainCulled, trainPoseStats } from './trains.js';
+import { setLegibilityCssHeight } from './tube-surface-rail.js';
+// ── /s16:R ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
 // Emergency debugging: catch all errors
@@ -4434,6 +4438,10 @@ function tick(frameTime) {
   // ── s24:R ──
   applyLayerEconomies();
   // ── /s24:R ──
+  // ── s16:R ── trainCull: this frame's render hides every `line:*` group (and with it every tube train) in the
+  // 'full' and 'lines' cull modes, so the trains are not posed or batched for it (their curve position still advances)
+  setTrainCulled(economies.on('trainCull') && economies.on('underAbove') && (s02CullMode === 'full' || s02CullMode === 'lines'));
+  // ── /s16:R ──
   // Update all trains (simulation, orientation, LOD, SpotLight pool)
   updateTrains(trainSystem, sim, camera, dt);
   // ── s30:T ── the same trains on the open-air track, from the clock just advanced
@@ -4443,6 +4451,9 @@ function tick(frameTime) {
   // Overground trains (simple ping-pong runners, distance-culled)
   const surfaceSimulationDt = sim.paused ? 0 : dt * sim.timeScale;
   if (overgroundGroup) overgroundGroup.userData.update(surfaceSimulationDt, camera);
+  // ── s16:R ── m25Chunks: a vehicle remembers its route chunk until it could have left it
+  motorwayGroup?.userData.setChunkMemory?.(economies.on('m25Chunks'));
+  // ── /s16:R ──
   motorwayGroup?.userData.update(surfaceSimulationDt, camera);
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
@@ -4490,12 +4501,18 @@ function tick(frameTime) {
   // ── s02:F ── near/far follow the display height (above 20,000 units only); before the sun fit, fog and sky read the range
   viewRange.update();
   // ── /s02:F ──
+  // ── s16:R ── shadowSnap: the shadow fit snaps along the light too
+  sunSystem.setAlongSnap(economies.on('shadowSnap'));
+  // ── /s16:R ──
   // ── sprint:D ──
   // Air-substrate sun blend and shadow fit; must precede the environment and
   // lighting updates below. Automatic quality level 1+ drops shadows first.
   sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
     adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
   // ── /sprint:D ──
+  // ── s16:R ── shadowFloat: compare what the GPU receives (float32), so a last-bit wobble repeats nothing
+  shadowCache.setFloat32(economies.on('shadowFloat'));
+  // ── /s16:R ──
   // ── s24:R ── withdraw a shadow-map render that would repeat the last one
   shadowCache.update({
     enabled: economies.on('shadowCache'),
@@ -4554,7 +4571,13 @@ function tick(frameTime) {
   // this frame: write any skipped chunk that could now show (fix round 1).
   if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
   // ── /s24:R ──
+  // ── s16:R ── edgeLineSize: the beyond-edge lines read this frame's canvas height, taken before any name was written
+  setLegibilityCssHeight(economies.on('edgeLineSize') && _s24LabelViewport ? _s24LabelViewport.h : null);
+  // ── /s16:R ──
   undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => composer.render(dt)); // s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
+  // ── s16:R ──
+  setLegibilityCssHeight(null);
+  // ── /s16:R ──
   sampleCushion();
   requestAnimationFrame(tick);
 }
@@ -4954,6 +4977,7 @@ if (import.meta.env.DEV) {
   window.__ug.trainBatchStats = trainBatchStats;
   window.__ug.doubleSideSplit = doubleSideSplit;
   window.__ug.shadowCache = shadowCache;
+  window.__ug.trainPoseStats = trainPoseStats; // s16:R: posed / reused / hidden / culled, for the trainCull checks
   window.__ug.isShown = isShown;
   // ── /s24:R ──
   // ── s02:B ──

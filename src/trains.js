@@ -513,7 +513,7 @@ function syncBatches(camera) {
   trainBatchStats.frames++;
   let batches = 0, instances = 0;
   for (const b of _batches) {
-    if (!b.body || !lineShown(b.root)) continue;
+    if (!b.body || _culledNow || !lineShown(b.root)) continue; // s16:R: culled with their line
     const n = b.trains.length;
     // Rebase on the grid point nearest the camera, in the line group's space.
     if (camera?.position) {
@@ -560,14 +560,21 @@ function syncBatches(camera) {
 // function of (t, dir), so while it dwells (t fixed) the pose already applied
 // is the one orient() would compute again, and a train on a hidden line need
 // not be posed at all until it is shown. Simulation state always advances.
-const trainEconomies = { reusePose: false, batch: false };
+// ── s16:R ── `cull` (sprint 16Oct26f, economy trainCull): the underground cull hides every `line:*` group, and with
+// them every tube train, from the render of an above-ground camera, so the trains are neither posed nor batched
+// there (their curve position still advances, for the audio). main.js sets it each frame from the cull's own mode.
+const trainEconomies = { reusePose: false, batch: false, cull: false };
+let _culledNow = false;
+export function setTrainCulled(on) { trainEconomies.cull = !!on; _culledNow = trainEconomies.cull; return _culledNow; }
+// ── /s16:R ──
 export function setTrainEconomies(next = {}) {
   const wasBatch = trainEconomies.batch;
   for (const k of Object.keys(trainEconomies)) if (k in next) trainEconomies[k] = !!next[k];
+  _culledNow = trainEconomies.cull; // s16:R
   if (trainEconomies.batch !== wasBatch) setBatchesEnabled(trainEconomies.batch);
   return { ...trainEconomies };
 }
-export const trainPoseStats = { posed: 0, reused: 0, hidden: 0 };
+export const trainPoseStats = { posed: 0, reused: 0, hidden: 0, culled: 0 }; // s16:R: culled
 function lineShown(train) {
   for (let o = train; o; o = o.parent) if (o.visible === false) return false;
   return true;
@@ -583,17 +590,18 @@ function pose(train) {
 // updatePoolPositions) reads train.position for every train, visible or not.
 // Keep the cheap position write and skip only the orientation (lookAt) work.
 // The pose is marked stale so it is fully re-posed once the line is shown.
-function placeHidden(train) {
+function placeHidden(train, byCull = false) { // s16:R: byCull counts the render's own cull apart from a hidden line
   const ud = train.userData;
   if (ud._posT !== ud.t) { ud.curve.getPointAt(ud.t, train.position); ud._posT = ud.t; }
   ud._poseT = NaN;
-  trainPoseStats.hidden++;
+  if (byCull) trainPoseStats.culled++; else trainPoseStats.hidden++;
 }
 // ── /s24:R ──
 
 export function updateTrains(system, sim, camera, dt) {
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
   const reuse = trainEconomies.reusePose;
+  const culled = _culledNow; // s16:R
   // s25:H: one simulation clock for the whole fleet; every train's state is a
   // pure function of it (trainStateAt), never of the frame sequence.
   const clock0 = system.simTime ?? 0;
@@ -610,7 +618,7 @@ export function updateTrains(system, sim, camera, dt) {
     if (ud._pausedLeft > 0) {
       // ── s24:R ──
       if (reuse) {
-        if (!lineShown(train)) { placeHidden(train); continue; }
+        if (culled || !lineShown(train)) { placeHidden(train, culled); continue; } // s16:R: culled
         if (ud._poseT === ud.t && ud._poseDir === ud.dir && ud._poseRatio === masterRatio()) { trainPoseStats.reused++; continue; } // s25:S Master re-aims
         pose(train);
         continue;
@@ -623,7 +631,7 @@ export function updateTrains(system, sim, camera, dt) {
 
     // ── s24:R ──
     if (reuse) {
-      if (!lineShown(train)) { placeHidden(train); continue; }
+      if (culled || !lineShown(train)) { placeHidden(train, culled); continue; } // s16:R: culled
       pose(train);
       continue;
     }

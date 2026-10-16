@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import source from './m25-motorway-data.json' with { type: 'json' };
 import { WATER_LIFT } from './render-layers.js';
 import { trueHeadingBasis } from './true-proportion.js'; // s25:S
-import { VEHICLE_TYPES, VEHICLE_COLOURS, TRAFFIC_SPEED_MPS, buildTrafficLayout, vehicleChainage, laneFor, buildVehicleGeometry } from './m25-traffic.js';
+import { VEHICLE_TYPES, VEHICLE_COLOURS, TRAFFIC_SPEED_MPS, TRAFFIC_VARIATION_M, buildTrafficLayout, vehicleChainage, laneFor, buildVehicleGeometry } from './m25-traffic.js'; // s16:R: TRAFFIC_VARIATION_M
 
 export const MOTORWAY_DATA=source;
 export const MOTORWAY_TERRAIN_MARGIN_M=40;
@@ -146,7 +146,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   materials['far-'+c.id]=new THREE.MeshBasicMaterial({color:new THREE.Color(c.hex).multiplyScalar(.82),fog:true,side:THREE.DoubleSide});
  });
  let nextVehicleId=0,lastCamera=null,lastProjectionKey=null,lastElapsed=NaN;
- const trafficStats={near:0,far:0,triangles:0,drawCalls:0,updateMs:0,farBelowPx:LOD_FAR_PX,nearAbovePx:LOD_NEAR_PX};
+ const trafficStats={near:0,far:0,triangles:0,drawCalls:0,updateMs:0,farBelowPx:LOD_FAR_PX,nearAbovePx:LOD_NEAR_PX,chunkSearches:0}; // s16:R: chunkSearches
  const nearMeshes=[],farMeshes=[];
  function buildTraffic(){
   for(const route of representative){
@@ -307,6 +307,32 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   return list[lo].visible;
  }
  // ── /s24:R ──
+ // ── s16:R ── chunk memory (sprint 16Oct26f, D-054, economy m25Chunks). A full pass asked every one of the 13,622
+ // vehicles which route chunk it is in (its chainage: a sine, a cyclic map and a binary search over the chunk starts),
+ // even when nothing of it is drawn: about 2 ms a frame on the weak setup at every London view. A vehicle's chainage moves
+ // at most TRAFFIC_SPEED_MPS + its swing's peak speed, times the steepest slope of its route's map, so it cannot leave its
+ // chunk before that rate has covered its distance to the nearest chunk edge. Until then the remembered chunk index is the
+ // answer the search would give, and a culled vehicle costs two array reads. The vehicles that are drawn are written exactly
+ // as before, in the same order (tests/s16-r-m25-chunks.test.mjs compares every instance matrix, id and count).
+ const CHUNK_SAFETY=1.5,MAX_SWING_RATE=TRAFFIC_VARIATION_M*2*Math.PI/45; // amplitude <= TRAFFIC_VARIATION_M, period >= 45 s
+ let chunkMemoryOn=false;
+ function chunkMemoryOf(c){
+  const e=chunksByRoute.get(c.route),n=c.count;
+  return c.chunkMemory={list:e.list,starts:e.starts,length:c.route.length,idx:new Int32Array(n),at:new Float64Array(n).fill(NaN),margin:new Float64Array(n),
+   rate:(TRAFFIC_SPEED_MPS+MAX_SWING_RATE)*Math.max(1,c.layout.maxSlope||1)*CHUNK_SAFETY};
+ }
+ function vehicleChunkVisible(c,i){
+  const m=c.chunkMemory||chunkMemoryOf(c);
+  if(Math.abs(elapsed-m.at[i])*m.rate<=m.margin[i])return m.list[m.idx[i]].visible; // NaN (never asked) is false: ask
+  const d=mod(vehicleChainage(c.layout,i,elapsed),m.length),starts=m.starts;
+  let lo=0,hi=starts.length-1;
+  while(lo<hi){const k=(lo+hi+1)>>1;if(starts[k]<=d)lo=k;else hi=k-1;} // the same search as chunkVisible
+  const next=lo+1<starts.length?starts[lo+1]:m.length;
+  m.idx[i]=lo;m.at[i]=elapsed;m.margin[i]=Math.min(d-starts[lo],next-d);
+  trafficStats.chunkSearches++;
+  return m.list[lo].visible;
+ }
+ // ── /s16:R ──
  function update(dt,camera,force=false){
   if(Number.isFinite(dt)&&dt>0)elapsed+=dt;
   if(camera)lastCamera=camera;
@@ -343,7 +369,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
    const L=c.layout;
    for(let i=0;i<c.count;i++){
     // ── s24:R ──
-    if(culling&&!chunkVisible(c.route,mod(vehicleChainage(L,i,elapsed),c.route.length))){trafficStats.culled++;continue;}
+    if(culling&&!(chunkMemoryOn?vehicleChunkVisible(c,i):chunkVisible(c.route,mod(vehicleChainage(L,i,elapsed),c.route.length)))){trafficStats.culled++;continue;} // s16:R: chunkMemoryOn
     // ── /s24:R ──
     const p=vehicleAt(c,i,scratch),pixels=vehiclePixelSize(projection,p,radius);
     if(c.lod[i]){if(pixels>LOD_NEAR_PX)c.lod[i]=0;}else if(pixels<LOD_FAR_PX)c.lod[i]=1;
@@ -394,6 +420,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  root.userData.setEconomies=({frustumCulling=cullToFrustum,fogCulling=fogCullOn,instanceRanges=uploadRanges,hiddenSkip=skipHidden}={})=>{const changed=frustumCulling!==cullToFrustum||fogCulling!==fogCullOn;cullToFrustum=!!frustumCulling;fogCullOn=!!fogCulling;uploadRanges=!!instanceRanges;skipHidden=!!hiddenSkip;if(changed)lastProjectionKey=null;};
  root.userData.getEconomies=()=>({frustumCulling:cullToFrustum,fogCulling:fogCullOn,instanceRanges:uploadRanges,hiddenSkip:skipHidden});
  root.userData.revalidate=revalidate;
+ root.userData.setChunkMemory=on=>{chunkMemoryOn=!!on;return chunkMemoryOn;}; // s16:R
  // ── /s24:R ──
  root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};root.userData.setHeightScale(heightScale);return root;
 }

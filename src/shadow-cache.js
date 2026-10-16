@@ -12,8 +12,19 @@
 
 const MATRIX_EPS = 0; // exact: the fit is texel-snapped, a still camera repeats it bit for bit
 
-function sameArray(a, b) {
+// ── s16:R ── shadowFloat (sprint 16Oct26f, D-054): the GPU receives the light's position and target as float32, and
+// the shadow camera is a function of those two points, so two float64 values that round to the same float32 give it
+// the same map (to the last bit of a rotation element that should be zero: 1e-17, measured). At a still camera the fit's
+// snapped target alternated in its last float64 bit (5175.2055123301 / 5175.205512330101; OrbitControls rebuilds the
+// camera position from spherical coordinates every frame, R/measure/shadow-wobble.mjs), which the exact comparison read
+// as a change and re-rendered the whole shadow map (about 1 ms on the weak setup) on 60 frames of 60. The camera's own
+// derived matrices are not compared: their near-zero elements carry float noise of that size and would read as a change
+// on three frames in four. Off, the comparison is exactly the 07391f3 one.
+const same32 = Math.fround;
+// ── /s16:R ──
+function sameArray(a, b, float32 = false) {
   if (!a || a.length !== b.length) return false;
+  if (float32) { for (let i = 0; i < a.length; i++) if (Math.abs(same32(a[i]) - same32(b[i])) > MATRIX_EPS) return false; return true; } // s16:R
   for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > MATRIX_EPS) return false;
   return true;
 }
@@ -21,6 +32,7 @@ function sameArray(a, b) {
 export function createShadowCache({ renderer, light }) {
   let last = null;        // signature of the map currently in the texture
   let casterKey = '';
+  let float32 = false;    // s16:R: shadowFloat
   const stats = { requested: 0, rendered: 0, skipped: 0 };
 
   function signature({ heightScale, casterVersion }) {
@@ -38,7 +50,8 @@ export function createShadowCache({ renderer, light }) {
   }
 
   function same(a, b) {
-    return a && b && sameArray(a.light, b.light) && sameArray(a.target, b.target)
+    const f = float32; // s16:R
+    return a && b && sameArray(a.light, b.light, f) && sameArray(a.target, b.target, f)
       && sameArray(a.frustum, b.frustum) && sameArray(a.mapSize, b.mapSize) && sameArray(a.bias, b.bias)
       && a.heightScale === b.heightScale && a.casterVersion === b.casterVersion;
   }
@@ -64,7 +77,10 @@ export function createShadowCache({ renderer, light }) {
     return false;
   }
 
-  return { update, stats, invalidate() { last = null; }, get casterKey() { return casterKey; } };
+  return { update, stats, invalidate() { last = null; }, get casterKey() { return casterKey; },
+    // s16:R: shadowFloat on or off; a change of mode forgets the last signature (its shape differs)
+    setFloat32(on) { const next = !!on; if (next !== float32) { float32 = next; last = null; } return float32; },
+    get float32() { return float32; } };
 }
 
 /** Cheap caster-set fingerprint: ids, visibility and cast flags of the direct
