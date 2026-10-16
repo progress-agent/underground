@@ -100,6 +100,13 @@ const VE = VERTICAL_EXAGGERATION;
 // fades in from BEYOND_EDGE_NEAR_M (where depth precision stops separating the two) and out between the
 // far figures, so the standard views keep their pixels. 0 removes it.
 export const BEYOND_EDGE_MIN_PX = 1.5;
+// ── s16:R ── edgeLineSize (sprint 16Oct26f, D-054): the line's onBeforeRender read `renderer.domElement.clientHeight`
+// inside the render, after the station names had been written that frame, which forced a style and layout pass there
+// (0.15 to 0.5 ms a frame on the weak setup, every view). main.js reads the same number once at the head of the frame
+// (before any name is written, the s24:R viewport) and hands it in for the duration of the render call only.
+let _cssH = null;
+export function setLegibilityCssHeight(h) { _cssH = Number.isFinite(h) && h > 0 ? h : null; }
+// ── /s16:R ──
 export const BEYOND_EDGE_FADE_M = [12000, 20000];
 export const BEYOND_EDGE_NEAR_M = [1500, 3000];
 const BEYOND_EDGE_LIFT = 0.4; // scene units above the bed, under the stripe's STRIPE_LIFT
@@ -453,7 +460,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     line.onBeforeRender = renderer => {
       renderer.getCurrentViewport(legV);
       material.resolution.set(legV.z, legV.w);
-      const css = renderer.domElement.clientHeight || legV.w;
+      const css = _cssH || renderer.domElement.clientHeight || legV.w; // s16:R: _cssH, when main.js passes this frame's height
       material.linewidth = BEYOND_EDGE_MIN_PX * legV.w / css;
     };
     const orig = Float32Array.from(pts), bases = new Float32Array(pts.length / 3);

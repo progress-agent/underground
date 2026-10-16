@@ -191,6 +191,7 @@ import { createVehicles } from './vehicles/index.js';
 // ── /s14:D ──
 // ── s16:R ── render economies of sprint 16Oct26f (lane R): see economies in src/render-economies.js
 import { setTrainCulled, trainPoseStats } from './trains.js';
+import { setLegibilityCssHeight } from './tube-surface-rail.js';
 // ── /s16:R ──
 
 // Version: 2026-02-06-1330 - UnderGround MVP
@@ -4564,7 +4565,13 @@ function tick(frameTime) {
   // this frame: write any skipped chunk that could now show (fix round 1).
   if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
   // ── /s24:R ──
+  // ── s16:R ── edgeLineSize: the beyond-edge lines read this frame's canvas height, taken before any name was written
+  setLegibilityCssHeight(economies.on('edgeLineSize') && _s24LabelViewport ? _s24LabelViewport.h : null);
+  // ── /s16:R ──
   undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => composer.render(dt)); // s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
+  // ── s16:R ──
+  setLegibilityCssHeight(null);
+  // ── /s16:R ──
   sampleCushion();
   requestAnimationFrame(tick);
 }

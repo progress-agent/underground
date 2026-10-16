@@ -27,6 +27,7 @@ export const ECONOMIES = {
   // s16:R (sprint 16Oct26f, D-054): economies that leave the picture unchanged and cut the weak machine's cost
   trainCull: 'Tube trains are not posed or batched for a frame whose render hides every line group (the underground cull)',
   shadowFloat: 'The shadow cache compares what the GPU receives (float32 light matrices), so a last-bit wobble does not repeat the shadow map',
+  edgeLineSize: 'The beyond-the-edge track lines read the canvas height taken before the names were written (no forced layout inside the render)',
   underAbove: 'Underground layers (lines, ribbons, trains, shafts, tunnels, geology, terrain underside) are not drawn from an above-ground camera (D-040: approved trade-offs 7 and 8)',
 };
 
