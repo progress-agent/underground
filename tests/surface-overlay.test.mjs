@@ -203,12 +203,32 @@ test('this checkout: the main checkout is found through git, and the lane overla
     // The main checkout itself (after promotion): writes need --promote.
     assert.ok((await overlayProblems({ root: ROOT })).every((p) => /--promote/.test(p)));
   } else {
-    // A worktree: the Microsoft overlay must be this checkout's own files, or
-    // the data tests in microsoft-footprints.test.mjs read the store instead.
-    assert.deepEqual(await overlayProblems({ root: ROOT }), [], 'run node scripts/surface-overlay.mjs prepare');
-    for (const rel of LANE_M_FILES) {
-      const st = await lstat(path.join(ROOT, SURFACE_REL, rel));
-      assert.ok(st.isFile() && !st.isSymbolicLink(), `${rel} is a real file in this checkout`);
+    // Sprint 16Oct26f (T-baseline, D-054): the sprint layout links a lane worktree's whole surface store (public/data/surface) to
+    // the main checkout's, read-only, because a lane that changes no surface data needs no overlay and the store is 840 MB. In
+    // that layout the guard is right to refuse every write ("through a symlinked directory") and the overlay cannot be this
+    // checkout's own files, so the test pins what DOES hold there: the only problems are those refusals, and each Microsoft file
+    // resolves to the main store's real file. Anywhere else (a prepared overlay, or a worktree with its own store) it is exactly as
+    // before.
+    const surface = path.join(ROOT, SURFACE_REL.split('/').slice(0, 3).join('/'));
+    const linked = await lstat(surface).then((st) => st.isSymbolicLink(), () => false)
+      && (await realpath(surface)).startsWith((await realpath(main)) + path.sep);
+    if (linked) {
+      const problems = await overlayProblems({ root: ROOT });
+      assert.ok(problems.length > 0, 'a linked store has problems to report');
+      for (const p of problems) assert.match(p, /refusing to write .* through a symlinked directory/, p);
+      for (const rel of LANE_M_FILES) {
+        const here = await realpath(path.join(ROOT, SURFACE_REL, rel)), store = await realpath(path.join(main, SURFACE_REL, rel));
+        assert.equal(here, store, `${rel} resolves to the main store's file`);
+        assert.ok((await lstat(store)).isFile(), `${rel} is a real file in the store`);
+      }
+    } else {
+      // A worktree: the Microsoft overlay must be this checkout's own files, or
+      // the data tests in microsoft-footprints.test.mjs read the store instead.
+      assert.deepEqual(await overlayProblems({ root: ROOT }), [], 'run node scripts/surface-overlay.mjs prepare');
+      for (const rel of LANE_M_FILES) {
+        const st = await lstat(path.join(ROOT, SURFACE_REL, rel));
+        assert.ok(st.isFile() && !st.isSymbolicLink(), `${rel} is a real file in this checkout`);
+      }
     }
   }
 });
