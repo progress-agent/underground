@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cornerFactor, nearForWall, wallDistance, hostDistance, createClearanceProbe, PROBE_REACH_M, NEAR_FLOOR, NEAR_CEIL, PROBE_AZIMUTHS,
+  NEAR_FLOOR_CAMERA, CAMERA_PROBE_RADIUS_M,
 } from '../src/player/near-clearance.js';
 
 /** A moveAndSlide over axis-aligned boxes [minX, maxX, minZ, maxZ], as collision.js does it (expanded by radius, separate axes). */
@@ -20,6 +21,8 @@ function boxCollision(boxes) {
         if (!d) continue;
         let nx = axis === 'x' ? x + d : x, nz = axis === 'z' ? z + d : z;
         for (const [x0, x1, z0, z1] of boxes) {
+          // as collision.js: a box whose radius-expanded footprint already contains the start never traps the body
+          if (pos.x > x0 - radius && pos.x < x1 + radius && pos.z > z0 - radius && pos.z < z1 + radius) continue;
           if (nx > x0 - radius && nx < x1 + radius && nz > z0 - radius && nz < z1 + radius) {
             if (axis === 'x') { nx = d > 0 ? x0 - radius - 1e-4 : x1 + radius + 1e-4; normalX = d > 0 ? -1 : 1; normalZ = 0; }
             else { nz = d > 0 ? z0 - radius - 1e-4 : z1 + radius + 1e-4; normalX = 0; normalZ = d > 0 ? -1 : 1; }
@@ -110,4 +113,29 @@ test('a raised host box (the walker passes under it) is found by its square, not
   const m1 = probe.measure(100, 0, 200 - 45 - 0.4, { feetY: 0, height: 9, radius: 0.33, hosts });
   assert.ok(Math.abs(m1 - 0.4) < 1e-9);
   assert.equal(probe.measure(100, 0, 200 - 45 - 0.4, { feetY: 0, height: 9, radius: 0.33 }), m1, 'cached');
+});
+
+test('a third-person camera 1 cm off a wall is seen by a pinhole probe, and its near plane drops to a few millimetres', () => {
+  const wallZ = -10, col = boxCollision([[-50, 50, -60, wallZ]]), cf = cornerFactor(55, 16 / 9);
+  const z = wallZ + 0.012;                                       // the round-1 check's frame: 1.2 cm from the drawn wall
+  // a 5 cm footprint starts inside the wall's expanded footprint, so collision.js ignores the wall: the old camera probe saw nothing here
+  assert.equal(wallDistance(col, 3, z, 0, 3, 0.05), null);
+  const d = wallDistance(col, 3, z, 0, 3, CAMERA_PROBE_RADIUS_M);
+  assert.ok(d !== null && Math.abs(d - 0.012) < 0.002, `pinhole probe: ${d}`);
+  const near = nearForWall(d, cf, { floor: NEAR_FLOOR_CAMERA });
+  assert.equal(near, NEAR_FLOOR_CAMERA);
+  assert.ok(near * cf < d - 0.005, `corner reach ${near * cf} is inside the wall at ${d}`);
+  // the eye's floor is unchanged: 0.1, and an eye can never be that close
+  assert.equal(nearForWall(d, cf), NEAR_FLOOR);
+});
+
+test('the camera floor only matters within about 18 cm of a wall: beyond that the near is the same with either floor', () => {
+  const cf = 1.2;
+  for (let w = 0.19; w < 2; w += 0.05) assert.equal(nearForWall(w, cf, { floor: NEAR_FLOOR_CAMERA }), nearForWall(w, cf));
+  // and between, the camera's near is lower than the eye's and its corners stay clear
+  for (const w of [0.06, 0.08, 0.1, 0.12, 0.15, 0.18]) {
+    const n = nearForWall(w, cf, { floor: NEAR_FLOOR_CAMERA });
+    assert.ok(n < NEAR_FLOOR, `wall ${w}: ${n}`);
+    assert.ok(n * cf < Math.max(w - 0.05, 0) + NEAR_FLOOR_CAMERA * cf + 1e-9, `wall ${w}`);
+  }
 });

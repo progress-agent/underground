@@ -21,7 +21,7 @@ import { createViewRules, allowsThirdIn } from './view-rules.js';
 import { createCameraRig } from './camera-rig.js';
 import { LENS_THIRD_MM, BLEND_S, easeOutCubic, installViewKey, installWheelZoom } from './third-person.js';
 // ── s16:T ── a camera against a wall lowers its near plane for those frames only (near-clearance.js)
-import { createClearanceProbe, cornerFactor, nearForWall } from './near-clearance.js';
+import { createClearanceProbe, cornerFactor, nearForWall, NEAR_FLOOR, NEAR_FLOOR_CAMERA, CAMERA_PROBE_RADIUS_M } from './near-clearance.js';
 import { BODY } from '../modes/pedestrian-body.js';
 // ── /s16:T ──
 
@@ -51,7 +51,7 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
   const s16tBandEye = { feetY: 0, height: 0, radius: 0, hosts: null }, s16tBandCam = { feetY: 0, height: 0, radius: 0, hosts: null };   // reused every frame
   /** The near plane a wall within reach of `cam` allows, or null when nothing is within reach. */
   let s16tHostsOf = null, s16tHosts = null, s16tHostsAt = -1e9;   // the station hosts' squares (raised boxes the collision band passes under), per index
-  function s16tClearNear(cam, probe, band) {
+  function s16tClearNear(cam, probe, band, floor = NEAR_FLOOR) {
     if (typeof ctx.collision?.moveAndSlide !== 'function') return null;
     // the getter builds a small facade object per call, so ask for the data index only until it exists and then every 5 s (a swap is still seen)
     if (s16tHostsOf === null || (ctx.time ?? 0) - s16tHostsAt > 5) {
@@ -62,7 +62,7 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
     band.hosts = s16tHosts;
     const wall = probe.measure(cam.position.x, cam.position.y, cam.position.z, band);
     if (wall === null) return null;
-    return nearForWall(wall, cornerFactor(cam.fov, cam.aspect));
+    return nearForWall(wall, cornerFactor(cam.fov, cam.aspect), { floor });
   }
   // ── /s16:T ──
 
@@ -262,8 +262,8 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
         // ── s16:T ── also clear of any wall within 1.5 m of the camera, pulled in or not (an alley's wall beside the camera
         // was cut the same way); never nearer than the rig asked, and the camera itself is not moved
         {
-          s16tBandCam.feetY = cam.position.y - 0.3 * VE; s16tBandCam.height = 0.6 * VE; s16tBandCam.radius = 0.05;
-          const clear = s16tClearNear(cam, s16tCam, s16tBandCam);
+          s16tBandCam.feetY = cam.position.y - 0.3 * VE; s16tBandCam.height = 0.6 * VE; s16tBandCam.radius = CAMERA_PROBE_RADIUS_M;
+          const clear = s16tClearNear(cam, s16tCam, s16tBandCam, NEAR_FLOOR_CAMERA);
           if (clear !== null && (wantNear === null || clear < wantNear)) wantNear = clear;
         }
         // ── /s16:T ──

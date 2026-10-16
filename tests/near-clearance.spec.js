@@ -166,4 +166,30 @@ test.describe('first person against a wall', () => {
       expect(r.reach, `corners clear of a wall ${r.dmin.toFixed(3)} m away`).toBeLessThan(r.dmin - 0.005);
     }
   });
+
+  // ── s16:T ── fix round 1 (the check's N-4): the contact above never pulls the rig in (distance 4.2), so the pulled-in case needs a
+  // pose of its own: four metres up the same street from C3, facing north (yaw 0) with the alley's wall at the camera's back.
+  // Walking away (W) the camera is pulled in for the first frames and comes out; backing in (S) the rig stays pulled in at its
+  // 0.5 m minimum and the camera touches the wall for a frame or two (a camera 1 cm off a wall needs a near plane of millimetres).
+  const PULL = { id: 'C3-pull', x: 2870.0, z: -715.6, yaw: 0 };
+  for (const [key, label] of [['w', 'walking away from the facade'], ['s', 'backing into the facade']]) {
+    test(`third person, rig pulled in by the facade, ${label}: the near never exceeds the rig's, every frame's corners stay clear`, async () => {
+      await press(PULL, 'third');
+      let probe = PROBE.replace('const cam = u.camera;', 'const cam = u.camera; const rig = ped.onFoot.rig;').replace('card: ped', 'rigDist: rig.distance, suggested: rig.suggestedNear, card: ped');
+      if (key === 's') probe = probe.replace('if (nc.n % 3 !== 0 || t < 0.5) return;', '');   // EVERY frame: the touching frame is one or two frames long
+      const rows = await h.sample(2.0, probe, [{ t: 0, down: [key] }]);
+      await h.releaseKeys();
+      const pulled = rows.filter((r) => r.rigDist <= 2.5);
+      const worst = Math.min(...rows.map((r) => r.margin));
+      console.log(`[near ${key === 'w' ? 'pull-W' : 'pull-S'}] ${rows.length} frames, ${pulled.length} with the rig pulled in (distance <= 2.5), least rig ${Math.min(...rows.map((r) => r.rigDist)).toFixed(2)} m, worst margin ${worst.toFixed(3)} m, least near ${Math.min(...rows.map((r) => r.near)).toFixed(4)}`);
+      expect(pulled.length, 'the rig was pulled in (the acceptance pose of the contact above never is)').toBeGreaterThanOrEqual(key === 's' ? 20 : 1);
+      for (const r of rows) {
+        if (r.suggested !== null) expect(r.near, 'never above the rig\'s own near').toBeLessThanOrEqual(r.suggested + 1e-9);
+        // Within about 6 mm of a wall no near plane keeps a corner clear (the plane has a size): the floor (1 mm) is then all there is to ask.
+        if (r.dmin < 0.02) expect(r.near, `camera ${r.dmin.toFixed(4)} m off a wall`).toBeLessThanOrEqual(0.001 + 1e-9);
+        else expect(r.reach, `near ${r.near.toFixed(4)} x cf ${r.cf.toFixed(3)} at t ${r.t.toFixed(3)} against a wall ${r.dmin.toFixed(3)} m away`).toBeLessThan(r.dmin - 0.005);
+      }
+    });
+  }
+  // ── /s16:T ──
 });

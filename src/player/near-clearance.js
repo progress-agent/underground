@@ -19,6 +19,12 @@
 
 export const PROBE_REACH_M = 1.5;       // how far from the eye a wall can matter
 export const NEAR_FLOOR = 0.1;          // the floor the bores already use (pedestrian.js UNDERGROUND_NEAR)
+export const NEAR_FLOOR_CAMERA = 0.001; // the third-person camera's floor: unlike the eye (held 0.35 m from any wall by the body's radius) the pulled-in
+                                        // camera can touch a wall, and a camera 1 cm from one needs a near plane of a few millimetres, not 0.1. Held for the
+                                        // frames the camera is that close only; 24-bit depth still resolves 6 mm at 10 m with it. Within about 6 mm of a wall even this
+                                        // cannot keep a corner clear (the plane has a size): that is the rig placing the camera on the wall, not the near plane's to fix.
+export const CAMERA_PROBE_RADIUS_M = 0.0001; // the camera's probe footprint: collision.moveAndSlide ignores a box whose (radius-expanded) footprint
+                                        // already contains the start, so a 5 cm probe sees nothing from a camera 1 cm off a wall (found by the round-1 check), and a 2 mm one nothing from 0.4 mm
 export const NEAR_CEIL = 1.0;           // the on-foot near plane
 export const CLEARANCE_FRACTION = 0.9;  // the corners reach this share of the wall distance...
 export const PROUD_M = 0.05;            // ...less this: what is drawn stands a few cm proud of the footprint the collision knows (a station's

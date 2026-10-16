@@ -9,7 +9,17 @@
 //
 // G-1: along each face of both hosts at 0.5 m steps, wherever the street 0.5 m outside the face is below the base, the plinth's
 // bottom edge there is at or below the street + 0.1 canonical (0.02 m real) and its top equals the host's base to 1e-3.
+//
+// G-2 (fix round 1): the plinth reads as one surface with the box above it. A plinth pixel is one that changes when the plinth mesh is
+// hidden for one render; for each image column holding at least 8 of them, the top four are set against the three pixels just above
+// the column's topmost one (the box face). The check's own figure (the median of ALL plinth pixels against the median of those face
+// pixels) weights a column by how tall the plinth stands in it: at the oblique pose the near columns, where the plinth is tall, are also
+// where the wall is darkest (the lighting varies along the wall, 82 mid-screen to 44 at the right edge, on the box above it as much as on
+// the plinth), so that figure reads -8 for a plinth that continues its wall to one level (80/80, 83/82, 75/75, 50/50 in the columns
+// probed). Column by column, at the seam, is the question "do they read as one surface"; that is what is asserted: the median over
+// columns of the difference at the seam is at most 2 levels per channel.
 import { test, expect } from '@playwright/test';
+import { api } from './player-vehicles-helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
 test.setTimeout(240000);
@@ -88,4 +98,47 @@ test.describe('the host plinth', () => {
       expect(r.mat.same, 'the map boxes\' own surface').toBe(true);
     });
   }
+
+  // ── s16:T ── G-2 (fix round 1): one surface with the box, column by column at the seam
+  for (const [name, x, z, yaw, master] of [['axial', 9070, 545, -Math.PI / 2, 1.1], ['oblique', 9087, 520, -Math.PI / 2 + 0.5, 1.1], ['axial', 9070, 545, -Math.PI / 2, 3]]) {
+    test(`G-2 ${name} view at Master ${master}: the plinth continues the box's wall to within 2 levels at the seam`, async () => {
+      const h = api(page);
+      await h.ev((M) => { const el = document.getElementById('masterHeight'); el.value = String(M); el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); window.__ugSun?.setTime?.(0.5, { persist: false }); }, master);
+      await h.ev(() => window.__ug.setRenderQualityMode('manual'));
+      await h.activatePedestrian();
+      await h.ev(([x, z, yaw]) => { const p = window.__ug.modes.registry.get('pedestrian'); p.setView('first'); p.place(x, z, { yaw }); }, [x, z, yaw]);
+      await h.wait(1500);
+      const r = await h.ev(() => {
+        const u = window.__ug, rend = u.composer.renderer, gl = rend.getContext(), cv = rend.domElement, sk = u.scene.getObjectByName('station-host-skirts');
+        u.sim.paused = true;
+        const W = cv.width, H = cv.height;
+        const read = () => { u.composer.render(); const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
+        sk.visible = false; const B = read(); sk.visible = true; const A = read();
+        const D = [[], [], []]; let cols = 0, all = [[], [], []], face = [[], [], []];
+        const med = (a) => { a = a.slice().sort((p, q) => p - q); return a.length ? a[Math.floor(a.length / 2)] : NaN; };
+        for (let x = 0; x < W; x++) {
+          const ys = [];
+          for (let y = 0; y < H; y++) { const i = (y * W + x) * 4; if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) > 6) ys.push(y); }
+          if (ys.length < 8) continue;
+          const top = ys[ys.length - 1];            // readPixels rows run bottom-up: the topmost plinth pixel has the largest y
+          if (ys[ys.length - 4] !== top - 3 || top + 3 >= H) continue;   // an unbroken run of four at the seam
+          cols++;
+          for (let c = 0; c < 3; c++) {
+            const p = [], f = [];
+            for (let k = 0; k < 4; k++) p.push(A[((top - k) * W + x) * 4 + c]);
+            for (let k = 1; k <= 3; k++) f.push(A[((top + k) * W + x) * 4 + c]);
+            D[c].push(med(p) - med(f));
+            for (const y of ys) all[c].push(A[(y * W + x) * 4 + c]);
+            face[c].push(...f);
+          }
+        }
+        u.sim.paused = false;
+        return { cols, seam: D.map(med), checkFigure: [0, 1, 2].map((c) => med(all[c]) - med(face[c])) };
+      });
+      console.log(`[plinth G-2 ${name} M${master}] ${r.cols} columns, seam ${JSON.stringify(r.seam)}, the check's weighted figure ${JSON.stringify(r.checkFigure)}`);
+      expect(r.cols, 'the plinth is on screen').toBeGreaterThan(200);
+      for (const d of r.seam) expect(Math.abs(d), 'the plinth and the box above it, side by side at the seam').toBeLessThanOrEqual(2);
+    });
+  }
+  // ── /s16:T ──
 });
