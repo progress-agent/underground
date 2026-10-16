@@ -4503,6 +4503,9 @@ function tick(frameTime) {
   sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
     adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
   // ── /sprint:D ──
+  // ── s16:R ── shadowFloat: compare what the GPU receives (float32), so a last-bit wobble repeats nothing
+  shadowCache.setFloat32(economies.on('shadowFloat'));
+  // ── /s16:R ──
   // ── s24:R ── withdraw a shadow-map render that would repeat the last one
   shadowCache.update({
     enabled: economies.on('shadowCache'),
