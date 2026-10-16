@@ -7,6 +7,9 @@
 // Poses are fixed places in the real baked city (yaw 0 faces north, -Z).
 import { test, expect } from '@playwright/test';
 import { POSES, api } from './player-vehicles-helpers.mjs';
+import { installLib } from './s14-helpers.js';
+import { PEDESTRIAN_TUNABLES, BODY } from '../src/modes/pedestrian-body.js';
+import { SKATE } from '../src/modes/skate-body.js';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -36,6 +39,12 @@ test.describe('the skateboard', () => {
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
     page.on('response', (r) => { if (/\/models\/player\//.test(r.url())) requests.push({ url: new URL(r.url()).pathname, status: r.status(), type: r.headers()['content-type'] }); });
+    // ── s16:T ── UG_CPU_THROTTLE=4 runs the page under a 4x CPU throttle (sprint 16Oct26f: the airtime and the route tests must hold under load)
+    if (Number(process.env.UG_CPU_THROTTLE) > 1) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.UG_CPU_THROTTLE) });
+    }
+    // ── /s16:T ──
     await h.boot();
     await h.activatePedestrian();
   });
@@ -164,7 +173,14 @@ test.describe('the skateboard', () => {
 
   test('handling 6: Space is an ollie: 0.70 to 0.95 m high, 0.70 to 0.95 s in the air, no jetpack, the board stays', async () => {
     await start('KX');
-    const s = await h.sample(2.6, SPEED_PROBE, [{ t: 0, down: ['w'] }, { t: 1.3, press: 'jump' }]);
+    // ── s16:T ── (T-airtime, D-054) the probe also reads the vertical speed and the ground the rider will land on, so the airtime can
+    // be measured as time, not as frames: the motion is exact per frame (stepBody integrates the mean velocity) but the FIRST and LAST
+    // air samples are frame-quantised, and the mode clock advances at most 0.05 s a frame, so first-sample to last-sample under-read the
+    // flight by up to two frame intervals (0.69 to 0.71 s under load against a true 0.740 s at King's Cross, where the street rises
+    // 0.28 m over the flight). The flight starts at the end of the last ground sample (the jump is taken at the start of the next frame)
+    // and ends `tau` after the last air sample, the root of  y + vy tau - g tau^2 / 2 = the ground there.
+    const s = await h.sample(2.6, `${SPEED_PROBE.replace('return {', 'const stand = u.modes.collision.standHeightAt(b.x, b.z, b.y, 0.4 * 5); return { vy: b.vy, stand,')}`, [{ t: 0, down: ['w'] }, { t: 1.3, press: 'jump' }]);
+    // ── /s16:T ──
     await h.releaseKeys();
     const takeoff = s.findIndex((r) => r.t >= 1.3 && r.state === 'air');
     expect(takeoff, 'airborne').toBeGreaterThan(0);
@@ -173,7 +189,14 @@ test.describe('the skateboard', () => {
     for (let i = takeoff; i < s.length && s[i].state === 'air'; i++) air.push(s[i]);
     const y0 = s[takeoff - 1].y;
     const peak = Math.max(...air.map((r) => (r.y - y0) / 5));
-    const dur = air[air.length - 1].t - air[0].t;
+    // ── s16:T ── the airtime in seconds, independent of the frame length
+    const G = PEDESTRIAN_TUNABLES.find((d) => d.key === 'gravity').default;
+    const last = air[air.length - 1];
+    const above = Math.max(0, (last.y - last.stand) / 5);
+    const tau = (last.vy + Math.sqrt(last.vy * last.vy + 2 * G * above)) / G;
+    const dur = last.t + tau - s[takeoff - 1].t;
+    console.log(`[handling 6] airtime ${dur.toFixed(4)} s (first to last air sample ${(last.t - air[0].t).toFixed(4)} s, ${air.length} frames), peak ${peak.toFixed(3)} m`);
+    // ── /s16:T ──
     expect(peak).toBeGreaterThanOrEqual(0.70);
     expect(peak).toBeLessThanOrEqual(0.95);
     expect(dur).toBeGreaterThanOrEqual(0.70);
@@ -277,6 +300,59 @@ test.describe('the skateboard', () => {
     expect(after.on).toBe(false);
     expect(after.refused).toBe('water');
   });
+
+  // ── s16:T ── T-ollie (D-054): the deck-ceiling guard (skate-glue.js, the `ceilingAt` block after the board's camera is placed)
+  // had no test of its own. Under Albert Bridge, 28 m in from its end `a`, the drawn underside is 2.233 m above the ground and
+  // 0.226 m above a rider's head (eye 1.7 + deck 0.157 + headroom 0.15 = 2.007 m): an ollie (0.82 m apex) would put the rider's head
+  // 0.6 m through the deck. The guard stops the head at the underside. With the guard removed this test fails (the rise is about
+  // 0.82 m and the head passes the ceiling by 0.6 m; the failing output is in T/build-notes.md).
+  test('handling 9: an ollie under a bridge deck stops the rider\'s head at the underside, and the rider lands with the board', async () => {
+    await start('KX', { board: false });
+    await h.setMaster(1);
+    await h.wait(900);
+    await h.ev(installLib);
+    const spot = await h.ev(() => {
+      const u = window.__ug, lib = window.__s14, rec = u.bridgeRegistry.get('albert');
+      const f = lib.frame(rec), P = lib.at(f, 28, 0);
+      return { x: P.x, z: P.z, yaw: lib.yawOf(f.ux, f.uz) };
+    });
+    await h.place('KX', { x: spot.x, z: spot.z, yaw: spot.yaw, settle: 800 });
+    // place() settles on the highest surface below: here the deck's top. Put the walker on the ground under it.
+    await h.ev(() => {
+      const u = window.__ug, p = u.modes.registry.get('pedestrian'), c = u.modes.collision;
+      p.body.y = c.groundHeightAt(p.body.x, p.body.z); p.body.vy = 0; p.body.vx = 0; p.body.vz = 0;
+    });
+    await h.wait(600);
+    await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
+    await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().board.on, null, { timeout: 8000 });
+    await h.wait(400);
+    const VEv = 5;
+    const topM = PEDESTRIAN_TUNABLES.find((d) => d.key === 'eye').default + SKATE.deckTopM + BODY.headroom;
+    const probe = `const b = ped.body, c = u.modes.collision; return { t, y: b.y, vy: b.vy, state: b.state, ground: c.groundHeightAt(b.x, b.z), ceil: c.ceilingAt(b.x, b.z, b.y), board: ped.playerState().board, x: b.x, z: b.z };`;
+    const s = await h.sample(1.5, probe, [{ t: 0.1, press: 'jump' }]);
+    await h.releaseKeys();
+    const rest = s[0];
+    expect(rest.ceil, 'a drawn underside above the rider').not.toBeNull();
+    const gapM = (rest.ceil - (rest.y + topM * VEv)) / VEv;
+    expect(gapM, 'the deck is 0.15 to 0.30 m above the rider\'s head').toBeGreaterThanOrEqual(0.15);
+    expect(gapM).toBeLessThanOrEqual(0.30);
+    const takeoff = s.findIndex((r) => r.state === 'air');
+    expect(takeoff, 'the ollie left the ground').toBeGreaterThan(0);
+    let worst = -Infinity, peak = 0;
+    for (const r of s) {
+      if (r.ceil !== null) worst = Math.max(worst, (r.y + topM * VEv - r.ceil) / VEv);
+      peak = Math.max(peak, (r.y - s[takeoff - 1].y) / VEv);
+    }
+    console.log(`[handling 9] gap ${gapM.toFixed(3)} m, rise ${peak.toFixed(3)} m, head past the ceiling by at most ${worst.toFixed(4)} m`);
+    expect(worst, 'the rider\'s head never passes the underside').toBeLessThanOrEqual(1e-3 / VEv);
+    expect(peak, 'and the rise is the gap, not the 0.82 m apex').toBeLessThanOrEqual(gapM + 0.02);
+    expect(peak).toBeGreaterThan(0.05);
+    const air = s.filter((r, i) => i >= takeoff && r.state === 'air');
+    expect(air[air.length - 1].t - s[takeoff - 1].t, 'back on the ground within 1 s').toBeLessThanOrEqual(1.0);
+    expect(s[s.length - 1].state).toBe('ground');
+    expect(s.every((r) => r.board), 'the board stays under the rider').toBe(true);
+  });
+  // ── /s16:T ──
 
   // ── pose ───────────────────────────────────────────────────────────────────────────────────────────────────────
   const BONES = `const bone = (n) => { const v = new T.Vector3(); u.player.figure.boneWorldPosition(n, v); return v; }; const by = ped.body.y; const hy = (n) => (bone(n).y - by) * ratio;`;
