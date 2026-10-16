@@ -15,7 +15,11 @@
 // sank into any street rising along it). The plane is the ground under the feet, tilted to the ground's slope
 // there (g, canonical rise per metre) and lifted 0.02 m, so it follows a rising or falling street instead of
 // burying or hovering over it. Depth write on the one plane, with a strict depth test, stops overlapping
-// triangles darkening twice. Opacity follows the sun's own shadow strength (so it fades with the sun's shadows:
+// triangles darkening twice. Since sprint 16Oct26f (T-speckle) every fragment WRITES the depth of that plane at
+// its own pixel (gl_FragDepth, below): coplanar triangles do not interpolate bit-identical depth, so with the
+// triangles' own depth some fragments of the second triangle came out one step nearer and passed the strict
+// test, double-darkening isolated pixels (the faint dark speckles inside the shadow). One depth per pixel makes
+// the strict test reject every overlap. Opacity follows the sun's own shadow strength (so it fades with the sun's shadows:
 // toggled off, Automatic's level 2 and below, or the height above the ground), fades out with the figure's
 // height above the plane, and is gone when the sun is lower than 8 degrees or the figure swims.
 export const SHADOW = Object.freeze({
@@ -83,6 +87,32 @@ vec4 mvPosition = viewMatrix * ugWp;
 gl_Position = projectionMatrix * mvPosition;
 `;
 
+// ── s16:T ── T-speckle (D-054): one depth per pixel. The plane in view space is (n, w) with n . x = w; the ray through
+// a pixel, (dx, dy, -1) with dx = (ndcX + P[8]) / P[0], dy = (ndcY + P[9]) / P[5], meets it at view z = -w / (n . dir);
+// the depth that z has under the projection is what the fragment writes, pulled a hair nearer than the ground it
+// lies 2 cm above (twice the pixel's depth slope and 4 steps of a 24-bit buffer; the polygon offset it replaces
+// is inert once a shader writes depth).
+const FRAG_DEPTH = `
+vec2 ugNdc = ( gl_FragCoord.xy - uVp.xy ) / uVp.zw * 2.0 - 1.0;
+vec3 ugDir = vec3( ( ugNdc.x + uProjK.z ) / uProjK.x, ( ugNdc.y + uProjK.w ) / uProjK.y, -1.0 );
+float ugZ = - uPlaneV.w / dot( uPlaneV.xyz, ugDir );
+float ugD = 0.5 * ( ( uProjZ.x * ugZ + uProjZ.y ) / ( - ugZ ) ) + 0.5;
+gl_FragDepth = ugD - 2.0 * max( abs( dFdx( ugD ) ), abs( dFdy( ugD ) ) ) - 4.0 / 16777216.0;
+`;
+
+/**
+ * What the fragment shader computes before its small pull-forward, in JS (the test pins it): the window depth in
+ * [0, 1] of the plane `planeView` = { nx, ny, nz, w } (view space, n . x = w) at the pixel with normalised device
+ * coordinates (ndcX, ndcY), under a projection with `proj` = the matrix elements (column-major, as three.js
+ * stores them). Pure.
+ */
+export function planeDepthAt(ndcX, ndcY, planeView, proj) {
+  const dx = (ndcX + proj[8]) / proj[0], dy = (ndcY + proj[9]) / proj[5];
+  const z = -planeView.w / (planeView.nx * dx + planeView.ny * dy - planeView.nz);
+  return 0.5 * ((proj[10] * z + proj[14]) / -z) + 0.5;
+}
+// ── /s16:T ──
+
 /** Shadow opacity for a state. Pure. */
 export function shadowOpacity({ strengthRatio, heightM, elevationDeg, swimming, enabled = true }) {
   if (!enabled || swimming || !(strengthRatio > 0) || !(elevationDeg >= SHADOW.minSunElevationDeg)) return 0;
@@ -91,7 +121,12 @@ export function shadowOpacity({ strengthRatio, heightM, elevationDeg, swimming, 
 }
 
 export function createFigureShadow({ THREE, figure }) {
-  const uniforms = { uLight: { value: new THREE.Vector3(0, 1, 0) }, uPlaneP: { value: new THREE.Vector3() }, uSlope: { value: new THREE.Vector2() }, uLift: { value: 0.1 } };
+  const uniforms = {
+    uLight: { value: new THREE.Vector3(0, 1, 0) }, uPlaneP: { value: new THREE.Vector3() }, uSlope: { value: new THREE.Vector2() }, uLift: { value: 0.1 },
+    // ── s16:T ── the plane in view space (xyz normal, w = -constant), the projection terms and the viewport
+    uPlaneV: { value: new THREE.Vector4() }, uProjK: { value: new THREE.Vector4() }, uProjZ: { value: new THREE.Vector2() }, uVp: { value: new THREE.Vector4() },
+    // ── /s16:T ──
+  };
   const material = new THREE.MeshBasicMaterial({
     color: 0x000000, transparent: true, opacity: 0.4, depthWrite: true, depthFunc: THREE.LessDepth,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4, fog: false, toneMapped: false,
@@ -104,8 +139,33 @@ export function createFigureShadow({ THREE, figure }) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nuniform vec3 uLight;\nuniform vec3 uPlaneP;\nuniform vec2 uSlope;\nuniform float uLift;')
       .replace(VERT_FIND, VERT_REPLACE);
+    // ── s16:T ── one depth per pixel (see FRAG_DEPTH)
+    shader.uniforms.uPlaneV = uniforms.uPlaneV;
+    shader.uniforms.uProjK = uniforms.uProjK;
+    shader.uniforms.uProjZ = uniforms.uProjZ;
+    shader.uniforms.uVp = uniforms.uVp;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec4 uPlaneV;\nuniform vec4 uProjK;\nuniform vec2 uProjZ;\nuniform vec4 uVp;')
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>${FRAG_DEPTH}`);
+    // ── /s16:T ──
   };
-  material.customProgramCacheKey = () => 'player-planar-shadow';
+  material.customProgramCacheKey = () => 'player-planar-shadow-fd';   // s16:T (was 'player-planar-shadow')
+
+  // ── s16:T ── the plane's view-space uniforms, set per mesh just before it draws (the camera and viewport of THIS render)
+  const planeW = new THREE.Plane(), planeN = new THREE.Vector3(), planeP = new THREE.Vector3(), vpTmp = new THREE.Vector4();
+  function setPlaneUniforms(renderer, camera) {
+    const g = uniforms.uSlope.value, P0 = uniforms.uPlaneP.value;
+    planeN.set(-g.x, 1, -g.y).normalize();
+    planeP.set(P0.x, P0.y + uniforms.uLift.value, P0.z);
+    planeW.setFromNormalAndCoplanarPoint(planeN, planeP).applyMatrix4(camera.matrixWorldInverse);
+    uniforms.uPlaneV.value.set(planeW.normal.x, planeW.normal.y, planeW.normal.z, -planeW.constant);
+    const e = camera.projectionMatrix.elements;
+    uniforms.uProjK.value.set(e[0], e[5], e[8], e[9]);
+    uniforms.uProjZ.value.set(e[10], e[14]);
+    renderer.getCurrentViewport(vpTmp);
+    uniforms.uVp.value.copy(vpTmp);
+  }
+  // ── /s16:T ──
 
   const meshes = [];
   let k = 0;
@@ -118,6 +178,7 @@ export function createFigureShadow({ THREE, figure }) {
     m.frustumCulled = false;
     m.castShadow = false; m.receiveShadow = false;
     m.renderOrder = 1;
+    m.onBeforeRender = (renderer, scene, camera) => setPlaneUniforms(renderer, camera);   // s16:T
     m.visible = false;
     src.parent.add(m);
     meshes.push(m);
