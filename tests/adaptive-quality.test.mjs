@@ -209,3 +209,54 @@ test('a probe that passes its first window but drifts over soon after still back
  h.sim(cost,20000);const settle=h.changes.length;h.sim(cost,90000);
  assert.ok(h.changes.length-settle<=8,`changes in 90s: ${h.changes.length-settle} ${JSON.stringify(h.controller.state().history.slice(-8).map(e=>[Math.round(e.at),e.from,e.to,e.why]))}`);
 });
+
+// ── s16:R ── sprint 16Oct26f, D-054 (lane R): the "did it help" check on the weak setup. Appended only; the tests above
+// are unchanged. On a processor-bound view resolution does not change the frame (R/profile.md section 3), a window's mean
+// wanders 3 to 6%, and the 07391f3 controller let that noise re-anchor its descent, so it ratcheted down to 35%. The
+// six traces are real frame intervals recorded on the Mac Studio with the processor slowed 4x (tests/fixtures/
+// aq-weak-intervals.json), at Bank, the figure on foot, on the board, in the Balloon, and Wednesday's Bank and overview.
+import { readFileSync } from 'node:fs';
+const AQ_WEAK = JSON.parse(readFileSync(new URL('./fixtures/aq-weak-intervals.json', import.meta.url), 'utf8'));
+
+test('s16:R weak-setup traces replayed for 300 s: at least 90% of the time at full resolution, never below 0.85, settled at 1', () => {
+  const names = Object.keys(AQ_WEAK.views);
+  assert.equal(names.length, 6);
+  for (const name of names) {
+    const ms = AQ_WEAK.views[name];
+    const c = createAdaptiveQuality({ apply: () => {} }); c.start(0);
+    let now = 0, i = 0, full = 0, total = 0, min = 1; const tail = {};
+    while (now < 300000) {
+      const f = ms[i++ % ms.length]; now += f; c.update(f, now);
+      const q = c.get(); total += f; if (q.scale === 1) full += f; min = Math.min(min, q.scale);
+      if (now > 300000 - 8000) tail[q.scale] = (tail[q.scale] || 0) + f;
+    }
+    const settled = Number(Object.entries(tail).sort((a, b) => b[1] - a[1])[0][0]);
+    assert.ok(full / total >= 0.9, `${name}: ${(100 * full / total).toFixed(1)}% of the time at full resolution`);
+    assert.ok(min >= 0.85, `${name}: lowest scale ${min}`);
+    assert.equal(settled, 1, `${name}: settled at ${settled}`);
+  }
+});
+
+test('s16:R a stall does not restart a hold: a 25 ms view with an 800 ms burst of 40 ms frames every 20 s stays at full resolution after its first revert', () => {
+  const h = harness();
+  let now = 0, reverted = false, below = 0, after = 0;
+  while (now < 300000) {
+    const ms = now > 10000 && now % 20000 < 800 ? 40 : 25; // a whole window of 40 ms (30% over the hold's 25 ms) every 20 s
+    now += ms; h.controller.update(ms, now);
+    if (!reverted && h.controller.state().history.some(x => /revert/.test(x.why))) { reverted = true; continue; }
+    if (reverted) { after++; if (h.controller.get().scale < 1) below++; }
+  }
+  assert.ok(reverted, 'the descent was tried and reverted (resolution does not help a 25 ms CPU-bound frame)');
+  assert.ok(after > 5000);
+  // after the revert only the backed-off trial descents (30 s, then 60, then 120) may leave full resolution, and briefly
+  assert.ok(below / after < 0.1, `below full resolution for ${(100 * below / after).toFixed(1)}% of the time after the revert`);
+});
+
+test('s16:R a GPU-bound view with 8% window noise still descends and holds at a lower rung', () => {
+  const h = harness();
+  h.sim(model({ cpu: 6, gpu: 60 }), 60000, { jitter: 0.08 });
+  const q = h.controller.get();
+  assert.ok(q.scale < 1, `a GPU-bound view must shed resolution, got ${q.scale}`);
+  assert.ok(h.controller.get().level >= FIRST_UNSHADOWED);
+});
+// ── /s16:R ──
