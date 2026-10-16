@@ -3,7 +3,8 @@
 // street (the checker's finding at King's Cross: a 16 m flat shadow, 2 cm above the feet, buried past 0.5 m).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SHADOW, shadowLight, clampSlope, projectOntoPlane, shadowOpacity } from '../src/player/figure-shadow.js';
+import * as THREE from 'three';
+import { SHADOW, shadowLight, clampSlope, projectOntoPlane, shadowOpacity, planeDepthAt } from '../src/player/figure-shadow.js';
 
 const sun = (elevDeg, azDeg = 40) => {
   const e = (elevDeg * Math.PI) / 180, a = (azDeg * Math.PI) / 180;
@@ -82,4 +83,43 @@ test('opacity rules are unchanged', () => {
   assert.equal(shadowOpacity({ strengthRatio: 1, heightM: 0, elevationDeg: 7, swimming: false }), 0);
   assert.equal(shadowOpacity({ strengthRatio: 1, heightM: 0, elevationDeg: 30, swimming: true }), 0);
   assert.ok(Math.abs(shadowOpacity({ strengthRatio: 1, heightM: 0, elevationDeg: 30, swimming: false }) - SHADOW.baseOpacity) < 1e-12);
+});
+
+// ── sprint 16Oct26f, lane T (T-speckle, D-054): one depth per pixel ────────────────────────────────────────────────
+// The shadow's fragment shader writes the depth of the shadow PLANE at its own pixel, so overlapping triangles at a pixel
+// agree to the last bit and the strict depth test lets only the first through (no double darkening, no speckles).
+// planeDepthAt is the JS mirror of that shader; the point projectOntoPlane puts on the plane, taken through the same view
+// and projection matrices, must have exactly the depth planeDepthAt gives for the pixel it lands on.
+test('planeDepthAt equals the depth of projectOntoPlane\'s point through the same matrices (1e-6), on a slope too', () => {
+  const cam = new THREE.PerspectiveCamera(22 * 1.4, 1.6, 1, 50000);
+  cam.position.set(30, 18, 40); cam.lookAt(2, 3, 0); cam.updateMatrixWorld(true); cam.updateProjectionMatrix();
+  const L = shadowLight(sun(28.4926, 70), 0.2);
+  for (const [gx, gz] of [[0, 0], [0.03, -0.12], [-0.2, 0.1]]) {
+    const plane = { px: 1, py: 3, pz: 2, gx, gz }, lift = 0.1;
+    // the plane in view space exactly as figure-shadow.js sets it
+    const n = new THREE.Vector3(-gx, 1, -gz).normalize(), p0 = new THREE.Vector3(plane.px, plane.py + lift, plane.pz);
+    const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(n, p0).applyMatrix4(cam.matrixWorldInverse);
+    const pv = { nx: pl.normal.x, ny: pl.normal.y, nz: pl.normal.z, w: -pl.constant };
+    for (const w of [{ x: 1, y: 3.4, z: 2 }, { x: 0.3, y: 6.9, z: 2.4 }, { x: 2.1, y: 3.02, z: 1.2 }, { x: -1, y: 8, z: 3 }]) {
+      const q = projectOntoPlane(w, L, plane, lift);
+      const ndc = new THREE.Vector3(q.x, q.y, q.z).applyMatrix4(cam.matrixWorldInverse).applyMatrix4(cam.projectionMatrix);
+      const depth = 0.5 * ndc.z + 0.5;
+      const got = planeDepthAt(ndc.x, ndc.y, pv, cam.projectionMatrix.elements);
+      assert.ok(Math.abs(got - depth) < 1e-6, `slope (${gx}, ${gz}) point ${JSON.stringify(w)}: ${got} vs ${depth}`);
+    }
+  }
+});
+
+test('two points on one pixel\'s ray, one thrown by each of two limbs, get the same plane depth', () => {
+  const cam = new THREE.PerspectiveCamera(30, 1.6, 1, 50000);
+  cam.position.set(0, 10, 25); cam.lookAt(0, 0, 0); cam.updateMatrixWorld(true); cam.updateProjectionMatrix();
+  const n = new THREE.Vector3(0, 1, 0), p0 = new THREE.Vector3(0, 0.1, 0);
+  const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(n, p0).applyMatrix4(cam.matrixWorldInverse);
+  const pv = { nx: pl.normal.x, ny: pl.normal.y, nz: pl.normal.z, w: -pl.constant };
+  const a = planeDepthAt(0.2, -0.3, pv, cam.projectionMatrix.elements), b = planeDepthAt(0.2, -0.3, pv, cam.projectionMatrix.elements);
+  assert.equal(a, b, 'a function of the pixel alone');
+  assert.notEqual(a, planeDepthAt(0.2, -0.31, pv, cam.projectionMatrix.elements), 'and it moves with the pixel (down the screen, for a floor)');
+  // the plane (y = 0.1) seen from y = 10: the ray through the centre of the screen meets it ~25 m away
+  const centre = planeDepthAt(0, 0, pv, cam.projectionMatrix.elements);
+  assert.ok(centre > 0.9 && centre < 1, `window depth ${centre}`);
 });

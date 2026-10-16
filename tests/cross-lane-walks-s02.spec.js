@@ -336,20 +336,23 @@ test('4b. the DLR from Stratford International through Stratford, and from Strat
     for (let k = 1; k < F.length; k++) {
       const p = F[k - 1], f = F[k];
       if (p.regime !== 'open' || f.regime !== 'open' || f.path !== p.path || f.cut || p.cut) continue;
-      const step = Math.abs(f.y - p.y) / VE / r.ratio, run = Math.hypot(f.x - p.x, f.z - p.z) / VE / r.ratio;
+      const step = Math.abs(f.y - p.y) / VE / r.ratio, run = Math.hypot(f.x - p.x, f.z - p.z);   // s16:T the run is in true metres (x and z are 1:1)
       const excess = step - 0.1 * run;            // a 10% grade is a ramp, not a step
       if (excess > worst) { worst = excess; at = { x: Math.round(f.x), z: Math.round(f.z), step, run }; }
     }
     console.log(`[xl-s02] DLR ${label}: worst height step beyond a 10% grade ${worst.toFixed(3)} m at ${JSON.stringify(at)}`);
-    // s14:F (sprint 14Oct26w, D-053 item 9, round 2 of the fix): the limit was 0.5 m, over twice what the check had ever measured
-    // (0.23 m, one run). What the check reads is not a step: at Stratford the DLR climbs a ramp of about 40% (0.43 m of height over
-    // 1.08 m of walk, from about (7859, -4316) to (7883, -4356)), and "beyond a 10% grade" leaves 0.3 of every metre walked. The
-    // walker's run per frame is capped (the tick bounds interactive motion to 0.05 s, so a frame never runs more than 1.084 m), which
-    // makes the reading a fixed ceiling, not a spread: (0.396 - 0.1) x 1.084 = 0.32 m. Seventeen runs on this build read 0.284 to 0.321 m at that ramp
-    // (Canning Town 0.167 to 0.249 m); bf10309 reads the same. So the limit is that ceiling plus 0.03 m: 0.35 m, the acceptance's
-    // cap (1.2 x the worst, 0.39 m, cannot fit under it: the ramp is the DLR profile's and is not lane F's code, F/fix-1/notes.md).
-    // A real 0.5 m step in the walker's height still fails it (F/tests-broken.md).
-    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.35);
+    // s16:T (sprint 16Oct26f, T-dlr, D-054): the "ramp of about 40%" that s14:F described here was a units slip in THIS check, not a
+    // ramp in the DLR profile. `step` is a height in metres as drawn (canonical y / VE / ratio) but `run` was divided by VE as well,
+    // though x and z are already real metres, so every "grade" read 5 times the real one: the 0.396 at Stratford is a real 6% (the
+    // profile there climbs 1.7 to 6.2% between (7856, -4316) and (7895, -4378); design-evidence/terrain-dlr.json). The run is now
+    // in true metres, so "beyond a 10% grade" means what it says, and what remains is the walker's height step beyond it.
+    // The DLR's real steep places (cuttings meeting daylight track, up to 30% at the Woolwich branch's deck end) were fixed at the
+    // source in src/dlr-profile.js and are bounded along the whole line by tests/dlr-gradient.spec.js.
+    // The limit: ten fresh runs on this build (the GPU lock held per run) read 0.000 m at Stratford and 0.000 m at Canning Town every time
+    // (a 10% grade in true metres absorbs every frame of the walk). The rule "the smallest multiple of 0.05 m at least 1.25 x the worst"
+    // gives 0, which would fail on rounding, so the limit is the smallest non-zero multiple: 0.05 m, down from 0.35 m. A real 0.5 m step in
+    // the walker's height still fails it by ten times its size.
+    expect(worst, `DLR ${label}: no step in the walker's height`).toBeLessThanOrEqual(0.05);
   }
 });
 

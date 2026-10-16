@@ -20,6 +20,10 @@
 import { createViewRules, allowsThirdIn } from './view-rules.js';
 import { createCameraRig } from './camera-rig.js';
 import { LENS_THIRD_MM, BLEND_S, easeOutCubic, installViewKey, installWheelZoom } from './third-person.js';
+// ── s16:T ── a camera against a wall lowers its near plane for those frames only (near-clearance.js)
+import { createClearanceProbe, cornerFactor, nearForWall, NEAR_FLOOR, NEAR_FLOOR_CAMERA, CAMERA_PROBE_RADIUS_M } from './near-clearance.js';
+import { BODY } from '../modes/pedestrian-body.js';
+// ── /s16:T ──
 
 const TAU = Math.PI * 2;
 const HEADING_RATE = 14;       // /s, how fast the figure turns towards its velocity
@@ -39,6 +43,28 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
     groundY: (x, z) => ctx.collision?.groundHeightAt(x, z) ?? null,
     waterY: (x, z) => ctx.collision?.waterAt(x, z)?.surfaceY ?? null,
   });
+
+  // ── s16:T ── T-near (D-054): the wall distance round the eye (first person) or round the pulled-in camera (third)
+  const s16tColl = { moveAndSlide: (pos, delta, o) => ctx.collision.moveAndSlide(pos, delta, o) };   // ctx.collision is wired after this is built
+  const s16tProbe = createClearanceProbe({ collision: s16tColl, VE });
+  const s16tCam = createClearanceProbe({ collision: s16tColl, VE });
+  const s16tBandEye = { feetY: 0, height: 0, radius: 0, hosts: null }, s16tBandCam = { feetY: 0, height: 0, radius: 0, hosts: null };   // reused every frame
+  /** The near plane a wall within reach of `cam` allows, or null when nothing is within reach. */
+  let s16tHostsOf = null, s16tHosts = null, s16tHostsAt = -1e9;   // the station hosts' squares (raised boxes the collision band passes under), per index
+  function s16tClearNear(cam, probe, band, floor = NEAR_FLOOR) {
+    if (typeof ctx.collision?.moveAndSlide !== 'function') return null;
+    // the getter builds a small facade object per call, so ask for the data index only until it exists and then every 5 s (a swap is still seen)
+    if (s16tHostsOf === null || (ctx.time ?? 0) - s16tHostsAt > 5) {
+      s16tHostsAt = ctx.time ?? 0;
+      const idx = ctx.stationBuildings?.()?.index;   // station-buildings.js: the data index (the facade also holds the meshes)
+      if (idx && idx !== s16tHostsOf) { s16tHostsOf = idx; s16tHosts = (idx.buildings || []).filter((b) => b.host).map((b) => b.host); }
+    }
+    band.hosts = s16tHosts;
+    const wall = probe.measure(cam.position.x, cam.position.y, cam.position.z, band);
+    if (wall === null) return null;
+    return nearForWall(wall, cornerFactor(cam.fov, cam.aspect), { floor });
+  }
+  // ── /s16:T ──
 
   let active = false;
   let effective = 'first';
@@ -232,9 +258,25 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
       if (show) {
         // Pulled in against a facade the figure is closer than the on-foot near plane (1 m): lower it for those frames
         // only. pedestrian.js puts its own near back at the start of every frame it does not hold.
-        const wantNear = rig.suggestedNear;
+        let wantNear = rig.suggestedNear;
+        // ── s16:T ── also clear of any wall within 1.5 m of the camera, pulled in or not (an alley's wall beside the camera
+        // was cut the same way); never nearer than the rig asked, and the camera itself is not moved
+        {
+          s16tBandCam.feetY = cam.position.y - 0.3 * VE; s16tBandCam.height = 0.6 * VE; s16tBandCam.radius = CAMERA_PROBE_RADIUS_M;
+          const clear = s16tClearNear(cam, s16tCam, s16tBandCam, NEAR_FLOOR_CAMERA);
+          if (clear !== null && (wantNear === null || clear < wantNear)) wantNear = clear;
+        }
+        // ── /s16:T ──
         if (wantNear !== null && cam.near !== wantNear) { cam.near = wantNear; cam.updateProjectionMatrix(); }
         ctx.player?.project(cam);
+      } else if (phase === 'body') {
+        // ── s16:T ── first person on foot or on the board: a wall within 1.5 m of the eye lowers the near plane so the
+        // frame's corners stay clear of it (pressed against a facade the eye is 0.35 m away; near 1.0 reaches 1.2 m).
+        // Only ever lowers it: above 20 km view-range.js owns a larger near.
+        s16tBandEye.feetY = body.y; s16tBandEye.height = (P.eye + BODY.headroom) * VE; s16tBandEye.radius = BODY.radius - 0.02;
+        const clear = s16tClearNear(cam, s16tProbe, s16tBandEye);
+        if (clear !== null && clear < cam.near) { cam.near = clear; cam.updateProjectionMatrix(); }
+        // ── /s16:T ──
       }
       captureFinal();
     },

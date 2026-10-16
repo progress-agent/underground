@@ -578,6 +578,10 @@ function edgeAhead(p, from, dir, limit) {
  * direction of travel, branchHeadingOf (default headingOf) for the choice at
  * junctions.
  */
+// ── s16:T ── (see the commitment in advance)
+const COMMIT_M = 30;               // a branch taken at a junction is kept this far along it
+const COMMIT_TURNED_BACK = -0.5;   // until the walker's wish points this far against the branch (dot of unit vectors)
+// ── /s16:T ──
 export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals = true, headingOf = headingAt, branchHeadingOf = headingOf } = {}) {
   let remaining = Math.max(0, dist);
   let stopped = false;
@@ -587,7 +591,21 @@ export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals =
   let edge = false;
   const crossed = [];
   const path0 = net.paths[pos.path];
-  pos.dir = travelDir(path0, pos.s, want, pos.dir, headingOf);
+  // ── s16:T ── T-route (D-054): a junction commitment. In the open the branch is chosen on `branchHeadingOf` (the drawn
+  // track averaged with the way to its next station) but every frame then re-decided the direction on `headingOf` (the drawn
+  // track alone). Where the two fall either side of the facing direction the walker reversed on the branch it had just taken,
+  // re-crossed the junction and chose again, each frame: 87 s at 200 m/s within 3 m of the fork south of Dalston Junction.
+  // So a branch taken at a junction keeps its direction while the walker is within COMMIT_M of it and has not turned back.
+  let dir = travelDir(path0, pos.s, want, pos.dir, headingOf);
+  const commit = pos.commit;
+  if (commit) {
+    if (commit.path === pos.path && Math.abs(pos.s - commit.s) < COMMIT_M) {
+      const h = branchHeadingOf(path0, pos.s, commit.dir);
+      if (want.x * h.x + want.z * h.z > COMMIT_TURNED_BACK) dir = commit.dir; else pos.commit = null;
+    } else pos.commit = null;
+  }
+  pos.dir = dir;
+  // ── /s16:T ──
   while (remaining > 1e-9 && guard++ < 64) {
     const p = net.paths[pos.path];
     const target = pos.s + pos.dir * remaining;
@@ -630,7 +648,11 @@ export function advance(net, pos, dist, want, { portalInset = 0, holdAtPortals =
     // by travel sense (side x dir), so a branch drawn the other way round keeps
     // the walker in the same physical bore.
     if (pos.side && next.path !== pos.path) pos.side = pos.side * pos.dir * next.dir;
+    // ── s16:T ── a move onto another path is a commitment to its direction (the line above keeps the same-path case as it was)
+    const moved = next.path !== pos.path;
     pos.path = next.path; pos.s = next.s; pos.dir = next.dir;
+    if (moved) pos.commit = { path: next.path, s: next.s, dir: next.dir };
+    // ── /s16:T ──
   }
   return { stopped, crossed, portal, edge };
 }

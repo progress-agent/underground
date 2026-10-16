@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { readFileSync } from 'node:fs';
 import {
-  buildTunnelNetwork, advance, pointAt, markOpenSections, nextStation, OPEN_MIN_RUN_M,
+  buildTunnelNetwork, advance, pointAt, markOpenSections, nextStation, OPEN_MIN_RUN_M, headingAt,
 } from '../src/modes/pedestrian-tunnels.js';
 import { towards, platformRows, routeDestination, joinOr, cleanStationName } from '../src/modes/tube-routes.js';
 import { createPlatformChooser } from '../src/modes/platform-chooser.js';
@@ -607,4 +607,52 @@ test('the open-track index: own track as Lane R draws it, shared bands on Tube a
   assert.equal(idx.classAt('bakerloo', 24, 500, 50), 1, 'on the Overground corridor');
   assert.equal(idx.classAt('bakerloo', 0, 500, 5), 0);
   assert.equal(idx.classAt('victoria', 0, 0, 1000), null);
+});
+
+// ── sprint 16Oct26f, lane T (T-route, D-054): a branch taken at a fork is kept ──────────────────────────────────────
+// In the open the walk chooses a branch on the heading it was given as `branchHeadingOf` (the drawn track averaged with the
+// way to the branch's next station) but every call also re-decided the direction on `headingOf` (the drawn track alone).
+// Where the two fall either side of the walker's facing the walker took a branch, was turned round on it, re-crossed the
+// fork and chose again, each frame: on 07391f3 it stayed within 3 m of the junction south of Dalston Junction for 87 s at
+// 200 m/s (the flaky Overground route test). The synthetic fork below makes the two disagree in just that way.
+test('a fork whose drawn heading and branch heading disagree: the walker keeps the branch it took (T-route)', () => {
+  const trunk = [v(-1000, 20, 0), v(-500, 20, 0), v(0, 20, 0)];
+  const upper = [v(0, 20, 0), v(300, 20, 280), v(900, 20, 800)];     // branch A: bears to +z
+  const lower = [v(0, 20, 0), v(300, 20, -280), v(900, 20, -800)];   // branch B: bears to -z
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: new Map([['overground', [trunk, upper, lower]]]), stationLayers: new Map() });
+  const B = 2;
+  const unit = (x, z) => { const l = Math.hypot(x, z); return { x: x / l, z: z / l }; };
+  // On the lower branch the DRAWN heading points a little back against the walker's wish over its first 25 m (the track curves
+  // round the points); the branch heading, averaged with the way to its station, points on. Everywhere else the chord.
+  const signed = (u, dir) => ({ x: u.x * dir, z: u.z * dir });
+  const headingOf = (p, s, dir) => (p.id === B ? signed(s < 25 ? unit(-0.3, -0.954) : unit(0.9, -0.43), dir) : headingAt(p, s, dir));
+  const branchHeadingOf = (p, s, dir) => (p.id === B ? signed(unit(0.9, -0.43), dir) : headingAt(p, s, dir));
+  const want = { x: 1, z: 0 };
+  const pos = { path: 0, s: net.paths[0].length - 5, dir: 1 };
+  let nearest = Infinity;
+  for (let i = 0; i < 60; i++) {
+    advance(net, pos, 1.67, want, { holdAtPortals: false, headingOf, branchHeadingOf });
+    if (pos.path === B) nearest = Math.min(nearest, pos.s);
+  }
+  assert.equal(pos.path, B, 'the walker took the lower branch');
+  assert.ok(pos.dir > 0, 'and it is still heading along it');
+  assert.ok(pos.s >= 30, `at least 30 m down the branch after 60 steps (was ${pos.s.toFixed(1)} m; on 07391f3 it never left the junction)`);
+});
+
+test('the commitment ends when the walker turns back, and 30 m from the fork', () => {
+  const trunk = [v(-1000, 20, 0), v(-500, 20, 0), v(0, 20, 0)];
+  const upper = [v(0, 20, 0), v(300, 20, 280), v(900, 20, 800)];
+  const net = buildTunnelNetwork({ THREE, VE, branchesByLine: new Map([['overground', [trunk, upper]]]), stationLayers: new Map() });
+  const pos = { path: 0, s: net.paths[0].length - 5, dir: 1 };
+  advance(net, pos, 20, { x: 1, z: 0 });
+  assert.equal(pos.path, 1, 'onto the branch');
+  assert.ok(pos.commit && pos.commit.path === 1 && pos.dir === 1);
+  // the walker now wants to go back the way it came: the commitment gives way at once
+  advance(net, pos, 10, { x: -1, z: -0.3 });
+  assert.equal(pos.dir, -1, 'turned back');
+  assert.equal(pos.commit, null);
+  // far along a branch the commitment is dropped
+  const far = { path: 1, s: 400, dir: 1, commit: { path: 1, s: 0, dir: 1 } };
+  advance(net, far, 1, { x: 1, z: 0 });
+  assert.equal(far.commit, null, 'more than 30 m from where it was taken');
 });

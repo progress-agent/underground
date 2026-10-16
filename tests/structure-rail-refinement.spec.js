@@ -29,11 +29,17 @@ test('rail grades are bounded by their mapped class at both heights; tunnels kee
  await ready(page);
  const result=await page.evaluate(()=>{
   // D-039: Structure n is now Master 5/n (see above).
-  const u=window.__ug,slider=document.getElementById('masterHeight'),limits={surface:1,cutting:1,embankment:4,viaduct:9};
+  // Sprint 16Oct26f (T-baseline, D-054): the track is laid on the STRUCTURAL ground, not on the drawn mesh. D-036 (13Sep26u) keeps
+  // "rail and other established structural bases" on the stable pre-refinement sampler (the river's refined bed is lower: 21 to 36
+  // canonical units under the viaducts that cross it), and D-048 item 7 (lines to their termini) lays the track beyond the ring on
+  // the hidden ground (main.js createOverground gets s02HiddenGround.structuralSurfaceY). That sampler IS getStructuralSurfaceY on
+  // the map, so this measures against the ground the track is built on. Measured against the mesh, 299 of 16,314 points failed: 276
+  // beyond the map edge and 23 over the refined river bed; against this ground, none. Every bound below is unchanged.
+  const u=window.__ug,slider=document.getElementById('masterHeight'),limits={surface:1,cutting:1,embankment:4,viaduct:9},ground=p=>u.termini.hiddenGround.structuralSurfaceY(p);
   const tunnels=u.overground.userData.paths.flat().filter(p=>p.cls==='tunnel'&&p.liftM<0).map(p=>({p,y:p.y}));
   const rows=[];
   for(const scale of [1,5]){slider.value=String(5/scale);slider.dispatchEvent(new Event('input'));u.structureMorph.flush();let error=0,gap=0,count=0,approachError=0;
-   for(const path of u.overground.userData.paths)for(let i=0;i<path.length;i++){const p=path[i];if(i)gap=Math.max(gap,Math.hypot(p.x-path[i-1].x,p.z-path[i-1].z));if(p.cls==='tunnel')continue;if(i&&path[i-1].cls!=='tunnel'){const prev=path[i-1];approachError=Math.max(approachError,Math.abs(p.liftM-prev.liftM)-.04*Math.hypot(p.x-prev.x,p.z-prev.z));}const h=p.y-u.getTerrainMeshSurfaceY(p);error=Math.max(error,scale-h,h-limits[p.cls]*scale);count++;}
+   for(const path of u.overground.userData.paths)for(let i=0;i<path.length;i++){const p=path[i];if(i)gap=Math.max(gap,Math.hypot(p.x-path[i-1].x,p.z-path[i-1].z));if(p.cls==='tunnel')continue;if(i&&path[i-1].cls!=='tunnel'){const prev=path[i-1];approachError=Math.max(approachError,Math.abs(p.liftM-prev.liftM)-.04*Math.hypot(p.x-prev.x,p.z-prev.z));}const h=p.y-ground(p);error=Math.max(error,scale-h,h-limits[p.cls]*scale);count++;}
    rows.push({scale,error,gap,count,approachError,tunnelError:Math.max(...tunnels.map(({p,y})=>Math.abs(p.y-y)))});
   }return rows;
  });

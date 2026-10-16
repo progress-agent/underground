@@ -35,7 +35,7 @@
 import * as THREE from 'three';
 import { cleanStationName } from './stations.js';
 import { ROUNDEL } from './platform-tunnel.js';
-import { patchBuildingHeight, getBuildingHeightScale } from './surface-geometry.js';
+import { patchBuildingHeight, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js'; // s16:T getBuildingMaterial
 import {
   pointInRing, nearestOnRing, distToRing, rectRing, bounds, createFootprintGrid, footprintOf, centroid,
 } from './station-building-geometry.js';
@@ -279,8 +279,8 @@ const RING_INDEX = { underground: 0, overground: 1, dlr: 2 };
 export const RING_COLOUR = { underground: ROUNDEL.red, overground: '#EE7623', dlr: '#00AFAD' };
 const NAME_COLOUR = '#d4d4d4';          // under the bloom threshold with room to spare: in sun the street view's lettering read 0.84 at #e6e6e6
 const WALL_COLOUR = 0xdcdad4;            // white, kept under the bloom threshold through AgX
-const HOST_SKIRT_COLOUR = 0x8a8580;      // the map boxes' own grey (surface-geometry.js)
 const SKIRT_M = 0.5;
+const SKIRT_STEP_M = 1;                   // s16:T the plinth follows the street every metre (was 3 m: the bottom edge lifted off a dip between samples)
 const ATLAS_W = 4096, ATLAS_CAP_H = 4096;
 const BAR_TEXT_FRAC = 0.66, BAR_TEXT_MAX_W = 450;   // the name's em on the bar and its widest extent (roundelTexture's)
 
@@ -570,7 +570,7 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
     const h = b.host, half = h.side / 2, top = h.baseM * VE, sx = [-1, 1, 1, -1], sz = [-1, -1, 1, 1];
     for (let f = 0; f < 4; f++) {
       const ax = h.x + sx[f] * half, az = h.z + sz[f] * half, bx = h.x + sx[(f + 1) % 4] * half, bz = h.z + sz[(f + 1) % 4] * half;
-      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 3)), nx = (bz - az) / L, nz = -(bx - ax) / L;   // outward (the ring runs clockwise in x, z)
+      const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / SKIRT_STEP_M)), nx = (bz - az) / L, nz = -(bx - ax) / L;   // outward (the ring runs clockwise in x, z)
       const pt = (t) => { const x = ax + (bx - ax) * t, z = az + (bz - az) * t, g = getStructuralY?.(x, z); return { x, z, y: Number.isFinite(g) ? g - 0.3 * VE : top }; };
       let prev = pt(0);
       for (let i = 1; i <= n; i++) {
@@ -591,7 +591,15 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
     skirtGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(skirtP), 3));
     skirtGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(skirtN), 3));
     skirtGeo.computeBoundingSphere();
-    skirtMat = new THREE.MeshStandardMaterial({ color: HOST_SKIRT_COLOUR, roughness: 0.9, metalness: 0 });
+    // ── s16:T ── T-near sibling, T-ng (D-054): the plinth is the box's own wall below its base, so it takes the map boxes'
+    // surface (colour, roughness 0.85, metalness 0.1 read from their shared material) rather than a lookalike (0.9, 0). It
+    // cannot BE the shared material: that one scales y about the origin (instances are base-pivoted), while these vertices are
+    // canonical, so they need no height law at all and follow Master as the terrain and the box's base do.
+    {
+      const bm = getBuildingMaterial();
+      skirtMat = new THREE.MeshStandardMaterial({ color: bm.color.clone(), roughness: bm.roughness, metalness: bm.metalness });
+    }
+    // ── /s16:T ──
     skirts = new THREE.Mesh(skirtGeo, skirtMat);
     skirts.name = 'station-host-skirts';
     skirts.userData.kind = 'station-host-skirts';

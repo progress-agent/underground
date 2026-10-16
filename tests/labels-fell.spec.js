@@ -57,11 +57,22 @@ const findPair = (page) => page.evaluate(() => {
   return { haveCock: !!cock, haveOak: !!oak };
 });
 
-test('labels are IM Fell English, chipless, halo-cushioned, half scale', async ({ page }) => {
+test('labels are IM Fell English, chipless, halo-cushioned, half scale at distance and grow no more than 2x on approach', async ({ page }) => {
   await gotoLoaded(page);
-  const style = await page.evaluate(() => {
+  const style = await page.evaluate(async () => {
+    const { cleanStationName, stationApproachScale } = await import('/src/stations.js');
+    const u = window.__ug, cam = u.camera;
+    cam.updateMatrixWorld(true);
+    const byName = new Map();
+    for (const [, layers] of u.lineShaftLayers) for (const st of (layers.stationsLayer?.stations || [])) byName.set(cleanStationName(st.name), st);
     const el = document.querySelector('.station-label-surface');
     const s = getComputedStyle(el);
+    const labels = [...document.querySelectorAll('.station-label-surface')].filter(e => getComputedStyle(e).display !== 'none');
+    const rows = labels.map((e) => {
+      const st = byName.get(e.textContent);
+      const d = st ? st.pos.clone().applyMatrix4(cam.matrixWorldInverse).length() : null;
+      return { px: parseFloat(e.style.fontSize), d, scale: d === null ? null : stationApproachScale(d) };
+    });
     const sizes = [...document.querySelectorAll('.station-label-surface')]
       .map(e => parseFloat(e.style.fontSize));
     return {
@@ -71,7 +82,10 @@ test('labels are IM Fell English, chipless, halo-cushioned, half scale', async (
       textShadow: s.textShadow,
       backdrop: s.backdropFilter || 'none',
       minPx: Math.min(...sizes),
-      maxPx: Math.max(...sizes),
+      shown: rows.length,
+      matched: rows.filter(r => r.d !== null).length,
+      far: rows.filter(r => r.d !== null && r.d > 1400 + 25).map(r => r.px),
+      maxAll: Math.max(...rows.map(r => r.px)),
     };
   });
   expect(style.fontFamily.startsWith('"IM Fell English"')).toBe(true);
@@ -83,7 +97,14 @@ test('labels are IM Fell English, chipless, halo-cushioned, half scale', async (
   expect(style.backdrop).toBe('none');
   // Half scale: was 16.5/11/8.25px, now 8.25/6/6px.
   expect(style.minPx).toBeGreaterThanOrEqual(6);
-  expect(style.maxPx).toBeLessThanOrEqual(8.5);
+  // Sprint 16Oct26f (T-baseline, D-054): this asserted "no label above 8.5 px", which D-036 (13Sep26u) superseded: "Station
+  // names retain their distant style with smooth bounded approach growth of roughly 2x" (stationApproachScale: 1x beyond
+  // 1,400 m, 2x at 200 m). So the distant style is pinned for stations beyond 1,400 m of the camera (the old 8.5 px) and the
+  // growth is bounded for every label (2 x 8.5 = 17 px). Neither bound was loosened for the case it protects.
+  expect(style.shown, 'labels are showing').toBeGreaterThan(5);
+  expect(style.matched, 'and they map to stations').toBeGreaterThan(5);
+  for (const px of style.far) expect(px, 'a station beyond 1,400 m keeps the distant style').toBeLessThanOrEqual(8.5);
+  expect(style.maxAll, 'bounded approach growth, 2x of 8.5 px').toBeLessThanOrEqual(17);
 });
 
 test('declutter grid + priority multipliers match the Item C policy', async ({ page }) => {

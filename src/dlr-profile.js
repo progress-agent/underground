@@ -115,6 +115,7 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
   const portalDistance=graph.map(n=>n.portal?0:Infinity),portalQueue=[];
   graph.forEach((n,i)=>{if(n.portal)portalQueue.push(i);});
   for(let q=0;q<portalQueue.length;q++){const i=portalQueue[q];for(const [j,d]of adj[i])if(portalDistance[i]+d<portalDistance[j]){portalDistance[j]=portalDistance[i]+d;portalQueue.push(j);}}
+  const FIXED=new Set(Object.values(data.stations).flatMap(s=>s.candidates.map(c=>c.node))); // s16:T every station and platform node: never moved
   let currentScale=1,terrainPending=true;
   function refresh({structureScale=currentScale}={}){
     if(!Number.isFinite(structureScale)||structureScale<=0)throw new RangeError('DLR structure scale must be positive');currentScale=structureScale;terrainPending=false;
@@ -128,6 +129,24 @@ export function createDlrProfile({project, sampleSurfaceY, verticalExaggeration=
     const queue=graph.map((_,i)=>i);let q=0;
     while(q<queue.length){const i=queue[q++],n=graph[i];if(n.underground||n.portal)continue;for(const [j,d]of adj[i]){const next=graph[j];if(next.underground||next.portal)continue;const floor=n.y-d*model.abovegroundGrade*ve;if(floor>next.y+1e-7){next.y=floor;queue.push(j);}}}
     for(let i=0;i<graph.length;i++){const n=graph[i];if(!n.underground&&!n.portal)n.y=Math.min(n.y,n.groundY+portalDistance[i]*model.portalGrade*ve);}
+    // ── s16:T ── T-dlr (D-054): daylight track meets a cutting without a step. The majorant above keeps cutting nodes out
+    // of its lift and gives daylight track a 1 m minimum (or its deck), so wherever the two meet the profile stepped by
+    // about a metre (or the whole deck) over one 9 to 20 m segment: 20.6% west of Stratford International, 30.6% at the
+    // Woolwich branch's deck end (the "40% ramp" of cross-lane check 4b was a units slip in the test, not this).
+    // Stations and platforms never move (FIXED); a station's own platform can therefore still meet a cutting steeply.
+    //  1. a daylight node beside a cutting is a junction whose ceiling is its own ground; ceilings grow at the portal
+    //     grade along daylight track, and daylight track is never above its ceiling nor below its ground;
+    //  2. a cutting is lifted, never above its own ground (so it stays a cutting), to meet daylight track at the
+    //     aboveground grade.
+    {
+      const above=n=>!n.underground&&!n.portal,ceiling=graph.map(()=>Infinity),relax=[];
+      for(let i=0;i<graph.length;i++){const n=graph[i];if(above(n)&&!FIXED.has(i)&&adj[i].some(([j])=>graph[j].kind==='cutting')){ceiling[i]=n.groundY;relax.push(i);}}
+      for(let k=0;k<relax.length;k++){const i=relax[k];for(const [j,d] of adj[i]){if(!above(graph[j]))continue;const c=ceiling[i]+d*model.portalGrade*ve;if(c<ceiling[j]-1e-9){ceiling[j]=c;relax.push(j);}}}
+      for(let i=0;i<graph.length;i++){const n=graph[i];if(above(n)&&!FIXED.has(i)&&ceiling[i]<Infinity)n.y=Math.min(n.y,Math.max(ceiling[i],n.groundY));}
+      const lift=graph.map((_,i)=>i);
+      for(let k=0;k<lift.length;k++){const i=lift[k],n=graph[i];if(n.kind==='tunnel')continue;for(const [j,d] of adj[i]){const m=graph[j];if(m.kind!=='cutting'||FIXED.has(j))continue;const floor=Math.min(n.y-d*model.abovegroundGrade*ve,m.groundY);if(floor>m.y+1e-7){m.y=floor;lift.push(j);}}}
+    }
+    // ── /s16:T ──
     return {terrainPending,structureScale:currentScale};
   }
   // s30:R fix round 1: `groundRelativeM` in true metres (a depth below ground,
