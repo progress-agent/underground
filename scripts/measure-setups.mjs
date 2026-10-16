@@ -30,6 +30,7 @@
 //       --out <file.json>   write results (default: stdout summary only)
 //       --views a,b,c       subset of views (default: all six)
 //       --settle <s>        settle/trace seconds per view (default 24)
+//       --quality <0-14>    (s16:R) pin Manual at that rung of the ladder, for profiling; the JSON records `quality`
 //       --arrival-s <s>     trace seconds for the arrival case (default: --settle)
 //   node scripts/measure-setups.mjs compare <before-origin> <after-origin> [options]
 //       Measures both origins on each setup (order alternates per round to
@@ -52,6 +53,9 @@ import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+// ── s16:R ──
+import { QUALITY_LEVELS } from '../src/adaptive-quality.js';
+// ── /s16:R ──
 
 export const VIEWS = {
   overview: { p: [0, 20000, 18000], t: [0, 0, 0] },
@@ -90,6 +94,9 @@ export const PLAYER_VIEWS = {
 };
 Object.assign(ALL_VIEWS, PLAYER_VIEWS);
 const resolveAnyPose = async (page, pose) => {
+  // ── s16:R ── the two walker presets (a station exit or a bridge deck) have their own placement
+  if (pose?.player === 'foot' && (pose.station || pose.bridge)) return s16rResolveWalk(page, pose);
+  // ── /s16:R ──
   // ── s14:D ── the vehicle views (lane D) are resolved by their own function
   if (pose?.player && pose.player !== 'foot') return s14dResolveVehicle(page, pose);
   // ── /s14:D ──
@@ -183,6 +190,70 @@ const s14dResolveVehicle = async (page, pose) => {
   });
 };
 // ── /s14:D ──
+// ── s16:R ── two non-gating presets for the report (sprint 16Oct26f, lane R, D-054). Like the body views they are
+// poses of a walker, not cameras, and they stay outside VIEWS (the gate's six), the extras and the player views.
+//   kingsCrossStreet  third person on foot at King's Cross's street exit, `back` m further out along the exit pose's
+//                     own yaw and turned to face the building (as tests/cross-lane-walks-s02.spec.js does), so the
+//                     names and the building are in frame; W for `shuttleS` s then S, repeating, so the figure
+//                     animates and never reaches the building (the station card stays closed)
+//   westminsterWalk   third person on Westminster Bridge's deck: starts 5 m in from end a facing end b and walks the
+//                     deck there and back (W until 5 m short of end b, then S until 5 m from end a), so the walker
+//                     never leaves the deck
+export const PLAYER_VIEWS_S16 = {
+  kingsCrossStreet: { player: 'foot', station: "King's Cross St. Pancras", back: 30, shuttleS: 2 },
+  westminsterWalk: { player: 'foot', bridge: 'westminster', shuttleS: 'deck' },
+};
+Object.assign(ALL_VIEWS, PLAYER_VIEWS_S16);
+export const s16rResolveWalk = async (page, pose) => {
+  await page.evaluate(() => { window.__ugShuttle?.(); window.__ugShuttle = null; });
+  await page.evaluate(() => window.__ug.modes.activate('pedestrian'));
+  await page.waitForFunction(() => { const d = window.__ug.modes.registry.get('pedestrian').debug(); return d.phase === 'body' && !d.ease.running; }, null, { timeout: 60000 });
+  await page.waitForFunction(() => { const v = window.__ug.modes.ctx.playerView; return !v || v.figureLoaded(); }, null, { timeout: 30000 });
+  await page.evaluate(({ station, back, bridge, shuttleS }) => {
+    const u = window.__ug, ped = u.modes.registry.get('pedestrian'), keys = u.fpsControls.keys, t0 = performance.now();
+    let deck = null; // { a, ux, uz, L }: the bridge's own axis, for the deck shuttle
+    if (station) {
+      const sb = u.stationBuildings, pose = sb.stationExitPose(sb.siteKeyOf(station));
+      ped.place(pose.x - Math.sin(pose.yaw) * back, pose.z - Math.cos(pose.yaw) * back, { yaw: pose.yaw + Math.PI, pitch: 0 });
+    } else {
+      const rec = u.bridgeRegistry.get(bridge), a = rec.deckEndpoints.a, b = rec.deckEndpoints.b;
+      const L = Math.hypot(b.x - a.x, b.z - a.z), ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
+      deck = { a, ux, uz, L };
+      ped.place(a.x + ux * 5, a.z + uz * 5, { yaw: Math.atan2(-ux, -uz), pitch: 0 });
+    }
+    ped.setView?.('third');
+    u.player?.setShadowEnabled?.(true);
+    const id = setInterval(() => {
+      let forward;
+      if (deck) {
+        const d = ped.debug(), along = (d.x - deck.a.x) * deck.ux + (d.z - deck.a.z) * deck.uz;
+        forward = window.__ugDeckDir ?? true;
+        if (forward && along > deck.L - 5) forward = false;
+        else if (!forward && along < 5) forward = true;
+        window.__ugDeckDir = forward;
+      } else forward = Math.floor((performance.now() - t0) / (shuttleS * 1000)) % 2 === 0;
+      if (forward) { keys.add('w'); keys.delete('s'); } else { keys.add('s'); keys.delete('w'); }
+    }, 100);
+    window.__ugDeckDir = true;
+    window.__ugShuttle = () => { clearInterval(id); keys.delete('w'); keys.delete('s'); };
+  }, pose);
+  await page.waitForTimeout(1500);
+  return page.evaluate(() => {
+    const c = window.__ug.camera, f = new window.__ugTHREE.Vector3();
+    c.getWorldDirection(f);
+    return { p: c.position.toArray(), t: [c.position.x + f.x * 50, c.position.y + f.y * 50, c.position.z + f.z * 50] };
+  });
+};
+// --quality <n>: pin Manual at rung n (0 to 14) of QUALITY_LEVELS, for profiling. The page's own trace then reports
+// the pinned rung (Manual leaves the controller idle, so its `get` would still say rung 0).
+export const parseQuality = (v) => {
+  if (v == null) return null;
+  const n = String(v).trim() === '' ? NaN : Number(v);
+  if (!Number.isInteger(n) || n < 0 || n >= QUALITY_LEVELS.length) throw new Error(`--quality takes a rung from 0 to ${QUALITY_LEVELS.length - 1}, got "${v}"`);
+  return n;
+};
+let s16rQuality = null; // set by main() from --quality; measure() reads it when its caller passes none
+// ── /s16:R ──
 export const SETUPS = {
   'as-lived': { dpr: 2, cpuThrottle: 1 },
   weak: { dpr: 1, cpuThrottle: 4 },
@@ -252,7 +323,14 @@ function machineNote() {
 }
 
 /** Measure one setup on one origin. */
-export async function measure({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS }) {
+// ── s16:R ── the signature gains `quality` (null: Automatic as before); the wrapper records it in the JSON
+export async function measure(args) {
+  const quality = args.quality ?? s16rQuality;
+  const r = await measureRun({ ...args, quality });
+  return quality != null ? { ...r, quality } : r;
+}
+async function measureRun({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS, quality = null }) {
+// ── /s16:R ──
   const { chromium } = await import('@playwright/test');
   const S = SETUPS[setup]; if (!S) throw new Error(`unknown setup ${setup}`);
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
@@ -284,6 +362,18 @@ export async function measure({ setup, origin, label = origin, views = Object.ke
       const gl = u.composer.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
       return { gpu: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null, dpr: devicePixelRatio };
     });
+    // ── s16:R ── --quality n: Manual at rung n, shadows as that rung says (not persisted), the trace reporting the rung
+    if (quality != null) {
+      if (views.includes('arrival')) { console.log('--quality: the arrival view drives the controller, so it is skipped'); views = views.filter(v => v !== 'arrival'); }
+      await page.evaluate((n) => {
+        const u = window.__ug, q = n.rung;
+        u.setRenderQualityMode('manual');
+        u.renderQuality.set({ scale: q.scale, samples: q.samples });
+        window.__ugSun.setShadowsEnabled(q.shadows, { persist: false });
+        u.adaptiveQuality.get = () => ({ level: n.level, ...q });
+      }, { level: quality, rung: QUALITY_LEVELS[quality] });
+    }
+    // ── /s16:R ──
     if (S.cpuThrottle > 1) { const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: S.cpuThrottle }); }
     // Warm-up: visit every standard view once so programs and uploads are settled.
     for (const [name, v0] of Object.entries(ALL_VIEWS)) {
@@ -346,6 +436,10 @@ async function main() {
   const { pos, opt } = parseArgs(rest);
   const views = opt.views ? opt.views.split(',') : Object.keys(VIEWS);
   const settleS = +(opt.settle ?? process.env.TRACE_S ?? 24), arrivalS = +(opt['arrival-s'] ?? settleS);
+  // ── s16:R ──
+  s16rQuality = parseQuality(opt.quality);
+  if (s16rQuality != null) console.log(`quality pinned: Manual at rung ${s16rQuality} (${JSON.stringify(QUALITY_LEVELS[s16rQuality])})`);
+  // ── /s16:R ──
   const setupsOf = s => (s === 'both' ? ['as-lived', 'weak'] : [s]);
   if (cmd === 'run') {
     const [setup, origin] = pos;
