@@ -24,7 +24,9 @@
 import { test, expect } from '@playwright/test';
 
 // Not serial: one failing leg does not hide the others. Every test sets its own state up on the shared page.
-test.setTimeout(240000);
+// Sprint 16Oct26f (T-route): a leg is bounded by the mode clock, which advances at most 0.05 s a frame, so at 10 fps a 90 s leg takes
+// 180 s of wall; with the setup that is maxMs / 0.5 + 60 s = 240 s, and 300 s leaves the margin for a loaded GPU.
+test.setTimeout(300000);
 
 const VE = 5;
 const TRACK_LANE_M = 3.6;           // the lane (2.6 m) and a metre
@@ -97,10 +99,15 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 90000, via 
     for (const k of keys) ug.fpsControls.keys.add(k);
     const t0 = performance.now();
     let vi = 0;
-    // The budget is the mode clock (a leg of 90 s or less of walking); the wall clock only guards a stalled page (a loaded GPU
-    // draws fewer frames a second, and the walk's own step is per frame).
+    // The budget is the mode clock (a leg of 90 s or less of walking). Sprint 16Oct26f (T-route, D-054): the wall clock used to be
+    // a bound of its own (maxMs x 2), but the mode clock advances at most 0.05 s a frame, so below 20 fps a 90 s leg needs more
+    // than 180 s of wall and was cut short under load ("failed twice under load, passed alone"). The only other bound now is a
+    // stall: the mode clock has not advanced for 15 s of wall time (a stalled page, not a slow one).
+    let lastClock = c0, lastProgress = performance.now();
     try {
-      while (performance.now() - t0 < maxMs * 2 && m.debug().clock - c0 < maxMs / 1000) {
+      while (m.debug().clock - c0 < maxMs / 1000) {
+        const clk = m.debug().clock, now = performance.now();
+        if (clk > lastClock + 1e-9) { lastClock = clk; lastProgress = now; } else if (now - lastProgress > 15000) break;
         if (via) {
           const d0 = m.debug(), c = ug.camera.position;
           while (vi < via.length && since(d0).some(a => a.name === via[vi])) vi++;
@@ -143,21 +150,31 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 90000, via 
   }, { lineId, until, keys, maxMs, via });
 }
 
-/** For each given (x, z): the plan distance to the line's drawn track, the deck height and the class there (acceptance D, deckY, clsAt). */
+/**
+ * For each given (x, z, y): the plan distance to the line's drawn track, the deck height and the class there (acceptance D, deckY, clsAt), and
+ * `ride`: the same for the drawn piece NEAREST IN THREE DIMENSIONS (plan distance and the height between the eye and the deck, in canonical metres).
+ * Sprint 16Oct26f (T-route, D-054): where two drawn pieces of the line cross at different heights the plan-nearest one is whichever lies a hair
+ * closer to the frame's position: at (5721, 1778) south of Rotherhithe a viaduct piece starting at (5719, 1778) is 2.24 m away in plan and 8.6 m up,
+ * while the surface piece the walker rides is 2.21 m away and 2.0 m up. Which was nearest depended on where the frame happened to land, so the
+ * "eye above the deck" check failed on some runs and passed on others (seen in the serial suite, never alone). The eye is by construction 1.7 m above
+ * the deck it rides, so that check reads `ride`; the hops and the "eye over 3 m above" share keep the plan-nearest piece as they always did.
+ */
 const nearDrawn = (line, pts) => page.evaluate(([line, pts]) => {
   const pieces = window.__ug.overground.userData.linePaths.get(line.replace(/^og:/, '')).filter(Boolean);
-  return pts.map(([x, z]) => {
-    let best = { d: Infinity, y: 0, cls: null };
+  return pts.map(([x, z, ey]) => {
+    let best = { d: Infinity, y: 0, cls: null }, ride = { d: Infinity, y: 0, cls: null }, rideScore = Infinity;
     for (const P of pieces) {
       for (let i = 0; i + 1 < P.length; i++) {
         const a = P[i], b = P[i + 1], dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
         let t = L2 > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / L2 : 0;
         t = Math.min(1, Math.max(0, t));
-        const d = Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t));
-        if (d < best.d) best = { d, y: a.y + (b.y - a.y) * t, cls: t < 0.5 ? a.cls : b.cls };
+        const d = Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)), y = a.y + (b.y - a.y) * t, cls = t < 0.5 ? a.cls : b.cls;
+        if (d < best.d) best = { d, y, cls };
+        const score = Math.hypot(d, (ey - y) / 5);
+        if (score < rideScore) { rideScore = score; ride = { d, y, cls }; }
       }
     }
-    return best;
+    return { ...best, ride };
   });
 }, [line, pts]);
 
@@ -195,9 +212,9 @@ const offTrackSites = (line) => page.evaluate((line) => {
 /** The checks on every open frame of a leg (O-RTE-b); returns counts. */
 async function checkLeg(r, line, label, { slack = true } = {}) {
   const open = r.frames.filter(f => f.regime === 'open' && f.phase === 'tunnel');
-  const near = await nearDrawn(line, open.map(f => [f.x, f.z]));
+  const near = await nearDrawn(line, open.map(f => [f.x, f.z, f.y]));
   const sites = await offTrackSites(line);
-  let hops = 0;
+  let hops = 0, hopM = 0;   // hopM: metres walked in hop frames (s16:T)
   const high = [];   // frames with the eye more than 3 m above the nearest drawn deck, within the lane
   open.forEach((f, i) => {
     expect(f.y, `${label}: above the terrain at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`).toBeGreaterThanOrEqual(f.g + 0.5 * VE * r.ratio - 1e-6);
@@ -206,16 +223,20 @@ async function checkLeg(r, line, label, { slack = true } = {}) {
     const exempt = sites.some(s => Math.hypot(f.x - s.x, f.z - s.z) <= s.off + 10);
     const n = near[i];
     if (!exempt) {
-      if (n.d > TRACK_LANE_M) { hops++; expect(n.d, `${label}: a junction hop beyond 20 m at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`).toBeLessThanOrEqual(20); }
+      if (n.d > TRACK_LANE_M) { hops++; hopM += i > 0 ? Math.hypot(f.x - open[i - 1].x, f.z - open[i - 1].z) : 0; expect(n.d, `${label}: a junction hop beyond 20 m at ${f.x.toFixed(0)}, ${f.z.toFixed(0)}`).toBeLessThanOrEqual(20); }
+      if (n.ride.cls !== 'tunnel') expect(f.y - n.ride.y, `${label}: eye height above the deck at ${f.x.toFixed(0)}, ${f.z.toFixed(0)} (${n.ride.cls})`).toBeGreaterThanOrEqual(0.5 * VE * r.ratio - 1e-6);
       if (n.cls !== 'tunnel') {
         const above = f.y - n.y;
-        expect(above, `${label}: eye height above the deck at ${f.x.toFixed(0)}, ${f.z.toFixed(0)} (${n.cls})`).toBeGreaterThanOrEqual(0.5 * VE * r.ratio - 1e-6);
         if (n.d <= TRACK_LANE_M && above > 3.0 * VE * r.ratio + 1e-6) high.push({ at: [Math.round(f.x), Math.round(f.z)], aboveM: +(above / VE / r.ratio).toFixed(2), deckBelowGroundM: +((f.g - n.y) / VE / r.ratio).toFixed(2),
           clamped: Math.abs(f.y - (f.g + 1 * VE * r.ratio)) < 1e-3, cls: n.cls, i });
       }
     }
   });
-  if (slack) expect(hops / Math.max(1, open.length), `${label}: frames between 3.6 and 20 m of the track`).toBeLessThanOrEqual(0.01);
+  // Sprint 16Oct26f (T-route, D-054): the share is of DISTANCE walked, not of frames. A frame is a wall-clock sample of a walk at 200 m/s, so a slower
+  // or hitchier run puts more of its frames at a junction hop (0.0105 of the frames in one full-file run, 0.010 or less alone) with the same walk.
+  // The bound is the same 0.01, now of the open distance walked.
+  const openM = open.reduce((m, f, i) => m + (i > 0 ? Math.hypot(f.x - open[i - 1].x, f.z - open[i - 1].z) : 0), 0);
+  if (slack) expect(hopM / Math.max(1, openM), `${label}: share of the open distance between 3.6 and 20 m of the track`).toBeLessThanOrEqual(0.01);
   // The eye is 1.7 m above the rail head, 3 m at most above the nearest drawn deck. The exceptions are the flanks of a tunnel bridged
   // as an overbridge (a tunnel run under 60 m between open runs is shown open, the rail head straight across): the drawn deck dips
   // into the first tunnel sample (surface-rail.js smooths the tunnel samples down into the ground), so the nearest drawn point
@@ -278,6 +299,11 @@ const bores = [];   // bore frames of the Weaver, Windrush and Lioness legs, for
 
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  // Sprint 16Oct26f (T-route): UG_CPU_THROTTLE=4 runs the page under a 4x CPU throttle (the legs must hold at 10 to 20 fps)
+  if (Number(process.env.UG_CPU_THROTTLE) > 1) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.UG_CPU_THROTTLE) });
+  }
   await boot();
 });
 test.afterAll(async () => { await page?.close(); });
