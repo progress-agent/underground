@@ -4498,6 +4498,9 @@ function tick(frameTime) {
   // ── s02:F ── near/far follow the display height (above 20,000 units only); before the sun fit, fog and sky read the range
   viewRange.update();
   // ── /s02:F ──
+  // ── s16:R ── shadowSnap: the shadow fit snaps along the light too
+  sunSystem.setAlongSnap(economies.on('shadowSnap'));
+  // ── /s16:R ──
   // ── sprint:D ──
   // Air-substrate sun blend and shadow fit; must precede the environment and
   // lighting updates below. Automatic quality level 1+ drops shadows first.
