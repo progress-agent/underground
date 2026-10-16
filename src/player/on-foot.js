@@ -45,15 +45,22 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
   });
 
   // ── s16:T ── T-near (D-054): the wall distance round the eye (first person) or round the pulled-in camera (third)
-  const s16tProbe = createClearanceProbe({ collision: { moveAndSlide: (...a) => ctx.collision.moveAndSlide(...a) }, VE });
-  const s16tCam = createClearanceProbe({ collision: { moveAndSlide: (...a) => ctx.collision.moveAndSlide(...a) }, VE });
+  const s16tColl = { moveAndSlide: (pos, delta, o) => ctx.collision.moveAndSlide(pos, delta, o) };   // ctx.collision is wired after this is built
+  const s16tProbe = createClearanceProbe({ collision: s16tColl, VE });
+  const s16tCam = createClearanceProbe({ collision: s16tColl, VE });
+  const s16tBandEye = { feetY: 0, height: 0, radius: 0, hosts: null }, s16tBandCam = { feetY: 0, height: 0, radius: 0, hosts: null };   // reused every frame
   /** The near plane a wall within reach of `cam` allows, or null when nothing is within reach. */
-  let s16tHostsOf = null, s16tHosts = null;   // the station hosts' squares (raised boxes the collision band passes under), per index
+  let s16tHostsOf = null, s16tHosts = null, s16tHostsAt = -1e9;   // the station hosts' squares (raised boxes the collision band passes under), per index
   function s16tClearNear(cam, probe, band) {
     if (typeof ctx.collision?.moveAndSlide !== 'function') return null;
-    const idx = ctx.stationBuildings?.()?.index;   // station-buildings.js: the data index (the facade also holds the meshes)
-    if (idx && idx !== s16tHostsOf) { s16tHostsOf = idx; s16tHosts = (idx.buildings || []).filter((b) => b.host).map((b) => b.host); }
-    const wall = probe.measure(cam.position.x, cam.position.y, cam.position.z, { ...band, hosts: s16tHosts });
+    // the getter builds a small facade object per call, so ask for the data index only until it exists and then every 5 s (a swap is still seen)
+    if (s16tHostsOf === null || (ctx.time ?? 0) - s16tHostsAt > 5) {
+      s16tHostsAt = ctx.time ?? 0;
+      const idx = ctx.stationBuildings?.()?.index;   // station-buildings.js: the data index (the facade also holds the meshes)
+      if (idx && idx !== s16tHostsOf) { s16tHostsOf = idx; s16tHosts = (idx.buildings || []).filter((b) => b.host).map((b) => b.host); }
+    }
+    band.hosts = s16tHosts;
+    const wall = probe.measure(cam.position.x, cam.position.y, cam.position.z, band);
     if (wall === null) return null;
     return nearForWall(wall, cornerFactor(cam.fov, cam.aspect));
   }
@@ -255,7 +262,8 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
         // ── s16:T ── also clear of any wall within 1.5 m of the camera, pulled in or not (an alley's wall beside the camera
         // was cut the same way); never nearer than the rig asked, and the camera itself is not moved
         {
-          const clear = s16tClearNear(cam, s16tCam, { feetY: cam.position.y - 0.3 * VE, height: 0.6 * VE, radius: 0.05 });
+          s16tBandCam.feetY = cam.position.y - 0.3 * VE; s16tBandCam.height = 0.6 * VE; s16tBandCam.radius = 0.05;
+          const clear = s16tClearNear(cam, s16tCam, s16tBandCam);
           if (clear !== null && (wantNear === null || clear < wantNear)) wantNear = clear;
         }
         // ── /s16:T ──
@@ -265,9 +273,8 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
         // ── s16:T ── first person on foot or on the board: a wall within 1.5 m of the eye lowers the near plane so the
         // frame's corners stay clear of it (pressed against a facade the eye is 0.35 m away; near 1.0 reaches 1.2 m).
         // Only ever lowers it: above 20 km view-range.js owns a larger near.
-        const clear = s16tClearNear(cam, s16tProbe, {
-          feetY: body.y, height: (P.eye + BODY.headroom) * VE, radius: BODY.radius - 0.02,
-        });
+        s16tBandEye.feetY = body.y; s16tBandEye.height = (P.eye + BODY.headroom) * VE; s16tBandEye.radius = BODY.radius - 0.02;
+        const clear = s16tClearNear(cam, s16tProbe, s16tBandEye);
         if (clear !== null && clear < cam.near) { cam.near = clear; cam.updateProjectionMatrix(); }
         // ── /s16:T ──
       }
