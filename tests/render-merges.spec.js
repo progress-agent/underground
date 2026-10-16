@@ -73,6 +73,10 @@ test.beforeAll(async ({ browser }) => {
     const u = window.__ug;
     u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 });
     window.__ugSun.setShadowsEnabled(true, { persist: false });
+    // s16:R (sprint 16Oct26f): trainCull stops posing and batching the tube trains in the frames whose render hides them
+    // (every above-ground view), so the batch counters this spec reads (batches, instances) stay at 0 there. This spec
+    // renders outside the cull (R.render) and tests the batch economy on its own terms, so it keeps the trains synced.
+    u.economies.set('trainCull', false);
   });
   await page.waitForTimeout(3000);
 });
