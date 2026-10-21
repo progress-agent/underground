@@ -3,6 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- s21:L: the opening's big downloads start here, at HTML parse, so they overlap the bundle download and
+         evaluation instead of queueing behind the work that needs them. src/boot-fetch.js hands each request to the
+         loader that used to start it; a request nobody takes is simply dropped. Wave 1: the terrain inputs, the
+         river and the M25 ring. -->
+    <script>
+      (function () {
+        var held = Object.create(null);
+        function start(url, cache) {
+          var p;
+          try { p = fetch(url, cache === 'default' ? undefined : { cache: cache }); } catch (e) { return; }
+          p.catch(function () {}); // a request nobody takes must not log an unhandled rejection
+          held[url] = { p: p, cache: cache };
+        }
+        window.__ugBoot = {
+          start: start,
+          has: function (url) { return !!held[url]; },
+          take: function (url, cache) {
+            var h = held[url];
+            if (!h || h.cache !== cache) return null;
+            delete held[url];
+            return h.p;
+          },
+        };
+        start('/data/terrain/london_full_height.json', 'no-store');
+        start('/data/terrain/london_full_height_u16.png', 'default');
+        start('/data/terrain/stratford-dtm.json', 'default');
+        start('/data/terrain/airport-dtm.json', 'default');
+        start('/data/terrain/southern-dtm.json', 'default');
+        start('/data/thames.json', 'no-store');
+        start('/data/m25.json', 'no-store');
+      })();
+    </script>
     <meta name="theme-color" content="#05070b" />
     <meta name="description" content="Interactive 3D visualization of the London Underground network with depth data, Crossrail, Tideway Tunnel, and geological strata. Explore 248 stations across 11 tube lines." />
     <meta property="og:title" content="UnderGround — London Underground 3D Visualization" />

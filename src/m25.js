@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 import { RENDER_ORDER } from './render-layers.js';
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { xzToTerrainUV } from './terrain.js';
@@ -10,7 +11,7 @@ import { rasterSignedDistanceMask, MAP_EDGE_SDF_BAND_M } from './m25-edge.js';
  */
 export async function loadM25Data() {
   try {
-    const res = await fetch('/data/m25.json', { cache: 'no-store' });
+    const res = await bootFetch('/data/m25.json', { cache: 'no-store' }) /* s21:L */;
     if (!res.ok) return null;
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('json')) return null;

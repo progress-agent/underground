@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 import UPNG from 'upng-js';
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import {
@@ -213,7 +214,7 @@ function applyPhysicalTerrainCorrection(hm, meta, correction) {
  * Returns { floats: Float32Array (normalised 0..1), width, height, minRaw, rawRange }.
  */
 async function load16bitHeightmap(url) {
-  const res = await fetch(url);
+  const res = await bootFetch(url); // s21:L
   if (!res.ok) throw new Error(`Failed to fetch heightmap: ${res.status}`);
   const buf = await res.arrayBuffer();
   const png = UPNG.decode(buf);
@@ -519,7 +520,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     let meta = null;
     for (const path of ['/data/terrain/london_full_height.json', '/data/terrain/victoria_dtm_u16.json']) {
       try {
-        const res = await fetch(path, { cache: 'no-store' });
+        const res = await bootFetch(path, { cache: 'no-store' }); // s21:L
         if (!res.ok) continue;
         const ct = res.headers.get('content-type') || '';
         if (!ct.includes('json')) continue;  // Skip HTML fallback responses
@@ -539,7 +540,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     // DSM includes roofs. Replace only independently validated Stratford
     // coverage with EA bare-earth elevations, before geometry, normals, colours
     // and all height samplers are built. Missing correction must be visible.
-    const correctionResponse = await fetch(TERRAIN_CORRECTION_URL);
+    const correctionResponse = await bootFetch(TERRAIN_CORRECTION_URL) /* s21:L */;
     if (!correctionResponse.ok || !(correctionResponse.headers.get('content-type') || '').includes('json')) {
       throw new Error('Required Stratford DTM correction is unavailable');
     }
@@ -550,12 +551,12 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
 
     // Airport terminal/hangar roofs are also present in the legacy DSM. Use
     // complete, validated EA bare-earth patches, blending only inside coverage.
-    const airportResponse=await fetch(AIRPORT_TERRAIN_URL);
+    const airportResponse=await bootFetch(AIRPORT_TERRAIN_URL) /* s21:L */;
     if(!airportResponse.ok||!(airportResponse.headers.get('content-type')||'').includes('json'))throw Error('Required airport DTM corrections unavailable');
     const airportCorrections=validateAirportTerrainCorrections(await airportResponse.json());
     meta.airportTerrainCorrections=applyAirportTerrainCorrections(hm,meta,airportCorrections);
 
-    const southernResponse=await fetch(SOUTHERN_TERRAIN_URL);
+    const southernResponse=await bootFetch(SOUTHERN_TERRAIN_URL) /* s21:L */;
     if(!southernResponse.ok||!(southernResponse.headers.get('content-type')||'').includes('json'))throw new Error('Required southern DTM extension unavailable');
     const southern=validateSouthernTerrain(await southernResponse.json());
     // Append forty old grid rows, keeping every old BNG grid node in place.
