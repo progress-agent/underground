@@ -29,6 +29,8 @@ async function gotoLoaded(page) {
         .every(n => !!window.__ug.scene.getObjectByName(n)),
     null, { timeout: 90000 }
   );
+  // s21:L: the motorway, airports, map-edge cliff and the rest are built after the landing (a deep link starts them at once)
+  await page.waitForFunction(() => !window.__ug.lateLayers || window.__ug.lateLayers.settled(), null, { timeout: 90000 });
   await page.waitForTimeout(3000);
 }
 
@@ -179,7 +181,12 @@ test('crossrail stays visible at 4000m broadside (alpha-fade regression)', async
   // Old alpha fade: 0.06-0.11% (invisible). Haze keeps the line legible —
   // measured 0.95% @ meanDelta 70 on 10Jul26f; thresholds allow pose jitter.
   expect(fp.changedPct).toBeGreaterThan(0.4);
-  expect(fp.meanDelta).toBeGreaterThan(30);
+  // s21:L: 30 became 20. The 30 was measured while the page was still loading (the live build's screenshot shows the
+  // loading bar and no city overhead), against a dark brown clay. The opening now finishes sooner, so the grey city
+  // is overhead when the pose is shot, and the line's mean contrast against it is lower: 7c2d4bd fully loaded gives
+  // 0.45% changed at mean 39 on this pose, the same as this build (24.9 after the test's downsample). The regression
+  // this test guards (an alpha fade to 0.06-0.11% changed) is still caught by the changedPct line above.
+  expect(fp.meanDelta).toBeGreaterThan(20);
 });
 
 test('tideway reads broadside over the chalk floor at 400m (contrast floor)', async ({ page }) => {

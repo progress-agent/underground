@@ -313,7 +313,15 @@ function sceneCentroid(pts) {
  * @param {function}         getSurfaceY   (x,z) → world Y
  * @returns {Array<object>}
  */
+// s21:L (approach E): a generator with a `yield` every few river segments, so the cliff layer can be built a few
+// milliseconds a frame after landing; computeThamesCrossings drains it, so the arithmetic is the original's.
 export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
+  const steps = computeThamesCrossingsSteps(thamesPoints, m25Points, getSurfaceY);
+  let r;
+  do { r = steps.next(); } while (!r.done);
+  return r.value;
+}
+export function* computeThamesCrossingsSteps(thamesPoints, m25Points, getSurfaceY) {
   const crossings = [];
   if (!thamesPoints?.length || !m25Points?.length) return crossings;
 
@@ -333,6 +341,7 @@ export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
   const line = thamesPoints.map(p => bngToScene(p.e, p.n));
   const hits = [];
   for (let i = 0; i < line.length - 1; i++) {
+    if (i % 10 === 0) yield; // s21:L
     const a = line[i], b = line[i + 1], rx = b.x - a.x, rz = b.z - a.z;
     for (let j = 0; j < m25Scene.length - 1; j++) {
       const p = m25Scene[j], q = m25Scene[j + 1], sx = q.x - p.x, sz = q.z - p.z;
@@ -409,7 +418,7 @@ export function computeThamesCrossings(thamesPoints, m25Points, getSurfaceY) {
  * @param {function}                                     getSurfaceY   (x,z) → world Y
  * @returns {THREE.Group}
  */
-export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
+export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY, crossings = null) { // s21:L: crossings = computeThamesCrossings' answer, when the caller already has it
   const group = new THREE.Group();
   group.name = 'thamesWaterfalls';
 
@@ -417,7 +426,7 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY) {
 
   // One source of truth with the skirt notch (sprint 23Sep26w): each ribbon
   // spills exactly where computeThamesCrossings says the river leaves the map.
-  for (const c of computeThamesCrossings(thamesPoints, m25Points, getSurfaceY)) {
+  for (const c of crossings ?? computeThamesCrossings(thamesPoints, m25Points, getSurfaceY)) {
     const ep = { width: c.width, dirSign: c.side === 'east' ? 1 : -1 };
     const intersection = { x: c.x, z: c.z, surfaceY: c.surfaceY };
     const dirX = c.dirX, dirZ = c.dirZ;

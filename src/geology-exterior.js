@@ -31,6 +31,7 @@ import { RENDER_ORDER } from './render-layers.js';
 
 // Boundary is sourced in BNG and projected with the runtime Trafalgar origin.
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
+import { computeVertexNormalsSteps } from './sliced-geometry.js'; // s21:L
 
 function bngToScene(e, n) {
   return { x: e - BNG_REF_E, z: -(n - BNG_REF_N) };
@@ -96,7 +97,12 @@ function firstSegmentFacesOutward(ringXZ /*, centroid */) {
  * @param {Array<object>} crossings       Thames boundary crossings (scene coords)
  * @returns {THREE.Mesh}
  */
-function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
+// s21:L (approach E): the three builders below are generators with a `yield` every few hundred iterations, so the cliff
+// layer can be built a few milliseconds a frame after landing (src/late-layers.js); the plain functions drain them, so the
+// arithmetic and the order of every statement are the original's.
+const drain = (steps) => { let r; do { r = steps.next(); } while (!r.done); return r.value; };
+
+function* buildClaySkirtSteps(m25Points, getSurfaceY, chalkTopY, crossings) {
   // Ring vertices in scene coords + their local surface Y (skirt top).
   // Sprint 23Sep26w: the ring is densified to <= SKIRT_STEP_M so the lip
   // follows the terrain it clips; long straight motorway chords would
@@ -106,6 +112,7 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   if (flat.length > 1 && flat[0].x === flat.at(-1).x && flat[0].z === flat.at(-1).z) flat.pop();
   const ring = [];
   for (let i = 0; i < flat.length; i++) {
+    if (i % 16 === 0) yield; // s21:L
     const a = flat[i], b = flat[(i + 1) % flat.length];
     const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / SKIRT_STEP_M));
     for (let k = 0; k < steps; k++) {
@@ -149,6 +156,7 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   // quads per segment (skipping notch segments).
   const rowVert = (ri, row) => ri * (ROWS + 1) + row;
   for (let ri = 0; ri < N; ri++) {
+    if (ri % 150 === 0) yield; // s21:L
     const r = ring[ri];
     for (let row = 0; row <= ROWS; row++) {
       const t = row / ROWS;                    // 0 = top (surface), 1 = chalk top
@@ -164,6 +172,7 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   }
 
   for (let ri = 0; ri < N; ri++) {
+    if (ri % 300 === 0) yield; // s21:L
     const a = ring[ri];
     const b = ring[(ri + 1) % N];
     const ni = (ri + 1) % N;
@@ -177,8 +186,11 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
 
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  yield; // s21:L
   geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  yield; // s21:L
   geom.setIndex(indices);
+  yield; // s21:L
 
   // Global winding flip if the fixed emit order faced inward.
   if (!firstSegmentFacesOutward(ring, { x: cx, z: cz })) {
@@ -188,7 +200,7 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
     }
     geom.index.needsUpdate = true;
   }
-  geom.computeVertexNormals();
+  yield* computeVertexNormalsSteps(geom); // s21:L
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -203,6 +215,8 @@ function buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings) {
   mesh.renderOrder = RENDER_ORDER.EXTERIOR_SKIRT;
   return mesh;
 }
+
+function buildClaySkirt(...args) { return drain(buildClaySkirtSteps(...args)); } // s21:L
 
 // Arc-length resample a scene-coord ring to `count` evenly-spaced points, then
 // smooth with a couple of moving-average passes so the raw ~270-vertex M25
@@ -253,7 +267,7 @@ function smoothRing(ringXZ, count = 128, smoothPasses = 2) {
  * @param {object}       [opts]
  * @returns {THREE.Mesh}
  */
-function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
+function* buildChalkColumnSteps(m25Points, chalkTopY, opts = {}) {
   const {
     bottomY = -19000,       // geometry extent (fades out just above this)
     levels = 64,            // vertical divisions (raised with the deeper column)
@@ -302,6 +316,7 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   const vAt = (ri, lj) => ri * (levels + 1) + lj;
 
   for (let ri = 0; ri < M; ri++) {
+    if (ri % 48 === 0) yield; // s21:L
     const ir = insetRing[ri];
     // Around-ring striation factor (independent of depth). Sampled on a CIRCLE
     // so it wraps seamlessly at ri=0/M — a linear ri/5.5 term jumps at the wrap
@@ -328,6 +343,7 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   }
 
   for (let ri = 0; ri < M; ri++) {
+    if (ri % 60 === 0) yield; // s21:L
     const ni = (ri + 1) % M;
     for (let lj = 0; lj < levels; lj++) {
       const TL = vAt(ri, lj),     BL = vAt(ri, lj + 1);
@@ -338,9 +354,12 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
 
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  yield; // s21:L
   geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geom.setAttribute('alpha', new THREE.Float32BufferAttribute(alphas, 1));
+  yield; // s21:L
   geom.setIndex(indices);
+  yield; // s21:L
 
   if (!firstSegmentFacesOutward(ring, { x: cx, z: cz })) {
     const idx = geom.index.array;
@@ -349,7 +368,7 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
     }
     geom.index.needsUpdate = true;
   }
-  geom.computeVertexNormals();
+  yield* computeVertexNormalsSteps(geom); // s21:L
 
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -374,6 +393,8 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
   return mesh;
 }
 
+function buildChalkColumn(...args) { return drain(buildChalkColumnSteps(...args)); } // s21:L
+
 /**
  * Build the full exterior geology group: clay disc skirt + fading chalk column.
  *
@@ -384,14 +405,18 @@ function buildChalkColumn(m25Points, chalkTopY, opts = {}) {
  * @returns {THREE.Group}
  */
 export function createGeologyExterior(m25Points, chalkTopY, getSurfaceY, crossings = []) {
+  return drain(createGeologyExteriorSteps(m25Points, chalkTopY, getSurfaceY, crossings)); // s21:L
+}
+export function* createGeologyExteriorSteps(m25Points, chalkTopY, getSurfaceY, crossings = []) {
   const group = new THREE.Group();
   group.name = 'geology-exterior';
   if (!m25Points?.length) return group;
 
-  const skirt = buildClaySkirt(m25Points, getSurfaceY, chalkTopY, crossings);
+  const skirt = yield* buildClaySkirtSteps(m25Points, getSurfaceY, chalkTopY, crossings);
   if (skirt) group.add(skirt);
+  yield;
 
-  const column = buildChalkColumn(m25Points, chalkTopY);
+  const column = yield* buildChalkColumnSteps(m25Points, chalkTopY);
   if (column) group.add(column);
 
   console.log(

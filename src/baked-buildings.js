@@ -257,6 +257,53 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
 }
 
 /**
+ * s21:L (hook 1 for lane V). The extent of every tile's records, [minX, minZ, maxX, maxZ] in scene metres: one pass
+ * over the payload (about 10 ms), made only when an `origin` order or a completeRadius is asked for.
+ */
+export function tileExtents(payload) {
+  const { view, tiles } = payload;
+  return tiles.map((t) => {
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, off = t.offset;
+    for (let i = 0; i < t.count; i++, off += REC_BYTES) {
+      const x = t.minX + view.getUint16(off, true) * 0.1;
+      const z = t.minZ + view.getUint16(off + 2, true) * 0.1;
+      const hx = view.getUint16(off + 6, true) * 0.05;
+      if (x - hx < minX) minX = x - hx;
+      if (x + hx > maxX) maxX = x + hx;
+      if (z - hx < minZ) minZ = z - hx;
+      if (z + hx > maxZ) maxZ = z + hx;
+    }
+    return t.count ? [minX, minZ, maxX, maxZ] : [t.minX, t.minZ, t.minX, t.minZ];
+  });
+}
+
+/** Distance from (x, z) to an extent rectangle (0 inside it). */
+export function distanceToExtent(extent, x, z) {
+  const dx = Math.max(extent[0] - x, 0, x - extent[2]);
+  const dz = Math.max(extent[1] - z, 0, z - extent[3]);
+  return Math.hypot(dx, dz);
+}
+
+/** A tile order from options: `order` (a permutation of tile indices) or `origin` ({x, z}, nearest first); else index order. */
+export function resolveTileOrder(payload, { order = null, origin = null } = {}, extents = null) {
+  const n = payload.tiles.length;
+  if (Array.isArray(order) || ArrayBuffer.isView(order)) {
+    const seen = new Uint8Array(n);
+    let ok = order.length === n;
+    for (let i = 0; ok && i < order.length; i++) { const k = order[i]; if (!Number.isInteger(k) || k < 0 || k >= n || seen[k]) ok = false; else seen[k] = 1; }
+    if (ok) return Array.from(order);
+    console.warn('[baked-buildings] tile order is not a permutation of the tiles; using index order');
+    return null;
+  }
+  if (origin && Number.isFinite(origin.x) && Number.isFinite(origin.z)) {
+    const ex = extents || tileExtents(payload);
+    const d = ex.map((e) => distanceToExtent(e, origin.x, origin.z));
+    return Array.from({ length: n }, (_, i) => i).sort((a, b) => d[a] - d[b] || a - b);
+  }
+  return null;
+}
+
+/**
  * Frame-budgeted builder over the whole payload.
  *
  * @param {object}   payload   from fetchBakedBuildings / parseBakedBuildings
@@ -264,13 +311,21 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
  * @param {number}   opts.VE         vertical exaggeration to apply at build time
  * @param {THREE.Material} opts.material  shared building material (carries the D-023 uniform)
  * @param {Function} opts.onMesh     (mesh) => void, called per completed tile
- * @returns {{pump: Function, isDone: Function, stats: Function}}
+ * @param {number[]} [opts.order]    s21:L: tile indices in the order to build them (a permutation); default index order
+ * @param {{x:number,z:number}} [opts.origin]  s21:L: build nearest-first from this point (used when no `order`)
+ * @returns {{pump: Function, isDone: Function, stats: Function, completeRadius: Function}}
  */
-export function createBakedBuildingBuilder(payload, { VE, material, onMesh, suppressBuilding = null }) {
+export function createBakedBuildingBuilder(payload, { VE, material, onMesh, suppressBuilding = null, order = null, origin = null }) {
   let next = 0;
   let placed = 0;
   let meshes = 0;
   let elapsedMs = 0;
+  let extents = null;
+  const getExtents = () => (extents ||= tileExtents(payload));
+  // The default (no order, no origin) is the original loop over tiles 0..n-1, with no extents computed.
+  const sequence = resolveTileOrder(payload, { order, origin }, !order && origin ? getExtents() : null);
+  const built = new Uint8Array(payload.tiles.length);
+  const tileAt = (n) => (sequence ? sequence[n] : n);
 
   return {
     /**
@@ -282,18 +337,35 @@ export function createBakedBuildingBuilder(payload, { VE, material, onMesh, supp
       if (next >= payload.tiles.length) return true;
       const t0 = performance.now();
       while (next < payload.tiles.length && performance.now() - t0 < budgetMs) {
-        const mesh = buildBakedTile(payload, next, VE, material, suppressBuilding);
+        const index = tileAt(next);
+        const mesh = buildBakedTile(payload, index, VE, material, suppressBuilding);
         if (mesh) {
           placed += mesh.count;
           meshes++;
           onMesh(mesh);
         }
+        built[index] = 1;
         next++;
       }
       elapsedMs += performance.now() - t0;
       return next >= payload.tiles.length;
     },
     isDone: () => next >= payload.tiles.length,
+    /**
+     * s21:L (hook 1): the radius about `origin` within which every tile is built: the distance to the nearest tile
+     * still to build (Infinity once all are built).
+     */
+    completeRadius(at) {
+      if (next >= payload.tiles.length) return Infinity;
+      const ex = getExtents();
+      let best = Infinity;
+      for (let i = 0; i < ex.length; i++) {
+        if (built[i]) continue;
+        const d = distanceToExtent(ex[i], at.x, at.z);
+        if (d < best) best = d;
+      }
+      return best;
+    },
     stats: () => ({
       tilesBuilt: next,
       tilesTotal: payload.tiles.length,

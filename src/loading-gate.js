@@ -139,6 +139,8 @@ export function createOpeningGate({
     timeline.revealed = ms();
     if (el) el.classList.add('done');
     const snap = readiness.snapshot();
+    // s21:L (hook 4 for lane V): everything the landing needs is built and uploaded, so the lock opens as the descent begins.
+    dispatch('ug:landing-lock', { at: ms() });
     intro.begin();
     let extra = {};
     try { extra = revealDetail?.() ?? {}; } catch (e) { console.warn('[opening] reveal detail failed', e); }

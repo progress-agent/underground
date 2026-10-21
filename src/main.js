@@ -9,13 +9,17 @@ import { bindMasterController, onMasterChange, structureHeightScale, boreRadiusM
 import * as TrueProportion from './true-proportion.js';
 // ── /s25:S ──
 import { createMiniMap } from './mini-map.js';
-import { createAirports, isAirportBuilding, getAirportHoverInfo, AIRPORT_DATA } from './airports.js';
+import { createAirports, createAirportsSteps, isAirportBuilding, getAirportHoverInfo, AIRPORT_DATA } from './airports.js';
 import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSurfaceY, getAirportDockInfo } from './airport-docks.js';
 import { airportSuppressionSignature } from './airport-suppression.js';
 import { createDlrProfile } from './dlr-profile.js';
-import { createMotorway, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
+import { createMotorway, createMotorwaySteps, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
+// ── s21:L ──
+import { createLateLayers, LATE_LAYER_ORDER } from './late-layers.js';
+import { openingHooks } from './opening-hooks.js';
+// ── /s21:L ──
 // ── sprint:F ──
-import { createFlights } from './flights.js';
+import { createFlights, createFlightsSteps } from './flights.js';
 // ── /sprint:F ──
 // ── sprint:integrate ──
 // One world wind (D-037): aircraft choose runways from the same surface wind
@@ -66,12 +70,12 @@ import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
 import { loadThamesData, createThamesVolume, WATER_LEVEL_M, WATER_TOP_Y, updateWater } from './thames.js';
 import { createThamesProfileSampler } from './thames-profile.js';
-import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
-import { createGeologyExterior } from './geology-exterior.js';
+import { loadM25Data, generateM25Mask, applyM25Mask, createM25Road, createThamesWaterfalls, computeThamesCrossings, computeThamesCrossingsSteps, initM25Boundary, isInsideM25, sampleM25Insideness } from './m25.js';
+import { createGeologyExterior, createGeologyExteriorSteps } from './geology-exterior.js';
 // ── sprint:B ──
 import { getMapEdgePointsBNG, getMapEdgeRing, trimRibbonVolumeToRing, isOffMapEdge } from './m25-edge.js';
 // ── s25:E ──
-import { clipWaterToMapEdge, clipLineSegmentsToMapEdge, SCENE_XZ } from './map-edge-clip.js';
+import { clipWaterToMapEdge, clipWaterToMapEdgeSteps, clipLineSegmentsToMapEdge, SCENE_XZ } from './map-edge-clip.js';
 import { findBridgeCrossings, tubeOnDeckY } from './rail-truth.js';
 import { WATER_LIFT as S25E_WATER_LIFT } from './render-layers.js';
 // ── /s25:E ──
@@ -97,8 +101,8 @@ import { getInfraHazeStrength } from './infra-materials.js';
 import { buildCrownRibbons } from './crown-ribbon.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity, createChalkPlane } from './geology.js';
 import { chalkRingFromPoints } from './chalk-field.js'; // s21:L
-import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
-import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
+import { loadReservoirData, createReservoirs, createReservoirsSteps, addReservoirsToLegend } from './reservoirs.js';
+import { loadCanalData, createCanals, createCanalsSteps, addCanalsToLegend } from './canals.js';
 import { createBridges } from './bridges.js';
 import { createOverground } from './overground.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
@@ -997,6 +1001,7 @@ const dlrStationPoints = [];
 // them drawn above ground), surfaceOnly station markers registered beside the
 // line layers as `surface:<line>`, and shared track drawn once with bands.
 let surfaceRail = null, surfaceRailStarting = false;
+let s21SurfaceRailFailed = false; // s21:L: the gate's 'overground' item waits for the open-air track (built async, 60 ms when it lands)
 function startSurfaceRail() {
   if (surfaceRail || surfaceRailStarting || !terrain) return;
   surfaceRailStarting = true;
@@ -1006,6 +1011,7 @@ function startSurfaceRail() {
   createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, // s02:T: beyond the ring the track rides the hidden ground (the same call on the map)
     heightScale: getBuildingHeightScale(), overground: overgroundGroup, dlrProfile }).then(rail => {
     surfaceRail = rail;
+    s21DefineSurfaceTrains(); // s21:L
     for (const [key, layers] of rail.stationLayers) {
       layers.stationsLayer.mesh.visible = stationsVisible;
       lineShaftLayers.set(key, layers);
@@ -1014,6 +1020,8 @@ function startSurfaceRail() {
   }).catch(err => {
     surfaceRailStarting = false;
     console.warn('Could not create the surface railway:', err.message);
+    s21SkipLayers(['surfaceTrains']); // s21:L
+    s21SurfaceRailFailed = true; // s21:L
   });
 }
 // ── s02:B ── The s01:R roof lift (surface station markers lifted over building roofs) is
@@ -1034,13 +1042,29 @@ function surfaceRailTooltip(mesh, hitPoint, faceIndex = null) {
 // surface railway exists (its paths are the track); a top-level group, never
 // `line:`, so D-040's cull leaves it drawn above ground.
 let surfaceTrains = null;
+// ── s21:L ── (approach E) The trains are created after landing, once the surface railway exists (the
+// 'surfaceTrains' late layer, defined where the railway is built); until then there is nothing to update.
 function updateSurfaceTrains() {
-  if (!surfaceTrains && surfaceRail) {
-    surfaceTrains = createSurfaceTrains({ scene, trainSystem, surfaceRail, overground: overgroundGroup, dlrProfile,
-      getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, heightScale: getBuildingHeightScale() }); // s02:T
-  }
   surfaceTrains?.update(camera);
 }
+function s21DefineSurfaceTrains() {
+  if (!surfaceRail || lateLayers.ids().includes('surfaceTrains')) return;
+  lateLayers.define('surfaceTrains', {
+    name: 'surface-trains',
+    steps: function* () {
+      yield;
+      // createSurfaceTrains adds its group to the scene it is given; hand it a stand-in and attach the group later.
+      let held = null;
+      const trains = createSurfaceTrains({ scene: { add: (group) => { held = group; } }, trainSystem, surfaceRail, overground: overgroundGroup, dlrProfile,
+        getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, heightScale: getBuildingHeightScale() }); // s02:T
+      return { trains, group: held || trains.group };
+    },
+    objects: (r) => [r.group],
+    prepare: (r) => { applyShadowPolicy(r.group); const now = getBuildingHeightScale(); if (r.trains.ratio !== now) r.trains.setHeightScale(now); },
+    attach: (r) => { scene.add(r.group); surfaceTrains = r.trains; },
+  });
+}
+// ── /s21:L ──
 // ── /s30:T ──
 
 const sim = {
@@ -1312,6 +1336,38 @@ let thamesProfileSampler = null;
 let seaLife = null; // silent sea life in the Thames, drawn only while submerged
 // ── /sprint:C ──
 const thamesDataPromise = loadThamesData();
+// ── s21:L ── (approach E) Layers the descent never shows are built after landing, one at a time in slices of a few
+// milliseconds a frame, each compiled with renderer.compileAsync before it is attached (src/late-layers.js). On a deep
+// link the opening is bypassed and they start at once. The registry is lane V's hook 2 (src/opening-hooks.js).
+const lateLayers = createLateLayers({
+  isOpen: () => { const phase = intro.getPhase(); return phase === 'done' || phase === 'bypassed'; },
+  // The programs are linked for the render target the scene is drawn into (the composer's), not the canvas: tone mapping and the
+  // output colour space are part of a program's key, so compiling against the canvas links variants nothing draws with.
+  compile: (objects) => {
+    const target = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.readBuffer);
+    try { return Promise.all(objects.map(object => renderer.compileAsync(object, camera, scene))); }
+    finally { renderer.setRenderTarget(target); }
+  },
+});
+openingHooks.register({ lateLayers });
+// settled() and ug:late-layers-done wait for all eight; a layer whose parent step or data failed is skipped, so they never hang.
+lateLayers.expect(LATE_LAYER_ORDER);
+const s21SkipLayers = (ids) => { for (const id of ids) lateLayers.skip(id); };
+// The solo/layer selection last applied (applySoloSelection), so a layer attached later honours it.
+let s21SoloValue = 'all';
+let s21CorridorQueued = false; // the beyond-edge corridor is queued as a late layer once its sources exist
+let s21M25Ready = false; // the readiness item 'm25': the M25 mask is applied and the chalk floor is built
+// A late layer's legend entry keeps the place it had when the layer was built before the veil: reserve it now, fill it at attach.
+function s21LegendSlot() {
+  const legend = document.getElementById('legend');
+  if (!legend) return null;
+  const slot = document.createElement('div');
+  slot.style.display = 'contents';
+  legend.appendChild(slot);
+  return slot;
+}
+// ── /s21:L ──
 // ── s21:L ── (approach F) The chalk floor's displacement (526 ms of noise and ring distances) runs in a worker as
 // soon as the terrain's extent and the M25 ring both exist, long before the M25 chain needs it, so the descent does
 // no geology work and the main thread only builds the plane, normals, colours and material.
@@ -1360,6 +1416,7 @@ function s21TryStartGeologyWork() {
       onBounds: (bounds) => { s21Bounds = bounds; s21TryStartGeologyWork(); } }) /* s21:L */.then(result => {
       if (!result) {
         grid.visible = true;
+        s21SkipLayers(LATE_LAYER_ORDER); // s21:L
         return;
       }
       terrain = result;
@@ -1379,29 +1436,44 @@ function s21TryStartGeologyWork() {
         scene.add(group);
       }).catch(error=>console.error('Park inscriptions unavailable:',error.message));
 
-      // Replacements must exist before any live or baked airport buildings
-      // are suppressed. Keep this group across buildings-path switches.
-      try {
-        airportsGroup = createAirports({ getSurfaceY: getStructuralSurfaceY,
-          VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
-        scene.add(airportsGroup);
-      } catch (error) {
-        airportInitError = error.message;
-        airportsGroup = null;
-        console.warn(`Airport models unavailable (${error.message}); retaining generic buildings`);
-      }
+      // ── s21:L ── (approach E) The airport models and the flights are built after landing. The airport
+      // suppression of the baked buildings travels in the payload (bakedPayload.airportSuppression), and the live
+      // path suppresses by the airport data (isAirportBuilding), so nothing waits for the models. Keep this group
+      // across buildings-path switches. If the models cannot be built the baked city keeps its suppressed footprints
+      // (the warning says so); before this change that case fell back to the live path.
+      let s21AirportScale = 1;
+      lateLayers.define('airports', {
+        name: 'airports',
+        steps: () => { s21AirportScale = getBuildingHeightScale(); return createAirportsSteps({ getSurfaceY: getStructuralSurfaceY,
+          VE: VERTICAL_EXAGGERATION, heightScale: s21AirportScale }); },
+        prepare: (group) => { const now = getBuildingHeightScale(); if (now !== s21AirportScale) group.userData.setHeightScale(now); applyShadowPolicy(group); },
+        stagger: (group) => group.userData.pickables, // megabytes of buffers: shown one a frame
+        attach: (group) => { airportsGroup = group; scene.add(group); },
+        onFail: (error) => {
+          airportInitError = error.message;
+          airportsGroup = null;
+          console.warn(`Airport models unavailable (${error.message}); the buildings keep their airport footprints suppressed`);
+        },
+      });
       // ── sprint:F ──
-      try {
-        flightsGroup?.userData.dispose();
-        flightsGroup = createFlights({ getSurfaceY: getStructuralSurfaceY,
-          VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale });
-        scene.add(flightsGroup);
-      } catch (error) {
-        flightsInitError = error.message;
-        flightsGroup = null;
-        console.warn(`Flights unavailable (${error.message})`);
-      }
+      lateLayers.define('flights', {
+        name: 'flights',
+        steps: function* () {
+          yield;
+          flightsGroup?.userData.dispose();
+          return yield* createFlightsSteps({ getSurfaceY: getStructuralSurfaceY,
+            VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale });
+        },
+        prepare: (group) => applyShadowPolicy(group),
+        attach: (group) => { flightsGroup = group; scene.add(group); },
+        onFail: (error) => {
+          flightsInitError = error.message;
+          flightsGroup = null;
+          console.warn(`Flights unavailable (${error.message})`);
+        },
+      });
       // ── /sprint:F ──
+      // ── /s21:L ──
 
       try {
         airportDockGroup=createAirportDockWater({VE:VERTICAL_EXAGGERATION});
@@ -1448,11 +1520,22 @@ function s21TryStartGeologyWork() {
       if (thamesMesh && thamesData?.points) {
         fetch('/data/bridges.json').then(r => (r.ok ? r.json() : {})).catch(() => ({}))
           .then(data => {
-            seaLife = createSeaLife({ thamesPoints: thamesData.points, navigation: thamesMesh.userData.navigation,
-              bridges: data?.bridges ?? [], VE: VERTICAL_EXAGGERATION, topY: WATER_TOP_Y, waterLevelM: WATER_LEVEL_M });
-            scene.add(seaLife.group);
-          }).catch(error => console.warn('Sea life unavailable:', error.message));
-      }
+            // ── s21:L ── built after landing (approach E); its update runs only once it is attached
+            lateLayers.define('seaLife', {
+              name: 'seaLife',
+              steps: function* () {
+                yield;
+                return createSeaLife({ thamesPoints: thamesData.points, navigation: thamesMesh.userData.navigation,
+                  bridges: data?.bridges ?? [], VE: VERTICAL_EXAGGERATION, topY: WATER_TOP_Y, waterLevelM: WATER_LEVEL_M });
+              },
+              objects: (life) => [life.group],
+              prepare: (life) => applyShadowPolicy(life.group),
+              attach: (life) => { seaLife = life; scene.add(life.group); },
+              onFail: (error) => console.warn('Sea life unavailable:', error.message),
+            });
+            // ── /s21:L ──
+          }).catch(error => { console.warn('Sea life unavailable:', error.message); s21SkipLayers(['seaLife']); }); // s21:L
+      } else s21SkipLayers(['seaLife']); // s21:L
       // ── /sprint:C ──
 
       createBridges({ getTerrainMeshSurfaceY, heightScale:getBuildingHeightScale() }).then(group => {
@@ -1487,41 +1570,77 @@ function s21TryStartGeologyWork() {
       // Reservoirs — data fetch started at module scope, create now that terrain is ready
       reservoirDataPromise.then(data => {
         if (data) {
-          // ── s25:E ── clip reservoirs and lakes to the map edge at load
-          const clipped = clipWaterToMapEdge(data, llToXZ, getMapEdgeRing(), { kind: 'polygon' });
-          (window.__ugWaterClip ||= {}).reservoirs = clipped.report;
-          reservoirsMesh = createReservoirs(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
-          // ── /s25:E ──
-          if (reservoirsMesh) {
-            scene.add(reservoirsMesh);
-            addReservoirsToLegend();
-            dbg('Reservoirs added to scene');
-          }
-        }
+          // ── s21:L ── built after landing (approach E); the legend entry keeps its old place
+          const legendSlot = s21LegendSlot();
+          lateLayers.define('reservoirs', {
+            name: 'reservoirs',
+            steps: function* () {
+              yield;
+              // ── s25:E ── clip reservoirs and lakes to the map edge at load
+              const clipped = yield* clipWaterToMapEdgeSteps(data, llToXZ, getMapEdgeRing(), { kind: 'polygon' });
+              (window.__ugWaterClip ||= {}).reservoirs = clipped.report;
+              yield;
+              return yield* createReservoirsSteps(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
+              // ── /s25:E ──
+            },
+            prepare: (mesh) => { if (mesh) applyShadowPolicy(mesh); },
+            objects: (mesh) => (mesh ? [mesh] : []),
+            attach: (mesh) => {
+              reservoirsMesh = mesh;
+              if (reservoirsMesh) {
+                reservoirsMesh.visible = s21SoloValue === 'all' || s21SoloValue === 'reservoirs';
+                scene.add(reservoirsMesh);
+                addReservoirsToLegend(legendSlot);
+                dbg('Reservoirs added to scene');
+              }
+            },
+          });
+          // ── /s21:L ──
+        } else s21SkipLayers(['reservoirs']); // s21:L
       });
 
       // Canals — data fetch started at module scope, create now that terrain is ready
       canalDataPromise.then(data => {
         if (data) {
-          // ── s25:E ── clip canals to the map edge at load; cut ends pulled
-          // back past the ribbon's 5 m half-width so no corner overhangs.
-          const clipped = clipWaterToMapEdge(data, llToXZ, getMapEdgeRing(), { kind: 'polyline', endInsetM: 6 });
-          (window.__ugWaterClip ||= {}).canals = clipped.report;
-          canalsMesh = createCanals(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
-          // ── /s25:E ──
-          if (canalsMesh) {
-            if(airportDockGroup?.parent && airportDockGroup.visible) {
-              // The old centreline dataset includes two dock ribbons. Clip
-              // only their exact wet-polygon overlap, keeping connections.
-              const materials=new Set();
-              canalsMesh.traverse(mesh=>{if(mesh.isMesh)materials.add(mesh.material);});
-              for(const material of materials)installAirportDockTerrainMask(material);
-            }
-            scene.add(canalsMesh);
-            addCanalsToLegend();
-            dbg('Canals added to scene');
-          }
-        }
+          // ── s21:L ── built after landing (approach E); the dock mask joins the canal materials before they are
+          // compiled (prepare), and the legend entry keeps its old place
+          const legendSlot = s21LegendSlot();
+          lateLayers.define('canals', {
+            name: 'canals',
+            steps: function* () {
+              yield;
+              // ── s25:E ── clip canals to the map edge at load; cut ends pulled
+              // back past the ribbon's 5 m half-width so no corner overhangs.
+              const clipped = yield* clipWaterToMapEdgeSteps(data, llToXZ, getMapEdgeRing(), { kind: 'polyline', endInsetM: 6 });
+              (window.__ugWaterClip ||= {}).canals = clipped.report;
+              yield;
+              return yield* createCanalsSteps(clipped.data, SCENE_XZ, getTerrainMeshSurfaceY);
+              // ── /s25:E ──
+            },
+            prepare: (mesh) => {
+              if (!mesh) return;
+              if(airportDockGroup?.parent && airportDockGroup.visible) {
+                // The old centreline dataset includes two dock ribbons. Clip
+                // only their exact wet-polygon overlap, keeping connections.
+                const materials=new Set();
+                mesh.traverse(m=>{if(m.isMesh)materials.add(m.material);});
+                for(const material of materials)installAirportDockTerrainMask(material);
+              }
+              applyShadowPolicy(mesh);
+            },
+            objects: (mesh) => (mesh ? [mesh] : []),
+            attach: (mesh) => {
+              canalsMesh = mesh;
+              if (canalsMesh) {
+                canalsMesh.visible = s21SoloValue === 'all' || s21SoloValue === 'canals';
+                scene.add(canalsMesh);
+                addCanalsToLegend(legendSlot);
+                dbg('Canals added to scene');
+              }
+            },
+          });
+          // ── /s21:L ──
+        } else s21SkipLayers(['canals']); // s21:L
       });
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
@@ -1536,6 +1655,7 @@ function s21TryStartGeologyWork() {
             if(result.undersideMat)installAirportDockTerrainMask(result.undersideMat);
           }
           applyRiverBedMaterial(result.topMat);
+          s21SkipLayers(['motorway', 'cliff']); // s21:L: no M25 ring, no motorway and no cliff
           return;
         }
         const supportPoints = m25Data.supportPoints || m25Data.points;
@@ -1569,28 +1689,62 @@ function s21TryStartGeologyWork() {
           dbg('Chalk floor added to scene');
         }
 
+        // ── s21:L ── (approach E) The motorway (traffic included) is built after landing, in slices, and the map
+        // edge's cliff (the Thames waterfalls and the exterior column) with it: the descent never shows either
+        // (profile section 3). Both bring their own fallbacks and side effects at attach. The Thames trim below
+        // stays before the veil: it rewrites the river's geometry before its upload.
         // Both carriageways and Dartford routes use mapped OSM geometry.
         // Keep the established ring and curated bridges as failure fallback.
-        try {
-          motorwayGroup = createMotorway({ getSurfaceY: getStructuralSurfaceY,
-            VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
-          scene.add(motorwayGroup);
-          syncMotorwayBridges();
-        } catch (error) {
-          motorwayInitError = error.message;
-          console.warn(`Motorway unavailable (${error.message}); retaining previous road and bridges`);
-          m25Road = createM25Road(m25Data.points, getStructuralSurfaceY);
-          if (m25Road) scene.add(m25Road);
-        }
+        let s21MotorwayScale = 1;
+        lateLayers.define('motorway', {
+          name: 'm25Motorway',
+          steps: () => { s21MotorwayScale = getBuildingHeightScale(); return createMotorwaySteps({ getSurfaceY: getStructuralSurfaceY,
+            VE: VERTICAL_EXAGGERATION, heightScale: s21MotorwayScale, initialUpdate: false }); },
+          prepare: (group) => { const now = getBuildingHeightScale(); if (now !== s21MotorwayScale) group.userData.setHeightScale(now); applyShadowPolicy(group); },
+          stagger: (group) => group.userData.pickables, // the six static meshes (10+ MB of buffers): shown one a frame
+          attach: (group) => { motorwayGroup = group; scene.add(group); syncMotorwayBridges(); },
+          onFail: (error) => {
+            motorwayInitError = error.message;
+            console.warn(`Motorway unavailable (${error.message}); retaining previous road and bridges`);
+            m25Road = createM25Road(m25Data.points, getStructuralSurfaceY);
+            if (m25Road) scene.add(m25Road);
+          },
+        });
+        // ── /s21:L ──
 
-        // Thames waterfalls at disc edge (needs both Thames and M25 data)
-        let thamesCrossings = [];
-        if (thamesData?.points?.length) {
-          const waterfalls = createThamesWaterfalls(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY); // sprint:B
-          if (waterfalls) scene.add(waterfalls);
-          // Boundary crossings feed the skirt notch so water spills over cleanly.
-          thamesCrossings = computeThamesCrossings(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY); // sprint:B
-        }
+        // ── s21:L ── Thames waterfalls at disc edge (needs both Thames and M25 data), the boundary crossings and the
+        // exterior tapered column (D1: clay disc skirt + fading chalk column, FrontSide-outward, so invisible from
+        // inside the disc; the skirt is notched at the Thames crossings so the waterfalls spill over the edge).
+        lateLayers.define('cliff', {
+          name: 'geology-exterior',
+          steps: function* () {
+            let waterfalls = null;
+            let thamesCrossings = [];
+            if (thamesData?.points?.length) {
+              // Boundary crossings feed the waterfall ribbons and the skirt notch, so water spills over cleanly: one
+              // computation (the waterfalls used to repeat it with the same inputs).
+              thamesCrossings = yield* computeThamesCrossingsSteps(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY); // sprint:B
+              yield;
+              waterfalls = createThamesWaterfalls(thamesData.points, mapEdgePoints, getTerrainMeshSurfaceY, thamesCrossings); // sprint:B
+              yield;
+            }
+            const exterior = yield* createGeologyExteriorSteps(
+              mapEdgePoints, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings // sprint:B
+            );
+            return { waterfalls, exterior };
+          },
+          objects: (r) => [r.waterfalls, r.exterior].filter(Boolean),
+          prepare: (r) => { if (r.waterfalls) applyShadowPolicy(r.waterfalls); if (r.exterior) applyShadowPolicy(r.exterior); },
+          attach: (r) => {
+            if (r.waterfalls) scene.add(r.waterfalls);
+            geologyExteriorGroup = r.exterior;
+            if (geologyExteriorGroup) {
+              geologyExteriorGroup.visible = geologyGroup ? geologyGroup.visible : true;
+              scene.add(geologyExteriorGroup);
+            }
+          },
+        });
+        // ── /s21:L ──
         // ── sprint:B ──
         // The river ends at the cliff where its waterfall spills, rather than
         // floating on past the map edge (thames.json runs 3.4km W / 1km E past it).
@@ -1601,17 +1755,7 @@ function s21TryStartGeologyWork() {
         }
         // ── /sprint:B ──
 
-        // Exterior tapered column (D1): clay disc skirt + fading chalk column.
-        // FrontSide-outward, so invisible from inside the disc; the skirt is
-        // notched at the Thames crossings so the waterfalls spill over the edge.
-        geologyExteriorGroup = createGeologyExterior(
-          mapEdgePoints, CHALK_TOP_Y, getTerrainMeshSurfaceY, thamesCrossings // sprint:B
-        );
-        if (geologyExteriorGroup) {
-          geologyExteriorGroup.visible = geologyGroup ? geologyGroup.visible : true;
-          scene.add(geologyExteriorGroup);
-        }
-
+        s21M25Ready = true; // s21:L: the M25 mask is on the terrain top, underside and chalk materials and the chalk floor is built
         dbg('M25 world boundary applied');
 
         // ── Surface features: tiled progressive loading ──
@@ -1654,7 +1798,7 @@ function s21TryStartGeologyWork() {
             const mesh = createTileBuildings(
               filteredBuildings, getStructuralSurfaceY,
               VERTICAL_EXAGGERATION, makeTileDedup(tileEntry.file),
-              withStationHides(withOffMapSuppression(airportsGroup ? isAirportBuilding : null), 'live') // sprint:B s02:B
+              withStationHides(withOffMapSuppression(airportInitError ? null : isAirportBuilding), 'live') // sprint:B s02:B s21:L: by the airport data, the models come later
             );
             if (mesh) {
               mesh.name = `buildings-${tileEntry.file}`;
@@ -1712,7 +1856,9 @@ function s21TryStartGeologyWork() {
           // city rather than a slower one.
           if (buildingsPath === 'baked') activateBakedBuildings();
         }).catch(err => console.warn('Surface loader failed:', err.message));
-      });
+      // ── s21:L ── (the chain used to end here with no catch: an exception was an unhandled rejection; it still logs)
+      }).catch(error => { console.error('M25 chain failed:', error); s21SkipLayers(['motorway', 'cliff']); });
+      // ── /s21:L ──
     });
   });
   
@@ -2111,7 +2257,8 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
-      suppressBuilding: withStationHides(withOffMapSuppression(airportsGroup && !bakedPayload.airportSuppression ? isAirportBuilding : null), 'baked'), // sprint:B s02:B
+      suppressBuilding: withStationHides(withOffMapSuppression(!airportInitError && !bakedPayload.airportSuppression ? isAirportBuilding : null), 'baked'), // sprint:B s02:B s21:L
+      ...(openingHooks.buildOrder || {}), // s21:L (hook 1 for lane V): { order } or { origin }; null keeps index order
       onMesh: (mesh) => {
         bakedMeshes.push(mesh);
         // A switch during the incremental build must not mix both cities.
@@ -2769,6 +2916,7 @@ async function buildNetworkMvp() {
 
     // Assign module-scoped applySoloSelection (needs cross-block access from keyboard/click handlers)
     applySoloSelection = function(val) {
+      s21SoloValue = val; // s21:L: a late layer attached after this call honours the selection
       const isInfra = ['crossrail', 'tideway', 'geology', 'reservoirs', 'canals', 'sewers', 'surface-texture', 'surface-geometry', 'surface-hybrid'].includes(val);
       const isSurface = val === 'surface-texture' || val === 'surface-geometry' || val === 'surface-hybrid';
 
@@ -3126,9 +3274,13 @@ const openingGate = createOpeningGate({
     { id: 'terrain', label: 'Shaping the terrain', weight: 4,
       check: () => terrain ? true : (scene.children.some(c => c.isGridHelper && c.visible) ? 'failed' : false) },
     { id: 'water', label: 'Filling the Thames', weight: 1, check: () => _s24Or(!!thamesMesh, 'thames') },
-    { id: 'm25', label: 'Laying the M25', weight: 1,
-      check: () => _s24Or(!!(motorwayGroup || m25Road) && !!geologyGroup && !!geologyExteriorGroup, 'm25') },
-    { id: 'airports', label: 'Building the airports', weight: 1, check: () => !!airportsGroup || !!airportInitError },
+    // ── s21:L ── 'm25' now means the M25 mask is on the terrain top, underside and chalk materials and the chalk floor is
+    // built (the motorway and the cliff are late layers); 'airports' means the airport fingerprint was checked against the
+    // payload (or the path is live): the models are a late layer, the buildings' suppression travels in the payload.
+    { id: 'm25', label: 'Laying the M25', weight: 1, check: () => _s24Or(s21M25Ready, 'm25') },
+    { id: 'airports', label: 'Clearing the airport sites', weight: 1,
+      check: () => buildingsPath === 'live' || !!bakedPayload },
+    // ── /s21:L ──
     { id: 'ground', label: 'Painting the ground', weight: 2,
       check: () => surfaceDataLoaded && (groundPath === 'baked' || _s24FootprintTiles() === true) },
     { id: 'buildings', label: 'Raising the buildings', weight: 4, check: () => {
@@ -3145,11 +3297,13 @@ const openingGate = createOpeningGate({
     // ── /s02:B ──
     { id: 'tube', label: 'Tracing the tube lines', weight: 3,
       check: () => tubeStationsReady && !!unifiedShaftLayer && document.querySelector('.station-label') ? true : _s24TubeProgress },
-    { id: 'reservoirs', label: 'Filling the reservoirs', weight: 0.5, check: () => _s24Or(!!reservoirsMesh, 'reservoirs') },
-    { id: 'canals', label: 'Cutting the canals', weight: 0.5, check: () => _s24Or(!!canalsMesh, 'canals') },
+    // s21:L: 'reservoirs' and 'canals' left the gate (late layers)
     { id: 'bridges', label: 'Spanning the river', weight: 0.5, check: () => !!bridgesGroup },
+    // ── s21:L ── 'overground' also waits for the open-air Tube and DLR track (created asynchronously after the Overground):
+    // with the veil lifting early it landed in the descent's first frame (about 60 ms of mesh and normals work).
     { id: 'overground', label: 'Running the Overground', weight: 0.5,
-      check: () => !!overgroundGroup?.userData?.stationsAttached },
+      check: () => !!overgroundGroup?.userData?.stationsAttached && (!!surfaceRail || s21SurfaceRailFailed) },
+    // ── /s21:L ──
     { id: 'parks', label: 'Naming the parks', weight: 0.5, check: () => !!parkLabelsGroup },
     { id: 'infrastructure', label: 'Tunnelling the infrastructure', weight: 1,
       check: () => !!(crossrailMesh && tidewayMesh && sewersMesh) },
@@ -3172,6 +3326,10 @@ const openingGate = createOpeningGate({
 });
 if (intro.isBypassed()) document.getElementById('loadingBar')?.classList.remove('veil');
 // ── /s24:O ──
+// ── s21:L ── the hooks lane V's previews import (src/opening-hooks.js): the gate, the landing lock, the baked builder's reach
+openingHooks.register({ gate: openingGate, getBuilder: () => bakedBuilder, getSurfaceY: getStructuralSurfaceY,
+  VE: VERTICAL_EXAGGERATION, bypassed: () => intro.isBypassed() });
+// ── /s21:L ──
 
 buildNetworkMvp();
 
@@ -4392,9 +4550,22 @@ function tick(frameTime) {
   // ── s02:T ── beyond the M25 (D-048 item 7): the corridor round the beyond-ring lines puts an
   // underground camera there on the underground regime (audio, labels, fog and light), and the
   // 'lines' cull hides the bored tubes from an above-ground camera outside the full-cull zone.
-  if (!s02Corridor.ready && surfaceRail && overgroundGroup?.userData?.linePaths
+  if (!s02Corridor.ready && !s21CorridorQueued && surfaceRail && overgroundGroup?.userData?.linePaths
       && lineBranchCenterPts.has('central') && lineBranchCenterPts.has('metropolitan')) {
-    s02Corridor.build(corridorSources({ surfaceRailPaths: surfaceRail.paths, overgroundLinePaths: overgroundGroup.userData.linePaths, boreBranches: lineBranchCenterPts }));
+    // ── s21:L ── (approach E) The corridor round the beyond-ring lines is built after landing, in slices: it is only
+    // read for cameras beyond the M25, and building it in the tick put 40 ms into the descent's first frame once the
+    // veil lifted early (it used to land behind the long task). Same inputs, same result (buildSteps drains to build).
+    s21CorridorQueued = true;
+    lateLayers.define('corridor', {
+      steps: function* () {
+        yield;
+        yield* s02Corridor.buildSteps(corridorSources({ surfaceRailPaths: surfaceRail.paths, overgroundLinePaths: overgroundGroup.userData.linePaths, boreBranches: lineBranchCenterPts }));
+        return null;
+      },
+      objects: () => [],
+      attach: () => {},
+    });
+    // ── /s21:L ──
   }
   {
     const w = s02Corridor.ready ? s02Corridor.weightAt(camera.position.x, camera.position.z) : 0;
@@ -4483,6 +4654,10 @@ function tick(frameTime) {
     }
   }
 
+  // ── s21:L ── the late layers (motorway, airports, flights, cliff, reservoirs, canals, sea life, surface trains)
+  // are built here after landing, a few milliseconds a frame (src/late-layers.js); nothing runs during the descent.
+  lateLayers.pump(); // the registry's own budget: 4 ms a frame
+  // ── /s21:L ──
   // ── s24:R ──
   applyLayerEconomies();
   // ── /s24:R ──
@@ -4913,6 +5088,7 @@ if (import.meta.env.DEV) {
     // ── s24:O ──
     openingGate,
     openingWork, // s21:L
+    lateLayers, openingHooks, // s21:L
     // ── /s24:O ──
     // ── sprint:A1 ──
     get modes() { return modeSystem; },

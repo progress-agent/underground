@@ -17,6 +17,11 @@ try {
     window.addEventListener('ug:opening-reveal', () => {
       window.__openingCheck = { ...window.__openingCheck, revealAt: performance.now() };
     });
+    // Sprint 21Oct26w (lane L): the motorway, airports, flights, cliff, reservoirs, canals, sea life and surface trains are
+    // built after landing; the registry announces when the last one is attached.
+    window.addEventListener('ug:late-layers-done', () => {
+      window.__openingCheck = { ...window.__openingCheck, lateDoneAt: performance.now() };
+    });
   });
   const errors = [], tiles = [], warnings = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -43,10 +48,15 @@ try {
   }
   await page.waitForFunction(() => window.__openingCheck.done, null, { timeout: 30000 });
   await page.screenshot({ path: `${out}/landing.png` });
+  // The descent itself lasts 9s from the moment the bar lets go. (Sprint 21Oct26w: the veil now lifts at about 4 s, so the
+  // 8 s floor on the landing time is the descent's own length, and the late layers must all be attached within 10 s of it.)
+  await page.waitForFunction(() => window.__openingCheck.lateDoneAt, null, { timeout: 30000 });
   const opening = await page.evaluate(() => window.__openingCheck);
-  // The descent itself lasts 9s from the moment the bar lets go.
   if (opening.doneAt < 8000 || (opening.revealAt && opening.doneAt - opening.revealAt < 8500)) {
     throw new Error('Opening was skipped or ended prematurely');
+  }
+  if (opening.lateDoneAt - opening.doneAt > 10000) {
+    throw new Error(`The late layers took ${Math.round(opening.lateDoneAt - opening.doneAt)} ms after landing (limit 10000)`);
   }
   await page.waitForTimeout(1000);
   await page.keyboard.down('KeyE');
