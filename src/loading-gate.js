@@ -191,5 +191,6 @@ export function createOpeningGate({
   }
 
   render();
-  return { frame, getState, readiness };
+  // s21:L: the stage alone, cheap enough to read every frame (the tick skips its render behind the veil).
+  return { frame, getState, readiness, stage: () => stage };
 }

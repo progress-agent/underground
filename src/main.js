@@ -4594,11 +4594,24 @@ function tick(frameTime) {
   // ── s16:R ── edgeLineSize: the beyond-edge lines read this frame's canvas height, taken before any name was written
   setLegibilityCssHeight(economies.on('edgeLineSize') && _s24LabelViewport ? _s24LabelViewport.h : null);
   // ── /s16:R ──
+  // ── s21:L ── (profile C) Behind the opaque veil, while the gate is still loading or compiling shaders, the frame
+  // is not seen: skip the render (458 ms of it before the veil). The gate's warm-up renders call the composer
+  // themselves and upload everything the descent needs. A skipped frame invalidates the shadow cache, so the
+  // first real frame draws its shadow map instead of being told it is unchanged since a frame never drawn.
+  const s21BehindVeil = !intro.isBypassed() && (openingGate.stage() === 'loading' || openingGate.stage() === 'compiling');
+  if (s21BehindVeil) {
+    shadowCache.invalidate();
+    setLegibilityCssHeight(null);
+  } else {
+  // ── /s21:L ──
   undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => composer.render(dt)); // s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
   // ── s16:R ──
   setLegibilityCssHeight(null);
   // ── /s16:R ──
   sampleCushion();
+  // ── s21:L ──
+  }
+  // ── /s21:L ──
   requestAnimationFrame(tick);
 }
 
