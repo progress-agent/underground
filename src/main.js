@@ -1653,7 +1653,10 @@ const thamesDataPromise = loadThamesData();
           // Create persistent 4096² texture spanning full M25 area
           if (groundPath === 'baked') {
             try {
-              surfaceTexState = await loadBakedGround(fullBBox);
+              // ── s21:L ── behind the opening veil nothing is watched, so the expansion runs in 48 ms slices;
+              // a deep link keeps the per-chunk pacing over its live scene.
+              surfaceTexState = await loadBakedGround(fullBBox, { paced: intro.isBypassed() });
+              // ── /s21:L ──
               renderer.initTexture(surfaceTexState.texture);
               dbg('Baked ground ready: full-city parks and roads');
             } catch (err) {
