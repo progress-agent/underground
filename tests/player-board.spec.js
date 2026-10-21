@@ -422,6 +422,54 @@ test.describe('the skateboard', () => {
     }
   });
 
+  // ── s21:T ── T-foot (sprint 21Oct26w): the pushing foot is planted on the ground through the push.
+  // Until then the stroke was a fixed 0.44 m back in 0.495 s whatever the board's speed, so the foot "on the ground" slid forward over it
+  // (about 0.47 m over the first full stroke from rest, metres a stroke near top speed). Now the ankle goes back by the board's own travel.
+  // Measured on the real app at open ground (KX), straight runs: a PLANTED SPAN is consecutive frames (2 or more) with push and the skate
+  // pose at full weight and the right ankle within 0.5 mm of its lowest height of the run (the sole on the ground); its SLIDE is the
+  // largest plan distance of the right ankle (and of the ball) from its position in the span's first frame. Bound: 5 mm, both bones,
+  // both speed bands (walking pace to a little above, and 11.5 m/s and over). 7c2d4bd reads 100 mm and more (acceptance T-FOOT-1).
+  const PLANTED_PROBE = `${BONES} const fr = bone("foot_r"), br = bone("ball_r"); const w = u.player.figure.debug().poseWeights.skate;
+    return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z };`;
+  function plantedSpans(s) {
+    const minH = Math.min(...s.map((r) => r.hr)), spans = [];
+    let cur = [];
+    const flush = () => {
+      if (cur.length >= 2) {
+        const a = cur[0], plan = (r, k) => Math.hypot(r[k + 'x'] - a[k + 'x'], r[k + 'z'] - a[k + 'z']);
+        spans.push({ frames: cur.length, t0: a.t, meanSpeed: cur.reduce((m, r) => m + r.speed, 0) / cur.length,
+          slideFoot: Math.max(...cur.map((r) => plan(r, 'f'))), slideBall: Math.max(...cur.map((r) => plan(r, 'b'))) });
+      }
+      cur = [];
+    };
+    for (const r of s) { if (r.push >= 0.999 && r.w >= 0.999 && r.hr - minH <= 0.0005) cur.push(r); else flush(); }
+    flush();
+    return spans;
+  }
+  for (const [band, lo, hi, plan] of [
+    ['walking pace', 1.0, 3.5, { secs: 1.8, at: [{ t: 0, down: ['w'] }] }],
+    // Shift from rest: the third stroke starts at 1.8 s with the push at full weight and the board at about 12.6 m/s. (W to a cruise, then Shift, finds no
+    // such stroke: a stroke starting from no push has its first 0.15 s at part weight, and at 12 m/s the foot is down for only 0.037 s of it.)
+    ['the 12 m/s band (Shift from rest)', 11.5, 99, { secs: 2.6, at: [{ t: 0, down: ['w', 'shift'] }] }],
+  ]) {
+    test(`pose 4: the planted foot holds still against the ground through the push (${band})`, async () => {
+      test.setTimeout(120000);
+      await start('KX');
+      await h.wait(1000);
+      const s = await h.sample(plan.secs, PLANTED_PROBE, plan.at);
+      await h.releaseKeys();
+      const spans = plantedSpans(s);
+      if (process.env.UG_FOOT_DUMP) (await import('node:fs')).writeFileSync(`${process.env.UG_FOOT_DUMP}-${band.replace(/[^a-z0-9]+/gi, '-')}.json`, JSON.stringify(s));   // s21:T: the raw frames, for the captures notes
+      console.log(`[pose 4] ${band}: ${s.length} frames, ${spans.length} planted spans ${JSON.stringify(spans.map((x) => [x.frames, +x.meanSpeed.toFixed(2), +(x.slideFoot * 1000).toFixed(2), +(x.slideBall * 1000).toFixed(2)]))} [frames, m/s, foot mm, ball mm]`);
+      expect(spans.some((x) => x.meanSpeed >= lo && x.meanSpeed <= hi), `a planted span at ${band} (mean speed ${lo} to ${hi} m/s)`).toBe(true);
+      for (const x of spans) {
+        expect(x.slideFoot, `the right ankle slid ${(x.slideFoot * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
+        expect(x.slideBall, `the right ball slid ${(x.slideBall * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
+      }
+    });
+  }
+  // ── /s21:T ──
+
   // ── boardrules ─────────────────────────────────────────────────────────────────────────────────────────────────
   test('boardrules 1: B at the top of a jump on foot is refused (air)', async () => {
     await start('BANK', { board: false });

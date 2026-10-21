@@ -18,6 +18,14 @@
 //   arms     aimed (upper to lower, lower to hand): the front arm out ahead, the back arm trailing
 //   legs     two-bone IK from the hip to the ankle target, the knee bending forward (+Z); the foot aimed flat
 // The push is the back foot swinging down to the ground beside the board, sliding back, and returning in an arc.
+//
+// PLANTED (s21:T, sprint 21Oct26w). Until then the slide was a fixed stroke in a fixed time (0.44 m back along the board over
+// 0.495 s, 0.889 m/s whatever the speed), so the foot "on the ground" moved at the board's speed minus 0.889 m/s: about 0.47 m
+// forward over the first full stroke from rest, and metres per stroke near top speed. A planted foot must go back along the board
+// at the board's own speed. stepPlant() follows the ground: while in contact the ankle target moves back by exactly the board's
+// travel since touchdown; contact ends when that travel reaches the leg's reach (0.44 m) or at phase slideShare (a slow board),
+// whichever comes first; the return arc then runs from where the foot lifted back to its touchdown point over the rest of the
+// stroke. Cadence (0.9 s), speed and every other pose are unchanged; with no `plant` every function below is exactly as it was.
 import { solveTwoBone } from './two-bone-ik.js';
 
 export const SKATE_POSE = Object.freeze({
@@ -36,6 +44,7 @@ export const SKATE_POSE = Object.freeze({
   footPitchRad: -30.6 * Math.PI / 180, // foot to ball, below horizontal, when the sole is flat (measured on Idle_Loop)
   groundSlideFrom: [0.12, 0.20], groundSlideTo: [-0.32, 0.20],   // the kick, x and z: as far as the leg reaches (measured)
   slideShare: 0.55,                 // of the 0.9 s stroke is the slide on the ground; the rest the return
+  reachM: 0.12 + 0.32,              // s21:T the leg's reach: groundSlideFrom[0] - groundSlideTo[0] (0.44 m), the same two numbers
   returnLiftM: 0.12,                // the return arcs this far above the ankle's standing height
   spineTurn: 0.25, neckTurn: 0.5, headTurn: 0.5, spinePushTurn: 0.6,
   armDirs: Object.freeze({
@@ -50,14 +59,69 @@ const lerp3 = (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2],
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
- * The back foot's ankle target in the pose frame (y = 0 is the deck top) for the stroke phase 0..1. Pure.
+ * A fresh plant record (s21:T): { contact, dx, dz, liftPhase, liftX, liftZ, lastPhase, lastPush }. dx, dz are the board's travel since touchdown
+ * in the POSE frame (x along the board towards the nose, z across it), liftPhase the stroke phase at which the foot left the ground
+ * and liftX, liftZ where it was then. Before the first step it describes the old fixed stroke's end (no contact).
  */
-export function backFootPath(phase) {
+export function createPlant() {
+  const S = SKATE_POSE;
+  return { contact: false, dx: 0, dz: 0, liftPhase: S.slideShare, liftX: S.groundSlideTo[0], liftZ: S.groundSlideTo[1], lastPhase: 0, lastPush: 0 };
+}
+
+/**
+ * Advance the plant by one frame (s21:T). Pure and allocation-free: it updates and returns `plant`.
+ * @param {object} plant   from createPlant()
+ * @param {{ push: number, pushPhase: number, travelX: number, travelZ: number }} f  the stroke weight and phase this frame, and the
+ *        board's displacement this frame in the POSE frame (metres; the caller rotates the world displacement by the figure's facing)
+ * A new stroke starts when the phase wrapped (pushPhase below last frame's), or the push weight is 0 now or was last frame; the touchdown is placed inside
+ * the frame by the phase's own fraction, and so is the lift, so a long frame at speed plants and lifts where a short one would.
+ */
+export function stepPlant(plant, { push, pushPhase, travelX, travelZ }) {
+  const S = SKATE_POSE, ph = pushPhase;
+  const wrapped = push > 0 && plant.lastPush > 0 && ph < plant.lastPhase;
+  let p0 = plant.lastPhase, tx = travelX, tz = travelZ;
+  if (wrapped || !(push > 0) || !(plant.lastPush > 0)) {
+    // a stroke begins: the share of this frame after the wrap (the phase advanced from lastPhase through 1 to ph), or all of it
+    // when the stroke begins from no push at all (the phase advanced from 0 to ph)
+    const share = wrapped ? Math.min(1, ph / Math.max(1e-12, ph + 1 - plant.lastPhase)) : 1;
+    plant.contact = true; plant.dx = 0; plant.dz = 0; plant.liftPhase = S.slideShare;
+    plant.liftX = S.groundSlideTo[0]; plant.liftZ = S.groundSlideTo[1];
+    p0 = 0; tx *= share; tz *= share;
+  }
+  if (plant.contact) {
+    const dx0 = plant.dx, dz0 = plant.dz, dp = ph - p0;
+    let f = 2;                                                   // the fraction of the post-touchdown part of the frame at which contact ends
+    if (dx0 + tx >= S.reachM) f = tx > 1e-12 ? Math.min(1, Math.max(0, (S.reachM - dx0) / tx)) : 0;
+    if (ph >= S.slideShare) f = Math.min(f, dp > 1e-12 ? Math.min(1, Math.max(0, (S.slideShare - p0) / dp)) : 0);
+    if (f <= 1) {
+      plant.contact = false;
+      plant.liftPhase = p0 + f * dp;
+      plant.dx = Math.min(dx0 + tx * f, S.reachM); plant.dz = dz0 + tz * f;
+      plant.liftX = S.groundSlideFrom[0] - plant.dx; plant.liftZ = S.groundSlideFrom[1] - plant.dz;
+    } else { plant.dx = dx0 + tx; plant.dz = dz0 + tz; }
+  }
+  plant.lastPhase = ph; plant.lastPush = push;
+  return plant;
+}
+
+/**
+ * The back foot's ankle target in the pose frame (y = 0 is the deck top) for the stroke phase 0..1. Pure.
+ * With a `plant` (s21:T, see the header) the foot is planted: in contact it goes back by the board's travel, then returns in an arc
+ * from where it lifted; without one it is the fixed stroke of 14Oct26w, number for number.
+ */
+export function backFootPath(phase, plant = null) {
   const S = SKATE_POSE;
   const groundY = S.ankleM + S.groundSoleLiftM - S.deckTopM;   // the ankle with the sole on the ground
   const from = [S.groundSlideFrom[0], groundY, S.groundSlideFrom[1]];
-  const to = [S.groundSlideTo[0], groundY, S.groundSlideTo[1]];
   const ph = ((phase % 1) + 1) % 1;
+  if (plant) {   // s21:T
+    if (plant.contact) return [from[0] - plant.dx, groundY, from[2] - plant.dz];
+    const u = clamp01((ph - plant.liftPhase) / (1 - plant.liftPhase));
+    const p = lerp3([plant.liftX, groundY, plant.liftZ], from, u);
+    p[1] = groundY + (S.ankleM + S.returnLiftM - groundY) * Math.sin(Math.PI * u);
+    return p;
+  }
+  const to = [S.groundSlideTo[0], groundY, S.groundSlideTo[1]];
   if (ph < S.slideShare) return lerp3(from, to, ph / S.slideShare);
   const u = (ph - S.slideShare) / (1 - S.slideShare);
   const p = lerp3(to, from, u);
@@ -70,28 +134,28 @@ export function backFootPath(phase) {
  * is 0.157 m lower than the deck, so the body must be too), easing up to 0.4 as the foot swings back through the air.
  * Continuous round the loop. Pure.
  */
-export function kickDepth(phase) {
+export function kickDepth(phase, liftPhase = SKATE_POSE.slideShare) {   // s21:T liftPhase: where the planted foot left the ground (default: today's)
   const ph = ((phase % 1) + 1) % 1;
-  if (ph < SKATE_POSE.slideShare) return 1;
-  const u = (ph - SKATE_POSE.slideShare) / (1 - SKATE_POSE.slideShare);
+  if (ph < liftPhase) return 1;
+  const u = (ph - liftPhase) / (1 - liftPhase);
   return 1 - 0.6 * Math.sin(Math.PI * u);
 }
 
 /**
  * Everything the pose is made of for a state, in the pose frame. Pure; the node test pins it.
- * @param {{ push: number, pushPhase: number, tuck: number }} s
+ * @param {{ push: number, pushPhase: number, tuck: number, plant?: object|null }} s   plant (s21:T): see stepPlant; absent, the fixed stroke
  */
-export function skateTargets({ push = 0, pushPhase = 0, tuck = 0 }) {
+export function skateTargets({ push = 0, pushPhase = 0, tuck = 0, plant = null }) {
   const S = SKATE_POSE;
   const pw = clamp01(push), tk = clamp01(tuck);
-  const wave = kickDepth(pushPhase);
+  const wave = plant ? kickDepth(pushPhase, plant.liftPhase) : kickDepth(pushPhase);
   const drop = S.stanceDropM + S.pushDropM * pw * wave + S.tuckDropM * tk;
   const lift = S.tuckLiftM * tk;
   const stanceL = [S.footAlongM, S.ankleM + lift, S.footAcrossM];
   const stanceR = [-S.footAlongM, S.ankleM + lift, S.footAcrossM];
   const pushL = [0.20, S.ankleM, 0];
   const footL = lerp3(stanceL, pushL, pw);
-  const footR = lerp3(stanceR, backFootPath(pushPhase), pw);
+  const footR = lerp3(stanceR, backFootPath(pushPhase, plant), pw);
   return {
     drop, shift: S.pushShiftM * pw * wave, footL, footR,
     yawL: lerp(S.frontFootYaw, S.pushFootYaw, pw), yawR: 0,

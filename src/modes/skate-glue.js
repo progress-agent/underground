@@ -14,7 +14,7 @@
 // FIRST USE. The board's model is fetched the first time B is pressed (a cold load fetches no extra model): B then sets
 // `pending`, and the board goes on when it has arrived, if the walker is still eligible.
 import { SKATE, createSkate, stepSkate, canBoard } from './skate-body.js';
-import { registerSkatePose } from '../vehicles/skate-pose.js';
+import { registerSkatePose, createPlant, stepPlant } from '../vehicles/skate-pose.js'; // s21:T: createPlant, stepPlant
 import { BODY } from './pedestrian-body.js';
 
 const TAU = Math.PI * 2;
@@ -48,7 +48,10 @@ const FOLLOW_RATE = 1.1;            // ... at this rate (/s)
  */
 export function createBoardController({ ctx, body, P, VE, K, world, hooks }) {
   const sk = createSkate();
-  const poseParams = { push: 0, pushPhase: 0, tuck: 0 };
+  const poseParams = { push: 0, pushPhase: 0, tuck: 0, plant: null }; // s21:T: plant
+  // ── s21:T ── the pushing foot is planted (sprint 21Oct26w): the plant record follows the board's travel in the pose frame
+  const plant = createPlant();
+  // ── /s21:T ──
   let floating = null;                    // { x, y, z, heading } a board dropped into the water
   let refusedAt = -Infinity, refusedText = null;
   let poseFigure = null;
@@ -250,8 +253,17 @@ export function createBoardController({ ctx, body, P, VE, K, world, hooks }) {
       if (!onRoof) hooks.contactStep(px, pz); // s14:I (roof guard)
       if (hooks.card()) { off('card'); return true; }
 
+      // ── s21:T ── plant the pushing foot: the frame's displacement (the board's own step, the walk-bounds hold and the facade
+      // push all included) rotated into the pose frame. Pose +X is the way the board rides and +Z across it; with the figure's
+      // facing f settled (FACING_RATE) they are (-cos f, +sin f) and (-sin f, -cos f) in world (x, z).
+      {
+        const wx = body.x - px, wz = body.z - pz, cf = Math.cos(sk.facing), sf = Math.sin(sk.facing);
+        stepPlant(plant, { push: sk.push, pushPhase: sk.pushPhase, travelX: -cf * wx + sf * wz, travelZ: -sf * wx - cf * wz });
+      }
+      // ── /s21:T ──
       // the figure's pose reads these
       poseParams.push = sk.push; poseParams.pushPhase = sk.pushPhase; poseParams.tuck = sk.tuck;
+      poseParams.plant = plant; // s21:T
       setPoseTarget(1);
       placeModel();
       followCamera(dt);
@@ -283,6 +295,7 @@ export function createBoardController({ ctx, body, P, VE, K, world, hooks }) {
       return {
         on: sk.on, pending: sk.pending, v: sk.v, heading: sk.heading, lean: sk.lean, push: sk.push, pushPhase: sk.pushPhase,
         tuck: sk.tuck, airT: sk.airT, refused: sk.refused, lastDrop: sk.lastDrop, floating: floating ? { ...floating } : null,
+        plant: { ...plant }, // s21:T
       };
     },
   };
