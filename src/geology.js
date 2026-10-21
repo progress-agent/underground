@@ -70,13 +70,31 @@ export function updateGeologyClarity(chalkClarity = 0) {
 // --- Main strata creation ---
 
 /**
+ * s21:L (approach F). The chalk floor's plane, built as createGeologicalStrata builds it, so a worker can be handed
+ * its vertex coordinates before the rest of the opening needs the mesh. `bounds` is getTerrainBounds()'s shape
+ * (minX, maxX, widthM, heightM are read). Returns the geometry (flat, Y unset), the float32 X and Z of every
+ * vertex and the plane's world centre.
+ */
+export function createChalkPlane(bounds) {
+  const TERRAIN_W = bounds.widthM, TERRAIN_H = bounds.heightM;
+  const CENTER_X = (bounds.minX + bounds.maxX) / 2, CENTER_Z = (bounds.minZ + bounds.maxZ) / 2;
+  const geom = new THREE.PlaneGeometry(TERRAIN_W, TERRAIN_H, CHALK_SEGMENTS, CHALK_SEGMENTS);
+  geom.rotateX(-Math.PI / 2);
+  const pos = geom.attributes.position;
+  const x = new Float32Array(pos.count), z = new Float32Array(pos.count);
+  for (let i = 0; i < pos.count; i++) { x[i] = pos.getX(i); z[i] = pos.getZ(i); }
+  return { geom, x, z, centerX: CENTER_X, centerZ: CENTER_Z };
+}
+const CHALK_SEGMENTS = 512;
+
+/**
  * Build the chalk floor group.
  * @param {Array<{e:number,n:number}>|null} m25Points  M25 BNG ring — enables
  *        rim-flatten during the build. Pass null for an unbounded floor.
  * @param {number} verticalScale  (kept for call-site compat; datum uses the
  *        module VE constant so the analytic surface stays consistent)
  */
-export function createGeologicalStrata(m25Points = null, verticalScale = VERTICAL_EXAGGERATION, { textures = null } = {}) { // s21:L: textures = { grain, roughness, normal } pixels from a worker
+export function createGeologicalStrata(m25Points = null, verticalScale = VERTICAL_EXAGGERATION, { textures = null, plane = null } = {}) { // s21:L: textures = { grain, roughness, normal } pixels from a worker; plane = { geom, disp } from createChalkPlane and a worker
   const group = new THREE.Group();
   group.name = 'geological-strata';
 
@@ -95,21 +113,30 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   if(!bounds)throw new Error('Geology requires loaded terrain bounds');
   const TERRAIN_W=bounds.widthM,TERRAIN_H=bounds.heightM;
   const CENTER_X=(bounds.minX+bounds.maxX)/2,CENTER_Z=(bounds.minZ+bounds.maxZ)/2;
-  const segments = 512;
-  const geom = new THREE.PlaneGeometry(TERRAIN_W, TERRAIN_H, segments, segments);
-  geom.rotateX(-Math.PI / 2);
+  const segments = CHALK_SEGMENTS;
+  // ── s21:L ── a prebuilt plane and the worker's displacement (the same numbers, computed elsewhere) replace the
+  // in-line loop; without them, or if the sizes disagree, the loop below runs exactly as it always did.
+  const usePlane = !!(plane && plane.geom && plane.disp && plane.disp.length === plane.geom.attributes.position.count);
+  const geom = usePlane ? plane.geom : new THREE.PlaneGeometry(TERRAIN_W, TERRAIN_H, segments, segments);
+  if (!usePlane) geom.rotateX(-Math.PI / 2);
+  // ── /s21:L ──
 
   // CPU vertex displacement — evaluated in WORLD XZ (local + centre) so the
   // baked mesh matches getChalkSurfaceY(worldX, worldZ) exactly.
   const pos = geom.attributes.position;
   const count = pos.count;
-  const dispArr = new Float32Array(count);
+  const dispArr = usePlane ? plane.disp : new Float32Array(count); // s21:L
   let dMin = Infinity, dMax = -Infinity;
   for (let i = 0; i < count; i++) {
-    const wx = pos.getX(i) + CENTER_X;
-    const wz = pos.getZ(i) + CENTER_Z;
-    const d = chalkDisplacement(wx, wz);
-    dispArr[i] = d;
+    let d;
+    if (usePlane) {
+      d = dispArr[i];
+    } else {
+      const wx = pos.getX(i) + CENTER_X;
+      const wz = pos.getZ(i) + CENTER_Z;
+      d = chalkDisplacement(wx, wz);
+      dispArr[i] = d;
+    }
     pos.setY(i, d);
     if (d < dMin) dMin = d;
     if (d > dMax) dMax = d;

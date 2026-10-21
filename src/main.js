@@ -95,7 +95,8 @@ import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewaySh
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { getInfraHazeStrength } from './infra-materials.js';
 import { buildCrownRibbons } from './crown-ribbon.js';
-import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity } from './geology.js';
+import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity, createChalkPlane } from './geology.js';
+import { chalkRingFromPoints } from './chalk-field.js'; // s21:L
 import { loadReservoirData, createReservoirs, addReservoirsToLegend } from './reservoirs.js';
 import { loadCanalData, createCanals, addCanalsToLegend } from './canals.js';
 import { createBridges } from './bridges.js';
@@ -1311,6 +1312,25 @@ let thamesProfileSampler = null;
 let seaLife = null; // silent sea life in the Thames, drawn only while submerged
 // ── /sprint:C ──
 const thamesDataPromise = loadThamesData();
+// ── s21:L ── (approach F) The chalk floor's displacement (526 ms of noise and ring distances) runs in a worker as
+// soon as the terrain's extent and the M25 ring both exist, long before the M25 chain needs it, so the descent does
+// no geology work and the main thread only builds the plane, normals, colours and material.
+let s21Bounds = null, s21M25 = null, s21GeologyStarted = false, s21GeologyResolve = () => {};
+const s21GeologyPromise = new Promise(resolve => { s21GeologyResolve = resolve; });
+function s21TryStartGeologyWork() {
+  if (s21GeologyStarted || !s21Bounds || !s21M25) return;
+  s21GeologyStarted = true;
+  try {
+    const ring = chalkRingFromPoints(s21M25.supportPoints || s21M25.points);
+    const plane = createChalkPlane(s21Bounds);
+    openingWork.chalkDisplacement({ ring, x: plane.x, z: plane.z, centerX: plane.centerX, centerZ: plane.centerZ })
+      .then(disp => s21GeologyResolve({ geom: plane.geom, disp }), () => s21GeologyResolve(null));
+  } catch (error) {
+    console.warn(`[opening] chalk displacement not started (${error.message}); the floor is built here`);
+    s21GeologyResolve(null);
+  }
+}
+// ── /s21:L ──
 
 // ---------- Ground (terrain if available, else debug grid) ----------
 {
@@ -1336,7 +1356,8 @@ const thamesDataPromise = loadThamesData();
   // Thames data must load before terrain so we can carve the river valley
   thamesDataPromise.then(thamesData => {
     thamesProfileSampler = createThamesProfileSampler(thamesData?.points);
-    tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData, textureSource: openingWork }) /* s21:L */.then(result => {
+    tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData, textureSource: openingWork,
+      onBounds: (bounds) => { s21Bounds = bounds; s21TryStartGeologyWork(); } }) /* s21:L */.then(result => {
       if (!result) {
         grid.visible = true;
         return;
@@ -1505,7 +1526,7 @@ const thamesDataPromise = loadThamesData();
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
       // ── s21:L ── the chalk floor's textures come from a worker (a failure there is the main-thread path)
-      Promise.all([m25DataPromise, openingWork.chalkSet.catch(() => null)]).then(([m25Data, s21Chalk]) => {
+      Promise.all([m25DataPromise, openingWork.chalkSet.catch(() => null), s21GeologyPromise]).then(([m25Data, s21Chalk, s21Plane]) => {
       // ── /s21:L ──
         if (!m25Data?.points?.length) {
           // Dock water is independently sourced; its paired wet-polygon mask
@@ -1540,7 +1561,7 @@ const thamesDataPromise = loadThamesData();
 
         // Chalk floor — build now that the M25 ring is available (rim-flatten),
         // then clip it with the same mask as the terrain (same UV→world map).
-        geologyGroup = createGeologicalStrata(supportPoints, sim.verticalScale, { textures: s21Chalk }); // s21:L
+        geologyGroup = createGeologicalStrata(supportPoints, sim.verticalScale, { textures: s21Chalk, plane: s21Plane }); // s21:L
         if (geologyGroup) {
           scene.add(geologyGroup);
           if (geologyGroup.userData.chalkMat) applyM25Mask(geologyGroup.userData.chalkMat, maskTex);
@@ -1990,6 +2011,9 @@ let m25Road = null;
 const m25DataPromise = loadM25Data();
 m25DataPromise.then(data => {
   if (data?.points?.length) initM25Boundary(data.supportPoints || data.points);
+  // ── s21:L ──
+  if (data?.points?.length) { s21M25 = data; s21TryStartGeologyWork(); } else s21GeologyResolve(null);
+  // ── /s21:L ──
 });
 
 // ---------- Surface features (tiled progressive loading) ----------
