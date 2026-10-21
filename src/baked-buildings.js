@@ -41,6 +41,7 @@
 // well under a second of wall clock, after which nothing happens ever again.
 
 import * as THREE from 'three';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 
 const MAGIC = 0x31424755;   // 'UGB1' little-endian
 const REC_BYTES = 10;
@@ -48,6 +49,10 @@ const DIR_BYTES = 16;
 const HEADER_BYTES = 12;
 
 export const BAKED_URL = '/data/surface/baked/buildings.bin';
+// s21:L (profile A + I): the same bytes, gzip-framed at build time (vite.config.js) and served as an
+// ordinary octet-stream like ground.bin, so Pages sends 8.8 MB instead of 12.8 MB. The uncompressed
+// payload stays in dist as the fallback, and every check below runs on the decompressed buffer.
+export const BAKED_Z_URL = '/data/surface/baked/buildings.z.bin';
 
 // ─── Load ───────────────────────────────────────────────────────────────────
 
@@ -64,25 +69,22 @@ export const BAKED_URL = '/data/surface/baked/buildings.bin';
  */
 export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint = null } = {}) {
   const metadataUrl = new URL('meta.json', new URL(url, globalThis.location?.href || 'http://localhost')).href;
-  const [resp, metadataResponse] = await Promise.all([fetch(url), fetch(metadataUrl)]);
-  if (!resp.ok) throw new Error(`baked payload: HTTP ${resp.status}`);
+  // s21:L: the payload, its metadata and (a value or a promise) the airport fingerprint arrive in
+  // any order; every check runs after all of them are here, with the same rules and messages.
+  const [buffer, metadataResponse, fingerprint] = await Promise.all([
+    fetchPayloadBuffer(url), bootFetch(metadataUrl), airportFingerprint,
+  ]);
   if (!metadataResponse.ok || (metadataResponse.headers.get('content-type') || '').includes('text/html')) {
     throw new Error('baked metadata unavailable');
   }
   const metadata = await metadataResponse.json();
-  if (airportFingerprint && !metadata.airportSuppression) {
+  if (fingerprint && !metadata.airportSuppression) {
     throw new Error('baked airport footprint compatibility missing; rebuild required');
   }
-  if (metadata.airportSuppression && metadata.airportSuppression.fingerprint !== airportFingerprint) {
+  if (metadata.airportSuppression && metadata.airportSuppression.fingerprint !== fingerprint) {
     throw new Error('baked airport replacements unavailable or incompatible');
   }
 
-  // SPA-fallback trap, same one surface-loader.js guards: a dev server or a
-  // Pages catch-all answers a missing file with index.html at HTTP 200.
-  const ct = resp.headers.get('content-type') || '';
-  if (ct.includes('text/html')) throw new Error('baked payload: got HTML (SPA fallback) — payload not deployed');
-
-  const buffer = await resp.arrayBuffer();
   const payload = parseBakedBuildings(buffer);
   if (metadata.buildings !== payload.buildings || metadata.tiles !== payload.tiles.length) throw new Error('baked metadata and payload disagree');
   if (metadata.payloadSha256) {
@@ -92,6 +94,29 @@ export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint 
   }
   payload.airportSuppression = metadata.airportSuppression || null;
   return payload;
+}
+
+/**
+ * s21:L. The payload's bytes: the gzip-framed copy first (default URL only), then the plain file.
+ * A missing, HTML (SPA fallback) or undecodable compressed answer falls through silently to the plain
+ * payload, whose own failures are the ones reported.
+ */
+async function fetchPayloadBuffer(url) {
+  if (url === BAKED_URL && typeof DecompressionStream === 'function') {
+    try {
+      const zr = await bootFetch(BAKED_Z_URL, { priority: 'low' });
+      if (zr.ok && !(zr.headers.get('content-type') || '').includes('text/html')) {
+        return await new Response(zr.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      }
+    } catch (_) { /* fall back to the plain payload */ }
+  }
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`baked payload: HTTP ${resp.status}`);
+  // SPA-fallback trap, same one surface-loader.js guards: a dev server or a
+  // Pages catch-all answers a missing file with index.html at HTTP 200.
+  const ct = resp.headers.get('content-type') || '';
+  if (ct.includes('text/html')) throw new Error('baked payload: got HTML (SPA fallback) — payload not deployed');
+  return resp.arrayBuffer();
 }
 
 /**

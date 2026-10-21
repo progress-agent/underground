@@ -12,6 +12,7 @@
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
+import { bootFetch } from './boot-fetch.js'; // s21:L
 const LOAD_RADIUS   = 12000; // metres — tiles within this radius of camera get loaded
 const UNLOAD_RADIUS = 18000; // metres — tiles beyond this get disposed
 const MAX_CONCURRENT = 4;    // max simultaneous tile fetches
@@ -44,7 +45,7 @@ export async function initSurfaceLoader(opts) {
   onTileLoaded = opts.onTileLoaded;
   onTileDisposed = opts.onTileDisposed;
 
-  const resp = await fetch('/data/surface/tiles/manifest.json');
+  const resp = await bootFetch('/data/surface/tiles/manifest.json'); // s21:L
   if (!resp.ok) throw new Error(`Manifest fetch failed: ${resp.status}`);
   manifest = await resp.json();
 

@@ -58,7 +58,7 @@ test('a different cache mode is not the boot request', async () => {
 
 test('index.html starts exactly the downloads the loaders take, with the loaders\' cache modes', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const started = [...html.matchAll(/start\('([^']+)', '([^']+)'\)/g)].map(m => [m[1], m[2]]);
+  const started = [...html.matchAll(/\bstart\('([^']+)'(?:, '([^']+)')?\)/g)].map(m => [m[1], m[2] || 'default']);
   const src = (f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
   // Every started URL appears in a bootFetch call of the loader that owns it.
   const owners = {
@@ -79,4 +79,20 @@ test('index.html starts exactly the downloads the loaders take, with the loaders
     if (mode === 'no-store') assert.ok(/cache: 'no-store'/.test(text), `${url} loader should ask no-store`);
   }
   assert.equal(started.length, Object.keys(owners).length);
+});
+
+test('wave 2 reserves what the loaders take after the heightmap and never starts it twice', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const reserved = [...html.matchAll(/reserve\('([^']+)'/g)].map(m => m[1]).sort();
+  assert.deepEqual(reserved, [
+    '/data/station-buildings.json',
+    '/data/surface/baked/buildings.z.bin',
+    '/data/surface/baked/ground.bin',
+    '/data/surface/baked/landmark-footprints.json',
+    '/data/surface/baked/meta.json',
+    '/data/surface/tiles/manifest.json',
+  ]);
+  // The live-path skips are present, and a reserved request settles through the same promise the loader holds.
+  assert.ok(/buildings=live/.test(html) && /ground=live/.test(html));
+  assert.ok(/settle\(q\)/.test(html));
 });

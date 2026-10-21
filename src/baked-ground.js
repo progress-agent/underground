@@ -2,6 +2,7 @@
 // road/green bits, gzip-compressed on disk. The shader still receives the exact
 // RGBA bytes produced by surface-texture.js, at the original 4096 resolution.
 import { createSurfaceTexture } from './surface-texture.js';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 
 export const GROUND_URL = '/data/surface/baked/ground.bin';
 export const GROUND_MAGIC = 0x31474755; // UGG1
@@ -25,7 +26,11 @@ export function parseGround(buffer, expectedBBox) {
 }
 
 export async function loadBakedGround(bbox) {
-  const response = await fetch(GROUND_URL, { signal: AbortSignal.timeout(15000) });
+  // s21:L: the request was started at HTML parse (index.html); the 15 s limit now covers the wait for its headers.
+  const response = await Promise.race([
+    bootFetch(GROUND_URL, { signal: AbortSignal.timeout(15000) }),
+    new Promise((_, reject) => setTimeout(() => reject(new DOMException('ground fetch timed out', 'TimeoutError')), 15000)),
+  ]);
   if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
     throw new Error(`ground fetch failed (${response.status})`);
   }

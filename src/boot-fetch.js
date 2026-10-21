@@ -8,7 +8,14 @@
 // request the boot script did not start, a different cache mode, or a context with no boot script
 // (the bake's Node shim, a unit test) gets an ordinary fetch. Nothing else about the loaders changes.
 
-const keyOf = (url) => String(url);
+// Same-origin URLs are keyed by path and query, however the caller spelled them.
+const keyOf = (url) => {
+  try {
+    const u = new URL(String(url), globalThis.location?.href);
+    if (globalThis.location && u.origin === globalThis.location.origin) return u.pathname + u.search;
+  } catch (_) { /* fall through */ }
+  return String(url);
+};
 const modeOf = (init) => (init && init.cache) || 'default';
 
 /** @returns {Promise<Response>} */

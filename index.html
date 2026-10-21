@@ -5,16 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- s21:L: the opening's big downloads start here, at HTML parse, so they overlap the bundle download and
          evaluation instead of queueing behind the work that needs them. src/boot-fetch.js hands each request to the
-         loader that used to start it; a request nobody takes is simply dropped. Wave 1: the terrain inputs, the
-         river and the M25 ring. -->
+         loader that used to start it; a request nobody takes is simply dropped.
+         Wave 1: the terrain inputs, the river and the M25 ring.
+         Wave 2: once the heightmap body has arrived (or 4 s after parse), the surface manifest, the ground and
+         building payloads, their metadata, the landmark footprints and the station data, so on a slow line the
+         heightmap that every later step needs is not sharing the connection with 9 MB of payload.
+         A live path chosen by the URL or by a saved choice (?buildings=live, ?ground=live) skips what it will not read. -->
     <script>
       (function () {
         var held = Object.create(null);
-        function start(url, cache) {
+        function start(url, cache, extra) {
+          var init = cache && cache !== 'default' ? { cache: cache } : {};
+          if (extra) for (var k in extra) init[k] = extra[k];
           var p;
-          try { p = fetch(url, cache === 'default' ? undefined : { cache: cache }); } catch (e) { return; }
+          try { p = fetch(url, init); } catch (e) { return null; }
           p.catch(function () {}); // a request nobody takes must not log an unhandled rejection
-          held[url] = { p: p, cache: cache };
+          held[url] = { p: p, cache: cache || 'default' };
+          return p;
         }
         window.__ugBoot = {
           start: start,
@@ -27,12 +34,51 @@
           },
         };
         start('/data/terrain/london_full_height.json', 'no-store');
-        start('/data/terrain/london_full_height_u16.png', 'default');
-        start('/data/terrain/stratford-dtm.json', 'default');
-        start('/data/terrain/airport-dtm.json', 'default');
-        start('/data/terrain/southern-dtm.json', 'default');
+        var heightmap = start('/data/terrain/london_full_height_u16.png');
+        start('/data/terrain/stratford-dtm.json');
+        start('/data/terrain/airport-dtm.json');
+        start('/data/terrain/southern-dtm.json');
         start('/data/thames.json', 'no-store');
         start('/data/m25.json', 'no-store');
+
+        var query = location.search, savedLive = false;
+        try {
+          var saved = JSON.parse(localStorage.getItem('ug:prefs:v2') || '{}');
+          savedLive = saved.buildingsPath === 'live' && saved.buildingsPathRev === 2;
+        } catch (e) { /* no storage: the default (baked) applies */ }
+        var buildingsLive = /[?&]buildings=live(&|$)/.test(query) || (savedLive && !/[?&]buildings=/.test(query));
+        var groundLive = /[?&]ground=live(&|$)/.test(query);
+        // Wave 2 is reserved now and started later: a loader that asks for one of these before the heightmap has
+        // arrived gets a promise that settles with the real request, so nothing is fetched twice.
+        var later = [];
+        function reserve(url, extra) {
+          var settle;
+          var p = new Promise(function (resolve) { settle = resolve; });
+          p.catch(function () {});
+          held[url] = { p: p, cache: 'default' };
+          later.push(function () {
+            var q;
+            try { q = fetch(url, extra || {}); } catch (e) { q = Promise.reject(e); }
+            q.catch(function () {});
+            settle(q);
+          });
+        }
+        reserve('/data/surface/tiles/manifest.json');
+        if (!groundLive) reserve('/data/surface/baked/ground.bin');
+        if (!buildingsLive) {
+          reserve('/data/surface/baked/meta.json');
+          reserve('/data/surface/baked/landmark-footprints.json');
+          reserve('/data/surface/baked/buildings.z.bin', { priority: 'low' });
+        }
+        reserve('/data/station-buildings.json');
+        var wave2 = false;
+        function second() {
+          if (wave2) return;
+          wave2 = true;
+          for (var i = 0; i < later.length; i++) later[i]();
+        }
+        if (heightmap) heightmap.then(function (r) { return r.clone().arrayBuffer(); }).then(second, second);
+        setTimeout(second, 4000);
       })();
     </script>
     <meta name="theme-color" content="#05070b" />

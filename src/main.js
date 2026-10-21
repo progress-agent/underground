@@ -984,7 +984,10 @@ function syncMotorwayBridges() {
     if (bridge) bridge.group.visible = false;
   }
 }
-let airportFingerprintPromise = null;
+// ── s21:L ── the fingerprint is pure on the airport data, so it is computed at boot and the payload's
+// airport check runs after the fetch (src/baked-buildings.js awaits it beside the payload).
+let airportFingerprintPromise = airportSuppressionSignature(AIRPORT_DATA);
+// ── /s21:L ──
 let dlrProfile = null;
 const dlrStationPoints = [];
 // ── s30:R ── Open-air Tube and DLR drawn as surface railway (D-041 item 2).
@@ -1360,7 +1363,6 @@ const thamesDataPromise = loadThamesData();
         airportsGroup = createAirports({ getSurfaceY: getStructuralSurfaceY,
           VE: VERTICAL_EXAGGERATION, heightScale: getBuildingHeightScale() });
         scene.add(airportsGroup);
-        airportFingerprintPromise = airportSuppressionSignature(AIRPORT_DATA);
       } catch (error) {
         airportInitError = error.message;
         airportsGroup = null;
@@ -1996,6 +1998,17 @@ let surfaceDataLoaded = false;
 // OrbitControls settling both drift between reloads), so the swap must be cheap
 // in both directions.
 let bakedPayload = null;
+// ── s21:L ──
+// The payload's download, decompression, checks and parse start at boot (its bytes are already on the
+// way from index.html), not at the end of the long build chain. activateBakedBuildings consumes it.
+let s21BakedPayloadPromise = null;
+function s21StartBakedPayload() {
+  s21BakedPayloadPromise ||= fetchBakedBuildings(undefined, { airportFingerprint: airportFingerprintPromise });
+  s21BakedPayloadPromise.catch(() => {}); // activateBakedBuildings reports a failure, once
+  return s21BakedPayloadPromise;
+}
+if (buildingsPath === 'baked') s21StartBakedPayload();
+// ── /s21:L ──
 let bakedBuilder = null;
 let bakedMeshes = [];
 let bakedLoadMs = 0;
@@ -2036,12 +2049,15 @@ async function activateBakedBuildings() {
 
   try {
     const t0 = performance.now();
-    const airportFingerprint = airportsGroup ? await airportFingerprintPromise : null;
     landmarkDataPromise ||= fetchLandmarkFootprints().catch(err => { landmarkDataPromise = null; throw err; });
     const [payload, footprints] = await Promise.all([
-      bakedPayload || fetchBakedBuildings(undefined, { airportFingerprint }), landmarkDataPromise,
+      bakedPayload || s21StartBakedPayload(), landmarkDataPromise, // s21:L
       stationBuildingsPromise, // s02:B: the station data must be ready before the first baked tile builds
     ]);
+    // ── s21:L ── as before: if the airport models could not be built, a payload that carries their
+    // suppression cannot be used (the footprints would be missing), so the live path takes over.
+    if (airportInitError && payload.airportSuppression) throw new Error('baked airport replacements unavailable or incompatible');
+    // ── /s21:L ──
     bakedPayload = payload;
     bakedLoadMs = Math.round(performance.now() - t0);
 
@@ -2075,6 +2091,7 @@ async function activateBakedBuildings() {
     dbg(`Baked buildings: ${(bakedPayload.bytes / 1048576).toFixed(2)}MB, ${bakedPayload.buildings.toLocaleString()} buildings across ${bakedPayload.tiles.length} tiles, fetched+parsed in ${bakedLoadMs}ms`);
   } catch (err) {
     console.warn(`Baked buildings unavailable (${err.message}) — falling back to the live tile path`);
+    s21BakedPayloadPromise = null; // s21:L: a later try fetches again, as before
     buildingsPath = 'live';
     bakedBuilder = null;
     resetLoadedTiles();
