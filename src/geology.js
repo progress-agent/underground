@@ -5,15 +5,17 @@
 // is the shared truth for the atmosphere blend and the HUD substrate readout.
 
 import * as THREE from 'three';
-import { fbmNoise, smoothNoise } from './noise.js';
+import { chalkDisplacement, chalkRingFromPoints, setChalkRing } from './chalk-field.js'; // s21:L
 import {
   generateChalkGrainTexture,
   generateChalkRoughnessTexture,
   generateUndersideNormalMap,
+  chalkGrainTextureFrom,
+  chalkRoughnessTextureFrom,
+  undersideNormalTextureFrom,
 } from './textures.js';
 import { RENDER_ORDER } from './render-layers.js';
 import { VERTICAL_EXAGGERATION, getTerrainBounds } from './terrain.js';
-import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 
 // ── Datum ───────────────────────────────────────────────────────────────
 // Chalk top is ABSOLUTE mOD: nominal clay/chalk boundary at 60m below sea
@@ -27,65 +29,9 @@ export const CHALK_TOP_Y = -60 * VERTICAL_EXAGGERATION;
 // same centre), so the M25 mask — indexed in terrain-UV space — lines up 1:1
 // when applyM25Mask() is called on the chalk material.
 
-// ── Relief bands (shared by the mesh build and the analytic re-eval) ─────
-// Two-band noise + terraced ledges + micro-grain. Amplitudes chosen so the
-// combined peak-to-peak clears the 120-unit (24m real) floor with room to
-// spare — troughs and ledges must read on approach.
-const BASIN_LAMBDA = 2400, BASIN_AMP = 82;   // broad basins
-const LEDGE_LAMBDA = 620,  LEDGE_AMP = 56;   // mid-scale ledges
-const LEDGE_STEP = 30, LEDGE_SOFT = 0.08;     // terrace quantum + edge-softening
-const MICRO_LAMBDA = 55,  MICRO_AMP = 7;      // micro-grain
-const RIM_FLATTEN_DIST = 800;                 // scene units inside M25 rim → displacement fades to 0
-
-// Decimated M25 ring in scene coords, [x0,z0,x1,z1,...] closed. Stored at
-// build time; used by rim-flatten (build) and getChalkSurfaceY (per frame).
-let _m25Poly = null;
-
-function smoothstep(edge0, edge1, x) {
-  let t = (x - edge0) / (edge1 - edge0);
-  if (t < 0) t = 0; else if (t > 1) t = 1;
-  return t * t * (3 - 2 * t);
-}
-
-// Min distance from world (x,z) to the stored M25 ring, in scene units.
-// Allocation-free. Returns Infinity when no ring is loaded (→ no flatten).
-function distToM25(x, z) {
-  const p = _m25Poly;
-  if (!p) return Infinity;
-  let best = Infinity;
-  for (let i = 0; i < p.length - 2; i += 2) {
-    const ax = p[i], az = p[i + 1];
-    const dx = p[i + 2] - ax, dz = p[i + 3] - az;
-    const len2 = dx * dx + dz * dz || 1;
-    let t = ((x - ax) * dx + (z - az) * dz) / len2;
-    if (t < 0) t = 0; else if (t > 1) t = 1;
-    const ex = x - (ax + t * dx), ez = z - (az + t * dz);
-    const d2 = ex * ex + ez * ez;
-    if (d2 < best) best = d2;
-  }
-  return Math.sqrt(best);
-}
-
-// Rim-flatten factor: 0 at the M25 boundary, ramping to 1 by RIM_FLATTEN_DIST
-// inside — so the floor meets the (later) chalk shaft flat and clean.
-function rimFactor(x, z) {
-  if (!_m25Poly) return 1;
-  return smoothstep(0, RIM_FLATTEN_DIST, distToM25(x, z));
-}
-
-// Raw two-band displacement (no rim flatten) as a pure function of world XZ.
-function chalkDisplacementRaw(x, z) {
-  const basin = (fbmNoise(x / BASIN_LAMBDA, z / BASIN_LAMBDA, 2) - 0.5) * 2 * BASIN_AMP;
-  const ln = (fbmNoise(x / LEDGE_LAMBDA + 100, z / LEDGE_LAMBDA + 100, 2) - 0.5) * 2 * LEDGE_AMP;
-  const q = Math.round(ln / LEDGE_STEP) * LEDGE_STEP;     // quantise to terraces
-  const ledge = q + (ln - q) * LEDGE_SOFT;                // soften the terrace edges slightly
-  const micro = (smoothNoise(x / MICRO_LAMBDA, z / MICRO_LAMBDA) - 0.5) * 2 * MICRO_AMP;
-  return basin + ledge + micro;
-}
-
-function chalkDisplacement(x, z) {
-  return chalkDisplacementRaw(x, z) * rimFactor(x, z);
-}
+// ── Relief bands ────────────────────────────────────────────────────────
+// s21:L: the displacement field (relief bands, the M25 rim-flatten and the decimated ring) moved verbatim to
+// chalk-field.js so a worker can evaluate it; this module keeps the mesh, the material and the analytic surface.
 
 /**
  * Analytic chalk surface Y at world (x, z). Re-evaluates the SAME noise the
@@ -130,7 +76,7 @@ export function updateGeologyClarity(chalkClarity = 0) {
  * @param {number} verticalScale  (kept for call-site compat; datum uses the
  *        module VE constant so the analytic surface stays consistent)
  */
-export function createGeologicalStrata(m25Points = null, verticalScale = VERTICAL_EXAGGERATION) {
+export function createGeologicalStrata(m25Points = null, verticalScale = VERTICAL_EXAGGERATION, { textures = null } = {}) { // s21:L: textures = { grain, roughness, normal } pixels from a worker
   const group = new THREE.Group();
   group.name = 'geological-strata';
 
@@ -139,17 +85,8 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   // Store a decimated M25 ring (scene coords, closed) for rim-flatten + the
   // per-frame analytic. Decimation keeps the O(vertices × segments) build cost
   // bounded; 800m flatten tolerance dwarfs the decimation error.
-  if (m25Points && m25Points.length > 3) {
-    const STEP = 2;
-    const pts = [];
-    for (let i = 0; i < m25Points.length; i += STEP) {
-      const p = m25Points[i];
-      pts.push(p.e - BNG_REF_E, -(p.n - BNG_REF_N));
-    }
-    // Close the ring
-    pts.push(pts[0], pts[1]);
-    _m25Poly = new Float32Array(pts);
-  }
+  const ring = chalkRingFromPoints(m25Points); // s21:L
+  if (ring) setChalkRing(ring);
 
   const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -214,9 +151,11 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   geom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
 
   // ── Textures: chalk grain map + grain-derived normal map ───────────────
-  const chalkGrainTex = generateChalkGrainTexture();
-  const chalkRoughTex = generateChalkRoughnessTexture();
-  const chalkNormalTex = generateUndersideNormalMap(chalkGrainTex); // reuse underside machinery
+  // ── s21:L ── pixels from a worker when given (identical bytes, the same canvas path)
+  const chalkGrainTex = textures ? chalkGrainTextureFrom(textures.grain) : generateChalkGrainTexture();
+  const chalkRoughTex = textures ? chalkRoughnessTextureFrom(textures.roughness) : generateChalkRoughnessTexture();
+  const chalkNormalTex = textures ? undersideNormalTextureFrom(textures.normal) : generateUndersideNormalMap(chalkGrainTex); // reuse underside machinery
+  // ── /s21:L ──
   // Retile to a floor-walking scale over the 70×50km plane (~500m per tile).
   for (const tex of [chalkGrainTex, chalkRoughTex, chalkNormalTex]) {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -281,7 +220,7 @@ export function createGeologicalStrata(m25Points = null, verticalScale = VERTICA
   const buildMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   console.log(
     `Chalk floor: ${segments}×${segments} @ Y=${chalkTopY}, relief p2p=${(dMax - dMin).toFixed(0)} units ` +
-    `(${((dMax - dMin) / VERTICAL_EXAGGERATION).toFixed(0)}m), rim-flatten=${_m25Poly ? 'on' : 'off'}, build=${buildMs.toFixed(0)}ms`
+    `(${((dMax - dMin) / VERTICAL_EXAGGERATION).toFixed(0)}m), rim-flatten=${ring ? 'on' : 'off'}, build=${buildMs.toFixed(0)}ms`
   );
   return group;
 }

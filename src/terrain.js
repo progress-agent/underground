@@ -8,6 +8,11 @@ import {
   generateTerrainNormalMap,
   generateUndersideGrainTexture,
   generateUndersideNormalMap,
+  terrainGrainTextureFrom,
+  terrainRoughnessTextureFrom,
+  terrainNormalTextureFrom,
+  undersideGrainTextureFrom,
+  undersideNormalTextureFrom,
 } from './textures.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 import { buildThamesCrossSections } from './thames-profile.js';
@@ -506,7 +511,10 @@ export function carveRiverChannel(
   console.log(`River channel: carved ${carved} vertices (${(carved / (vertexCols * vertexRows) * 100).toFixed(1)}% of terrain)`);
 }
 
-export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false, thamesData = null } = {}) {
+// s21:L options (both optional; without them, as in the bake's Node shim, the build is exactly as before):
+//   textureSource  { terrainSet, terrainNormal(heights, w, h) }: the noise textures' pixels from workers (src/opening-work.js)
+//   onBounds       called with the terrain's scene extent as soon as it is known, before the heavy work
+export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, wireframe = false, thamesData = null, textureSource = null, onBounds = null } = {}) {
   // Looks for generated outputs from scripts/build-heightmap.mjs
   // Expected files (served from /public/data):
   // - /data/terrain/london_full_height_u16.png (full London coverage, 10m res)
@@ -587,6 +595,11 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     const widthM = bngXmax - bngXmin;
     const heightM = bngYmax - bngYmin;
 
+    // ── s21:L ── the extent is known: lane-F work that needs only the bounds (the chalk floor's plane) can start now.
+    onBounds?.({ minX: swSceneX, maxX: neSceneX, minZ: neSceneZ, maxZ: swSceneZ, widthM: terrainW, heightM: terrainH,
+      centerX, centerZ });
+    // ── /s21:L ──
+
     console.log(`Terrain: BNG [${bngXmin},${bngYmin}]–[${bngXmax},${bngYmax}] → scene center (${centerX.toFixed(0)}, ${centerZ.toFixed(0)}), ${terrainW.toFixed(0)}×${terrainH.toFixed(0)}m`);
 
     // ── Geometry ──────────────────────────────────────────────────────
@@ -658,6 +671,13 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       );
     }
 
+    // ── s21:L ── the normal map's input is final here (the river-bed refinement below changes the geometry, never
+    // `elevations`), so a worker starts on it while the main thread builds the mesh.
+    const normalPixelsPromise = textureSource
+      ? textureSource.terrainNormal(Float32Array.from(elevations, y => (y - elevMin) / elevRange), segments + 1, segmentsY + 1)
+      : null;
+    // ── /s21:L ──
+
     // ── Second pass: displace vertices with vertical exaggeration ─────
     // Reference to sea level (0m AOD) so Y=0 = Ordnance Datum.
     // Central London (~10-15m) sits at Y=30-45, matching the camera start (Y=30).
@@ -721,30 +741,6 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
 
     console.log(`Terrain: ${pos.count} vertices, VE=${VE}×, Y range: ${minY.toFixed(1)}–${maxY.toFixed(1)}, mean elev: ${meanElev.toFixed(1)}m`);
 
-    // ── Generate procedural textures ──────────────────────────────────
-    const grainTex = generateTerrainGrainTexture();
-    const roughnessTex = generateTerrainRoughnessTexture();
-    const terrainNormalTex = generateTerrainNormalMap(Float32Array.from(elevations,y=>(y-elevMin)/elevRange), segments+1, segmentsY+1);
-    const undersideGrainTex = generateUndersideGrainTexture();
-    const undersideNormalTex = generateUndersideNormalMap(undersideGrainTex);
-
-    // ── Topside material (warm earth, viewed from above) ────────────
-    const topMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      vertexColors: true,
-      map: grainTex,
-      normalMap: terrainNormalTex,
-      normalScale: new THREE.Vector2(1.2, 1.2),
-      roughnessMap: roughnessTex,
-      roughness: 0.85,
-      metalness: 0.05,
-      transparent: false,
-      opacity: opacity,
-      depthWrite: true,
-      wireframe: !!wireframe,
-      side: THREE.FrontSide,
-    });
-
     // ── Underside geometry + vertex colours (rock face, viewed from below) ─
     // Deepened (~24% darker) so the overhead mass reads as damp soil/rock and
     // sits clearly ABOVE the bright chalk floor in the clay-zone sandwich —
@@ -778,6 +774,54 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       usColArr[i * 3 + 2] = usTmpCol.b;
     }
     undersideGeom.setAttribute('color', new THREE.BufferAttribute(usColArr, 3));
+
+    // ── s21:L ── (the contour lines and the textures moved below the underside colours; the code is unchanged)
+    // ── Contour lines ─────────────────────────────────────────────────
+    const contourLines = generateContourLines(geom);
+    if (contourLines) contourLines.position.set(centerX, 0, centerZ);
+
+
+    // ── Generate procedural textures ──────────────────────────────────
+    // ── s21:L ── the pixels come from workers when a textureSource is given (identical bytes, same canvas path);
+    // the awaits sit after the river-bed refinement, the underside colours and the contours, which do not need them.
+    let grainTex, roughnessTex, terrainNormalTex, undersideGrainTex, undersideNormalTex;
+    let workerSet = null, workerNormal = null;
+    if (textureSource) {
+      try { [workerSet, workerNormal] = await Promise.all([textureSource.terrainSet, normalPixelsPromise]); }
+      catch (error) { console.warn(`[opening] worker textures unavailable (${error.message}); generating them here`); }
+    }
+    if (workerSet && workerNormal) {
+      const set = workerSet, normalPixels = workerNormal;
+      grainTex = terrainGrainTextureFrom(set.grain);
+      roughnessTex = terrainRoughnessTextureFrom(set.roughness);
+      terrainNormalTex = terrainNormalTextureFrom(normalPixels);
+      undersideGrainTex = undersideGrainTextureFrom(set.undersideGrain);
+      undersideNormalTex = undersideNormalTextureFrom(set.undersideNormal);
+    } else {
+      grainTex = generateTerrainGrainTexture();
+      roughnessTex = generateTerrainRoughnessTexture();
+      terrainNormalTex = generateTerrainNormalMap(Float32Array.from(elevations,y=>(y-elevMin)/elevRange), segments+1, segmentsY+1);
+      undersideGrainTex = generateUndersideGrainTexture();
+      undersideNormalTex = generateUndersideNormalMap(undersideGrainTex);
+    }
+    // ── /s21:L ──
+
+    // ── Topside material (warm earth, viewed from above) ────────────
+    const topMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      map: grainTex,
+      normalMap: terrainNormalTex,
+      normalScale: new THREE.Vector2(1.2, 1.2),
+      roughnessMap: roughnessTex,
+      roughness: 0.85,
+      metalness: 0.05,
+      transparent: false,
+      opacity: opacity,
+      depthWrite: true,
+      wireframe: !!wireframe,
+      side: THREE.FrontSide,
+    });
 
     // ── Underside material (rock face with normal map for relief) ────
     // emissive keeps exposed earth visible where nothing overdraws it.
@@ -836,10 +880,6 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
     } catch {
       // ignore
     }
-
-    // ── Contour lines ─────────────────────────────────────────────────
-    const contourLines = generateContourLines(geom);
-    if (contourLines) contourLines.position.set(centerX, 0, centerZ);
 
     return { mesh, undersideMesh, topMat, undersideMat, meta, widthM, heightM, heightSampler, contourLines };
   } catch (err) {

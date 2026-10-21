@@ -36,6 +36,7 @@ export const WARM_FRACTIONS = [0.08, 0.2, 0.4, 0.6, 0.8, 0.93, 1];
 export function createOpeningGate({
   intro, renderer, composer, scene, camera, items, el = null,
   capMs = 45000, coreIds = null, graceMs = 10000, beforeCompile = null, whileWaiting = null,
+  revealDetail = null, // s21:L: () => object merged into the reveal event's timeline (the workers' job times)
   now = () => performance.now(), dispatch = (name, detail) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch (_) { /* noop */ }
   },
@@ -139,7 +140,9 @@ export function createOpeningGate({
     if (el) el.classList.add('done');
     const snap = readiness.snapshot();
     intro.begin();
-    dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline }, compile: { ...compile } });
+    let extra = {};
+    try { extra = revealDetail?.() ?? {}; } catch (e) { console.warn('[opening] reveal detail failed', e); }
+    dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline, ...extra }, compile: { ...compile } });
   }
 
   /** Call once per animation frame, before intro.update(). */

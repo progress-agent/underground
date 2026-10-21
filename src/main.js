@@ -1,3 +1,4 @@
+import { openingWork } from './opening-start.js'; // s21:L: first, so the workers start before the rest of the bundle is evaluated
 import { LANDMARK_INFO } from './landmark-info.js';
 import * as THREE from 'three';
 import { createRenderQuality } from './render-quality.js';
@@ -1335,7 +1336,7 @@ const thamesDataPromise = loadThamesData();
   // Thames data must load before terrain so we can carve the river valley
   thamesDataPromise.then(thamesData => {
     thamesProfileSampler = createThamesProfileSampler(thamesData?.points);
-    tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData }).then(result => {
+    tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData, textureSource: openingWork }) /* s21:L */.then(result => {
       if (!result) {
         grid.visible = true;
         return;
@@ -1503,7 +1504,9 @@ const thamesDataPromise = loadThamesData();
       });
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
-      m25DataPromise.then(m25Data => {
+      // ── s21:L ── the chalk floor's textures come from a worker (a failure there is the main-thread path)
+      Promise.all([m25DataPromise, openingWork.chalkSet.catch(() => null)]).then(([m25Data, s21Chalk]) => {
+      // ── /s21:L ──
         if (!m25Data?.points?.length) {
           // Dock water is independently sourced; its paired wet-polygon mask
           // must also exist when the optional M25 boundary fetch fails.
@@ -1537,7 +1540,7 @@ const thamesDataPromise = loadThamesData();
 
         // Chalk floor — build now that the M25 ring is available (rim-flatten),
         // then clip it with the same mask as the terrain (same UV→world map).
-        geologyGroup = createGeologicalStrata(supportPoints, sim.verticalScale);
+        geologyGroup = createGeologicalStrata(supportPoints, sim.verticalScale, { textures: s21Chalk }); // s21:L
         if (geologyGroup) {
           scene.add(geologyGroup);
           if (geologyGroup.userData.chalkMat) applyM25Mask(geologyGroup.userData.chalkMat, maskTex);
@@ -3128,6 +3131,7 @@ const openingGate = createOpeningGate({
       check: () => !!(crossrailMesh && tidewayMesh && sewersMesh) },
   ],
   beforeCompile: () => { for (const child of scene.children) applyShadowPolicy(child); },
+  revealDetail: () => ({ work: openingWork.timings() }), // s21:L
   whileWaiting: () => {
     // Behind the bar the frame is not being watched: spend more of it
     // building the baked city (the tick spends its usual 6ms slice as well).
@@ -4884,6 +4888,7 @@ if (import.meta.env.DEV) {
     fpsControls, intro, landscapeLock, controlsGuide, readout,
     // ── s24:O ──
     openingGate,
+    openingWork, // s21:L
     // ── /s24:O ──
     // ── sprint:A1 ──
     get modes() { return modeSystem; },
