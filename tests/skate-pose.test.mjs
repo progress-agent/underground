@@ -222,13 +222,48 @@ test('s21:T planted: contact ends at the leg\'s reach or at slideShare, whicheve
   }
 });
 
-test('s21:T planted: no push means no plant (a new stroke starts from touchdown whenever the weight comes back)', () => {
+test('s21:T planted: no push means no plant (a new stroke starts whenever the weight comes back, and the foot is down once the weight is 1)', () => {
   const pl = createPlant();
   stepPlant(pl, { push: 0, pushPhase: 0, travelX: 0.2, travelZ: 0 });
-  assert.equal(pl.contact, true); assert.ok(pl.dx <= 0.2 + 1e-12);
+  assert.equal(pl.contact, true); assert.equal(pl.armed, false); assert.equal(pl.dx, 0);
+  // Changed in fix round 2 (was: dx 0.05 after a frame at weight 0.4). The foot is blended in by the push weight, so at 0.4 it is
+  // still in the air; counting the board's travel against it then used up the leg's reach before the foot arrived (T-FOOT-2).
   stepPlant(pl, { push: 0.4, pushPhase: 0.01, travelX: 0.05, travelZ: 0 });
-  assert.equal(pl.contact, true); assert.ok(Math.abs(pl.dx - 0.05) < 1e-12, `the stroke starts when the weight comes back, not from the coasting (${pl.dx})`);
+  assert.equal(pl.contact, true); assert.equal(pl.armed, false); assert.equal(pl.dx, 0, 'the foot waits at the touchdown point while it is blended in');
+  stepPlant(pl, { push: 1, pushPhase: 0.02, travelX: 0.05, travelZ: 0 });
+  assert.equal(pl.armed, true); assert.equal(pl.dx, 0, 'the frame the weight reaches 1 is the touchdown, no travel counted yet');
+  stepPlant(pl, { push: 1, pushPhase: 0.03, travelX: 0.05, travelZ: 0 });
+  assert.ok(Math.abs(pl.dx - 0.05) < 1e-12, `and the travel counts from the next frame (${pl.dx})`);
   // skateTargets with a plant: the pose weight lerps in as before
-  const t = skateTargets({ push: 0, pushPhase: 0.3, tuck: 0, plant: pl });
+  const q = createPlant();
+  stepPlant(q, { push: 0, pushPhase: 0, travelX: 0, travelZ: 0 });
+  const t = skateTargets({ push: 0, pushPhase: 0.3, tuck: 0, plant: q });
   assert.deepEqual(t.footR, skateTargets({ push: 0, pushPhase: 0.3, tuck: 0 }).footR, 'push 0: the stance foot, plant or not');
+});
+
+test('s21:T planted: a stroke that starts while the board is rolling still puts the foot on the ground (fix round 2)', () => {
+  const S = SKATE_POSE, g = S.ankleM + S.groundSoleLiftM - S.deckTopM;
+  for (const v of [1, 3, 4.6, 8, 11.7, 17]) for (const dtS of [1 / 60, 1 / 120, 1 / 30]) {
+    const pl = createPlant();
+    stepPlant(pl, { push: 0, pushPhase: 0, travelX: v * dtS, travelZ: 0 });   // rolling, W up
+    let t = 0, push = 0, boardX = 0, lowest = Infinity, groundFrames = 0, worldAtTouch = null, maxWorldDrift = 0, armedAt = null;
+    while (t + dtS < 0.9 - 1e-9) {   // one stroke: the wrap at 0.9 s would begin the next
+      t += dtS; boardX += v * dtS; push = Math.min(1, push + dtS / 0.15);
+      const ph = (t / 0.9) % 1;
+      stepPlant(pl, { push, pushPhase: ph, travelX: v * dtS, travelZ: 0 });
+      const tg = skateTargets({ push, pushPhase: ph, tuck: 0, plant: pl });
+      lowest = Math.min(lowest, tg.footR[1]);
+      if (push >= 0.999 && pl.contact && tg.footR[1] < g + 1e-9) {
+        groundFrames++;
+        const world = boardX + tg.footR[0];
+        if (worldAtTouch === null) { worldAtTouch = world; armedAt = t; }
+        maxWorldDrift = Math.max(maxWorldDrift, Math.abs(world - worldAtTouch));
+      }
+    }
+    assert.ok(lowest <= g + 1e-9, `v ${v} dt ${dtS}: the foot target reached the ground (lowest ${lowest}, ground ${g})`);
+    assert.ok(groundFrames >= 1, `v ${v} dt ${dtS}: a full-weight frame on the ground`);
+    if (dtS <= 1 / 60 && v <= 12) assert.ok(groundFrames >= 2, `v ${v} dt ${dtS}: two or more frames planted (${groundFrames})`);
+    assert.ok(maxWorldDrift < 1e-9, `v ${v} dt ${dtS}: planted to the ground (${maxWorldDrift.toExponential(2)} m)`);
+    assert.ok(armedAt >= 0.15 - 1e-9 && armedAt <= 0.15 + dtS + 1e-9, 'the touchdown is where the weight reaches 1');
+  }
 });

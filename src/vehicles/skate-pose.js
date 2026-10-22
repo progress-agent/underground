@@ -54,18 +54,21 @@ export const SKATE_POSE = Object.freeze({
   riseS: 0.2, fallS: 0.2,
 });
 
+const PLANT_ARM_PUSH = 0.999;   // s21:T the push weight at which the foot is down: the back foot is blended in by the push weight, so only at (nearly) 1 is it at its target
 const lerp = (a, b, k) => a + (b - a) * k;
 const lerp3 = (a, b, k) => [lerp(a[0], b[0], k), lerp(a[1], b[1], k), lerp(a[2], b[2], k)];
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
- * A fresh plant record (s21:T): { contact, dx, dz, liftPhase, liftX, liftZ, lastPhase, lastPush }. dx, dz are the board's travel since touchdown
+ * A fresh plant record (s21:T): { contact, armed, dx, dz, liftPhase, liftX, liftZ, lastPhase, lastPush }. `contact` is true from the start of a stroke until the foot lifts;
+ * `armed` becomes true on the frame the push weight reaches 1, which is the frame the foot is on the ground (until then the foot is still
+ * being blended in from its stance and is not touching anything, so the board's travel is not counted against it). dx, dz are the board's travel since touchdown
  * in the POSE frame (x along the board towards the nose, z across it), liftPhase the stroke phase at which the foot left the ground
  * and liftX, liftZ where it was then. Before the first step it describes the old fixed stroke's end (no contact).
  */
 export function createPlant() {
   const S = SKATE_POSE;
-  return { contact: false, dx: 0, dz: 0, liftPhase: S.slideShare, liftX: S.groundSlideTo[0], liftZ: S.groundSlideTo[1], lastPhase: 0, lastPush: 0 };
+  return { contact: false, armed: false, dx: 0, dz: 0, liftPhase: S.slideShare, liftX: S.groundSlideTo[0], liftZ: S.groundSlideTo[1], lastPhase: 0, lastPush: 0 };
 }
 
 /**
@@ -79,16 +82,30 @@ export function createPlant() {
 export function stepPlant(plant, { push, pushPhase, travelX, travelZ }) {
   const S = SKATE_POSE, ph = pushPhase;
   const wrapped = push > 0 && plant.lastPush > 0 && ph < plant.lastPhase;
+  const newStroke = wrapped || !(push > 0) || !(plant.lastPush > 0);
   let p0 = plant.lastPhase, tx = travelX, tz = travelZ;
-  if (wrapped || !(push > 0) || !(plant.lastPush > 0)) {
+  if (newStroke) {
     // a stroke begins: the share of this frame after the wrap (the phase advanced from lastPhase through 1 to ph), or all of it
     // when the stroke begins from no push at all (the phase advanced from 0 to ph)
     const share = wrapped ? Math.min(1, ph / Math.max(1e-12, ph + 1 - plant.lastPhase)) : 1;
-    plant.contact = true; plant.dx = 0; plant.dz = 0; plant.liftPhase = S.slideShare;
+    plant.contact = true; plant.armed = false; plant.dx = 0; plant.dz = 0; plant.liftPhase = S.slideShare;
     plant.liftX = S.groundSlideTo[0]; plant.liftZ = S.groundSlideTo[1];
     p0 = 0; tx *= share; tz *= share;
   }
-  if (plant.contact) {
+  if (plant.contact && !plant.armed) {
+    // The back foot is blended in from its stance by the push weight, which rises over 0.15 s whenever a stroke starts from no push
+    // (a W pressed again while rolling). Until the weight is 1 the foot is on its way down and touches nothing; counting the board's
+    // travel against it then would use up the leg's reach (0.44 m is under 0.15 s above 3 m/s) before the foot ever arrived. So the
+    // touchdown is the frame the weight reaches 1: the target waits at the touchdown point, and the travel counts from the next frame.
+    if (push >= PLANT_ARM_PUSH) {
+      plant.armed = true;
+      if (!newStroke) { p0 = ph; tx = 0; tz = 0; }
+    } else if (ph >= S.slideShare) {   // the weight never reached 1 (released first): the stroke finishes without a contact
+      plant.contact = false; plant.liftPhase = ph;
+      plant.liftX = S.groundSlideFrom[0]; plant.liftZ = S.groundSlideFrom[1];
+    }
+  }
+  if (plant.contact && plant.armed) {
     const dx0 = plant.dx, dz0 = plant.dz, dp = ph - p0;
     let f = 2;                                                   // the fraction of the post-touchdown part of the frame at which contact ends
     if (dx0 + tx >= S.reachM) f = tx > 1e-12 ? Math.min(1, Math.max(0, (S.reachM - dx0) / tx)) : 0;

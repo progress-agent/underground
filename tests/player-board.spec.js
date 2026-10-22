@@ -431,7 +431,7 @@ test.describe('the skateboard', () => {
   // both speed bands (walking pace to a little above, and 11.5 m/s and over). 7c2d4bd reads 100 mm and more (acceptance T-FOOT-1).
   const PLANTED_PROBE = `${BONES} const fr = bone("foot_r"), br = bone("ball_r"); const w = u.player.figure.debug().poseWeights.skate;
     return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z };`;
-  // minFrames: 2 at walking pace (the acceptance's definition). At 12 m/s the foot is on the ground for 0.44 / 12.7 = 0.035 s, which is one to three frames at
+  // minFrames: 2 at walking pace and in the acceptance's own run B (fix round 2). In the Shift-from-rest band, at 12 m/s the foot is on the ground for 0.44 / 12.7 = 0.035 s, which is one to three frames at
   // 60 to 80 fps, so which of them land inside the 0.5 mm height window is a coin toss on frame timing (the first version, asking for 2, failed 2 of 4 runs
   // in the checker's hands); there a single planted frame counts as the foot being on the ground (a slide of 0 over one frame is vacuous, and the bound is
   // still asserted over every longer span). The regression this guards (no plant: the foot sits at ground height for the whole 0.495 s stroke, metres of
@@ -456,6 +456,9 @@ test.describe('the skateboard', () => {
     // Shift from rest: the third stroke starts at 1.8 s with the push at full weight and the board at about 12.6 m/s. (W to a cruise, then Shift, finds no
     // such stroke: a stroke starting from no push has its first 0.15 s at part weight, and at 12 m/s the foot is down for only 0.037 s of it.)
     ['the 12 m/s band (Shift from rest)', 11.5, 99, 1, { secs: 2.6, at: [{ t: 0, down: ['w', 'shift'] }] }],
+    // The acceptance's own run B (fix round 2): W to a cruise, released, then W and Shift. The stroke after the re-press starts from no push, so its
+    // weight rises over 0.15 s; the foot is now put down when the weight reaches 1, and it is down for 0.44 / 12 s, two or three frames.
+    ['the 12 m/s band (W to a cruise, released, W and Shift)', 11.5, 99, 2, { secs: 3.9, at: [{ t: 0, down: ['w'] }, { t: 2.3, up: ['w'] }, { t: 2.7, down: ['w', 'shift'] }] }],
   ]) {
     test(`pose 4: the planted foot holds still against the ground through the push (${band})`, async () => {
       test.setTimeout(120000);
@@ -471,6 +474,29 @@ test.describe('the skateboard', () => {
         expect(x.slideFoot, `the right ankle slid ${(x.slideFoot * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
         expect(x.slideBall, `the right ball slid ${(x.slideBall * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
       }
+    });
+  }
+  // pose 5 (fix round 2): a stroke that starts while the board is rolling (W released and pressed again) still puts the foot on the ground.
+  // The push weight rises over 0.15 s and the leg's reach (0.44 m) is used up in 0.44 / v s, so above about 3 m/s the old plant ended its contact inside the
+  // rise and the foot only swung down towards the deck and back up. The lowest the right ankle gets in the 0.5 s after the re-press must be the run's own
+  // ground height (the lowest it reaches anywhere, which is the first stroke from rest), within 3 mm.
+  for (const [name, minSpeed, secs, at, repressT] of [
+    ['re-pressed at about 5 m/s', 3.5, 2.6, [{ t: 0, down: ['w'] }, { t: 0.9, up: ['w'] }, { t: 1.3, down: ['w'] }], 1.3],
+    ['re-pressed with Shift at a 12 m/s cruise', 11, 3.4, [{ t: 0, down: ['w'] }, { t: 2.3, up: ['w'] }, { t: 2.7, down: ['w', 'shift'] }], 2.7],
+  ]) {
+    test(`pose 5: a stroke that starts while rolling puts the foot on the ground (${name})`, async () => {
+      test.setTimeout(120000);
+      await start('KX');
+      await h.wait(1000);
+      const s = await h.sample(secs, PLANTED_PROBE, at);
+      await h.releaseKeys();
+      const ground = Math.min(...s.map((r) => r.hr));
+      const after = s.filter((r) => r.t >= repressT && r.t < repressT + 0.5);
+      const lowest = Math.min(...after.map((r) => r.hr));
+      const speed = s.find((r) => r.t >= repressT).speed;
+      console.log(`[pose 5] ${name}: speed at the re-press ${speed.toFixed(2)} m/s, ground ${(ground * 1000).toFixed(1)} mm, lowest ankle after it ${(lowest * 1000).toFixed(1)} mm`);
+      expect(speed, 'rolling when W is pressed again').toBeGreaterThanOrEqual(minSpeed);
+      expect(lowest - ground, 'the ankle reached the ground in the first stroke after the re-press (m above it)').toBeLessThanOrEqual(0.003);
     });
   }
   // ── /s21:T ──
