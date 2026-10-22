@@ -23,7 +23,7 @@
 
 import * as THREE from 'three';
 
-const MAX_DURATION_MS = 15000; // hard watchdog, counted from the moment the descent starts playing
+let MAX_DURATION_MS = 15000; // hard watchdog, counted from the moment the descent starts playing
 
 // Frame-safe clock (sprint 24Sep26h, lane O). The descent advances by the
 // display frame delta, clamped to this many milliseconds per frame, so a
@@ -113,6 +113,12 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   let firstPlayFrame = false;
   let anchorsResolved = false;
   let bypassed = false;
+  // ── s21:V2 ── the opening study's path, the governor's rate and the skip gate
+  let s21Path = null;
+  let s21Rate = null;       // () => number in [0, 1]: how much of the frame's time the descent clock takes
+  let s21SkipOpen = null;   // () => boolean: a click is applied only when this is true; earlier clicks are remembered
+  const poseOf = (ms) => { if (s21Path) { const v = s21Path.poseAt(ms); return { x: v.x, y: v.y, z: v.z }; } return introPoseAt(params, ms); };
+  // ── /s21:V2 ──
 
   function onSkip() { skipRequested = true; }
 
@@ -122,7 +128,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky']) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky', 'ostart', 'ovista' /* s21:V2 */]) sp.delete(setting);
     return sp.size > 0;
   }
 
@@ -140,7 +146,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
 
   function applyPose(p) {
     camera.position.set(p.x, p.y, p.z);
-    camera.lookAt(params.lookX, params.lookY, params.lookZ);
+    camera.lookAt(params.lookX, params.lookY, params.lookZ); // s21:V2: params.look* is the path's L once setPath ran
     // Flush matrixWorld so the next station-label projection reads this
     // pose (same-frame, not next-frame). Without this the labels appear to
     // "drift" behind the camera during fast motion.
@@ -202,7 +208,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   /** Put the camera back on the start pose (after the gate's warm-up renders). */
   function primeStart() {
     if (!started || finished) return;
-    applyPose(introPoseAt(params, 0));
+    applyPose(poseOf(0)); // s21:V2 (was introPoseAt(params, 0))
   }
 
   /**
@@ -227,18 +233,18 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
     if (finished || !playing) return;
 
     try {
-      if (skipRequested) { applyPoseK3(); finalize(); return; }
+      if (skipRequested && (!s21SkipOpen || s21SkipOpen())) { applyPoseK3(); finalize(); return; } // s21:V2: a click is remembered until the landing lock is open
 
       // Frame 0 of the path is drawn on the first frame after begin(),
       // whatever that frame's delta was.
       if (firstPlayFrame) firstPlayFrame = false;
-      else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS);
+      else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS) * (s21Rate ? s21Rate() : 1); // s21:V2: governed
 
       if (playedMs >= params.totalMs || now() - playStartWall >= MAX_DURATION_MS) {
         applyPoseK3(); finalize(); return;
       }
 
-      applyPose(introPoseAt(params, playedMs));
+      applyPose(poseOf(playedMs)); // s21:V2 (was introPoseAt(params, playedMs))
     } catch (e) {
       console.error('[intro] update failed', e);
       try { finalize(); } catch (_) { /* noop */ }
@@ -281,9 +287,21 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   }
 
   /** Pose the camera at `ms` along the path (warm-up renders behind the bar). */
-  function showPoseAt(ms) { applyPose(introPoseAt(params, ms)); }
+  function showPoseAt(ms) { applyPose(poseOf(ms)); } // s21:V2
 
-  const api = { run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
+  // ── s21:V2 ──
+  /** Fly a path from opening-path.js: its S, E, L and totalMs replace the pose parameters (the footprint code reads getParams). */
+  function setPath(path, { watchdogExtraMs = 6000, rate = null, skipOpen = null } = {}) {
+    s21Path = path;
+    s21Rate = rate; s21SkipOpen = skipOpen;
+    Object.assign(params, { startX: path.S.x, startY: path.S.y, startZ: path.S.z, endX: path.E.x, endY: path.E.y, endZ: path.E.z,
+      lookX: path.L.x, lookY: path.L.y, lookZ: path.L.z, totalMs: path.totalMs });
+    anchorsResolved = true;
+    MAX_DURATION_MS = path.totalMs + watchdogExtraMs;
+  }
+  // ── /s21:V2 ──
+
+  const api = { setPath /* s21:V2 */, run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
     getPlayedMs, tune, replay, getParams, poseAt: ms => introPoseAt(params, ms) };
   return api;
 }

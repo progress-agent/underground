@@ -18,6 +18,19 @@ import { createMotorway, createMotorwaySteps, MOTORWAY_REPLACED_BRIDGES } from '
 import { createLateLayers, LATE_LAYER_ORDER } from './late-layers.js';
 import { openingHooks } from './opening-hooks.js';
 // ── /s21:L ──
+// ── s21:V2 ── opening study variant 2 (prototype preview, never live): start height and landing by URL
+import { createOpeningPath, cappedStartAltM } from './opening-path.js';
+import { VISTA_BY_ID } from './opening-vistas.js';
+import { createOpeningV2 } from './opening-v2.js';
+import { createAssemblyMask } from './assembly-mask.js';
+const s21V2Url = new URLSearchParams(window.location.search);
+const s21V2StartReq = Number(s21V2Url.get('ostart'));
+const s21V2StartOk = Number.isFinite(s21V2StartReq) && s21V2StartReq >= 5000 && s21V2Url.get('ostart') !== null && s21V2Url.get('ostart') !== '';
+const s21V2Vista = VISTA_BY_ID[s21V2Url.get('ovista')] || VISTA_BY_ID['jubilee-thames'];
+const s21V2Honoured = { start: s21V2Url.get('ostart') === null ? null : s21V2StartOk, vista: s21V2Url.get('ovista') === null ? null : !!VISTA_BY_ID[s21V2Url.get('ovista')] };
+openingHooks.buildOrder = { origin: { x: s21V2Vista.C.x, z: s21V2Vista.C.z } }; // hook 1: tiles nearest the crossing first
+let s21V2 = null, s21V2Mask = null, s21V2PumpMs = 24;
+// ── /s21:V2 ──
 // ── sprint:F ──
 import { createFlights, createFlightsSteps } from './flights.js';
 // ── /sprint:F ──
@@ -3222,6 +3235,12 @@ async function buildNetworkMvp() {
 // streaming. Camera descends from 5000m while terrain + buildings stream in
 // beneath it. finalize() re-enables controls on every exit path.
 const intro = createIntro({ camera, controls, fpsControls, llToXZ });
+// ── s21:V2 ──
+const s21V2StartAltM = cappedStartAltM(s21V2StartOk ? s21V2StartReq : 8000, masterHeight.value);
+const s21V2Path = createOpeningPath({ C: s21V2Vista.C, surfaceYAtC: s21V2Vista.surfaceYAtC, E: s21V2Vista.E, L: s21V2Vista.L,
+  startAltM: s21V2StartAltM, master: masterHeight.value, totalMs: 10000, tauMs: 800 });
+intro.setPath(s21V2Path, { watchdogExtraMs: 50000, rate: () => s21V2?.rate() ?? 1, skipOpen: () => (s21V2 ? s21V2.skipOpen() : true) });
+// ── /s21:V2 ──
 intro.run();
 // Existing Share link now includes an exact canonical camera pose. A valid
 // view is an intentional location deep-link and follows the intro skip path.
@@ -3314,10 +3333,11 @@ const openingGate = createOpeningGate({
   ],
   beforeCompile: () => { for (const child of scene.children) applyShadowPolicy(child); },
   revealDetail: () => ({ work: openingWork.timings() }), // s21:L
+  onReady: (snap) => { s21V2?.onGateReady(snap); }, keepRunning: true, // s21:V2: the director owns the cover and the moment; the gate keeps working in the descent
   whileWaiting: () => {
     // Behind the bar the frame is not being watched: spend more of it
     // building the baked city (the tick spends its usual 6ms slice as well).
-    if (bakedBuilder && !bakedBuilder.isDone()) bakedBuilder.pump(24);
+    if (bakedBuilder && !bakedBuilder.isDone()) bakedBuilder.pump(s21V2PumpMs); // s21:V2 (was 24)
     // Live tiles load around the camera; also load around the landing, so
     // the descent does not stream tiles in (load 12km, unload 18km, and the
     // two poses are about 2.2km apart). Alternate 500ms loader windows.
@@ -3334,6 +3354,14 @@ if (intro.isBypassed()) document.getElementById('loadingBar')?.classList.remove(
 openingHooks.register({ gate: openingGate, getBuilder: () => bakedBuilder, getSurfaceY: getStructuralSurfaceY,
   VE: VERTICAL_EXAGGERATION, bypassed: () => intro.isBypassed() });
 // ── /s21:L ──
+// ── s21:V2 ──
+if (!intro.isBypassed()) {
+  s21V2 = createOpeningV2({ camera, intro, gate: openingGate, path: s21V2Path, vista: s21V2Vista, startAltM: s21V2StartAltM, masterHeight,
+    getBuilder: () => bakedBuilder, getLandmarkGroup: () => landmarkGroup, setPumpMs: (ms) => { s21V2PumpMs = ms; },
+    params: { ostart: s21V2Url.get('ostart'), ovista: s21V2Url.get('ovista'), honoured: s21V2Honoured } });
+  s21V2Mask = createAssemblyMask({ getGroup: () => landmarkGroup, getOrigin: () => s21V2.origin(), getFront: () => s21V2.maskFront() });
+} else document.getElementById('ugSkyTitle')?.remove();
+// ── /s21:V2 ──
 
 buildNetworkMvp();
 
@@ -4442,6 +4470,9 @@ function tick(frameTime) {
   // Opening gate first: it may start the descent, whose frame 0 is drawn below.
   openingGate.frame();
   // ── /s24:O ──
+  // ── s21:V2 ──
+  s21V2?.update(dt);
+  // ── /s21:V2 ──
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);
 
@@ -4807,13 +4838,13 @@ function tick(frameTime) {
   // is not seen: skip the render (458 ms of it before the veil). The gate's warm-up renders call the composer
   // themselves and upload everything the descent needs. A skipped frame invalidates the shadow cache, so the
   // first real frame draws its shadow map instead of being told it is unchanged since a frame never drawn.
-  const s21BehindVeil = !intro.isBypassed() && (openingGate.stage() === 'loading' || openingGate.stage() === 'compiling');
+  const s21BehindVeil = !intro.isBypassed() && !s21V2 /* s21:V2: no veil, the sky is watched */ && (openingGate.stage() === 'loading' || openingGate.stage() === 'compiling');
   if (s21BehindVeil) {
     shadowCache.invalidate();
     setLegibilityCssHeight(null);
   } else {
   // ── /s21:L ──
-  undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => composer.render(dt)); // s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
+  undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => (s21V2Mask ? s21V2Mask.render(() => composer.render(dt)) : composer.render(dt))); // s21:V2 (the mask) s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
   // ── s16:R ──
   setLegibilityCssHeight(null);
   // ── /s16:R ──

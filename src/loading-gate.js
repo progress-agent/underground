@@ -36,6 +36,7 @@ export const WARM_FRACTIONS = [0.08, 0.2, 0.4, 0.6, 0.8, 0.93, 1];
 export function createOpeningGate({
   intro, renderer, composer, scene, camera, items, el = null,
   capMs = 45000, coreIds = null, graceMs = 10000, beforeCompile = null, whileWaiting = null,
+  onReady = null, keepRunning = false, // s21:V2: onReady(snapshot) replaces the veil fade and intro.begin(); keepRunning keeps the gate working once the descent plays
   revealDetail = null, // s21:L: () => object merged into the reveal event's timeline (the workers' job times)
   now = () => performance.now(), dispatch = (name, detail) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch (_) { /* noop */ }
@@ -116,6 +117,9 @@ export function createOpeningGate({
   function warmStep() {
     const params = intro.getParams();
     const f = WARM_FRACTIONS[warmIndex++];
+    // s21:V2: the view may be on screen now, so the camera is saved and restored around the warm-up render (which the
+    // same frame's ordinary render overwrites) instead of snapping back to pose 0.
+    const savedPos = camera.position.clone(), savedQuat = camera.quaternion.clone();
     try {
       intro.showPoseAt(f * params.totalMs);
       // Force the shadow pass so its depth programs link now, not when the
@@ -125,7 +129,7 @@ export function createOpeningGate({
     } catch (e) {
       console.warn('[opening] warm-up render failed', e);
     }
-    intro.primeStart();
+    camera.position.copy(savedPos); camera.quaternion.copy(savedQuat); camera.updateMatrixWorld(true); // s21:V2 (was intro.primeStart())
     readiness.setProgress(WARMUP_ID, warmIndex / WARM_FRACTIONS.length);
     if (warmIndex >= WARM_FRACTIONS.length) {
       readiness.settle(WARMUP_ID);
@@ -137,11 +141,11 @@ export function createOpeningGate({
   function reveal() {
     stage = 'done';
     timeline.revealed = ms();
-    if (el) el.classList.add('done');
     const snap = readiness.snapshot();
     // s21:L (hook 4 for lane V): everything the landing needs is built and uploaded, so the lock opens as the descent begins.
     dispatch('ug:landing-lock', { at: ms() });
-    intro.begin();
+    if (onReady) onReady(snap); // s21:V2: the director owns the cover and the moment
+    else { if (el) el.classList.add('done'); intro.begin(); }
     let extra = {};
     try { extra = revealDetail?.() ?? {}; } catch (e) { console.warn('[opening] reveal detail failed', e); }
     dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline, ...extra }, compile: { ...compile } });
@@ -159,7 +163,7 @@ export function createOpeningGate({
       return;
     }
 
-    if (phase === 'playing') {
+    if (phase === 'playing' && !keepRunning) { // s21:V2: keepRunning keeps compiling and warming during the descent
       // Something else started the descent (the tuner's Replay): stand down
       // rather than move the camera under it.
       stage = 'done';

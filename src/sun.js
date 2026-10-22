@@ -44,6 +44,7 @@
 // which PCFSoftShadowMap does not otherwise read) makes the shader return
 // "fully lit" before it samples anything. See patchShadowChunk.
 
+import { applyRise } from './opening-rise.js'; // s21:V2
 import * as THREE from 'three';
 import { getBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
 import { setAirSun, resolveSunDirection, LEGACY_SUN_POSITION } from './environment.js';
@@ -368,8 +369,9 @@ buildingDepthMaterial.onBeforeCompile = shader => {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nuniform float uHeightScale;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;');
+  applyRise(shader); // s21:V2
 };
-buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale';
+buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale-rise'; // s21:V2 (was 'building-depth-height-scale')
 
 // ── Shadow participation policy ─────────────────────────────────────────────
 

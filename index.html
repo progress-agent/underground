@@ -411,10 +411,21 @@
       }
 
       /* Compass + altimeter replaced by src/readout.js (#ug-readout) */
+      /* ── s21:V2 ── no veil: the page opens on the sky; the gate keeps writing to the (hidden) bar */
+      #loadingBar.veil { visibility: hidden; }
+      html { background: #5f84b4; } /* the sky's colour until the first frame is drawn */
+      #ugSkyTitle {
+        display: block; position: fixed; left: 0; right: 0; top: 22%; z-index: 40; text-align: center; pointer-events: none;
+        color: #fff; font: 300 clamp(22px, 4vw, 44px)/1.2 system-ui, sans-serif; letter-spacing: 0.42em; text-transform: uppercase;
+        text-shadow: 0 2px 18px rgba(0,0,0,0.45); opacity: 1; transition: opacity 1s ease-out;
+      }
+      body.ug-opening-v2-watched #ugSkyTitle { opacity: 0; }
+      /* ── /s21:V2 ── */
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="ugSkyTitle">Under Ground</div><!-- s21:V2 -->
     <div id="loadingBar" class="veil" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div class="title">Under Ground</div>
       <div class="track"><div class="fill" id="loadingFill"></div></div>
