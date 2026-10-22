@@ -127,6 +127,7 @@ import { createIntro } from './intro.js';
 import { initIntroTuner } from './intro-tuner.js';
 // ── s24:O ──
 import { createOpeningGate } from './loading-gate.js';
+import { buildV4Path, createOpeningV4 } from './opening-v4.js'; // s21:V4
 import { applyShadowPolicy } from './sun.js';
 import { getSurfaceTileStates } from './surface-loader.js';
 // ── /s24:O ──
@@ -3222,6 +3223,11 @@ async function buildNetworkMvp() {
 // streaming. Camera descends from 5000m while terrain + buildings stream in
 // beneath it. finalize() re-enables controls on every exit path.
 const intro = createIntro({ camera, controls, fpsControls, llToXZ });
+// ── s21:V4 ── variant 4 (the film): the path from 18,000 m behind the Hampstead crossing; the director is created after the gate
+const s21v4Path = buildV4Path(masterHeight.value);
+intro.setPath(s21v4Path);
+let s21v4 = null;
+// ── /s21:V4 ──
 intro.run();
 // Existing Share link now includes an exact canonical camera pose. A valid
 // view is an intentional location deep-link and follows the intro skip path.
@@ -3314,6 +3320,7 @@ const openingGate = createOpeningGate({
   ],
   beforeCompile: () => { for (const child of scene.children) applyShadowPolicy(child); },
   revealDetail: () => ({ work: openingWork.timings() }), // s21:L
+  onReady: (snap) => s21v4?.onReady(snap), // s21:V4 (the director owns the cover and the moment)
   whileWaiting: () => {
     // Behind the bar the frame is not being watched: spend more of it
     // building the baked city (the tick spends its usual 6ms slice as well).
@@ -3334,6 +3341,23 @@ if (intro.isBypassed()) document.getElementById('loadingBar')?.classList.remove(
 openingHooks.register({ gate: openingGate, getBuilder: () => bakedBuilder, getSurfaceY: getStructuralSurfaceY,
   VE: VERTICAL_EXAGGERATION, bypassed: () => intro.isBypassed() });
 // ── /s21:L ──
+// ── s21:V4 ── the director, and the layer handles the film's fake assembly masks (record mode only)
+function s21v4Layers() {
+  const one = (o) => (o ? [o] : []);
+  const named = (re) => scene.children.filter(c => re.test(c.name || ''));
+  return {
+    water: [...one(thamesMesh), ...one(reservoirsMesh), ...one(canalsMesh)],
+    infra: [...one(motorwayGroup), ...one(airportsGroup), ...one(airportDockGroup), ...one(bridgesGroup), ...named(/waterfall|geology-exterior|flights/i)],
+    rail: [...one(overgroundGroup), ...one(surfaceRail?.group), ...named(/surface-?trains|surface-?rail|overground|open-air/i)],
+    parks: one(parkLabelsGroup),
+    buildings: surfaceGeometryGroup,
+    landmarks: landmarkGroup,
+  };
+}
+s21v4 = createOpeningV4({ camera, scene, intro, gate: openingGate, lateLayers, cloudSystem, masterHeight, lensSystem,
+  path: s21v4Path, layers: s21v4Layers, baked: () => bakedBuilder, isBypassed: () => intro.isBypassed(),
+  setGroundArtwork: (on) => { if (surfaceTextureMaterial) setSurfaceTextureEnabled(surfaceTextureMaterial, on); } });
+// ── /s21:V4 ──
 
 buildNetworkMvp();
 
@@ -4442,6 +4466,9 @@ function tick(frameTime) {
   // Opening gate first: it may start the descent, whose frame 0 is drawn below.
   openingGate.frame();
   // ── /s24:O ──
+  // ── s21:V4 ──
+  s21v4?.update(dt);
+  // ── /s21:V4 ──
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);
 

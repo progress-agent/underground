@@ -44,6 +44,7 @@
 // which PCFSoftShadowMap does not otherwise read) makes the shader return
 // "fully lit" before it samples anything. See patchShadowChunk.
 
+import { chainRise } from './opening-rise.js'; // s21:V4
 import * as THREE from 'three';
 import { getBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
 import { setAirSun, resolveSunDirection, LEGACY_SUN_POSITION } from './environment.js';
@@ -370,6 +371,9 @@ buildingDepthMaterial.onBeforeCompile = shader => {
     .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;');
 };
 buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale';
+// ── s21:V4 ── the film's rise in the shadow pass too, or shadows stand before their buildings
+chainRise(buildingDepthMaterial, 'building-depth-height-scale-rise');
+// ── /s21:V4 ──
 
 // ── Shadow participation policy ─────────────────────────────────────────────
 

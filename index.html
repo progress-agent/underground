@@ -412,8 +412,36 @@
 
       /* Compass + altimeter replaced by src/readout.js (#ug-readout) */
     </style>
+    <!-- s21:V4 -->
+    <script>
+      // The film applies to the plain opening only: a deep link or a record run has no film (settings parameters do not count).
+      (function () {
+        try {
+          var q = new URLSearchParams(location.search), rec = q.get('film') === 'record';
+          ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky', 'film', 'filmDebug', 'ostart', 'ovista'].forEach(function (k) { q.delete(k); });
+          if (rec || q.toString()) document.documentElement.classList.add('ug-nofilm');
+          if (rec) document.documentElement.classList.add('ug-recording');
+        } catch (e) { /* the film shows */ }
+      })();
+    </script>
+    <style>
+      #ugFilmWrap { position: fixed; inset: 0; z-index: 60; background: #0b1017; opacity: 1; }
+      #ugFilmWrap::before { content: ""; position: absolute; inset: 0; background: url(data:image/jpeg;base64,/9j//gAQTGF2YzYxLjE5LjEwMQD/2wBDAAgKCgsKCw0NDQ0NDRAPEBAQEBAQEBAQEBASEhIVFRUSEhIQEBISFBQVFRcXFxUVFRUXFxkZGR4eHBwjIyQrKzP/xABwAAEAAgMBAAAAAAAAAAAAAAABAAUEAwcGAQEBAQEBAAAAAAAAAAAAAAABAAIDBBAAAQMDAgMIAwEAAAAAAAAAAQIAEQQhA2ExM3ESoXNyskOxQlGRgUEiEQEBAQEBAQAAAAAAAAAAAAAAATGBQRH/wAARCAASACADARIAAhIAAxIA/9oADAMBAAIRAxEAPwDmNLjCQBIVaf8AJNuxtEQd7JtJAkjkJD9cLhQukYyD0kHUNxL+UxEXm/43P6lpAGTCmN7zEEQBrP8AGrzKKSJ3MnU6sPxoKKpxAXHTBJF1fX3EWLlWelN4vqHmqmJhUZMpZR/FkxTDdV16D08fhV5nPTx+FXmeomaq1k3HMMO45hqSVVZx1d4fdyr46u8Pu+dziuca9U1//9k=) center / cover; filter: blur(8px); transform: scale(1.05); }
+      #ugFilm { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      #ugFilmWrap.done { opacity: 0; transition: opacity 0.3s ease-out; pointer-events: none; }
+      html:not(.ug-nofilm) #loadingBar.veil { visibility: hidden; }
+      html.ug-nofilm #ugFilmWrap { display: none; }
+      html.ug-recording #loadingBar { display: none; }
+      body.ug-film-nolabels .station-label { visibility: hidden !important; }
+      body.ug-film-recording #hud, body.ug-film-recording #ug-readout, body.ug-film-recording #netStatus,
+      body.ug-film-recording .net-status, body.ug-film-recording #ug-controls-guide, body.ug-film-recording #hudDetails,
+      body.ug-film-recording #ug-mini-map, body.ug-film-recording #ug-mode-bar, body.ug-film-recording #ug-station-banner,
+      body.ug-film-recording #ug-platform-chooser, body.ug-film-recording .tuner { display: none !important; }
+    </style>
+    <!-- /s21:V4 -->
   </head>
   <body>
+    <!-- s21:V4 --><div id="ugFilmWrap"><video id="ugFilm" src="opening/v4-film.mp4" poster="opening/v4-poster.jpg" muted playsinline autoplay preload="auto"></video></div><!-- /s21:V4 -->
     <div id="app"></div>
     <div id="loadingBar" class="veil" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div class="title">Under Ground</div>

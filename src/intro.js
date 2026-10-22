@@ -113,6 +113,9 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   let firstPlayFrame = false;
   let anchorsResolved = false;
   let bypassed = false;
+  // ── s21:V4 ── an opening path (src/opening-path.js) replaces the straight line when set
+  let path = null;
+  // ── /s21:V4 ──
 
   function onSkip() { skipRequested = true; }
 
@@ -122,7 +125,8 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky']) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky',
+      'film', 'filmDebug', 'ostart', 'ovista' /* s21:V4 */]) sp.delete(setting);
     return sp.size > 0;
   }
 
@@ -140,13 +144,14 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
 
   function applyPose(p) {
     camera.position.set(p.x, p.y, p.z);
-    camera.lookAt(params.lookX, params.lookY, params.lookZ);
+    camera.lookAt(params.lookX, params.lookY, params.lookZ); // s21:V4: params.look* is the path's L once setPath ran
     // Flush matrixWorld so the next station-label projection reads this
     // pose (same-frame, not next-frame). Without this the labels appear to
     // "drift" behind the camera during fast motion.
     camera.updateMatrixWorld(true);
   }
 
+  function poseAtMs(ms) { return path ? path.poseAt(ms) : introPoseAt(params, ms); } // s21:V4
   function applyPoseK3() { applyPose({ x: params.endX, y: params.endY, z: params.endZ }); }
 
   function removeListeners() {
@@ -202,7 +207,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   /** Put the camera back on the start pose (after the gate's warm-up renders). */
   function primeStart() {
     if (!started || finished) return;
-    applyPose(introPoseAt(params, 0));
+    applyPose(poseAtMs(0));
   }
 
   /**
@@ -234,17 +239,26 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
       if (firstPlayFrame) firstPlayFrame = false;
       else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS);
 
-      if (playedMs >= params.totalMs || now() - playStartWall >= MAX_DURATION_MS) {
+      if (playedMs >= params.totalMs || now() - playStartWall >= (path ? path.totalMs + 6000 : MAX_DURATION_MS)) {
         applyPoseK3(); finalize(); return;
       }
 
-      applyPose(introPoseAt(params, playedMs));
+      applyPose(poseAtMs(playedMs));
     } catch (e) {
       console.error('[intro] update failed', e);
       try { finalize(); } catch (_) { /* noop */ }
     }
   }
 
+  // ── s21:V4 ──
+  /** Fly an opening path: S, E, L and totalMs go into params so getParams() readers (the footprint) stay consistent. */
+  function setPath(p) {
+    path = p;
+    Object.assign(params, { startX: p.S.x, startY: p.S.y, startZ: p.S.z, endX: p.E.x, endY: p.E.y, endZ: p.E.z,
+      lookX: p.L.x, lookY: p.L.y, lookZ: p.L.z, totalMs: p.totalMs });
+    anchorsResolved = true;
+  }
+  // ── /s21:V4 ──
   function isRunning() { return started && !finished; }
   function isPlaying() { return playing && !finished; }
   function isBypassed() { return bypassed; }
@@ -281,9 +295,9 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   }
 
   /** Pose the camera at `ms` along the path (warm-up renders behind the bar). */
-  function showPoseAt(ms) { applyPose(introPoseAt(params, ms)); }
+  function showPoseAt(ms) { applyPose(poseAtMs(ms)); }
 
   const api = { run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
-    getPlayedMs, tune, replay, getParams, poseAt: ms => introPoseAt(params, ms) };
+    getPlayedMs, tune, replay, getParams, poseAt: ms => poseAtMs(ms), setPath };
   return api;
 }

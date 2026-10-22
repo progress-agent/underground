@@ -36,6 +36,7 @@ export const WARM_FRACTIONS = [0.08, 0.2, 0.4, 0.6, 0.8, 0.93, 1];
 export function createOpeningGate({
   intro, renderer, composer, scene, camera, items, el = null,
   capMs = 45000, coreIds = null, graceMs = 10000, beforeCompile = null, whileWaiting = null,
+  onReady = null, // s21:V4: when given, called with the readiness snapshot instead of dropping the veil and calling intro.begin()
   revealDetail = null, // s21:L: () => object merged into the reveal event's timeline (the workers' job times)
   now = () => performance.now(), dispatch = (name, detail) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch (_) { /* noop */ }
@@ -116,6 +117,9 @@ export function createOpeningGate({
   function warmStep() {
     const params = intro.getParams();
     const f = WARM_FRACTIONS[warmIndex++];
+    // ── s21:V4 ── the view may be on screen now (the film is up, not a veil): keep the camera as it was
+    const v4Pos = onReady ? camera.position.clone() : null, v4Quat = onReady ? camera.quaternion.clone() : null;
+    // ── /s21:V4 ──
     try {
       intro.showPoseAt(f * params.totalMs);
       // Force the shadow pass so its depth programs link now, not when the
@@ -125,7 +129,8 @@ export function createOpeningGate({
     } catch (e) {
       console.warn('[opening] warm-up render failed', e);
     }
-    intro.primeStart();
+    if (onReady) { camera.position.copy(v4Pos); camera.quaternion.copy(v4Quat); camera.updateMatrixWorld(true); } // s21:V4
+    else intro.primeStart();
     readiness.setProgress(WARMUP_ID, warmIndex / WARM_FRACTIONS.length);
     if (warmIndex >= WARM_FRACTIONS.length) {
       readiness.settle(WARMUP_ID);
@@ -137,11 +142,16 @@ export function createOpeningGate({
   function reveal() {
     stage = 'done';
     timeline.revealed = ms();
-    if (el) el.classList.add('done');
     const snap = readiness.snapshot();
     // s21:L (hook 4 for lane V): everything the landing needs is built and uploaded, so the lock opens as the descent begins.
     dispatch('ug:landing-lock', { at: ms() });
-    intro.begin();
+    // ── s21:V4 ── the director owns the cover and the moment
+    if (onReady) { try { onReady(snap); } catch (e) { console.warn('[opening] onReady failed', e); } }
+    else {
+      if (el) el.classList.add('done');
+      intro.begin();
+    }
+    // ── /s21:V4 ──
     let extra = {};
     try { extra = revealDetail?.() ?? {}; } catch (e) { console.warn('[opening] reveal detail failed', e); }
     dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline, ...extra }, compile: { ...compile } });

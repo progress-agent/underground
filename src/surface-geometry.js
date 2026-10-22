@@ -28,6 +28,7 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
+import { chainRise } from './opening-rise.js'; // s21:V4
 
 // -- Shared material (single instance across all tiles) -----------------------
 
@@ -56,6 +57,9 @@ buildingMat.onBeforeCompile = (shader) => {
 // Distinct cache key so this material never shares a compiled program with an
 // un-injected MeshStandardMaterial.
 buildingMat.customProgramCacheKey = () => 'building-height-scale';
+// ── s21:V4 ── the film's rise (inert at the default uniform)
+chainRise(buildingMat, 'building-height-scale-rise');
+// ── /s21:V4 ──
 
 /**
  * s02:B: the building height law for a merged, non-instanced mesh (the station
