@@ -124,6 +124,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { createLensSystem } from './lens.js';
 import { initAudio, updateAudio, setMasterVolume, setMuted, setTabVisible, isAudioReady, initSpatialSources } from './audio.js';
 import { createIntro } from './intro.js';
+import { createV3Config, createOpeningV3 } from './opening-v3.js'; // s21:V3
 import { initIntroTuner } from './intro-tuner.js';
 // ── s24:O ──
 import { createOpeningGate } from './loading-gate.js';
@@ -3222,6 +3223,11 @@ async function buildNetworkMvp() {
 // streaming. Camera descends from 5000m while terrain + buildings stream in
 // beneath it. finalize() re-enables controls on every exit path.
 const intro = createIntro({ camera, controls, fpsControls, llToXZ });
+// ── s21:V3 ── opening study variant 3: the path from the chosen vista and start height (?ovista=, ?ostart=)
+const s21V3Config = createV3Config({ search: window.location.search, masterValue: masterHeight.value });
+intro.setPath(s21V3Config.path);
+let s21V3 = null; // the director, created once the gate exists
+// ── /s21:V3 ──
 intro.run();
 // Existing Share link now includes an exact canonical camera pose. A valid
 // view is an intentional location deep-link and follows the intro skip path.
@@ -3273,6 +3279,7 @@ const _s24Or = (ready, failedKey) => ready ? true : (_s24Failed.has(failedKey) ?
 const openingGate = createOpeningGate({
   intro, renderer, composer, scene, camera,
   el: document.getElementById('loadingBar'),
+  onReady: (snap) => s21V3?.onReady(snap), // s21:V3: the director owns the cover and the moment the descent begins
   coreIds: ['terrain', 'ground', 'buildings', 'tube'],
   items: [
     { id: 'terrain', label: 'Shaping the terrain', weight: 4,
@@ -3317,7 +3324,7 @@ const openingGate = createOpeningGate({
   whileWaiting: () => {
     // Behind the bar the frame is not being watched: spend more of it
     // building the baked city (the tick spends its usual 6ms slice as well).
-    if (bakedBuilder && !bakedBuilder.isDone()) bakedBuilder.pump(24);
+    if (bakedBuilder && !bakedBuilder.isDone()) bakedBuilder.pump((s21V3?.coverage() ?? 1) > 0.5 ? 24 : 12); // s21:V3: 12 ms once the deck is thin
     // Live tiles load around the camera; also load around the landing, so
     // the descent does not stream tiles in (load 12km, unload 18km, and the
     // two poses are about 2.2km apart). Alternate 500ms loader windows.
@@ -3334,6 +3341,11 @@ if (intro.isBypassed()) document.getElementById('loadingBar')?.classList.remove(
 openingHooks.register({ gate: openingGate, getBuilder: () => bakedBuilder, getSurfaceY: getStructuralSurfaceY,
   VE: VERTICAL_EXAGGERATION, bypassed: () => intro.isBypassed() });
 // ── /s21:L ──
+// ── s21:V3 ──
+s21V3 = createOpeningV3({ intro, gate: openingGate, path: s21V3Config.path, record: s21V3Config.record, camera,
+  deckEl: document.getElementById('ugDeck') });
+if (intro.isBypassed()) document.getElementById('ugDeck')?.setAttribute('hidden', '');
+// ── /s21:V3 ──
 
 buildNetworkMvp();
 
@@ -4442,6 +4454,9 @@ function tick(frameTime) {
   // Opening gate first: it may start the descent, whose frame 0 is drawn below.
   openingGate.frame();
   // ── /s24:O ──
+  // ── s21:V3 ──
+  s21V3?.update(dt);
+  // ── /s21:V3 ──
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);
 
@@ -4807,7 +4822,7 @@ function tick(frameTime) {
   // is not seen: skip the render (458 ms of it before the veil). The gate's warm-up renders call the composer
   // themselves and upload everything the descent needs. A skipped frame invalidates the shadow cache, so the
   // first real frame draws its shadow map instead of being told it is unchanged since a frame never drawn.
-  const s21BehindVeil = !intro.isBypassed() && (openingGate.stage() === 'loading' || openingGate.stage() === 'compiling');
+  const s21BehindVeil = !intro.isBypassed() && (openingGate.stage() === 'loading' || openingGate.stage() === 'compiling') && (s21V3?.rendering() ?? true); // s21:V3: render once the deck has begun to thin
   if (s21BehindVeil) {
     shadowCache.invalidate();
     setLegibilityCssHeight(null);

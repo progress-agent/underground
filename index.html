@@ -411,6 +411,33 @@
       }
 
       /* Compass + altimeter replaced by src/readout.js (#ug-readout) */
+
+      /* ── s21:V3 ── the cloud deck (opening study variant 3): CSS over the canvas, so it keeps drifting while the
+         main thread is blocked. The veil stays in the DOM (the gate writes to it) but is hidden. */
+      #loadingBar.veil { visibility: hidden; }
+      #ugDeck { position: fixed; inset: 0; z-index: 55; pointer-events: none; overflow: hidden;
+        transform-origin: 50% 50%; transition: transform 0.25s linear; will-change: transform; }
+      #ugDeck[hidden] { display: none; }
+      #ugDeck .base { position: absolute; inset: 0; background: #dfe6ec; transition: opacity 0.25s linear; will-change: opacity; }
+      /* each layer is one tile larger than the screen and translates by exactly one tile, so the loop is seamless and
+         runs on the compositor (it keeps drifting while the main thread is blocked) */
+      #ugDeck .lay { position: absolute; background-image: url(opening/deck.webp); background-repeat: repeat;
+        transition: opacity 0.25s linear; will-change: transform, opacity; }
+      #ugDeck .l1 { --t: 1200px; background-size: var(--t) var(--t); left: calc(var(--t) * -1); top: calc(var(--t) * -1);
+        width: calc(100% + var(--t)); height: calc(100% + var(--t)); animation: ugDeck1 90s linear infinite; }
+      #ugDeck .l2 { --t: 1900px; background-size: var(--t) var(--t); left: 0; top: calc(var(--t) * -1);
+        width: calc(100% + var(--t)); height: calc(100% + var(--t)); animation: ugDeck2 140s linear infinite; }
+      #ugDeck .l3 { --t: 3000px; background-size: var(--t) var(--t); left: calc(var(--t) * -1); top: 0;
+        width: calc(100% + var(--t)); height: calc(100% + var(--t)); animation: ugDeck3 220s linear infinite; }
+      @keyframes ugDeck1 { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(1200px, 1200px, 0); } }
+      @keyframes ugDeck2 { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-1900px, 1900px, 0); } }
+      @keyframes ugDeck3 { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(3000px, -3000px, 0); } }
+      #ugDeck .title { position: absolute; left: 0; right: 0; top: 42%; text-align: center; color: #fff; font-size: 15px;
+        letter-spacing: 0.34em; text-transform: uppercase; text-shadow: 0 1px 14px rgba(60,80,100,0.55); transition: opacity 0.25s linear; }
+      #ugDeck .bar { position: absolute; left: 50%; top: calc(42% + 36px); width: min(260px, calc(100vw - 32px)); height: 1px;
+        margin-left: calc(min(260px, calc(100vw - 32px)) / -2); background: rgba(255,255,255,0.35); transition: opacity 0.25s linear; }
+      #ugDeck .bar i { display: block; height: 100%; width: 0; background: rgba(255,255,255,0.95); }
+      /* ── /s21:V3 ── */
     </style>
   </head>
   <body>
@@ -420,6 +447,9 @@
       <div class="track"><div class="fill" id="loadingFill"></div></div>
       <div class="meta"><div class="label">Loading London Underground…</div><div class="pct">0%</div></div>
     </div>
+    <!-- ── s21:V3 ── -->
+    <div id="ugDeck" aria-hidden="true"><div class="base"></div><div class="lay l1"></div><div class="lay l2"></div><div class="lay l3"></div><div class="title">Under Ground</div><div class="bar"><i></i></div></div>
+    <!-- ── /s21:V3 ── -->
     <div id="netStatus" class="net-status" style="display:none"></div>
     <div id="hoverTip" class="hover-tip" style="display:none"></div>
 

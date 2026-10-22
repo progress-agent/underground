@@ -113,6 +113,10 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   let firstPlayFrame = false;
   let anchorsResolved = false;
   let bypassed = false;
+  // ── s21:V3 ── the opening study's path (src/opening-path.js); null keeps today's straight descent
+  let s21Path = null;
+  const s21PathPose = (ms) => { const v = s21Path.poseAt(ms); return { x: v.x, y: v.y, z: v.z }; };
+  // ── /s21:V3 ──
 
   function onSkip() { skipRequested = true; }
 
@@ -122,7 +126,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky']) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky', 'ostart', 'ovista' /* s21:V3 */]) sp.delete(setting);
     return sp.size > 0;
   }
 
@@ -140,7 +144,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
 
   function applyPose(p) {
     camera.position.set(p.x, p.y, p.z);
-    camera.lookAt(params.lookX, params.lookY, params.lookZ);
+    camera.lookAt(params.lookX, params.lookY, params.lookZ); // s21:V3: lookX/Y/Z are the path's L once setPath ran
     // Flush matrixWorld so the next station-label projection reads this
     // pose (same-frame, not next-frame). Without this the labels appear to
     // "drift" behind the camera during fast motion.
@@ -202,7 +206,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   /** Put the camera back on the start pose (after the gate's warm-up renders). */
   function primeStart() {
     if (!started || finished) return;
-    applyPose(introPoseAt(params, 0));
+    applyPose(s21Path ? s21PathPose(0) : introPoseAt(params, 0)); // s21:V3
   }
 
   /**
@@ -234,11 +238,11 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
       if (firstPlayFrame) firstPlayFrame = false;
       else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS);
 
-      if (playedMs >= params.totalMs || now() - playStartWall >= MAX_DURATION_MS) {
+      if (playedMs >= params.totalMs || now() - playStartWall >= (s21Path ? s21Path.totalMs + 6000 : MAX_DURATION_MS)) {
         applyPoseK3(); finalize(); return;
       }
 
-      applyPose(introPoseAt(params, playedMs));
+      applyPose(s21Path ? s21PathPose(playedMs) : introPoseAt(params, playedMs)); // s21:V3
     } catch (e) {
       console.error('[intro] update failed', e);
       try { finalize(); } catch (_) { /* noop */ }
@@ -281,9 +285,20 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   }
 
   /** Pose the camera at `ms` along the path (warm-up renders behind the bar). */
-  function showPoseAt(ms) { applyPose(introPoseAt(params, ms)); }
+  function showPoseAt(ms) { applyPose(s21Path ? s21PathPose(ms) : introPoseAt(params, ms)); } // s21:V3
+  // ── s21:V3 ──
+  /** Fly the opening study's path: S, E, L and totalMs replace the straight descent's parameters. */
+  function setPath(path) {
+    s21Path = path;
+    Object.assign(params, { startX: path.S.x, startY: path.S.y, startZ: path.S.z, endX: path.E.x, endY: path.E.y, endZ: path.E.z,
+      lookX: path.L.x, lookY: path.L.y, lookZ: path.L.z, totalMs: path.totalMs });
+    anchorsResolved = true;
+    return api;
+  }
+  // ── /s21:V3 ──
 
   const api = { run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
-    getPlayedMs, tune, replay, getParams, poseAt: ms => introPoseAt(params, ms) };
+    getPlayedMs, tune, replay, getParams, poseAt: ms => (s21Path ? s21PathPose(ms) : introPoseAt(params, ms)),
+    setPath /* s21:V3 */ };
   return api;
 }
