@@ -993,6 +993,7 @@ function syncMotorwayBridges() {
 // ── s21:L ── the fingerprint is pure on the airport data, so it is computed at boot and the payload's
 // airport check runs after the fetch (src/baked-buildings.js awaits it beside the payload).
 let airportFingerprintPromise = airportSuppressionSignature(AIRPORT_DATA);
+let s21SurfaceRailFailed = false; // the gate's 'overground' item waits for the open-air track (built async, 60 ms when it lands)
 // ── /s21:L ──
 let dlrProfile = null;
 const dlrStationPoints = [];
@@ -1001,7 +1002,6 @@ const dlrStationPoints = [];
 // them drawn above ground), surfaceOnly station markers registered beside the
 // line layers as `surface:<line>`, and shared track drawn once with bands.
 let surfaceRail = null, surfaceRailStarting = false;
-let s21SurfaceRailFailed = false; // s21:L: the gate's 'overground' item waits for the open-air track (built async, 60 ms when it lands)
 function startSurfaceRail() {
   if (surfaceRail || surfaceRailStarting || !terrain) return;
   surfaceRailStarting = true;
@@ -1011,7 +1011,9 @@ function startSurfaceRail() {
   createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY: s02HiddenGround.structuralSurfaceY, projectStation: llToXZ, // s02:T: beyond the ring the track rides the hidden ground (the same call on the map)
     heightScale: getBuildingHeightScale(), overground: overgroundGroup, dlrProfile }).then(rail => {
     surfaceRail = rail;
-    s21DefineSurfaceTrains(); // s21:L
+    // ── s21:L ──
+    s21DefineSurfaceTrains();
+    // ── /s21:L ──
     for (const [key, layers] of rail.stationLayers) {
       layers.stationsLayer.mesh.visible = stationsVisible;
       lineShaftLayers.set(key, layers);
@@ -1020,8 +1022,10 @@ function startSurfaceRail() {
   }).catch(err => {
     surfaceRailStarting = false;
     console.warn('Could not create the surface railway:', err.message);
-    s21SkipLayers(['surfaceTrains']); // s21:L
-    s21SurfaceRailFailed = true; // s21:L
+    // ── s21:L ──
+    s21SkipLayers(['surfaceTrains']);
+    s21SurfaceRailFailed = true;
+    // ── /s21:L ──
   });
 }
 // ── s02:B ── The s01:R roof lift (surface station markers lifted over building roofs) is
@@ -4550,11 +4554,12 @@ function tick(frameTime) {
   // ── s02:T ── beyond the M25 (D-048 item 7): the corridor round the beyond-ring lines puts an
   // underground camera there on the underground regime (audio, labels, fog and light), and the
   // 'lines' cull hides the bored tubes from an above-ground camera outside the full-cull zone.
-  if (!s02Corridor.ready && !s21CorridorQueued && surfaceRail && overgroundGroup?.userData?.linePaths
+  if (!s02Corridor.ready && surfaceRail && overgroundGroup?.userData?.linePaths
       && lineBranchCenterPts.has('central') && lineBranchCenterPts.has('metropolitan')) {
     // ── s21:L ── (approach E) The corridor round the beyond-ring lines is built after landing, in slices: it is only
     // read for cameras beyond the M25, and building it in the tick put 40 ms into the descent's first frame once the
     // veil lifted early (it used to land behind the long task). Same inputs, same result (buildSteps drains to build).
+    if (!s21CorridorQueued) {
     s21CorridorQueued = true;
     lateLayers.define('corridor', {
       steps: function* () {
@@ -4565,6 +4570,7 @@ function tick(frameTime) {
       objects: () => [],
       attach: () => {},
     });
+    }
     // ── /s21:L ──
   }
   {
