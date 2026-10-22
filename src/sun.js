@@ -46,6 +46,7 @@
 
 import * as THREE from 'three';
 import { getBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
+import { patchRise } from './opening-rise.js'; // s21:V1
 import { setAirSun, resolveSunDirection, LEGACY_SUN_POSITION } from './environment.js';
 
 const DEG = Math.PI / 180;
@@ -368,8 +369,9 @@ buildingDepthMaterial.onBeforeCompile = shader => {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nuniform float uHeightScale;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;');
+  patchRise(shader); // s21:V1
 };
-buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale';
+buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale-rise'; // s21:V1 (was 'building-depth-height-scale')
 
 // ── Shadow participation policy ─────────────────────────────────────────────
 

@@ -28,6 +28,7 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
+import { patchRise } from './opening-rise.js'; // s21:V1
 
 // -- Shared material (single instance across all tiles) -----------------------
 
@@ -52,10 +53,11 @@ buildingMat.onBeforeCompile = (shader) => {
       '#include <begin_vertex>',
       '#include <begin_vertex>\n\ttransformed.y *= uHeightScale;',
     );
+  patchRise(shader); // s21:V1
 };
 // Distinct cache key so this material never shares a compiled program with an
 // un-injected MeshStandardMaterial.
-buildingMat.customProgramCacheKey = () => 'building-height-scale';
+buildingMat.customProgramCacheKey = () => 'building-height-scale-rise'; // s21:V1 (was 'building-height-scale')
 
 /**
  * s02:B: the building height law for a merged, non-instanced mesh (the station

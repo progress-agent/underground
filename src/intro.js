@@ -103,6 +103,20 @@ export { easeOutCubic, DEFAULTS as INTRO_DEFAULTS };
 
 export function createIntro({ camera, controls, fpsControls, llToXZ, now = () => performance.now() }) {
   const params = { ...DEFAULTS };
+  // ── s21:V1 ── an opening path (src/opening-path.js) replaces the straight descent when set
+  let path = null;
+  const _v1 = new THREE.Vector3();
+  const poseFor = (ms) => { if (!path) return introPoseAt(params, ms); path.poseAt(ms, _v1); return { x: _v1.x, y: _v1.y, z: _v1.z }; };
+  const maxDurationMs = () => (path ? path.totalMs + 6000 : MAX_DURATION_MS);
+  function setPath(p) {
+    path = p;
+    params.startX = p.S.x; params.startY = p.S.y; params.startZ = p.S.z;
+    params.endX = p.E.x; params.endY = p.E.y; params.endZ = p.E.z;
+    params.lookX = p.L.x; params.lookY = p.L.y; params.lookZ = p.L.z;
+    params.totalMs = p.totalMs;
+    anchorsResolved = true;
+  }
+  // ── /s21:V1 ──
 
   let finished = false;
   let started = false;      // run() called: intro owns the camera
@@ -122,7 +136,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky']) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky', 'ostart', 'ovista']) sp.delete(setting); // s21:V1: ostart and ovista are settings
     return sp.size > 0;
   }
 
@@ -202,7 +216,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   /** Put the camera back on the start pose (after the gate's warm-up renders). */
   function primeStart() {
     if (!started || finished) return;
-    applyPose(introPoseAt(params, 0));
+    applyPose(poseFor(0)); // s21:V1
   }
 
   /**
@@ -234,11 +248,11 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
       if (firstPlayFrame) firstPlayFrame = false;
       else playedMs += Math.min(Math.max(0, (dt || 0) * 1000), MAX_STEP_MS);
 
-      if (playedMs >= params.totalMs || now() - playStartWall >= MAX_DURATION_MS) {
+      if (playedMs >= params.totalMs || now() - playStartWall >= maxDurationMs() /* s21:V1 */) {
         applyPoseK3(); finalize(); return;
       }
 
-      applyPose(introPoseAt(params, playedMs));
+      applyPose(poseFor(playedMs)); // s21:V1
     } catch (e) {
       console.error('[intro] update failed', e);
       try { finalize(); } catch (_) { /* noop */ }
@@ -281,9 +295,9 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   }
 
   /** Pose the camera at `ms` along the path (warm-up renders behind the bar). */
-  function showPoseAt(ms) { applyPose(introPoseAt(params, ms)); }
+  function showPoseAt(ms) { applyPose(poseFor(ms)); } // s21:V1
 
   const api = { run, begin, primeStart, showPoseAt, update, isRunning, isPlaying, isBypassed, getPhase,
-    getPlayedMs, tune, replay, getParams, poseAt: ms => introPoseAt(params, ms) };
+    getPlayedMs, tune, replay, getParams, poseAt: ms => poseFor(ms), setPath /* s21:V1 */ };
   return api;
 }
