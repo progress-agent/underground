@@ -36,7 +36,7 @@ export const ECONOMIES = {
 // ── s16:R ── economies that exist but ship OFF (sprint 16Oct26f); s21:T: the list is now empty. shadowSnap shipped on in
 // sprint 21Oct26w (D-055 item 1, Jordan: "Let's switch it on as we might need those frames later"), against the
 // recommendation: it saves about 1 ms a frame at the body views, and at the Westminster Bridge pose its frame differs from
-// the unsnapped one by about 587 of 5.2M pixels (0.011%, at most 4 levels), above the 0.002% tolerance every economy is held
+// the unsnapped one by about 587 of 5.2M pixels (0.011%, 4 levels in most runs, 5 in one; the pin allows 6), above the 0.002% tolerance every economy is held
 // to. That accepted difference is pinned in tests/render-economies-s16.spec.js (P7). The mechanism stays so a future
 // off-by-default economy has a home: createEconomies leaves a DEFAULT_OFF member off unless the URL names it
 // (`?econ=name,...`, the named ones only); at runtime `__ug.economies.set(name, true)`. `?econ=-shadowSnap`, `?econ=0`,

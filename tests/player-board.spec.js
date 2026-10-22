@@ -431,11 +431,16 @@ test.describe('the skateboard', () => {
   // both speed bands (walking pace to a little above, and 11.5 m/s and over). 7c2d4bd reads 100 mm and more (acceptance T-FOOT-1).
   const PLANTED_PROBE = `${BONES} const fr = bone("foot_r"), br = bone("ball_r"); const w = u.player.figure.debug().poseWeights.skate;
     return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z };`;
-  function plantedSpans(s) {
+  // minFrames: 2 at walking pace (the acceptance's definition). At 12 m/s the foot is on the ground for 0.44 / 12.7 = 0.035 s, which is one to three frames at
+  // 60 to 80 fps, so which of them land inside the 0.5 mm height window is a coin toss on frame timing (the first version, asking for 2, failed 2 of 4 runs
+  // in the checker's hands); there a single planted frame counts as the foot being on the ground (a slide of 0 over one frame is vacuous, and the bound is
+  // still asserted over every longer span). The regression this guards (no plant: the foot sits at ground height for the whole 0.495 s stroke, metres of
+  // slide over some 30 frames) shows as long spans with a large slide, and the pure test pins the world ankle to 1e-9 m at 12 and 17 m/s.
+  function plantedSpans(s, minFrames = 2) {
     const minH = Math.min(...s.map((r) => r.hr)), spans = [];
     let cur = [];
     const flush = () => {
-      if (cur.length >= 2) {
+      if (cur.length >= minFrames) {
         const a = cur[0], plan = (r, k) => Math.hypot(r[k + 'x'] - a[k + 'x'], r[k + 'z'] - a[k + 'z']);
         spans.push({ frames: cur.length, t0: a.t, meanSpeed: cur.reduce((m, r) => m + r.speed, 0) / cur.length,
           slideFoot: Math.max(...cur.map((r) => plan(r, 'f'))), slideBall: Math.max(...cur.map((r) => plan(r, 'b'))) });
@@ -446,11 +451,11 @@ test.describe('the skateboard', () => {
     flush();
     return spans;
   }
-  for (const [band, lo, hi, plan] of [
-    ['walking pace', 1.0, 3.5, { secs: 1.8, at: [{ t: 0, down: ['w'] }] }],
+  for (const [band, lo, hi, minFrames, plan] of [
+    ['walking pace', 1.0, 3.5, 2, { secs: 1.8, at: [{ t: 0, down: ['w'] }] }],
     // Shift from rest: the third stroke starts at 1.8 s with the push at full weight and the board at about 12.6 m/s. (W to a cruise, then Shift, finds no
     // such stroke: a stroke starting from no push has its first 0.15 s at part weight, and at 12 m/s the foot is down for only 0.037 s of it.)
-    ['the 12 m/s band (Shift from rest)', 11.5, 99, { secs: 2.6, at: [{ t: 0, down: ['w', 'shift'] }] }],
+    ['the 12 m/s band (Shift from rest)', 11.5, 99, 1, { secs: 2.6, at: [{ t: 0, down: ['w', 'shift'] }] }],
   ]) {
     test(`pose 4: the planted foot holds still against the ground through the push (${band})`, async () => {
       test.setTimeout(120000);
@@ -458,7 +463,7 @@ test.describe('the skateboard', () => {
       await h.wait(1000);
       const s = await h.sample(plan.secs, PLANTED_PROBE, plan.at);
       await h.releaseKeys();
-      const spans = plantedSpans(s);
+      const spans = plantedSpans(s, minFrames);
       if (process.env.UG_FOOT_DUMP) (await import('node:fs')).writeFileSync(`${process.env.UG_FOOT_DUMP}-${band.replace(/[^a-z0-9]+/gi, '-')}.json`, JSON.stringify(s));   // s21:T: the raw frames, for the captures notes
       console.log(`[pose 4] ${band}: ${s.length} frames, ${spans.length} planted spans ${JSON.stringify(spans.map((x) => [x.frames, +x.meanSpeed.toFixed(2), +(x.slideFoot * 1000).toFixed(2), +(x.slideBall * 1000).toFixed(2)]))} [frames, m/s, foot mm, ball mm]`);
       expect(spans.some((x) => x.meanSpeed >= lo && x.meanSpeed <= hi), `a planted span at ${band} (mean speed ${lo} to ${hi} m/s)`).toBe(true);
