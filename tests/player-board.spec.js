@@ -476,8 +476,9 @@ test.describe('the skateboard', () => {
       test.setTimeout(120000);
       await start('KX');
       await h.wait(1000);
-      // Run B has only 34 ms of ground contact. A fixed 120 Hz simulation clock
-      // samples that interval repeatedly regardless of GPU scheduling. This runs
+      // Run B has only 34 ms of ground contact. A fixed 125 Hz clock uses exact
+      // 8 ms steps: fractional milliseconds otherwise shift the contact boundary
+      // with the page clock. This samples it repeatedly regardless of GPU scheduling, running
       // the real app tick and world bones, keeping the two-frame definition and
       // every slide assertion; it cannot pass by observing a single stationary frame.
       const runB = band.includes('W to a cruise');
@@ -485,17 +486,19 @@ test.describe('the skateboard', () => {
         const clock = window.__boardClock, u = window.__ug, ped = u.modes.registry.get('pedestrian');
         clock.hold = true;
         while (!clock.held) await new Promise(requestAnimationFrame);
-        const t0 = u.modes.ctx.time, keys = u.fpsControls.keys, out = [];
+        const keys = u.fpsControls.keys, out = [];
         const fn = new Function('t', 'u', 'ped', 'T', 'ratio', 'dt', probe);
         const pending = at.map(a => ({ ...a, done: false }));
         try {
-          while (u.modes.ctx.time - t0 < seconds) {
-            const t = u.modes.ctx.time - t0;
+          for (let frame = 0; frame < Math.ceil(seconds * 125); frame++) {
+            const t = frame / 125;
             for (const a of pending) if (!a.done && t >= a.t) {
               a.done = true; for (const k of a.down || []) keys.add(k); for (const k of a.up || []) keys.delete(k);
             }
-            out.push(fn(t, u, ped, window.__ugTHREE, u.masterHeight.ratio, 1 / 120));
-            const tick = clock.held; clock.held = null; clock.last += 1000 / 120; tick(clock.last);
+            out.push(fn(t, u, ped, window.__ugTHREE, u.masterHeight.ratio, 1 / 125));
+            const tick = clock.held, beforeTick = u.modes.ctx.time;
+            clock.held = null; clock.last += 8; tick(clock.last);
+            if (Math.abs(u.modes.ctx.time - beforeTick - 0.008) > 1e-8) throw new Error('Run B clock did not advance the real app by 8 ms');
             while (!clock.held) await new Promise(requestAnimationFrame);
           }
         } finally {
