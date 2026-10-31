@@ -26,8 +26,9 @@ import { createAssemblyMask } from './assembly-mask.js';
 const s21V2Url = new URLSearchParams(window.location.search);
 const s21V2StartReq = Number(s21V2Url.get('ostart'));
 const s21V2StartOk = Number.isFinite(s21V2StartReq) && s21V2StartReq >= 5000 && s21V2Url.get('ostart') !== null && s21V2Url.get('ostart') !== '';
-const s21V2Vista = VISTA_BY_ID[s21V2Url.get('ovista')] || VISTA_BY_ID['kings-cross'];
-const s21V2Honoured = { start: s21V2Url.get('ostart') === null ? null : s21V2StartOk, vista: s21V2Url.get('ovista') === null ? null : !!VISTA_BY_ID[s21V2Url.get('ovista')] };
+const s21V2VistaOk = Object.hasOwn(VISTA_BY_ID, s21V2Url.get('ovista'));
+const s21V2Vista = s21V2VistaOk ? VISTA_BY_ID[s21V2Url.get('ovista')] : VISTA_BY_ID['kings-cross'];
+const s21V2Honoured = { start: s21V2Url.get('ostart') === null ? null : s21V2StartOk, vista: s21V2Url.get('ovista') === null ? null : s21V2VistaOk };
 openingHooks.buildOrder = { origin: { x: s21V2Vista.C.x, z: s21V2Vista.C.z } }; // hook 1: tiles nearest the crossing first
 let s21V2 = null, s21V2Mask = null, s21V2PumpMs = 24;
 // ── /s21:V2 ──

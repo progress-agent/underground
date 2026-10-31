@@ -42,3 +42,13 @@ for(const kind of ['key','touch'])test(`${kind} still skips to the selected land
   const r=await page.evaluate(()=>({p:window.__ug.camera.position.toArray(),orbit:window.__ug.controls.enabled,keys:window.__ug.fpsControls.enabled}));
   for(const [i,e] of [420,-110,-2760].entries())expect(r.p[i]).toBeCloseTo(e,6);expect(r.orbit&&r.keys).toBe(true);
 });
+
+for (const vista of ['constructor','__proto__','no-such-vista']) test(`invalid vista ${vista} falls back safely`,async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`/?ovista=${vista}&ostart=250`);
+  await page.waitForFunction(()=>window.__ugOpening,null,{timeout:30000});
+  const r=await page.evaluate(()=>window.__ugOpening);
+  expect([r.vista,r.startAltM]).toEqual(['kings-cross',18000]);
+  expect(r.params.honoured).toEqual({start:false,vista:false});
+  expect(errors).toEqual([]);
+});

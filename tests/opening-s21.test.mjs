@@ -93,3 +93,20 @@ test('the reveal event carries the work timeline from revealDetail', async () =>
   for (let i = 0; i < WARM_FRACTIONS.length + 1; i++) plain.gate.frame();
   assert.equal(plain.events.find(e => e.name === 'ug:opening-reveal').detail.timeline.work, undefined);
 });
+
+// The game renders into linear composer targets; compileAsync must see that
+// target synchronously and restore the caller while shader readiness waits.
+test('precompilation uses the composer target and restores it before async readiness', async () => {
+  const target = { name: 'linear scene target' }, original = { name: 'caller target' };
+  let current = original, resolveCompile, seen;
+  const camera = new THREE.PerspectiveCamera();
+  const intro = createIntro({ camera, controls: { enabled:true,target:new THREE.Vector3() }, fpsControls:{ enabled:true }, llToXZ:()=>({x:0,z:0}) });
+  intro.run();
+  const renderer = { info:{programs:[]}, getRenderTarget:()=>current, setRenderTarget:t=>{current=t},
+    compileAsync:()=>{seen=current;return new Promise(r=>{resolveCompile=r})} };
+  const gate = createOpeningGate({intro,renderer,composer:{readBuffer:target,render(){}},scene:{},camera,items:[{id:'a',check:()=>true}]});
+  gate.frame();
+  assert.equal(seen,target); assert.equal(current,original); assert.equal(gate.stage(),'compiling');
+  resolveCompile(); await new Promise(r=>setImmediate(r));
+  assert.equal(gate.stage(),'warming'); assert.equal(current,original);
+});

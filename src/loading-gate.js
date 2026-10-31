@@ -95,11 +95,21 @@ export function createOpeningGate({
     const start = now();
     compile.programsBefore = renderer.info?.programs?.length ?? null;
     let p;
+    // The watched scene is drawn into the composer's linear target. Compiling
+    // against the default sRGB framebuffer warms a different program variant;
+    // remote dock water then compiles on its first visible tilt frame. Only the
+    // synchronous compile call needs the target; restore it before the promise
+    // waits so ordinary watched frames keep their render state.
+    const compileTarget = composer.readBuffer;
+    const canSetTarget = compileTarget && typeof renderer.getRenderTarget === 'function' && typeof renderer.setRenderTarget === 'function';
+    const previousTarget = canSetTarget ? renderer.getRenderTarget() : null;
     try {
+      if (canSetTarget) renderer.setRenderTarget(compileTarget);
       p = typeof renderer.compileAsync === 'function'
         ? renderer.compileAsync(scene, camera)
         : Promise.resolve(renderer.compile(scene, camera));
     } catch (e) { p = Promise.reject(e); }
+    finally { if (canSetTarget) renderer.setRenderTarget(previousTarget); }
     p.then(() => {
       compile.ms = Math.round(now() - start);
       compile.programsAfter = renderer.info?.programs?.length ?? null;
