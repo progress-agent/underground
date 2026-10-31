@@ -422,6 +422,85 @@ test.describe('the skateboard', () => {
     }
   });
 
+  // ── s21:T ── T-foot (sprint 21Oct26w): the pushing foot is planted on the ground through the push.
+  // Until then the stroke was a fixed 0.44 m back in 0.495 s whatever the board's speed, so the foot "on the ground" slid forward over it
+  // (about 0.47 m over the first full stroke from rest, metres a stroke near top speed). Now the ankle goes back by the board's own travel.
+  // Measured on the real app at open ground (KX), straight runs: a PLANTED SPAN is consecutive frames (2 or more) with push and the skate
+  // pose at full weight and the right ankle within 0.5 mm of its lowest height of the run (the sole on the ground); its SLIDE is the
+  // largest plan distance of the right ankle (and of the ball) from its position in the span's first frame. Bound: 5 mm, both bones,
+  // both speed bands (walking pace to a little above, and 11.5 m/s and over). 7c2d4bd reads 100 mm and more (acceptance T-FOOT-1).
+  const PLANTED_PROBE = `${BONES} const fr = bone("foot_r"), br = bone("ball_r"); const w = u.player.figure.debug().poseWeights.skate;
+    return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z };`;
+  // minFrames: 2 at walking pace and in the acceptance's own run B (fix round 2). In the Shift-from-rest band, at 12 m/s the foot is on the ground for 0.44 / 12.7 = 0.035 s, which is one to three frames at
+  // 60 to 80 fps, so which of them land inside the 0.5 mm height window is a coin toss on frame timing (the first version, asking for 2, failed 2 of 4 runs
+  // in the checker's hands); there a single planted frame counts as the foot being on the ground (a slide of 0 over one frame is vacuous, and the bound is
+  // still asserted over every longer span). The regression this guards (no plant: the foot sits at ground height for the whole 0.495 s stroke, metres of
+  // slide over some 30 frames) shows as long spans with a large slide, and the pure test pins the world ankle to 1e-9 m at 12 and 17 m/s.
+  function plantedSpans(s, minFrames = 2) {
+    const minH = Math.min(...s.map((r) => r.hr)), spans = [];
+    let cur = [];
+    const flush = () => {
+      if (cur.length >= minFrames) {
+        const a = cur[0], plan = (r, k) => Math.hypot(r[k + 'x'] - a[k + 'x'], r[k + 'z'] - a[k + 'z']);
+        spans.push({ frames: cur.length, t0: a.t, meanSpeed: cur.reduce((m, r) => m + r.speed, 0) / cur.length,
+          slideFoot: Math.max(...cur.map((r) => plan(r, 'f'))), slideBall: Math.max(...cur.map((r) => plan(r, 'b'))) });
+      }
+      cur = [];
+    };
+    for (const r of s) { if (r.push >= 0.999 && r.w >= 0.999 && r.hr - minH <= 0.0005) cur.push(r); else flush(); }
+    flush();
+    return spans;
+  }
+  for (const [band, lo, hi, minFrames, plan] of [
+    ['walking pace', 1.0, 3.5, 2, { secs: 1.8, at: [{ t: 0, down: ['w'] }] }],
+    // Shift from rest: the third stroke starts at 1.8 s with the push at full weight and the board at about 12.6 m/s. (W to a cruise, then Shift, finds no
+    // such stroke: a stroke starting from no push has its first 0.15 s at part weight, and at 12 m/s the foot is down for only 0.037 s of it.)
+    ['the 12 m/s band (Shift from rest)', 11.5, 99, 1, { secs: 2.6, at: [{ t: 0, down: ['w', 'shift'] }] }],
+    // The acceptance's own run B (fix round 2): W to a cruise, released, then W and Shift. The stroke after the re-press starts from no push, so its
+    // weight rises over 0.15 s; the foot is now put down when the weight reaches 1, and it is down for 0.44 / 12 s, two or three frames.
+    ['the 12 m/s band (W to a cruise, released, W and Shift)', 11.5, 99, 2, { secs: 3.9, at: [{ t: 0, down: ['w'] }, { t: 2.3, up: ['w'] }, { t: 2.7, down: ['w', 'shift'] }] }],
+  ]) {
+    test(`pose 4: the planted foot holds still against the ground through the push (${band})`, async () => {
+      test.setTimeout(120000);
+      await start('KX');
+      await h.wait(1000);
+      const s = await h.sample(plan.secs, PLANTED_PROBE, plan.at);
+      await h.releaseKeys();
+      const spans = plantedSpans(s, minFrames);
+      if (process.env.UG_FOOT_DUMP) (await import('node:fs')).writeFileSync(`${process.env.UG_FOOT_DUMP}-${band.replace(/[^a-z0-9]+/gi, '-')}.json`, JSON.stringify(s));   // s21:T: the raw frames, for the captures notes
+      console.log(`[pose 4] ${band}: ${s.length} frames, ${spans.length} planted spans ${JSON.stringify(spans.map((x) => [x.frames, +x.meanSpeed.toFixed(2), +(x.slideFoot * 1000).toFixed(2), +(x.slideBall * 1000).toFixed(2)]))} [frames, m/s, foot mm, ball mm]`);
+      expect(spans.some((x) => x.meanSpeed >= lo && x.meanSpeed <= hi), `a planted span at ${band} (mean speed ${lo} to ${hi} m/s)`).toBe(true);
+      for (const x of spans) {
+        expect(x.slideFoot, `the right ankle slid ${(x.slideFoot * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
+        expect(x.slideBall, `the right ball slid ${(x.slideBall * 1000).toFixed(1)} mm over a planted span of ${x.frames} frames at ${x.meanSpeed.toFixed(1)} m/s`).toBeLessThanOrEqual(0.005);
+      }
+    });
+  }
+  // pose 5 (fix round 2): a stroke that starts while the board is rolling (W released and pressed again) still puts the foot on the ground.
+  // The push weight rises over 0.15 s and the leg's reach (0.44 m) is used up in 0.44 / v s, so above about 3 m/s the old plant ended its contact inside the
+  // rise and the foot only swung down towards the deck and back up. The lowest the right ankle gets in the 0.5 s after the re-press must be the run's own
+  // ground height (the lowest it reaches anywhere, which is the first stroke from rest), within 3 mm.
+  for (const [name, minSpeed, secs, at, repressT] of [
+    ['re-pressed at about 5 m/s', 3.5, 2.6, [{ t: 0, down: ['w'] }, { t: 0.9, up: ['w'] }, { t: 1.3, down: ['w'] }], 1.3],
+    ['re-pressed with Shift at a 12 m/s cruise', 11, 3.4, [{ t: 0, down: ['w'] }, { t: 2.3, up: ['w'] }, { t: 2.7, down: ['w', 'shift'] }], 2.7],
+  ]) {
+    test(`pose 5: a stroke that starts while rolling puts the foot on the ground (${name})`, async () => {
+      test.setTimeout(120000);
+      await start('KX');
+      await h.wait(1000);
+      const s = await h.sample(secs, PLANTED_PROBE, at);
+      await h.releaseKeys();
+      const ground = Math.min(...s.map((r) => r.hr));
+      const after = s.filter((r) => r.t >= repressT && r.t < repressT + 0.5);
+      const lowest = Math.min(...after.map((r) => r.hr));
+      const speed = s.find((r) => r.t >= repressT).speed;
+      console.log(`[pose 5] ${name}: speed at the re-press ${speed.toFixed(2)} m/s, ground ${(ground * 1000).toFixed(1)} mm, lowest ankle after it ${(lowest * 1000).toFixed(1)} mm`);
+      expect(speed, 'rolling when W is pressed again').toBeGreaterThanOrEqual(minSpeed);
+      expect(lowest - ground, 'the ankle reached the ground in the first stroke after the re-press (m above it)').toBeLessThanOrEqual(0.003);
+    });
+  }
+  // ── /s21:T ──
+
   // ── boardrules ─────────────────────────────────────────────────────────────────────────────────────────────────
   test('boardrules 1: B at the top of a jump on foot is refused (air)', async () => {
     await start('BANK', { board: false });

@@ -22,6 +22,7 @@
 // Pins are floors and behaviours, never counts: Lane T extends the Weaver to Cheshunt in parallel.
 
 import { test, expect } from '@playwright/test';
+import { speeds, oldRuleWindows } from './helpers/speed-windows.mjs';   // s21:T: state- and distance-based speed windows (see the helper)
 
 // Not serial: one failing leg does not hide the others. Every test sets its own state up on the shared page.
 // Sprint 16Oct26f (T-route): a leg is bounded by the mode clock, which advances at most 0.05 s a frame, so at 10 fps a 90 s leg takes
@@ -122,6 +123,7 @@ function ride({ lineId, until = null, keys = ['w', 'shift'], maxMs = 90000, via 
         const d = m.debug(), c = ug.camera.position;
         const w = ug.modes.ctx.waterSurfaceAt?.(c.x, c.z);
         frames.push({ clock: d.clock, phase: d.phase, regime: d.regime, path: d.tunnel?.path ?? null, s: d.tunnel?.s ?? null, lineId: d.tunnel?.lineId ?? null,
+          len: d.tunnel ? net.paths[d.tunnel.path]?.length ?? null : null,   // s21:T: the path's length, so a frame knows its arc distance to both ends
           speed: d.tunnel?.speed ?? null, x: c.x, y: c.y, z: c.z, g: ug.modes.ctx.getTerrainY(c.x, c.z), water: Number.isFinite(w) ? w : null,
           inside: sampleM25Insideness(c.x, c.z), above: ug.aboveGroundView, cut: d.openAir.cut?.kind ?? null,
           flare: +getComputedStyle(flare).opacity, card: d.card?.kind ?? null, edge: d.atEdge, interior: d.interior.visible,
@@ -178,26 +180,7 @@ const nearDrawn = (line, pts) => page.evaluate(([line, pts]) => {
   });
 }, [line, pts]);
 
-/** Plan speed over windows of >= 0.5 s of the mode clock, only where every frame is open, at the given speed, with no cut. */
-function speeds(r, speed) {
-  const L = r.frames, out = [];
-  for (let i = 0; i < L.length; i++) {
-    let j = i; while (j < L.length && L[j].clock - L[i].clock < 0.5) j++;
-    if (j >= L.length) break;
-    const seg = L.slice(i, j + 1);
-    if (seg.some(f => f.regime !== 'open' || f.speed !== speed || f.cut || f.bridged)) continue;
-    let d = 0, jump = false;
-    for (let k = 1; k < seg.length; k++) {
-      const dd = Math.hypot(seg[k].x - seg[k - 1].x, seg[k].z - seg[k - 1].z);
-      if (dd > 3 * speed * (seg[k].clock - seg[k - 1].clock) + 1 || seg[k].path !== seg[k - 1].path) jump = true;
-      d += dd;
-    }
-    if (jump) continue;
-    out.push(d / (seg.at(-1).clock - seg[0].clock));
-    i = j - 1;
-  }
-  return out.sort((a, b) => a - b);
-}
+// s21:T: speeds() moved to tests/helpers/speed-windows.mjs (windows chosen by state and closed by arc distance, never by the clock).
 const median = (a) => a[a.length >> 1];
 
 /** Sites of the line's stations that lie more than 15 m off the drawn track (acceptance: off-track), with their offset. */
@@ -265,6 +248,12 @@ async function leg({ line, from, toward, until, order, keys = ['w', 'shift'], ma
   const c = await checkLeg(r, line, label);
   expect(c.open, `${label}: open frames`).toBeGreaterThanOrEqual(minOpen);
   const v = speeds(r, speed);
+  // s21:T: UG_SPEED_TRACE=1 logs the 7c2d4bd rule's windows with their path, first arc position, arc distance to the nearer path end and value,
+  // beside the new rule's range, so the cause of the flake (the first window after a path change near a junction) can be read off any run.
+  if (process.env.UG_SPEED_TRACE) {
+    const w = oldRuleWindows(r, speed);
+    console.log(`[speed-trace] ${label}: old rule ${w.length} windows, new rule ${v.length} windows (min ${v[0]?.toFixed(2)}, max ${v.at(-1)?.toFixed(2)}); old windows ${JSON.stringify(w.map(x => [x.path, x.s0 === null ? null : +x.s0.toFixed(1), x.fromEnd === null ? null : +x.fromEnd.toFixed(1), +x.v.toFixed(2)]))}`);
+  }
   if (speed === 200) {
     expect(v.length, `${label}: speed windows`).toBeGreaterThanOrEqual(label.includes('Thames') ? 1 : 5);
     if (v.length >= 5) { expect(Math.abs(median(v) - 200), `${label}: median ${median(v)}`).toBeLessThanOrEqual(6); for (const x of v) expect(Math.abs(x - 200), `${label}: window ${x}`).toBeLessThanOrEqual(10); }

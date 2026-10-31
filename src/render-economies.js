@@ -33,13 +33,16 @@ export const ECONOMIES = {
   underAbove: 'Underground layers (lines, ribbons, trains, shafts, tunnels, geology, terrain underside) are not drawn from an above-ground camera (D-040: approved trade-offs 7 and 8)',
 };
 
-// ── s16:R ── economies that exist but ship OFF (sprint 16Oct26f). shadowSnap saves about 1 ms a frame at the body views
-// and at Greenwich, but at the Westminster Bridge pose its frame differs from the unsnapped one by 561 of 5.2M pixels
-// (0.011%, at most 4 levels), above the 0.002% tolerance every economy is held to, so it waits for Jordan's word
-// (R/options.md). createEconomies leaves these off unless the URL names them (`?econ=shadowSnap,...`, the named ones
-// only); at runtime `__ug.economies.set('shadowSnap', true)`; for good, empty this set. parseEconomies itself is
-// unchanged: it still reports every economy on for an absent `econ`.
-export const DEFAULT_OFF = new Set(['shadowSnap']);
+// ── s16:R ── economies that exist but ship OFF (sprint 16Oct26f); s21:T: the list is now empty. shadowSnap shipped on in
+// sprint 21Oct26w (D-055 item 1, Jordan: "Let's switch it on as we might need those frames later"), against the
+// recommendation: it saves about 1 ms a frame at the body views, and at the Westminster Bridge pose its frame differs from
+// the unsnapped one by about 587 of 5.2M pixels (0.011%, 4 levels in most runs, 5 in one; the pin allows 6), above the 0.002% tolerance every economy is held
+// to. That accepted difference is pinned in tests/render-economies-s16.spec.js (P7). The mechanism stays so a future
+// off-by-default economy has a home: createEconomies leaves a DEFAULT_OFF member off unless the URL names it
+// (`?econ=name,...`, the named ones only); at runtime `__ug.economies.set(name, true)`. `?econ=-shadowSnap`, `?econ=0`,
+// a named-only list without it, and `__ug.economies.set('shadowSnap', false)` all switch shadowSnap off. parseEconomies
+// itself is unchanged: it still reports every economy on for an absent `econ`.
+export const DEFAULT_OFF = new Set();
 function namedOn(search) {
   let raw = null;
   try { raw = new URLSearchParams(search).get('econ'); } catch { raw = null; }

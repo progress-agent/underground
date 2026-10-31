@@ -114,23 +114,26 @@ export const ADAPTIVE_TUNING = {
 export function createAdaptiveQuality({ apply, tuning = {} }) {
   const K = { ...ADAPTIVE_TUNING, ...tuning };
   const MAX = QUALITY_LEVELS.length - 1;
+  // s21:T: only the last judgeWindows (judging) and anchorWindows (the anchor's least) window means are ever read, so atLevel keeps no more
+  const AT_LEVEL_CAP = Math.max(K.judgeWindows, K.anchorWindows);
   let level = 0;
   let windowStart = null, cooldownUntil = 0, samples = [], longFrames = 0;
   let overWindows = 0, stableMs = 0;
   let stable = [];          // recent in-band windows [mean, span], judged together
   let pendingDrop = null;   // { from, exempt }
   let descent = null;       // { level, mean }: where the current descent is anchored
-  let heavy = 0;            // s16:R consecutive windows heavier than the hold's by heavierRetry
-  let atLevel = [];         // s16:R window means since the last change (the level they were measured at)
-  let recentOver = [];      // s16:R the last over-budget window means at this level (the anchor's mean)
+  // s16:R consecutive windows heavier than the hold's by heavierRetry. s21:T: reset in reset() only, never in change(): resetting it in
+  // change() would alter when Automatic drops after a revert (a count carried over from before the revert can end a hold on one
+  // window; 176 of 200 seeded synthetic runs decided differently), a behaviour change and not a loose end. Capped at heavyWindows.
+  let heavy = 0;
+  let atLevel = [];         // s16:R window means since the last change (the level they were measured at); s21:T: only the last AT_LEVEL_CAP kept
   let pendingProbe = null;  // { from, to, before }
   let lastProbe = null;     // { to, before, at }: the most recent probe that passed its first window
-  let hold = null;          // { level, until, mean, streak }
+  let hold = null;          // { level, until, mean }
   let holdStreak = 0;
   const backoff = new Map(); // target level -> { until, mean, count }
   const history = [];        // recent decisions, for tests and the dev HUD
 
-  const over = () => K.targetMs * K.overBudget;
   // The over-budget line for a given level: the shadows-on rungs are more tolerant.
   const overAt = l => K.targetMs * (QUALITY_LEVELS[l].shadows ? K.shadowsOverBudget : K.overBudget);
   const EDGE_WORK = { 4: 1, 2: 0.8, 0: 0.62 };
@@ -140,7 +143,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function change(next, now, why) {
     const from = level;
-    stable = []; atLevel = []; recentOver = [];
+    stable = []; atLevel = [];
     level = Math.max(0, Math.min(MAX, next));
     apply(QUALITY_LEVELS[level]);
     cooldownUntil = now + K.cooldownMs; // exclude target reallocation and shader warm-up
@@ -153,7 +156,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     windowStart = now;
     cooldownUntil = now === null ? 0 : now + 1000;
     samples = []; longFrames = 0; overWindows = 0; stableMs = 0; stable = [];
-    pendingDrop = null; pendingProbe = null; lastProbe = null; hold = null; holdStreak = 0; descent = null; atLevel = []; recentOver = [];
+    pendingDrop = null; pendingProbe = null; lastProbe = null; hold = null; holdStreak = 0; descent = null; atLevel = []; heavy = 0; // s21:T heavy reset here too
     backoff.clear();
   }
 
@@ -174,7 +177,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function evaluate(mean, span, now) {
     let continuing = false;
-    atLevel.push(mean);
+    atLevel.push(mean); if (atLevel.length > AT_LEVEL_CAP) atLevel.shift(); // s21:T bounded
     // 1. Is the descent paying off? (s16:R) Judged on the mean of judgeWindows windows at one level against the anchor's
     // mean, never on one window: on the weak setup a window's mean wanders 3 to 6% and a CPU-bound view straddling the
     // band line re-anchored on noise at every rung, so the descent never reached its judgement and sank to the floor.
@@ -217,11 +220,10 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
     if (mean > overAt(level)) {
       stableMs = 0; stable = []; overWindows++;
-      recentOver.push(mean); if (recentOver.length > K.judgeWindows) recentOver.shift();
       const severe = mean > K.targetMs * K.severe;
       if (level >= MAX || (overWindows < 2 && !severe && !continuing)) return;
       // s16:R a hold ends early only when the view has been clearly heavier for heavyWindows windows running, not on one stall
-      heavy = hold && mean >= hold.mean * K.heavierRetry ? heavy + 1 : 0;
+      heavy = hold && mean >= hold.mean * K.heavierRetry ? Math.min(heavy + 1, K.heavyWindows) : 0; // s21:T capped: the only test is heavy < heavyWindows
       if (hold && level <= hold.level && now < hold.until && heavy < K.heavyWindows) return;
       // Drifting back over budget soon after a probe is that probe failing
       // late (it passed its first window on noise): back off as if it had.
@@ -295,7 +297,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   return {
     update, reset, start,
     get: () => ({ level, ...QUALITY_LEVELS[level] }),
-    state: () => ({ level, overWindows, stableMs, pendingDrop, pendingProbe, hold, descent, backoff: Object.fromEntries(backoff), history: history.slice() }),
+    state: () => ({ level, windowsAtLevel: atLevel.length, overWindows, stableMs, pendingDrop, pendingProbe, hold, descent, backoff: Object.fromEntries(backoff), history: history.slice() }),
     tuning: K,
   };
 }

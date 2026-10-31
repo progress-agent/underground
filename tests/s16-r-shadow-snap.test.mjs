@@ -54,7 +54,7 @@ test('s16:R shadowSnap: the existing fit guarantees hold with the along-light sn
   }
 });
 
-test('s16:R shadowSnap: off (the default), the fit is exactly the 07391f3 one', () => {
+test('s16:R shadowSnap: off (the function own default), the fit is exactly the 07391f3 one', () => {
   const direction = sunDirection(0.4), focus = new THREE.Vector3(321.123, 0, 456.789);
   const a = fitShadowFrustum({ focus, groundY: 50, direction }), b = fitShadowFrustum({ focus, groundY: 50, direction, alongSnap: false });
   for (const k of ['x', 'y', 'z']) assert.ok(same(a.target[k], b.target[k]));

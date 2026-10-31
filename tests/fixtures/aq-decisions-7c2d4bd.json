@@ -1,0 +1,145 @@
+{
+ "source": "git show 7c2d4bd:src/adaptive-quality.js",
+ "replay": {
+  "live-streetBank": {
+   "n": 121,
+   "sha256": "0ec7d4d51c6e13c0f3e04fe583348e9143e5abfb304933546528cf66e0714f46",
+   "first300s": [
+    "2528.100|0>1|drop",
+    "4681.500|1>2|drop",
+    "6072.200|2>3|drop",
+    "7476.500|3>4|drop",
+    "9648.300|4>1|revert: dropping did not help",
+    "39924.800|1>2|drop",
+    "41337.700|2>3|drop",
+    "42738.300|3>4|drop",
+    "44895.200|4>1|revert: dropping did not help",
+    "104922.800|1>2|drop",
+    "106311.100|2>3|drop",
+    "107705.800|3>4|drop",
+    "109880.000|4>1|revert: dropping did not help",
+    "229914.100|1>2|drop",
+    "231326.700|2>3|drop",
+    "232727.200|3>4|drop",
+    "234873.500|4>1|revert: dropping did not help"
+   ]
+  },
+  "live-playerFoot": {
+   "n": 111,
+   "sha256": "0ecf6d3fc1188c2fcc28ee77f5acdf49233478cb44215cddb26da61424d88f81",
+   "first300s": [
+    "2490.600|0>1|drop",
+    "4648.700|1>2|drop",
+    "6048.800|2>3|drop",
+    "7454.000|3>4|drop",
+    "9609.800|4>1|revert: dropping did not help",
+    "41537.700|1>2|drop",
+    "42932.200|2>3|drop",
+    "44335.700|3>4|drop",
+    "46460.000|4>1|revert: dropping did not help",
+    "107250.200|1>2|drop",
+    "109406.500|2>3|drop",
+    "111593.300|3>1|revert: dropping did not help",
+    "232365.600|1>2|drop",
+    "234503.100|2>1|revert: dropping did not help"
+   ]
+  },
+  "live-playerSkate": {
+   "n": 146,
+   "sha256": "60d9f3c57afc51aeab209fa6fdb55a66d25feac13f8bc3196168d70a9bc0cbb2",
+   "first300s": [
+    "4026.600|0>1|drop",
+    "6189.800|1>2|drop",
+    "7569.700|2>3|drop",
+    "8965.700|3>4|drop",
+    "11145.800|4>1|revert: dropping did not help",
+    "41530.600|1>2|drop",
+    "42918.000|2>3|drop",
+    "44340.900|3>4|drop",
+    "46515.900|4>1|revert: dropping did not help",
+    "106594.000|1>2|drop",
+    "107989.400|2>3|drop",
+    "109382.400|3>4|drop",
+    "111511.500|4>1|revert: dropping did not help",
+    "231879.200|1>2|drop",
+    "233275.200|2>3|drop",
+    "234675.400|3>4|drop",
+    "236851.500|4>1|revert: dropping did not help"
+   ]
+  },
+  "live-playerBalloon": {
+   "n": 121,
+   "sha256": "c3c34f953a940a75f1cef9798cf8e8408abb5c03ff11fb496d469b0179d90df2",
+   "first300s": [
+    "2520.200|0>1|drop",
+    "4681.800|1>2|drop",
+    "6080.400|2>3|drop",
+    "7492.900|3>4|drop",
+    "9640.900|4>1|revert: dropping did not help",
+    "39859.800|1>2|drop",
+    "41253.300|2>3|drop",
+    "42651.900|3>4|drop",
+    "44804.500|4>1|revert: dropping did not help",
+    "105533.300|1>2|drop",
+    "106929.700|2>3|drop",
+    "108333.600|3>4|drop",
+    "110499.600|4>1|revert: dropping did not help",
+    "230701.100|1>2|drop",
+    "232106.500|2>3|drop",
+    "233485.900|3>4|drop",
+    "235656.500|4>1|revert: dropping did not help"
+   ]
+  },
+  "wed-streetBank": {
+   "n": 121,
+   "sha256": "8253ff1b97ab55bc29ce73c20d5c698cdca40c72fb728d09f32ce90d6241c6b8",
+   "first300s": [
+    "4778.200|0>1|drop",
+    "6941.300|1>2|drop",
+    "8350.200|2>3|drop",
+    "9753.900|3>4|drop",
+    "11910.500|4>1|revert: dropping did not help",
+    "42194.600|1>2|drop",
+    "43585.400|2>3|drop",
+    "44988.100|3>4|drop",
+    "47133.100|4>1|revert: dropping did not help",
+    "107168.200|1>2|drop",
+    "109341.100|2>3|drop",
+    "110732.700|3>4|drop",
+    "112933.600|4>1|revert: dropping did not help",
+    "232975.300|1>2|drop",
+    "234382.900|2>3|drop",
+    "235802.100|3>4|drop",
+    "237958.900|4>1|revert: dropping did not help"
+   ]
+  },
+  "wed-overview": {
+   "n": 121,
+   "sha256": "8e15264d66586d3a3562dbd4aca2c0b0ac04c688ad603a3a8022b1b47e826906",
+   "first300s": [
+    "2514.700|0>1|drop",
+    "4647.800|1>2|drop",
+    "6041.200|2>3|drop",
+    "7436.500|3>4|drop",
+    "9589.400|4>1|revert: dropping did not help",
+    "39885.700|1>2|drop",
+    "41289.300|2>3|drop",
+    "42700.500|3>4|drop",
+    "44853.100|4>1|revert: dropping did not help",
+    "104891.000|1>2|drop",
+    "106293.000|2>3|drop",
+    "107700.100|3>4|drop",
+    "109859.800|4>1|revert: dropping did not help",
+    "230054.700|1>2|drop",
+    "231448.200|2>3|drop",
+    "232817.300|3>4|drop",
+    "234980.900|4>1|revert: dropping did not help"
+   ]
+  }
+ },
+ "fuzz": {
+  "seeds": 200,
+  "n": 19064,
+  "sha256": "edaf754325e699b2f96e6e7fd2b4eb3969c3a19e20b105b8038b1630689512eb"
+ }
+}
