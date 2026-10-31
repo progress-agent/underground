@@ -442,7 +442,7 @@ test.describe('the skateboard', () => {
   // largest plan distance of the right ankle (and of the ball) from its position in the span's first frame. Bound: 5 mm, both bones,
   // both speed bands (walking pace to a little above, and 11.5 m/s and over). 7c2d4bd reads 100 mm and more (acceptance T-FOOT-1).
   const PLANTED_PROBE = `${BONES} const fr = bone("foot_r"), br = bone("ball_r"); const w = u.player.figure.debug().poseWeights.skate;
-    return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z };`;
+    return { t, speed: Math.hypot(ped.body.vx, ped.body.vz), push: ped.playerState().push, w, hr: hy("foot_r"), fx: fr.x, fz: fr.z, bx: br.x, bz: br.z, plant: { ...ped.debug().board.plant } };`;
   // minFrames: 2 at walking pace and in the acceptance's own run B (fix round 2). In the Shift-from-rest band, at 12 m/s the foot is on the ground for 0.44 / 12.7 = 0.035 s, which is one to three frames at
   // 60 to 80 fps, so which of them land inside the 0.5 mm height window is a coin toss on frame timing (the first version, asking for 2, failed 2 of 4 runs
   // in the checker's hands); there a single planted frame counts as the foot being on the ground (a slide of 0 over one frame is vacuous, and the bound is
@@ -477,8 +477,8 @@ test.describe('the skateboard', () => {
       await start('KX');
       await h.wait(1000);
       // Run B has only 34 ms of ground contact. A fixed 125 Hz clock uses exact
-      // 8 ms steps: fractional milliseconds otherwise shift the contact boundary
-      // with the page clock. This samples it repeatedly regardless of GPU scheduling, running
+      // 8 ms steps and frame-counted key times, sampling it repeatedly regardless
+      // of GPU scheduling. This runs
       // the real app tick and world bones, keeping the two-frame definition and
       // every slide assertion; it cannot pass by observing a single stationary frame.
       const runB = band.includes('W to a cruise');
