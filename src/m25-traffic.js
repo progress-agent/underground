@@ -141,6 +141,14 @@ export function chainageMap(refRoute, route, wayLength) {
  * @returns per-carrier { base, amp, omega, phase, type, colour, lanePick, map }
  */
 export function buildTrafficLayout(carriers, wayLength) {
+  // s21:L: the generator below drains here, so every statement runs in its original order
+  const steps = buildTrafficLayoutSteps(carriers, wayLength);
+  let r;
+  do { r = steps.next(); } while (!r.done);
+  return r.value;
+}
+/** buildTrafficLayout with a `yield` every few thousand identities, for the late layers (sprint 21Oct26w, lane L). */
+export function* buildTrafficLayoutSteps(carriers, wayLength) {
   const ref = carriers[0].route;
   const maps = carriers.map(c => chainageMap(ref, c.route, wayLength));
   const L = maps[0].refLength;
@@ -152,6 +160,7 @@ export function buildTrafficLayout(carriers, wayLength) {
     let best = 0, score = -Infinity;
     carriers.forEach((c, j) => { const s = (c.count - taken[j]) / c.count; if (s > score + 1e-12) { score = s; best = j; } });
     slots[k] = [best, taken[best]++];
+    if (k % 2500 === 2499) yield; // s21:L
   }
   const out = carriers.map(c => ({
     base: new Float64Array(c.count), amp: new Float32Array(c.count), omega: new Float32Array(c.count),
@@ -159,7 +168,8 @@ export function buildTrafficLayout(carriers, wayLength) {
     lanePick: new Float32Array(c.count),
   }));
   const ids = slots.map(([j, i]) => carriers[j].idOffset + i);
-  const classes = ids.map(vehicleClass);
+  const classes = [];
+  for (let k = 0; k < ids.length; k++) { classes.push(vehicleClass(ids[k])); if (k % 1500 === 1499) yield; } // s21:L (was ids.map(vehicleClass); the same calls in the same order)
   const len = classes.map(c => VEHICLE_TYPES[c.type].length);
   const minGap = k => (len[k] + len[(k + 1) % total]) / 2 + TRAFFIC_CLEARANCE_M + 2 * TRAFFIC_VARIATION_M;
   let sumMin = 0, sumE = 0;
@@ -168,6 +178,7 @@ export function buildTrafficLayout(carriers, wayLength) {
     sumMin += minGap(k);
     e[k] = -Math.log(1 - hash01(ids[k], 4));
     sumE += e[k];
+    if (k % 4000 === 3999) yield; // s21:L
   }
   const spare = L - sumMin;
   if (!(spare > 0)) throw new Error('Motorway too short for its traffic identities');
@@ -182,6 +193,7 @@ export function buildTrafficLayout(carriers, wayLength) {
     o.phase[i] = 2 * Math.PI * hash01(id, 8);
     o.type[i] = cls.type; o.colour[i] = cls.colour; o.lanePick[i] = cls.lanePick;
     d += minGap(k) + spare * e[k] / sumE;
+    if (k % 3000 === 2999) yield; // s21:L
   }
   out.forEach((o, j) => { o.map = maps[j].map; o.length = maps[j].length; o.refLength = L; o.maxSlope = maps[j].maxSlope; }); // s16:R: maxSlope
   return out;

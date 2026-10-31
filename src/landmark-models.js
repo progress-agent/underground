@@ -1,4 +1,5 @@
 import { millenniumDome, palaceDetails } from './landmark-detail-geometry.js';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 // Landmark silhouettes over the retained OSM outlines. All authored dimensions
 // are real metres. Each building pivots at its own sampled terrain elevation;
 // the existing building-height control scales the complete body and crown.
@@ -44,7 +45,7 @@ export function validateLandmarkFootprints(data) {
 }
 
 export async function fetchLandmarkFootprints() {
-  const r = await fetch(LANDMARK_FOOTPRINTS_URL);
+  const r = await bootFetch(LANDMARK_FOOTPRINTS_URL); // s21:L
   if (!r.ok || (r.headers.get('content-type') || '').includes('text/html')) throw new Error('landmark footprints unavailable');
   return validateLandmarkFootprints(await r.json());
 }

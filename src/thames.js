@@ -1,4 +1,5 @@
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 import * as THREE from 'three';
 import { VERTICAL_EXAGGERATION, getTerrainRiverBed } from './terrain.js';
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
@@ -25,7 +26,7 @@ export { updateWater };
 
 export async function loadThamesData() {
   try {
-    const res = await fetch('/data/thames.json', { cache: 'no-store' });
+    const res = await bootFetch('/data/thames.json', { cache: 'no-store' }) /* s21:L */;
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {

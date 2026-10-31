@@ -36,6 +36,7 @@ export const WARM_FRACTIONS = [0.08, 0.2, 0.4, 0.6, 0.8, 0.93, 1];
 export function createOpeningGate({
   intro, renderer, composer, scene, camera, items, el = null,
   capMs = 45000, coreIds = null, graceMs = 10000, beforeCompile = null, whileWaiting = null,
+  revealDetail = null, // s21:L: () => object merged into the reveal event's timeline (the workers' job times)
   now = () => performance.now(), dispatch = (name, detail) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch (_) { /* noop */ }
   },
@@ -138,8 +139,12 @@ export function createOpeningGate({
     timeline.revealed = ms();
     if (el) el.classList.add('done');
     const snap = readiness.snapshot();
+    // s21:L (hook 4 for lane V): everything the landing needs is built and uploaded, so the lock opens as the descent begins.
+    dispatch('ug:landing-lock', { at: ms() });
     intro.begin();
-    dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline }, compile: { ...compile } });
+    let extra = {};
+    try { extra = revealDetail?.() ?? {}; } catch (e) { console.warn('[opening] reveal detail failed', e); }
+    dispatch('ug:opening-reveal', { ...snap, timeline: { ...timeline, ...extra }, compile: { ...compile } });
   }
 
   /** Call once per animation frame, before intro.update(). */
@@ -191,5 +196,6 @@ export function createOpeningGate({
   }
 
   render();
-  return { frame, getState, readiness };
+  // s21:L: the stage alone, cheap enough to read every frame (the tick skips its render behind the veil).
+  return { frame, getState, readiness, stage: () => stage };
 }

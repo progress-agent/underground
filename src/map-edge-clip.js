@@ -238,11 +238,20 @@ export function clipPolylineToRing(line, ring, endInsetM = 0) {
  * @param {Array<[number,number]>} ring
  * @param {{kind:'polygon'|'polyline', endInsetM?:number}} opts
  */
-export function clipWaterToMapEdge(data, project, ring, { kind, endInsetM = 0 }) {
+export function clipWaterToMapEdge(data, project, ring, options) {
+  // s21:L: the generator below drains here, so every statement runs in its original order
+  const steps = clipWaterToMapEdgeSteps(data, project, ring, options);
+  let r;
+  do { r = steps.next(); } while (!r.done);
+  return r.value;
+}
+/** clipWaterToMapEdge with a `yield` per feature, for the late layers (sprint 21Oct26w, lane L). */
+export function* clipWaterToMapEdgeSteps(data, project, ring, { kind, endInsetM = 0 }) {
   const report = { kind, kept: 0, clipped: [], dropped: [] };
   if (!data?.features) return { data, report };
   const features = [];
   for (const f of data.features) {
+    yield;
     if (!f.coords || f.coords.length < (kind === 'polygon' ? 3 : 2)) continue;
     const pts = f.coords.map(([lat, lon]) => { const p = project(lat, lon); return [p.x, p.z]; });
     const parts = kind === 'polygon' ? clipPolygonToRing(pts, ring) : clipPolylineToRing(pts, ring, endInsetM);

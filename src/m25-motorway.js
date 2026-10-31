@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { computeVertexNormalsSteps, computeBoundingSphereSteps } from './sliced-geometry.js'; // s21:L
 import source from './m25-motorway-data.json' with { type: 'json' };
 import { WATER_LIFT } from './render-layers.js';
 import { trueHeadingBasis } from './true-proportion.js'; // s25:S
-import { VEHICLE_TYPES, VEHICLE_COLOURS, TRAFFIC_SPEED_MPS, TRAFFIC_VARIATION_M, buildTrafficLayout, vehicleChainage, laneFor, buildVehicleGeometry } from './m25-traffic.js'; // s16:R: TRAFFIC_VARIATION_M
+import { VEHICLE_TYPES, VEHICLE_COLOURS, TRAFFIC_SPEED_MPS, TRAFFIC_VARIATION_M, buildTrafficLayout, buildTrafficLayoutSteps, vehicleChainage, laneFor, buildVehicleGeometry } from './m25-traffic.js'; // s16:R: TRAFFIC_VARIATION_M
 
 export const MOTORWAY_DATA=source;
 export const MOTORWAY_TERRAIN_MARGIN_M=40;
@@ -47,7 +48,11 @@ export function getMotorwayBoundary(margin=MOTORWAY_TERRAIN_MARGIN_M){
  for(let pass=0;pass<8;pass++){let repaired=false;outer:for(let i=1;i<out.length;i++)for(let j=i+2;j<out.length;j++){if(i===1&&j===out.length-1)continue;const a=out[i-1],b=out[i],c=out[j-1],d=out[j],rx=b[0]-a[0],rz=b[1]-a[1],sx=d[0]-c[0],sz=d[1]-c[1],den=rx*sz-rz*sx;if(Math.abs(den)<1e-8)continue;const t=((c[0]-a[0])*sz-(c[1]-a[1])*sx)/den,u=((c[0]-a[0])*rz-(c[1]-a[1])*rx)/den;if(t>0&&t<1&&u>0&&u<1){if(j-i>12)throw new Error('Unexpected large self-crossing in motorway support margin');out.splice(i,j-i,[a[0]+t*rx,a[1]+t*rz]);repaired=true;break outer;}}if(!repaired)break;}return out;
 }
 
-export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28,viewportHeightPx=defaultViewportHeight}={}){
+// s21:L (approach E): the builder is a generator with `yield` at its loop boundaries so the opening can spend a few
+// milliseconds a frame on it after landing (src/late-layers.js). createMotorway drains it, so the arithmetic and the
+// order of every statement are the original's; only the places the thread may be handed back were added.
+export function createMotorway(options={}){const steps=createMotorwaySteps(options);let r;do{r=steps.next();}while(!r.done);return r.value;}
+export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28,viewportHeightPx=defaultViewportHeight,initialUpdate=true}={}){
  if(typeof getSurfaceY!=='function')throw new Error('Motorway requires canonical getSurfaceY');
  const sample=(x,z)=>{const y=getSurfaceY({x,z});if(!Number.isFinite(y))throw new Error(`Missing motorway terrain at ${x},${z}`);return y;};
  const root=new THREE.Group();root.name='m25Motorway';const waterY=2*VE+WATER_LIFT;let scale=heightScale,elapsed=0,frame=0;
@@ -85,12 +90,12 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   for(let i=1;i<rp.samples.length;i++)visit(rp.samples[i-1],rp.samples[i],0);
   refined.push(rp.samples.at(-1));rp.samples=refined;
  }
- for(const w of source.roads)roadPaths.set(w.id,makeRoad(w));
- for(const rp of roadPaths.values())refineRoad(rp);
+ for(const w of source.roads){roadPaths.set(w.id,makeRoad(w));yield;}
+ for(const rp of roadPaths.values()){refineRoad(rp);yield;}
  // Build each complete source circuit, then calculate the raised/sunken transition
  // profiles across way boundaries. Each unique road is drawn once below.
  const routes=[];
- for(const r of source.routes){let distance=0;const path=[];for(const id of r.wayIds){const rp=roadPaths.get(id);for(const s of rp.samples.slice(0,-1))path.push({...s,distance:distance+s.distance});distance+=rp.length;}path.push({...path[0],distance});routes.push({...r,path,length:distance});}
+ for(const r of source.routes){let distance=0;const path=[];for(const id of r.wayIds){const rp=roadPaths.get(id);for(const s of rp.samples.slice(0,-1))path.push({...s,distance:distance+s.distance});distance+=rp.length;yield;}path.push({...path[0],distance});routes.push({...r,path,length:distance});}
  function profile(route){const p=route.path,n=p.length-1;let i=0;while(i<n){if(!p[i].bridge&&!p[i].tunnel){i++;continue;}const tunnel=p[i].tunnel,bridge=p[i].bridge,start=i;while(i<n&&p[i].tunnel===tunnel&&p[i].bridge===bridge)i++;const end=i-1,first=p[start],last=p[end],r=byId.get(first.road),isDartford=tunnel&&r.ref==='A282',qe2=!tunnel&&r.id===20003982;
  const transition=tunnel?0:qe2?0:110;let a=start,b=end;while(a>0&&first.distance-p[a].distance<transition)a--;while(b<n-1&&p[b].distance-last.distance<transition)b++;const span=p[b].distance-p[a].distance||1;
  for(let j=a;j<=b;j++){const s=p[j],t=(s.distance-p[a].distance)/span,linear=p[a].groundY+(p[b].groundY-p[a].groundY)*t;let y;
@@ -100,39 +105,39 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  s.profileY=y;s.profileKind=tunnel?'tunnel':qe2?'qe2':'bridge';}
  }
  }
- for(const r of routes)profile(r);
+ for(const r of routes){profile(r);yield;}
  // Choose representative routes by direction and Dartford bore. Both northbound
  // tunnel alignments carry cars, while shared stretches are not rendered twice.
  const representative=[];const keys=new Set();for(const r of routes){const key=r.direction+':'+r.wayIds.filter(id=>byId.get(id).tunnel&&byId.get(id).ref==='A282').join(',');if(keys.has(key))continue;keys.add(key);representative.push(r);}
  // Apply a consistent profile to each shared source point using its first circuit.
- const profileMap=new Map();for(const r of routes)for(const s of r.path)if(!profileMap.has(`${s.road}:${s.x}:${s.z}`))profileMap.set(`${s.road}:${s.x}:${s.z}`,s);
- for(const rp of roadPaths.values())for(const s of rp.samples){const mapped=profileMap.get(`${s.road}:${s.x}:${s.z}`);if(mapped){s.baseY=mapped.baseY;s.deltaY=mapped.deltaY;s.profileKind=mapped.profileKind;}}
+ const profileMap=new Map();let n=0;for(const r of routes){for(const s of r.path){if(!profileMap.has(`${s.road}:${s.x}:${s.z}`))profileMap.set(`${s.road}:${s.x}:${s.z}`,s);if(++n%2500===0)yield;}}
+ n=0;for(const rp of roadPaths.values()){for(const s of rp.samples){const mapped=profileMap.get(`${s.road}:${s.x}:${s.z}`);if(mapped){s.baseY=mapped.baseY;s.deltaY=mapped.deltaY;s.profileKind=mapped.profileKind;}if(++n%2500===0)yield;}}
  // Every terminal road sample inherits the next way's shared endpoint profile.
  const endpointMap=new Map();for(const rp of roadPaths.values()){const s=rp.samples[0];endpointMap.set(`${s.x}:${s.z}`,s);}for(const rp of roadPaths.values()){const s=rp.samples.at(-1),next=endpointMap.get(`${s.x}:${s.z}`);if(next){s.baseY=next.baseY;s.deltaY=next.deltaY;s.profileKind=next.profileKind;}}
  // Joined ways can have different widths and tangents. Reconcile their shared
  // deck datum against every ordinary-road edge, rather than inheriting a narrower
  // neighbour's clearance. Both rendered roads and traffic use this same profile.
  const junctions=new Map();for(const rp of roadPaths.values())for(const s of [rp.samples[0],rp.samples.at(-1)]){const key=`${s.x}:${s.z}`;if(!junctions.has(key))junctions.set(key,[]);junctions.get(key).push({s,ordinary:!rp.road.tunnel&&!rp.road.bridge});}
- for(const entries of junctions.values()){const ordinary=entries.filter(e=>e.ordinary);if(!ordinary.length)continue;const baseY=Math.max(...entries.map(e=>e.s.baseY),...ordinary.map(e=>e.s.groundY));const top=Math.max(baseY+.8,...entries.map(e=>e.s.baseY+e.s.deltaY));for(const {s}of entries){s.baseY=baseY;s.deltaY=top-baseY;}}
- const finalProfiles=new Map();for(const rp of roadPaths.values())for(const s of rp.samples)finalProfiles.set(`${s.road}:${s.x}:${s.z}`,s);for(const r of routes)for(const s of r.path){const final=finalProfiles.get(`${s.road}:${s.x}:${s.z}`);s.baseY=final.baseY;s.deltaY=final.deltaY;}
+ let junctionCount=0;for(const entries of junctions.values()){if(++junctionCount%100===0)yield;const ordinary=entries.filter(e=>e.ordinary);if(!ordinary.length)continue;const baseY=Math.max(...entries.map(e=>e.s.baseY),...ordinary.map(e=>e.s.groundY));const top=Math.max(baseY+.8,...entries.map(e=>e.s.baseY+e.s.deltaY));for(const {s}of entries){s.baseY=baseY;s.deltaY=top-baseY;}}
+ const finalProfiles=new Map();n=0;for(const rp of roadPaths.values()){for(const s of rp.samples){finalProfiles.set(`${s.road}:${s.x}:${s.z}`,s);if(++n%2500===0)yield;}}n=0;for(const r of routes){for(const s of r.path){const final=finalProfiles.get(`${s.road}:${s.x}:${s.z}`);s.baseY=final.baseY;s.deltaY=final.deltaY;if(++n%2500===0)yield;}}
  const batches=new Map(),staticMeshes=[];const ensure=mat=>{if(!batches.has(mat))batches.set(mat,{positions:[],bases:[]});return batches.get(mat);};
  const vertex=(mat,x,y,z,base)=>{const b=ensure(mat);b.positions.push(x,y,z);b.bases.push(base);};
  const quad=(mat,ps)=>{for(const i of [0,1,2,0,2,3])vertex(mat,...ps[i]);};
  const v=(s,side,dy=0)=>[s.x-s.dz*side,s.baseY+s.deltaY+dy,s.z+s.dx*side,s.baseY];
  function strip(a,b,l,r,mat,dy=0){quad(mat,[v(a,l,dy),v(b,l,dy),v(b,r,dy),v(a,r,dy)]);}
  function verticalStrip(a,b,side,lo,hi,mat){quad(mat,[v(a,side,lo),v(b,side,lo),v(b,side,hi),v(a,side,hi)]);}
- for(const rp of roadPaths.values()){const w=rp.road,p=rp.samples,half=widthFor(w)/2;for(let i=1;i<p.length;i++){const a=p[i-1],b=p[i];strip(a,b,-half,half,'road');for(const side of [-1,1]){strip(a,b,side*half-.16,side*half+.16,'marking',.08);verticalStrip(a,b,side*(half+.3),0,.85*VE,'barrier');strip(a,b,side*(half+.3)-.13,side*(half+.3)+.13,'barrier',.85*VE);if(!w.tunnel&&!w.bridge){
+ for(const rp of roadPaths.values()){const w=rp.road,p=rp.samples,half=widthFor(w)/2;for(let i=1;i<p.length;i++){if(i%48===0)yield;const a=p[i-1],b=p[i];strip(a,b,-half,half,'road');for(const side of [-1,1]){strip(a,b,side*half-.16,side*half+.16,'marking',.08);verticalStrip(a,b,side*(half+.3),0,.85*VE,'barrier');strip(a,b,side*(half+.3)-.13,side*(half+.3)+.13,'barrier',.85*VE);if(!w.tunnel&&!w.bridge){
  // The deck clears the highest transverse sample, but each foundation foot
  // must meet its own edge terrain. Its scale pivot is also that edge datum.
  const edge=side>0?1:0,groundA=a.edgeGroundY[edge],groundB=b.edgeGroundY[edge];const loA=Math.min(groundA-.4,a.baseY+a.deltaY),loB=Math.min(groundB-.4,b.baseY+b.deltaY);quad('foundation',[v(a,side*half),v(b,side*half),[b.x-b.dz*side*half,loB,b.z+b.dx*side*half,groundB],[a.x-a.dz*side*half,loA,a.z+a.dx*side*half,groundA]]);}}
  for(let lane=1;lane<w.lanes;lane++)if(Math.floor(a.distance/12)%2===0){const offset=-half+(2.4*1.18)/2+(3.5*1.18)*lane;strip(a,b,offset-.12,offset+.12,'marking',.09);}
  // Short supports under real tagged bridge decks, never under a whole ordinary road.
  if(w.bridge&&(w.id!==20003982||i<p.length*.35||i>p.length*.65)&&i%5===0){const y=a.baseY+a.deltaY,height=y-a.groundY;if(height>4)verticalStrip(a,{...a,x:a.x+a.dx*2.3,z:a.z+a.dz*2.3},0,-height,0,'foundation');}
- }}
+ }yield;}
  // QEII towers/cables follow the actual southern carriageway. Existing curated
  // bridge supplied the54m clearance and86m pylon proportions, not surveyed road Z.
  const qe=roadPaths.get(20003982);if(qe){const p=qe.samples;for(const fraction of [.5-225/qe.length,.5+225/qe.length]){const i=Math.floor((p.length-1)*fraction),s=p[i],deck=s.baseY+s.deltaY,top=deck+86*VE;for(const side of [-1,1]){const offset=widthFor(qe.road)/2+1.4;const x=s.x-s.dz*side*offset,z=s.z+s.dx*side*offset;for(const [ax,az,bx,bz]of [[-2.2,-2.2,2.2,-2.2],[2.2,-2.2,2.2,2.2],[2.2,2.2,-2.2,2.2],[-2.2,2.2,-2.2,-2.2]])quad('pylon',[[x+ax,s.groundY,z+az,s.groundY],[x+bx,s.groundY,z+bz,s.groundY],[x+bx,top,z+bz,s.baseY],[x+ax,top,z+az,s.baseY]]);for(let k=1;k<=7;k++)for(const sign of [-1,1]){const j=Math.max(0,Math.min(p.length-1,i+sign*k*4)),q=p[j],qx=q.x-q.dz*side*offset,qz=q.z+q.dx*side*offset;const cy=deck+(86*VE)*(.5+.5*k/7);quad('cable',[[x-.16,cy,z,s.baseY],[x+.16,cy,z,s.baseY],[qx+.16,q.baseY+q.deltaY,qz,q.baseY],[qx-.16,q.baseY+q.deltaY,qz,q.baseY]]);}}}}
- for(const [mat,b]of batches){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(b.positions,3));g.setAttribute('motorwayBase',new THREE.Float32BufferAttribute(b.bases,1));g.computeVertexNormals();g.userData.original=new Float32Array(g.attributes.position.array);const mesh=new THREE.Mesh(g,materials[mat]);mesh.name=`m25-${mat}`;mesh.userData={type:'motorway',name:'M25 / A282 orbital motorway',part:mat};root.add(mesh);staticMeshes.push(mesh);}
+ for(const [mat,b]of batches){const g=new THREE.BufferGeometry();{const positionArray=new Float32Array(b.positions.length);for(let i=0;i<positionArray.length;i++){positionArray[i]=b.positions[i];if(i%40000===39999)yield;}g.setAttribute('position',new THREE.BufferAttribute(positionArray,3));const baseArray=new Float32Array(b.bases.length);for(let i=0;i<baseArray.length;i++){baseArray[i]=b.bases[i];if(i%40000===39999)yield;}g.setAttribute('motorwayBase',new THREE.BufferAttribute(baseArray,1));}yield* computeVertexNormalsSteps(g);{const source=g.attributes.position.array,copy=new Float32Array(source.length);for(let i=0;i<source.length;i+=150000){copy.set(source.subarray(i,i+150000),i);yield;}g.userData.original=copy;}const mesh=new THREE.Mesh(g,materials[mat]);mesh.name=`m25-${mat}`;mesh.userData={type:'motorway',name:'M25 / A282 orbital motorway',part:mat};root.add(mesh);staticMeshes.push(mesh);yield;}
  // ── Traffic (sprint 23Sep26w, D-037 Lane B) ─────────────────────────────
  // Stable identities: one per `vehicleSpacing` metres of each direction, the
  // anticlockwise count shared by its two Dartford-bore circuits (unchanged).
@@ -148,7 +153,7 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  let nextVehicleId=0,lastCamera=null,lastProjectionKey=null,lastElapsed=NaN;
  const trafficStats={near:0,far:0,triangles:0,drawCalls:0,updateMs:0,farBelowPx:LOD_FAR_PX,nearAbovePx:LOD_NEAR_PX,chunkSearches:0}; // s16:R: chunkSearches
  const nearMeshes=[],farMeshes=[];
- function buildTraffic(){
+ function* buildTraffic(){
   for(const route of representative){
    const sharedDirection=route.direction==='anticlockwise'?2:1,count=Math.ceil(route.length/vehicleSpacing/sharedDirection);
    carriers.push({route,count,idOffset:nextVehicleId,lod:new Uint8Array(count),index:carriers.length}); // s25:F: index
@@ -157,30 +162,33 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
   const wayLength=id=>roadPaths.get(id).length;
   for(const direction of ['clockwise','anticlockwise']){
    const group=carriers.filter(c=>c.route.direction===direction);if(!group.length)continue;
-   buildTrafficLayout(group,wayLength).forEach((layout,j)=>{group[j].layout=layout;});
+   (yield* buildTrafficLayoutSteps(group,wayLength)).forEach((layout,j)=>{group[j].layout=layout;});
+   yield;
   }
   // Capacity per mesh = identities of that class; every mesh is shared by all
   // carriers, so draw calls do not multiply with circuits.
   const nearCap=new Int32Array(VEHICLE_TYPES.length*VEHICLE_COLOURS.length),farCap=new Int32Array(VEHICLE_COLOURS.length);
   for(const c of carriers)for(let i=0;i<c.count;i++){nearCap[c.layout.type[i]*VEHICLE_COLOURS.length+c.layout.colour[i]]++;farCap[c.layout.colour[i]]++;}
-  VEHICLE_TYPES.forEach((type,t)=>VEHICLE_COLOURS.forEach((colour,k)=>{
+  for(const [t,type] of VEHICLE_TYPES.entries())for(const [k,colour] of VEHICLE_COLOURS.entries()){
    const cap=Math.max(1,nearCap[t*VEHICLE_COLOURS.length+k]);
    const mesh=new THREE.InstancedMesh(buildVehicleGeometry(type.id,colour.hex),materials.traffic,cap);
    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;mesh.count=0;mesh.visible=false;
    mesh.name=`m25-cars-near-${type.id}-${colour.id}`;
    mesh.userData={type:'motorway',name:'Slow motorway traffic',part:'traffic',lod:'near',vehicleType:type.id,colour:colour.id,trianglesPerVehicle:mesh.geometry.index.count/3,vehicleIds:new Int32Array(cap)};
    root.add(mesh);nearMeshes.push(mesh);
-  }));
-  VEHICLE_COLOURS.forEach((colour,k)=>{
+   yield;
+  }
+  for(const [k,colour] of VEHICLE_COLOURS.entries()){
    const cap=Math.max(1,farCap[k]);
    const mesh=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),materials['far-'+colour.id],cap);
    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;mesh.count=0;mesh.visible=false;
    mesh.name=`m25-cars-far-${colour.id}`;
    mesh.userData={type:'motorway',name:'Slow motorway traffic',part:'traffic',lod:'far',colour:colour.id,trianglesPerVehicle:2,vehicleIds:new Int32Array(cap)};
    root.add(mesh);farMeshes.push(mesh);
-  });
+   yield;
+  }
  }
- buildTraffic();
+ yield* buildTraffic();
  function pointAt(route,distance,out={}){const p=route.path,d=mod(distance,route.length);let lo=0,hi=p.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(p[m].distance<=d)lo=m;else hi=m;}const a=p[lo],b=p[hi],t=(d-a.distance)/(b.distance-a.distance||1);out.x=a.x+(b.x-a.x)*t;out.z=a.z+(b.z-a.z)*t;out.y=(a.baseY+(b.baseY-a.baseY)*t)+((a.deltaY+(b.deltaY-a.deltaY)*t)*scale);out.dx=b.x-a.x;out.dz=b.z-a.z;const l=Math.hypot(out.dx,out.dz)||1;out.dx/=l;out.dz/=l;out.dy=((b.baseY+b.deltaY*scale)-(a.baseY+a.deltaY*scale))/l;out.road=a.road;out.tunnel=a.tunnel;return out;}
  const scratch={};
  function vehicleAt(c,i,out={},t=elapsed) { // s25:F: t, so near vehicles can be posed at the current time
@@ -422,5 +430,8 @@ export function createMotorway({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28
  root.userData.revalidate=revalidate;
  root.userData.setChunkMemory=on=>{chunkMemoryOn=!!on;return chunkMemoryOn;}; // s16:R
  // ── /s24:R ──
- root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};root.userData.setHeightScale(heightScale);return root;
+ root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};// The initial height scale, as setHeightScale applies it, one static mesh at a time (175 ms in one call).
+ if(!Number.isFinite(heightScale)||heightScale<=0)throw new Error('Motorway height scale must be positive');scale=heightScale;
+ for(const m of staticMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++){p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;if(i%60000===59999)yield;}p.needsUpdate=true;yield* computeVertexNormalsSteps(g);yield* computeBoundingSphereSteps(g);yield;}
+ if(initialUpdate)update(0,lastCamera,true);return root; // s21:L: initialUpdate:false leaves the first fleet pass (13 ms) to the tick, which does it within three frames
 }

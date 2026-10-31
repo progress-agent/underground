@@ -686,8 +686,13 @@ function buildTypeGeometry(model, livery = null) {
 // aircraft is larger than this). 0 disables the floor.
 export const MIN_ON_SCREEN_PX = 6;
 
-export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, capacity = 48, model: trafficModel, minPixels = MIN_ON_SCREEN_PX } = {}) {
+// s21:L (approach E): a generator with a `yield` after the traffic model and after each aircraft mesh, so the flights can
+// be built a few milliseconds a frame after landing (src/late-layers.js); createFlights drains it, so every statement runs
+// in its original order.
+export function createFlights(options = {}) { const steps = createFlightsSteps(options); let r; do { r = steps.next(); } while (!r.done); return r.value; }
+export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () => 1, capacity = 48, model: trafficModel, minPixels = MIN_ON_SCREEN_PX } = {}) {
   const traffic = trafficModel || createTrafficModel({ getSurfaceY, VE });
+  yield;
   const root = new THREE.Group(); root.name = 'flights';
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .78, metalness: .05, fog: true });
   const meshes = {};
@@ -699,6 +704,7 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.userData = { type: 'flight', model, livery };
     meshes[key] = mesh; root.add(mesh);
+    yield;
   }
   // ── /s25:F ──
   let elapsed = 0, current = [], lastCamera = null, floorPx = minPixels;
@@ -835,6 +841,15 @@ export function createFlights({ getSurfaceY, VE = 5, getHeightScale = () => 1, c
     traffic, meshes, stats, pick, formatLabel: formatFlightLabel,
     dispose() { for (const mesh of Object.values(meshes)) { mesh.geometry.dispose(); mesh.dispose?.(); } material.dispose(); root.removeFromParent(); },
   };
+  // s21:L: the first list (render below) builds a path for each stream's variants; build them here, one stream at a
+  // time, with the module's own memoised functions (flightVariant and pathFor cache by stream and variant), so the render
+  // that follows finds them cached. The window of laps is flightsAt's, at elapsed time 0.
+  for (const stream of traffic.streams || []) {
+    const q = stream.loop ? Math.floor((0 - stream.offset) / stream.period) : 0;
+    const k0 = stream.loop ? q - stream.aircraft + 1 : Math.floor((0 - stream.after - stream.offset) / stream.period) - 1;
+    const k1 = stream.loop ? q : Math.ceil((0 + stream.before - stream.offset) / stream.period) + 1;
+    for (let k = k0; k <= k1; k++) { traffic.pathFor(stream, traffic.flightVariant(stream, k)); yield; }
+  }
   render();
   return root;
 }

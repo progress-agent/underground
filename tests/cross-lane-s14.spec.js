@@ -762,6 +762,7 @@ test('8 views by place: third person above ground on foot, board, Drone and Ball
 // ── 9. the opening (against the live build) ────────────────────────────────────────────────────────────────────
 test('9 the opening: a cold default load runs it as the live build does, the figure fetched after the landing, no console error', async ({ browser }) => {
   const INIT = () => {
+    try { performance.setResourceTimingBufferSize(5000); } catch (_) {} // s21:L: the dev server's 250-entry buffer is full before the landing
     window.__s14o = { reveal: null, done: null };
     window.addEventListener('ug:opening-reveal', () => { window.__s14o.reveal = performance.now(); }, { once: true });
     window.addEventListener('ug:intro-done', () => { window.__s14o.done = performance.now(); }, { once: true });
@@ -801,11 +802,13 @@ test('9 the opening: a cold default load runs it as the live build does, the fig
     expect(r.glb.length, `${r.label}: the figure is fetched once`).toBe(1);
     expect(r.glb[0].start, `${r.label}: after the landing`).toBeGreaterThan(r.done);
   }
-  for (const r of live) expect(r.glb.length).toBe(0);
-  // within noise: the candidate's mean reveal and landing within 15% (or 1.5 s) of the live build's
+  // s21:L: the live build is now 7c2d4bd, which has the figure; the check was written against the build before it (none)
+  for (const r of live) expect(r.glb.length).toBeLessThanOrEqual(1);
+  // s21:L: the faster opening is the point of the sprint, so the candidate must not be SLOWER than the live build
+  // beyond noise (it used to be required to be within noise of it, either way)
   const tol = (v) => Math.max(1500, 0.15 * v);
-  expect(Math.abs(sum.candReveal - sum.liveReveal), 'reveal time').toBeLessThanOrEqual(tol(sum.liveReveal));
-  expect(Math.abs(sum.candDone - sum.liveDone), 'landing time').toBeLessThanOrEqual(tol(sum.liveDone));
+  expect(sum.candReveal - sum.liveReveal, 'reveal time (candidate minus live)').toBeLessThanOrEqual(tol(sum.liveReveal));
+  expect(sum.candDone - sum.liveDone, 'landing time (candidate minus live)').toBeLessThanOrEqual(tol(sum.liveDone));
 });
 
 test('no console or page errors across the cross-lane checks', () => {

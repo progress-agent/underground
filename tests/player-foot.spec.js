@@ -398,7 +398,7 @@ test.describe('the view rules, with the figure held back and in the tunnel', () 
 
   test('the GLB is fetched after the opening has landed, once', async ({ browser }) => {
     const p = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    await p.addInitScript(() => { window.addEventListener('ug:intro-done', () => { window.__introDoneAt = performance.now(); }); });
+    await p.addInitScript(() => { try { performance.setResourceTimingBufferSize(5000); } catch (_) {} /* s21:L: the dev server's 250-entry buffer is full before the landing, which dropped the GLB's entry */ window.addEventListener('ug:intro-done', () => { window.__introDoneAt = performance.now(); }); });
     try {
       await p.goto('/');
       await p.waitForFunction(() => window.__introDoneAt !== undefined, null, { timeout: 150000 });

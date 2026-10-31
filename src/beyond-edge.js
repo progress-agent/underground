@@ -70,12 +70,19 @@ export function createBeyondEdgeCorridor({ isOffMapEdge }) {
    * caller may pass whole paths). Replaces any earlier build.
    */
   function build(polylines) {
+    // s21:L: the generator below drains here, so every statement runs in its original order
+    const steps = buildSteps(polylines);
+    while (!steps.next().done);
+  }
+  /** build() with a `yield` every 200 painted points, for the late layers (sprint 21Oct26w, lane L). */
+  function* buildSteps(polylines) {
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const dense = [];
     // Densified first: a sparse polyline (the bores run station to station) crosses the ring between two points.
     for (const pl of polylines) {
       const pts = pl.filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.z));
       for (const run of beyondRuns(densify(pts, 10), p => off(p.x, p.z))) dense.push(...run);
+      yield; // s21:L
     }
     stats.points = dense.length;
     if (!dense.length) { tiles = null; ready = true; return; }
@@ -89,7 +96,9 @@ export function createBeyondEdgeCorridor({ isOffMapEdge }) {
     tiles = new Array(nx * nz).fill(null);
     stats.tiles = 0;
     const reach = Math.ceil((CORRIDOR_ZERO_M + CORRIDOR_CELL_M) / CORRIDOR_CELL_M);
+    let painted = 0;
     for (const p of dense) {
+      if (++painted % 200 === 0) yield; // s21:L
       const cx = Math.floor((p.x - ox) / CORRIDOR_CELL_M), cz = Math.floor((p.z - oz) / CORRIDOR_CELL_M);
       for (let j = cz - reach; j <= cz + reach; j++) for (let i = cx - reach; i <= cx + reach; i++) {
         if (i < 0 || j < 0) continue;
@@ -129,7 +138,7 @@ export function createBeyondEdgeCorridor({ isOffMapEdge }) {
     return d <= CORRIDOR_FULL_M ? 1 : corridorWeightFromDistance(d);
   }
 
-  return { build, weightAt, distanceAt, get ready() { return ready; }, get stats() { return stats; } };
+  return { build, buildSteps, weightAt, distanceAt, get ready() { return ready; }, get stats() { return stats; } };
 }
 
 /**

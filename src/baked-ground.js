@@ -2,6 +2,7 @@
 // road/green bits, gzip-compressed on disk. The shader still receives the exact
 // RGBA bytes produced by surface-texture.js, at the original 4096 resolution.
 import { createSurfaceTexture } from './surface-texture.js';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 
 export const GROUND_URL = '/data/surface/baked/ground.bin';
 export const GROUND_MAGIC = 0x31474755; // UGG1
@@ -24,8 +25,21 @@ export function parseGround(buffer, expectedBBox) {
   return { size, bbox, packed: new Uint8Array(buffer, GROUND_HEADER) };
 }
 
-export async function loadBakedGround(bbox) {
-  const response = await fetch(GROUND_URL, { signal: AbortSignal.timeout(15000) });
+/**
+ * @param {object} bbox
+ * @param {object} [opts]
+ * @param {boolean} [opts.paced=true]  one 32 KB chunk, then a setTimeout(0), at a time: the expansion shares the
+ *   frame thread with a scene being watched (deep links keep this).
+ * @param {number} [opts.sliceMs=48]  unpaced: expand in slices of this many milliseconds with one yield between,
+ *   for use behind the opening veil, where nothing is being watched (sprint 21Oct26w, approach B: the paced
+ *   pass took 1.57 s of wall clock for 0.3 s of work).
+ */
+export async function loadBakedGround(bbox, { paced = true, sliceMs = 48 } = {}) {
+  // s21:L: the request was started at HTML parse (index.html); the 15 s limit now covers the wait for its headers.
+  const response = await Promise.race([
+    bootFetch(GROUND_URL, { signal: AbortSignal.timeout(15000) }),
+    new Promise((_, reject) => setTimeout(() => reject(new DOMException('ground fetch timed out', 'TimeoutError')), 15000)),
+  ]);
   if (!response.ok || response.headers.get('content-type')?.includes('text/html')) {
     throw new Error(`ground fetch failed (${response.status})`);
   }
@@ -37,6 +51,7 @@ export async function loadBakedGround(bbox) {
   // Yield between chunks: expanding 16 million pixels must not monopolise the
   // frame thread during the opening descent, especially on slower machines.
   const chunk = 32768;
+  let sliceStart = performance.now();
   for (let start = 0; start < packed.length; start += chunk) {
     const end = Math.min(start + chunk, packed.length);
     for (let i = start; i < end; i++) {
@@ -47,7 +62,11 @@ export async function loadBakedGround(bbox) {
         state.pixels[offset + 3] = bits & (2 << (p * 2)) ? 255 : 0;
       }
     }
-    await new Promise(resolve => setTimeout(resolve, 0));
+    if (paced) await new Promise(resolve => setTimeout(resolve, 0));
+    else if (performance.now() - sliceStart >= sliceMs && end < packed.length) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      sliceStart = performance.now();
+    }
   }
   return state;
 }

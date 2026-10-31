@@ -33,7 +33,15 @@ export async function loadReservoirData() {
   }
 }
 
+// s21:L (approach E): a generator with a `yield` per feature, so the layer can be built a few milliseconds a frame after
+// landing (src/late-layers.js); createReservoirs drains it, so every statement runs in its original order.
 export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
+  const steps = createReservoirsSteps(data, latLonToXZ, getTerrainSurfaceY);
+  let r;
+  do { r = steps.next(); } while (!r.done);
+  return r.value;
+}
+export function* createReservoirsSteps(data, latLonToXZ, getTerrainSurfaceY) {
   if (!data || !data.features || data.features.length === 0) return null;
   
   const group = new THREE.Group();
@@ -43,6 +51,7 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
   const waterMaterial = createWaterMaterial('reservoir');
   
   for (const feature of data.features) {
+    yield; // s21:L
     if (!feature.coords || feature.coords.length < 3) continue;
     
     // Convert lat/lon to scene coordinates
@@ -158,8 +167,8 @@ export function createReservoirs(data, latLonToXZ, getTerrainSurfaceY) {
   return group;
 }
 
-export function addReservoirsToLegend() {
-  const legend = document.getElementById('legend');
+export function addReservoirsToLegend(container = null) { // s21:L: container = a legend slot reserved earlier
+  const legend = container || document.getElementById('legend');
   if (!legend) return;
   
   const legendItem = document.createElement('div');

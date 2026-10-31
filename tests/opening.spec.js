@@ -92,8 +92,12 @@ test.describe('Lane O: opening', () => {
     expect(r.thames).toBe(true);
     expect(r.bridges).toBe(true);
     expect(r.overground).toBe(true);
-    expect(r.motorway).toBe(true);
-    expect(r.airports).toBe(true);
+    // s21:L (sprint 21Oct26w): the motorway and the airport models are late layers, built after landing because the
+    // descent never shows them (profile section 3); the 'm25' and 'airports' readiness items now mean the M25 mask and
+    // chalk floor, and the airport fingerprint check. At the reveal both groups are absent; tests/opening-s21.spec.js
+    // holds that both attach within 10 s of landing.
+    expect(r.motorway).toBe(false);
+    expect(r.airports).toBe(false);
     expect(r.shafts).toBe(true);
     expect(r.barPct).toBe(100);
     // Nothing gave up or timed out on a healthy load.

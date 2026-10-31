@@ -167,7 +167,9 @@ test('gate: bar stays below 100% until layers, shaders and warm-up are all done'
   assert.equal(gate.getState().readiness.items.find(i => i.id === WARMUP_ID).status, 'ready');
   gate.frame();
   assert.equal(intro.getPhase(), 'playing');
-  assert.equal(events[0].name, 'ug:opening-reveal');
+  // s21:L: the landing lock (hook 4 for lane V) is announced as the descent begins, so the reveal is the event after it,
+  // not events[0]; the pin that matters (the reveal fires, once, when the phase is playing) is kept.
+  assert.deepEqual(events.map(e => e.name), ['ug:landing-lock', 'ug:opening-reveal']);
   const log = gate.getState().barLog;
   assert.ok(log.every(e => e.pct < 100 || e.complete), JSON.stringify(log));
   assert.equal(log.at(-1).pct, 100);

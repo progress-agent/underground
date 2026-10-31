@@ -21,7 +21,15 @@ export async function loadCanalData() {
   }
 }
 
+// s21:L (approach E): a generator with a `yield` per feature, so the layer can be built a few milliseconds a frame after
+// landing (src/late-layers.js); createCanals drains it, so every statement runs in its original order.
 export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
+  const steps = createCanalsSteps(data, latLonToXZ, getTerrainSurfaceY);
+  let r;
+  do { r = steps.next(); } while (!r.done);
+  return r.value;
+}
+export function* createCanalsSteps(data, latLonToXZ, getTerrainSurfaceY) {
   if (!data || !data.features || data.features.length === 0) return null;
 
   const group = new THREE.Group();
@@ -39,6 +47,7 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
   const significantCanals = data.features.filter(f => f.length_km > 0.5);
 
   for (const feature of significantCanals) {
+    yield; // s21:L
     if (!feature.coords || feature.coords.length < 2) continue;
 
     // Convert lat/lon to scene coordinates with terrain height
@@ -158,8 +167,8 @@ export function createCanals(data, latLonToXZ, getTerrainSurfaceY) {
   return group;
 }
 
-export function addCanalsToLegend() {
-  const legend = document.getElementById('legend');
+export function addCanalsToLegend(container = null) { // s21:L: container = a legend slot reserved earlier
+  const legend = container || document.getElementById('legend');
   if (!legend) return;
 
   const legendItem = document.createElement('div');

@@ -1,7 +1,7 @@
 // buildings-default.spec.js: Lane F (sprint 02Oct26f, D-048 item 6). The baked city is the
 // default building path; the live per-tile path stays as the explicit choice and as the
 // automatic fallback. Pins (each case in a fresh browser context):
-//   b1  a clean profile with no parameters fetches baked/buildings.bin and never a live tile;
+//   b1  a clean profile with no parameters fetches the baked payload (buildings.z.bin since sprint 21Oct26w, else buildings.bin) and never a live tile;
 //   b2  a 'live' saved before this release is dropped once (other prefs kept) and lands on baked;
 //   b3  a live chosen with the HUD after the release persists; choosing baked again restores it
 //       and the default URL carries no buildings parameter;
@@ -13,7 +13,9 @@
 import { test, expect } from '@playwright/test';
 
 const PREFS = 'ug:prefs:v2';
-const BIN = '**/baked/buildings.bin', FOOT = '**/baked/landmark-footprints.json';
+// s21:L: the payload is also offered gzip-framed (buildings.z.bin) and tried first, so the 404 and unparseable
+// cases route BOTH names, which is the same fault for the same payload.
+const BIN = /\/baked\/buildings(\.z)?\.bin$/, FOOT = '**/baked/landmark-footprints.json';
 const LIVE_TILE = /\/surface\/tiles\/(?!manifest).*\.json/;
 
 async function open(browser, { url = '/', init = null, routes = [] } = {}) {
@@ -36,7 +38,7 @@ const ready = page => page.waitForFunction(() => !!(window.__ug?.camera && windo
 const pathOf = page => page.evaluate(() => window.__ug.buildingsPath);
 const prefsOf = page => page.evaluate(k => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return null; } }, PREFS);
 const loadedTiles = page => page.evaluate(() => window.__ug.surfaceLoaderStats.loaded);
-const baked200 = log => log.responses.filter(r => /\/baked\/buildings\.bin/.test(r.url) && r.status === 200);
+const baked200 = log => log.responses.filter(r => /\/baked\/buildings(\.z)?\.bin/.test(r.url) && r.status === 200);
 const openHud = page => page.evaluate(() => { document.getElementById('hudDetails').open = true; });
 const urlParams = page => page.evaluate(() => Object.fromEntries(new URL(location.href).searchParams));
 const ariaPressed = page => page.getAttribute('#bakedBuildings', 'aria-pressed');
@@ -103,7 +105,7 @@ test('b4: ?buildings=live runs the live path for the visit, and is not saved', a
 });
 
 for (const [name, routes, expectedErrors] of [
-  ['b5: a 404 on the payload falls back to live with the existing warning', [[BIN, r => r.fulfill({ status: 404, body: 'not found' })]], 1],
+  ['b5: a 404 on the payload falls back to live with the existing warning', [[BIN, r => r.fulfill({ status: 404, body: 'not found' })]], 2], // s21:L: one failed load for each of the two names
   ['b6: an unparseable payload falls back to live', [[BIN, r => r.fulfill({ status: 200, contentType: 'application/octet-stream', body: Buffer.alloc(64) })]], 0],
   ['b6: a missing footprint companion falls back to live', [[FOOT, r => r.fulfill({ status: 404, body: 'not found' })]], 1],
 ]) {

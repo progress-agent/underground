@@ -33,6 +33,7 @@
 // is read from the atlas in uniform control flow (the grey outline on the bar was a mip level picked at the name's edges).
 
 import * as THREE from 'three';
+import { bootFetch } from './boot-fetch.js'; // s21:L
 import { cleanStationName } from './stations.js';
 import { ROUNDEL } from './platform-tunnel.js';
 import { patchBuildingHeight, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js'; // s16:T getBuildingMaterial
@@ -240,7 +241,7 @@ const state = { index: null, meshes: null, ready: false, hidden: { live: 0, bake
 /** Fetch and index the data once. Resolves to the index; rejects (and clears) on failure so a retry is possible. */
 export function loadStationBuildings(url = STATION_BUILDINGS_URL) {
   if (_loadPromise) return _loadPromise;
-  _loadPromise = fetch(url).then(async (res) => {
+  _loadPromise = bootFetch(url).then(async (res) => { // s21:L
     if (!res.ok) throw new Error(`${url}: ${res.status}`);
     if (/text\/html/i.test(res.headers.get('content-type') || '')) throw new Error(`${url}: HTML (SPA fallback)`);
     const index = createStationBuildingIndex(await res.json());
