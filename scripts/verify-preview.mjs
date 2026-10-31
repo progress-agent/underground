@@ -9,7 +9,8 @@ const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle',
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
   await page.addInitScript(() => {
-    window.__openingCheck = { done: false, doneAt: null };
+    window.__openingCheck = { done: false, doneAt: null, phases: [] };
+    window.addEventListener('ug:opening-phase', e => window.__openingCheck.phases.push(e.detail));
     window.addEventListener('ug:intro-done', () => {
       window.__openingCheck = { ...window.__openingCheck, done: true, doneAt: performance.now() };
     });
@@ -25,7 +26,7 @@ try {
   });
   const errors = [], tiles = [], warnings = [];
   page.on('pageerror', e => errors.push(e.message));
-  page.on('console', m => { if (m.type() === 'warning') warnings.push(m.text()); });
+  page.on('console', m => { if (m.type() === 'warning') warnings.push(m.text()); if (m.type() === 'error') errors.push(m.text()); });
   page.on('request', r => { if (/\/surface\/tiles\/(?!manifest).*\.json/.test(r.url())) tiles.push(r.url()); });
   const ground = page.waitForResponse(r => r.url().includes('/baked/ground.bin'));
   const buildings = page.waitForResponse(r => /\/baked\/buildings(\.z)?\.bin/.test(r.url()));
@@ -48,12 +49,20 @@ try {
   }
   await page.waitForFunction(() => window.__openingCheck.done, null, { timeout: 30000 });
   await page.screenshot({ path: `${out}/landing.png` });
-  // The descent itself lasts 9s from the moment the bar lets go. (Sprint 21Oct26w: the veil now lifts at about 4 s, so the
-  // 8 s floor on the landing time is the descent's own length, and the late layers must all be attached within 10 s of it.)
+  // The chosen descent lasts five seconds after descent-begin. Gate readiness
+  // can precede the tilt ending, so phase marks are the timing authority.
   await page.waitForFunction(() => window.__openingCheck.lateDoneAt, null, { timeout: 30000 });
   const opening = await page.evaluate(() => window.__openingCheck);
-  if (opening.doneAt < 8000 || (opening.revealAt && opening.doneAt - opening.revealAt < 8500)) {
-    throw new Error('Opening was skipped or ended prematurely');
+  const at = name => opening.phases.find(p => p.phase === name)?.at;
+  const descentMs = at('landed') - at('descent-begin');
+  for (const name of ['cover-lifted', 'tilt-start', 'sweep-start', 'descent-begin', 'crossing', 'landed']) {
+    if (!Number.isFinite(at(name))) throw new Error(`Opening missed ${name}`);
+  }
+  if (descentMs < 4500) throw new Error(`Opening was skipped or ended prematurely: ${descentMs} ms`);
+  const chosen = await page.evaluate(() => ({ variant: window.__ugOpening?.variant, start: window.__ugOpening?.startAltM,
+    vista: window.__ugOpening?.vista, font: document.fonts.check('44px "Eksell Display"') }));
+  if (chosen.variant !== 2 || chosen.start !== 18000 || chosen.vista !== 'kings-cross' || !chosen.font) {
+    throw new Error(`Wrong default opening: ${JSON.stringify(chosen)}`);
   }
   if (opening.lateDoneAt - opening.doneAt > 10000) {
     throw new Error(`The late layers took ${Math.round(opening.lateDoneAt - opening.doneAt)} ms after landing (limit 10000)`);
@@ -81,7 +90,7 @@ try {
       dp.on('pageerror', e => dPageErrors.push(e.message));
       await dp.goto(`${url}/`, { waitUntil: 'domcontentloaded' });
       await dp.waitForFunction(() => document.getElementById('loadingBar')?.classList.contains('done'), null, { timeout: 90000 });
-      await dp.waitForTimeout(8000);
+      await dp.waitForFunction(() => window.__ugOpening?.phases.some(p => p.phase === 'landed'), null, { timeout: 60000 });
       const bin = responses.filter(r => /\/baked\/buildings(\.z)?\.bin/.test(r.url));
       await dp.evaluate(() => { const d = document.getElementById('hudDetails'); if (d) d.open = true; });
       return {

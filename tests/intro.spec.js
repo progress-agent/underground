@@ -4,7 +4,7 @@
 //   1. Frame progression — 4 screenshots at t=0, t=3000ms, surface-cross, final.
 //   2. Control lockout — OrbitControls + fpsControls disabled during, restored after.
 //   3. URL-param skip — ?skip=1 short-circuits intro, controls up immediately.
-//   4. Click skip — mid-flight click fast-forwards to K3 (~y=-39), controls up.
+//   4. Click skip — mid-flight click fast-forwards to the chosen landing (y=-110), controls up.
 //   5. Audio untouched — masterGain stays at 0 (Track B default muted) throughout.
 //
 // Conventions mirror tests/phase1-baseline.spec.js. Screenshots land in
@@ -152,8 +152,8 @@ test.describe('Track C — intro sequence', () => {
       // not ready we path toward the 15s end; when ready fires before
       // min-duration, we continue toward 8s". We therefore assert the
       // weaker (but design-correct) invariant: camera is mid-descent.
-      expect(pos.y).toBeGreaterThan(-39);
-      expect(pos.y).toBeLessThan(25000);
+      expect(pos.y).toBeGreaterThan(-110);
+      expect(pos.y).toBeLessThan(90117.93);
     }
 
     // F2 — surface-cross. Poll until camera y crosses from positive to ≤ 0.
@@ -180,8 +180,8 @@ test.describe('Track C — intro sequence', () => {
       await page.screenshot({ path: file, fullPage: false });
       frames.push({ label: 'f3-final', pos, file });
       console.log(`[intro] f3-final pos=(${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`);
-      // K3 final altitude = -39 per design §3.
-      expect(pos.y).toBeCloseTo(-39, 0);
+      // The chosen King’s Cross landing.
+      expect(pos.y).toBeCloseTo(-110, 0);
     }
 
     // All four screenshot files must exist on disk.
@@ -278,9 +278,9 @@ test.describe('Track C — intro sequence', () => {
     console.log(`[intro] click-skip state: orbit=${state.orbit} fps=${state.fps} y=${state.cameraY}`);
 
     expect(state.orbit).toBe(true);
-    // Camera snapped to K3 altitude -39 (design §4.2 option A exact snap).
-    expect(state.cameraY).toBeCloseTo(-39, 0);
-    expect(Math.abs(state.cameraY - (-39))).toBeLessThanOrEqual(2);
+    // Skip lands at the same King’s Cross pose as normal completion.
+    expect(state.cameraY).toBeCloseTo(-110, 0);
+    expect(Math.abs(state.cameraY - (-110))).toBeLessThanOrEqual(2);
   });
 
   test('Test 5: audio masterGain stays 0 throughout intro', async ({ page }) => {

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { licensedFontsPlugin } from './scripts/prepare-licensed-fonts.mjs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { gzip } from 'node:zlib';
@@ -53,7 +54,7 @@ function bakedPayloadPlugin() {
 
 export default defineConfig({
   base: '/',
-  plugins: [bakedPayloadPlugin()],
+  plugins: [licensedFontsPlugin(), bakedPayloadPlugin()],
 
   // Keep initial load snappy: split large deps (Three.js) into separate chunks.
   build: {

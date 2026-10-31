@@ -45,6 +45,18 @@ test.describe('the skateboard', () => {
       await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.UG_CPU_THROTTLE) });
     }
     // ── /s16:T ──
+    await page.addInitScript(() => {
+      const raf = window.requestAnimationFrame.bind(window);
+      const clock = window.__boardClock = { held: null, hold: false, last: 0, offset: 0 };
+      window.requestAnimationFrame = cb => {
+        if (cb.name !== 'tick') return raf(cb);
+        return raf(ts => {
+          if (clock.hold) { clock.held = cb; return; }
+          clock.last = ts + clock.offset;
+          cb(clock.last);
+        });
+      };
+    });
     await h.boot();
     await h.activatePedestrian();
   });
@@ -464,10 +476,38 @@ test.describe('the skateboard', () => {
       test.setTimeout(120000);
       await start('KX');
       await h.wait(1000);
-      const s = await h.sample(plan.secs, PLANTED_PROBE, plan.at);
+      // Run B has only 34 ms of ground contact. A fixed 120 Hz simulation clock
+      // samples that interval repeatedly regardless of GPU scheduling. This runs
+      // the real app tick and world bones, keeping the two-frame definition and
+      // every slide assertion; it cannot pass by observing a single stationary frame.
+      const runB = band.includes('W to a cruise');
+      const s = runB ? await h.ev(async ({ seconds, probe, at }) => {
+        const clock = window.__boardClock, u = window.__ug, ped = u.modes.registry.get('pedestrian');
+        clock.hold = true;
+        while (!clock.held) await new Promise(requestAnimationFrame);
+        const t0 = u.modes.ctx.time, keys = u.fpsControls.keys, out = [];
+        const fn = new Function('t', 'u', 'ped', 'T', 'ratio', 'dt', probe);
+        const pending = at.map(a => ({ ...a, done: false }));
+        try {
+          while (u.modes.ctx.time - t0 < seconds) {
+            const t = u.modes.ctx.time - t0;
+            for (const a of pending) if (!a.done && t >= a.t) {
+              a.done = true; for (const k of a.down || []) keys.add(k); for (const k of a.up || []) keys.delete(k);
+            }
+            out.push(fn(t, u, ped, window.__ugTHREE, u.masterHeight.ratio, 1 / 120));
+            const tick = clock.held; clock.held = null; clock.last += 1000 / 120; tick(clock.last);
+            while (!clock.held) await new Promise(requestAnimationFrame);
+          }
+        } finally {
+          keys.clear(); clock.offset = clock.last - performance.now(); clock.hold = false;
+          const tick = clock.held; clock.held = null;
+          if (tick) requestAnimationFrame(tick);
+        }
+        return out;
+      }, { seconds: plan.secs, probe: PLANTED_PROBE, at: plan.at }) : await h.sample(plan.secs, PLANTED_PROBE, plan.at);
       await h.releaseKeys();
       const spans = plantedSpans(s, minFrames);
-      if (process.env.UG_FOOT_DUMP) (await import('node:fs')).writeFileSync(`${process.env.UG_FOOT_DUMP}-${band.replace(/[^a-z0-9]+/gi, '-')}.json`, JSON.stringify(s));   // s21:T: the raw frames, for the captures notes
+      if (process.env.UG_FOOT_DUMP) (await import('node:fs')).writeFileSync(`${process.env.UG_FOOT_DUMP}-r${test.info().repeatEachIndex}-${band.replace(/[^a-z0-9]+/gi, '-')}.json`, JSON.stringify(s));   // s21:T: the raw frames, for the captures notes
       console.log(`[pose 4] ${band}: ${s.length} frames, ${spans.length} planted spans ${JSON.stringify(spans.map((x) => [x.frames, +x.meanSpeed.toFixed(2), +(x.slideFoot * 1000).toFixed(2), +(x.slideBall * 1000).toFixed(2)]))} [frames, m/s, foot mm, ball mm]`);
       expect(spans.some((x) => x.meanSpeed >= lo && x.meanSpeed <= hi), `a planted span at ${band} (mean speed ${lo} to ${hi} m/s)`).toBe(true);
       for (const x of spans) {

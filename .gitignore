@@ -14,8 +14,8 @@ public/data/terrain/london_full_height_u16.png
 public/data/surface/
 
 # Test artifacts
-test-results/
-tests/screenshots/
+test-results
+tests/screenshots
 
 # Local Cloudflare Wrangler folder
 .wrangler
@@ -24,3 +24,6 @@ tests/screenshots/
 RESULT.md
 .codex-last-message.txt
 scripts/.cache/
+
+# Paid face, supplied from the local licence at dev/build time.
+public/fonts/EksellDisplay-Large.*
