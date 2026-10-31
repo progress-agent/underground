@@ -24,6 +24,9 @@ async function waitForAppReady(page) {
     { timeout: 30000 },
   );
 
+  // Readiness can open during the selected tilt. Labels need the landed camera.
+  await page.waitForFunction(() => window.__ug.intro.getPhase() === 'done', null, { timeout: 90000 });
+
   // Extra settle time for terrain + shafts + infra meshes to load
   await page.waitForTimeout(4000);
 }
