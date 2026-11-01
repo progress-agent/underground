@@ -145,6 +145,7 @@ import { applyShadowPolicy } from './sun.js';
 import { getSurfaceTileStates } from './surface-loader.js';
 // ── /s24:O ──
 import { initLandscapeLock } from './landscape-lock.js';
+import { isTouchDevice, installTouchUi } from './touch-ui.js';
 import { initControlsGuide } from './controls-guide.js';
 import { initCushionLuma, sampleCushion, resetCushion, _cushionState } from './cushion-luma.js';
 import { initReadout } from './readout.js';
@@ -308,7 +309,7 @@ const app = document.getElementById('app');
 // #compass and #altimeter replaced by src/readout.js module
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouchDevice() ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 // Filmic tone mapping (applied by OutputPass at the end of the composer
 // chain — scene renders linear HDR into the HalfFloat target). AgX chosen
@@ -862,7 +863,9 @@ function updateFpsControls(dt) {
 // Portrait + narrow viewport → full-screen rotate-device overlay. iOS Safari
 // silently rejects screen.orientation.lock(), so CSS + matchMedia is the
 // load-bearing path.
-const landscapeLock = initLandscapeLock();
+// D-058 (01Nov26u): a touch device gets the phone layout in either orientation, so no rotate wall there.
+const TOUCH_UI = isTouchDevice();
+const landscapeLock = TOUCH_UI ? null : initLandscapeLock();
 
 // ---------- Control-guide widget (D-003) ----------
 // Round 4 widget — typographic-grid keys, glow-on-press, timed caption fade,
@@ -3981,7 +3984,39 @@ let _clearHoverForMotion = null;
     tip.style.transform = `translate(${x}px, ${y}px)`;
   }
 
+  // D-058: on touch there is no hover. A finger's moves run no picking at all (they are pans and looks); a clean
+  // tap runs the cascade once at the tap and the tip stays pinned until the next touch.
+  let _tapStart = null, _tapping = false, _touchCount = 0;
+  function clampTipIntoView() {
+    if (!tip || tip.style.display === 'none') return;
+    // Pinned as a card, centred just above the touch mode bar, so it never sits under the finger or a label.
+    const r = tip.getBoundingClientRect();
+    const bar = document.querySelector('#ug-touch .modes')?.getBoundingClientRect();
+    const floor = bar && bar.top > window.innerHeight / 2 ? bar.top : window.innerHeight - 16;
+    const x = Math.max(8, (window.innerWidth - r.width) / 2);
+    const y = Math.max(8, floor - r.height - 12);
+    tip.style.transform = `translate(${x}px, ${y}px)`;
+  }
+  function onTouchDown(ev) {
+    if (ev.pointerType !== 'touch') return;
+    _touchCount++;
+    _tapStart = _touchCount === 1 ? { id: ev.pointerId, x: ev.clientX, y: ev.clientY, t: performance.now() } : null;
+    onPointerLeave();
+  }
+  function onTouchUp(ev) {
+    if (ev.pointerType !== 'touch') return;
+    _touchCount = Math.max(0, _touchCount - 1);
+    const s0 = _tapStart;
+    _tapStart = null;
+    if (!s0 || s0.id !== ev.pointerId || ev.type !== 'pointerup') return;
+    if (Math.hypot(ev.clientX - s0.x, ev.clientY - s0.y) > 10 || performance.now() - s0.t > 450) return;
+    _tapping = true;
+    try { onPointerMove(ev); } finally { _tapping = false; }
+    clampTipIntoView();
+  }
+
   function onPointerMove(ev) {
+    if (ev.pointerType === 'touch' && !_tapping) return;
     // Skip the whole hover cascade (up to three full-scene raycasts) while a
     // rotate drag is active — tooltips are irrelevant mid-drag and the raycasts
     // are the dominant per-move cost. Clear any lingering tip on the way in.
@@ -4064,8 +4099,11 @@ let _clearHoverForMotion = null;
   }
 
   renderer.domElement.addEventListener('pointermove', onPointerMove);
-  renderer.domElement.addEventListener('pointerleave', onPointerLeave);
+  renderer.domElement.addEventListener('pointerleave', (ev) => { if (ev.pointerType !== 'touch') onPointerLeave(); });
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('pointerdown', onTouchDown);
+  renderer.domElement.addEventListener('pointerup', onTouchUp);
+  renderer.domElement.addEventListener('pointercancel', onTouchUp);
 }
 
 // ---------- UI toggles ----------
@@ -4872,6 +4910,8 @@ modeSystem = installModes({
   getMasterBus,
 });
 // ── /sprint:A1 ──
+// D-058: the phone layout (mode bar, thumbstick, buttons) on touch devices only.
+const touchUi = TOUCH_UI ? installTouchUi({ registry: modeSystem.registry, canvas: renderer.domElement }) : null;
 // ── sprint:A2 ──
 // Pedestrian mode reads the tube network lazily (stations, platforms and the
 // snapped tunnel centrelines); getters so it always sees the current snap.

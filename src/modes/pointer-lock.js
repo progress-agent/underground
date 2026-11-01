@@ -29,6 +29,8 @@ export function createLookInput({ element, onLook = () => {}, document = globalT
   let mode = 'none';
   let dragging = false;
   let pointerId = null;
+  // D-058: a touch drag is measured from clientX/Y. iOS Safari leaves movementX at 0 on touch pointers.
+  let lastX = null, lastY = null;
   const lockListeners = new Set();
   const isLocked = () => !!document && document.pointerLockElement === element;
 
@@ -39,6 +41,7 @@ export function createLookInput({ element, onLook = () => {}, document = globalT
 
   const onClick = (e) => {
     if (mode !== 'lock' || isLocked() || e.button !== 0) return;
+    if (e.pointerType === 'touch') return; // a phone has no cursor to capture; drag look serves it
     try {
       const p = element.requestPointerLock?.();
       // Chrome returns a promise that rejects if the gesture is refused
@@ -48,15 +51,28 @@ export function createLookInput({ element, onLook = () => {}, document = globalT
   };
   const onPointerDown = (e) => {
     if (mode === 'none' || isLocked() || e.button !== 0) return;
+    if (dragging && pointerId !== null && e.pointerType === 'touch') return; // a second finger is a pinch, not a new look
     dragging = true;
     pointerId = e.pointerId;
+    lastX = e.clientX; lastY = e.clientY;
   };
   const onPointerMove = (e) => {
     if (mode === 'none') return;
     if (isLocked()) { report(e); return; }
-    if (dragging && (e.buttons & 1) && (pointerId === null || e.pointerId === pointerId)) report(e);
+    if (!dragging || (pointerId !== null && e.pointerId !== pointerId)) return;
+    if (e.pointerType === 'touch') {
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      if (dx || dy) onLook(dx, dy);
+      return;
+    }
+    if (e.buttons & 1) report(e);
   };
-  const endDrag = () => { dragging = false; pointerId = null; };
+  const endDrag = (e) => {
+    // A second finger lifting must not end the first finger's look drag.
+    if (e?.pointerId !== undefined && pointerId !== null && e.pointerId !== pointerId) return;
+    dragging = false; pointerId = null; lastX = lastY = null;
+  };
   const onLockChange = () => {
     endDrag();
     const locked = isLocked();
