@@ -1,7 +1,8 @@
 import { isTouchDevice } from './touch-ui.js';
 
-// D-058: a phone's 3x screen is drawn at most 1.5x (desktop keeps 2x); Automatic and Scale work below that.
-const DPR_CAP = isTouchDevice() ? 1.5 : 2;
+// D-058 item 8: a phone never uses edge smoothing (MSAA). At a phone's pixel density the saving is better spent on
+// resolution, which Automatic then holds higher; the edge-smoothing control has no effect there.
+const TOUCH = isTouchDevice();
 
 // One sizing path for startup, manual quality changes and window resize.
 // Map geometry, camera and HTML labels stay independent of drawing resolution.
@@ -11,7 +12,7 @@ export function createRenderQuality({ renderer, composer }) {
   const get = () => ({ scale, samples, pixelRatio: renderer.getPixelRatio() });
 
   function resize() {
-    const ratio = Math.min(window.devicePixelRatio || 1, DPR_CAP) * scale;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2) * scale;
     if (renderer.getPixelRatio() !== ratio) renderer.setPixelRatio(ratio);
     composer.setPixelRatio(ratio);
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -22,7 +23,7 @@ export function createRenderQuality({ renderer, composer }) {
     const nextScale = Number(next.scale ?? scale);
     scale = Number.isFinite(nextScale) ? Math.min(1, Math.max(0.35, nextScale)) : 1;
     const nextSamples = Number(next.samples ?? samples);
-    samples = [0, 2, 4].includes(nextSamples) ? nextSamples : 4;
+    samples = TOUCH ? 0 : [0, 2, 4].includes(nextSamples) ? nextSamples : 4;
     // Release the previous framebuffer before changing its sample count.
     // Only renderTarget1 draws geometry; the post buffer always stays at zero.
     if (composer.renderTarget1.samples !== samples) {

@@ -38,13 +38,16 @@ for (const orient of ['portrait', 'landscape']) {
         wall: !!document.querySelector('#ug-landscape-lock.locked'),
         guide: getComputedStyle(document.getElementById('ug-controls-guide')).display,
         bar: [...document.querySelectorAll('#ug-touch .modes button')].map(b => b.dataset.mode),
-        ratioCap: window.__ug.renderQuality.get().pixelRatio <= 1.5 * window.__ug.renderQuality.get().scale + 1e-6,
+        // D-058 item 8: no edge smoothing and no glow on phones.
+        samples: window.__ug.renderQuality.get().samples,
+        bloom: window.__ug.bloomPass.enabled,
       }));
       expect(s.touch).toBe(true);
       expect(s.wall).toBe(false);
       expect(s.guide).toBe('none');
       expect(s.bar).toEqual(['deity', 'pedestrian', 'drone', 'balloon']);
-      expect(s.ratioCap).toBe(true);
+      expect(s.samples).toBe(0);
+      expect(s.bloom).toBe(false);
     });
 
     test('the mode bar switches body, the stick drives it and drag looks, with no key left held', async ({ page, context }) => {
@@ -56,7 +59,8 @@ for (const orient of ['portrait', 'landscape']) {
 
       await page.tap('#ug-touch .modes button[data-mode=drone]');
       await expect.poll(() => page.evaluate(() => window.__ug.modes.activeId)).toBe('drone');
-      await expect(page.locator('#ug-touch .stick-zone')).toBeVisible();
+      await expect(page.locator('#ug-touch .stick-zone.move')).toBeVisible();
+      await expect(page.locator('#ug-touch .stick-zone.look')).toBeVisible();
       await simFor(page, 0.5);
 
       const yaw = () => page.evaluate(() => window.__ug.camera.rotation.y);
@@ -86,19 +90,19 @@ for (const orient of ['portrait', 'landscape']) {
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
 
       // Fast latches Shift on one tap and off on the next, and survives a switch into another mode that has it.
-      const fastBtn = page.locator('#ug-touch .actions button[data-action=fast]');
+      const fastBtn = page.locator('#ug-touch .fast-slot button[data-action=fast]');
       await fastBtn.tap();
       expect(await page.evaluate(() => window.__ug.fpsControls.keys.has('shift'))).toBe(true);
-      await expect(page.locator('#ug-touch .stick-zone')).toHaveClass(/is-fast/);
+      await expect(page.locator('#ug-touch .stick-zone.move')).toHaveClass(/is-fast/);
 
       await page.tap('#ug-touch .modes button[data-mode=deity]');
       await expect.poll(() => page.evaluate(() => window.__ug.modes.activeId)).toBe('deity');
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual(['shift']);
-      await page.locator('#ug-touch .actions button[data-action=fast]').tap();
+      await page.locator('#ug-touch .fast-slot button[data-action=fast]').tap();
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
 
       // Deity flies on the stick too, as W does on a keyboard.
-      await expect(page.locator('#ug-touch .stick-zone')).toBeVisible();
+      await expect(page.locator('#ug-touch .stick-zone.move')).toBeVisible();
       const d0 = await camPos(page);
       await touch('touchStart', [[sx, sy, 6]]);
       for (let i = 1; i <= 5; i++) await touch('touchMove', [[sx, sy - i * 8, 6]]);
@@ -107,6 +111,49 @@ for (const orient of ['portrait', 'landscape']) {
       const d1 = await camPos(page);
       expect(Math.hypot(d1.x - d0.x, d1.z - d0.z)).toBeGreaterThan(1);
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
+    });
+
+    test('the look stick turns Deity (arrow keys) and a body (look input), and lets go cleanly', async ({ page, context }) => {
+      await boot(page);
+      const cdp = await context.newCDPSession(page);
+      const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent',
+        { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
+      const yaw = () => page.evaluate(() => {
+        const e = new (window.__ug.camera.rotation.constructor)().setFromQuaternion(window.__ug.camera.quaternion, 'YXZ');
+        return e.y;
+      });
+      const zone = await page.locator('#ug-touch .stick-zone.look').boundingBox();
+      const lx = zone.x + zone.width * 0.6, ly = zone.y + zone.height * 0.75;
+      const push = async (id) => {
+        await touch('touchStart', [[lx, ly, id]]);
+        for (let i = 1; i <= 6; i++) await touch('touchMove', [[lx + i * 9, ly, id]]);
+      };
+
+      // Deity: the stick holds an arrow key, which is how Deity turns on a keyboard.
+      await push(11);
+      expect(await page.evaluate(() => window.__ug.fpsControls.keys.has('arrowright'))).toBe(true);
+      const y0 = await yaw();
+      await page.evaluate(async () => { for (let i = 0; i < 30; i++) await new Promise(r => requestAnimationFrame(r)); });
+      await touch('touchEnd', []);
+      expect(Math.abs((await yaw()) - y0)).toBeGreaterThan(0.05);
+      expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
+
+      // A body: the stick streams look input; no key is held.
+      await page.tap('#ug-touch .modes button[data-mode=drone]');
+      await expect.poll(() => page.evaluate(() => window.__ug.modes.activeId)).toBe('drone');
+      await simFor(page, 0.5);
+      const b0 = await yaw();
+      await push(12);
+      await simFor(page, 0.6);
+      expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
+      await touch('touchEnd', []);
+      const b1 = await yaw();
+      expect(Math.abs(b1 - b0)).toBeGreaterThan(0.05);
+      // Released: once the Drone's look lag has eased out, the view holds still.
+      await simFor(page, 1.0);
+      const settled = await yaw();
+      await simFor(page, 0.5);
+      expect(Math.abs((await yaw()) - settled)).toBeLessThan(0.01);
     });
 
     test('a tap pins the info under it; a drag over the same point shows nothing', async ({ page, context }) => {
@@ -155,6 +202,9 @@ test('desktop keeps the desktop layout', async ({ page }) => {
   const s = await page.evaluate(() => ({
     touch: document.documentElement.classList.contains('ug-touch'),
     layer: !!document.getElementById('ug-touch'),
+    bloom: window.__ug.bloomPass.enabled,
+    samples: window.__ug.renderQuality.get().samples,
   }));
-  expect(s).toEqual({ touch: false, layer: false });
+  // The phone cuts (D-058 item 8) never reach desktop. Automatic may lower samples later; at boot it holds full quality.
+  expect(s).toEqual({ touch: false, layer: false, bloom: true, samples: 4 });
 });

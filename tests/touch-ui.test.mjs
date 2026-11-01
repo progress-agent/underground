@@ -1,7 +1,7 @@
 // The phone layout's input mapping (D-058, 01Nov26u): the stick's keys, touch detection and touch look deltas.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stickKeys, isTouchDevice, STICK, BUTTONS } from '../src/touch-ui.js';
+import { stickKeys, lookDelta, isTouchDevice, STICK, BUTTONS, LOOK_RATE } from '../src/touch-ui.js';
 import { createLookInput } from '../src/modes/pointer-lock.js';
 
 const keys = (x, y) => [...stickKeys(x, y)].sort().join('');
@@ -38,13 +38,22 @@ test('touch detection honours ?touch= and the coarse-pointer query', () => {
   assert.equal(isTouchDevice({ search: '', matchMedia: undefined }), false);
 });
 
-test('every mode has one big thumb button: Space in the bodies, E (up) in Deity', () => {
-  for (const id of ['pedestrian', 'drone', 'balloon']) {
-    const big = BUTTONS[id].filter(b => b.big);
-    assert.equal(big.length, 1, id);
-    assert.equal(big[0].key, 'space', id);
+test('every mode has one down/up pair, side by side: Space up in the bodies, E up in Deity', () => {
+  for (const [id, up] of [['pedestrian', 'space'], ['drone', 'space'], ['balloon', 'space'], ['deity', 'e']]) {
+    const pair = BUTTONS[id].filter(b => b.pair);
+    assert.deepEqual(pair.map(b => b.id), ['down', 'up'], id);
+    assert.deepEqual(pair.map(b => b.key), ['q', up], id);
   }
-  assert.deepEqual(BUTTONS.deity.filter(b => b.big).map(b => b.key), ['e']);
+});
+
+test('the look stick: nothing in the dead zone, LOOK_RATE at full push, and the push direction kept', () => {
+  assert.deepEqual(lookDelta(STICK.dead * 0.9, 0, 1), [0, 0]);
+  const [fx, fy] = lookDelta(1, 0, 0.5);
+  assert.ok(Math.abs(fx - LOOK_RATE * 0.5) < 1e-9 && fy === 0);
+  const [hx] = lookDelta(0.6, 0, 1);
+  assert.ok(hx > 0 && hx < LOOK_RATE);
+  const [ux, uy] = lookDelta(0, -1, 1);
+  assert.ok(ux === 0 && uy < 0);
 });
 
 test('Fast is a Shift latch in Deity, Walk and Drone; Balloon has no sprint', () => {

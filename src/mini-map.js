@@ -241,7 +241,9 @@ export function miniMapPoseKey(camera) {
   return [p.x,p.z,m[0],m[2],m[4],m[6],m[8],m[10],q[0],q[5],q[8],q[9]].map(n=>n.toFixed(5)).join(',');
 }
 
-export function createMiniMap({camera,projectStation,parent=document.body,data=diagram,onFocus=()=>{},creditsParent=document.querySelector('#hudDetails')}) {
+// autoCollapse (default true): narrow or short windows start collapsed and collapse on resize. D-058: false on phones,
+// where the map starts open and only the viewer closes it (iOS also fires resize as its toolbars come and go).
+export function createMiniMap({camera,projectStation,parent=document.body,data=diagram,onFocus=()=>{},creditsParent=document.querySelector('#hudDetails'),autoCollapse=true}) {
   const mapping=createSchematicMapping({projectStation,data});
   const root=document.createElement('section');root.id='ug-mini-map';
   root.setAttribute('aria-label','Tube orientation map');
@@ -300,9 +302,9 @@ export function createMiniMap({camera,projectStation,parent=document.body,data=d
   // The narrow-screen controls occupy the full width when expanded. They take
   // precedence; return the map automatically when the controls close.
   const avoidHud=()=> {root.hidden=window.innerWidth<=700 && Boolean(hud?.open);};
-  const onResize=()=> { if(media.matches) setCollapsed(true);avoidHud();lastPose=''; };
+  const onResize=()=> { if(autoCollapse&&media.matches) setCollapsed(true);avoidHud();lastPose=''; };
   hud?.addEventListener('toggle',avoidHud);
-  window.addEventListener('resize',onResize);setCollapsed(media.matches);avoidHud();
+  window.addEventListener('resize',onResize);setCollapsed(autoCollapse&&media.matches);avoidHud();
   function update(timeMs=performance.now()) {
     if(disposed||collapsed||root.hidden||timeMs-lastTime<66) return;
     lastTime=timeMs;

@@ -19,7 +19,7 @@
 // cloud system converts: a cloud's altitude follows Master like the landscape,
 // its body keeps true proportions like every structure (Lane S rule).
 
-export const CLOUD_PRESETS = Object.freeze({
+const BASE_PRESETS = {
   fairCumulus: Object.freeze({
     id: 'fairCumulus',
     label: 'Fair-weather cumulus',
@@ -59,6 +59,15 @@ export const CLOUD_PRESETS = Object.freeze({
     // Balloon lift under cumulus (cheap thermal: an updraft below each cloud).
     updraftMps: 1.4,
   }),
+};
+
+// D-058 item 8 (Jordan, 01Nov26u, "fewer clouds on phones"): half the cover on touch devices. The generator stops at
+// the coverage fraction, so this sky is the first clouds of the desktop one, in the same places, and nothing else
+// about the weather changes.
+export const CLOUD_PRESETS = Object.freeze({
+  ...BASE_PRESETS,
+  fairCumulusPhone: Object.freeze({ ...BASE_PRESETS.fairCumulus, id: 'fairCumulusPhone', label: 'Fair-weather cumulus (phone)',
+    oktas: BASE_PRESETS.fairCumulus.oktas / 2 }),
 });
 
 export const DEFAULT_CLOUD_PRESET = 'fairCumulus';

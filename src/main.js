@@ -309,7 +309,7 @@ const app = document.getElementById('app');
 // #compass and #altimeter replaced by src/readout.js module
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouchDevice() ? 1.5 : 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 // Filmic tone mapping (applied by OutputPass at the end of the composer
 // chain — scene renders linear HDR into the HalfFloat target). AgX chosen
@@ -437,6 +437,8 @@ const bloomPass = new UnrealBloomPass(
   0.88   // threshold — catch amber windows, not terrain/stations
 );
 composer.addPass(bloomPass);
+// D-058 item 8 (Jordan, 01Nov26u): no glow on phones; its blur passes are spent on resolution instead.
+if (isTouchDevice()) bloomPass.enabled = false;
 composer.addPass(new OutputPass());
 
 // ── Lens character simulation (barrel distortion, CA, vignette) ──
@@ -445,10 +447,11 @@ const underwaterSurface = createUnderwaterSurface({ camera, lensPass: lensSystem
   sceneTarget: composer.renderTarget1 });
 const renderQuality = createRenderQuality({ renderer, composer });
 let syncRenderQualityUi = () => {};
+// D-058 item 8: phones aim for 30 fps, so Automatic stops trading resolution for a 60 fps a phone cannot hold.
 const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
   renderQuality.set(quality);
   syncRenderQualityUi();
-} });
+}, tuning: isTouchDevice() ? { targetMs: 1000 / 30 } : {} });
 
 // ── s24:R ──
 // Render economies (sprint 24Sep26h, D-038): savings that leave the picture
@@ -1340,7 +1343,8 @@ attachSky(skySystem);
 // ── s25:C ──
 // Fair-weather cumulus and city-wide cloud shadows (D-039). Lit by the sun and
 // sky each frame; hidden underground and underwater. ?clouds=0 turns them off.
-const cloudSystem = createCloudSystem({ scene, sunSystem, skySystem });
+// D-058 item 8: phones draw half the cover, the first clouds of the same sky (an override of D-043 on phones only).
+const cloudSystem = createCloudSystem({ scene, sunSystem, skySystem, preset: TOUCH_UI ? 'fairCumulusPhone' : undefined });
 // ── /s25:C ──
 
 // Keep rim light for tube highlighting
@@ -2526,7 +2530,8 @@ function llToXZ(lat, lon) {
 
 let miniMap = null;
 try {
-  miniMap = createMiniMap({ camera, projectStation: llToXZ, onFocus: () => fpsControls.keys.clear() });
+  // D-058 item 9: on a phone the map starts open and stays open until the viewer closes it.
+  miniMap = createMiniMap({ camera, projectStation: llToXZ, onFocus: () => fpsControls.keys.clear(), autoCollapse: !TOUCH_UI });
 } catch (error) {
   console.warn(`Tube orientation map unavailable: ${error.message}`);
 }
@@ -4911,7 +4916,8 @@ modeSystem = installModes({
 });
 // ── /sprint:A1 ──
 // D-058: the phone layout (mode bar, thumbstick, buttons) on touch devices only.
-const touchUi = TOUCH_UI ? installTouchUi({ registry: modeSystem.registry, canvas: renderer.domElement }) : null;
+const touchUi = TOUCH_UI ? installTouchUi({ registry: modeSystem.registry, canvas: renderer.domElement,
+  onLook: (dx, dy) => modeSystem.registry.look(dx, dy), getQuality: () => renderQuality.get() }) : null;
 // ── sprint:A2 ──
 // Pedestrian mode reads the tube network lazily (stations, platforms and the
 // snapped tunnel centrelines); getters so it always sees the current snap.
