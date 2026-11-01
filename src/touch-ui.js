@@ -9,9 +9,10 @@
 //   isTouchDevice()            coarse pointer and no hover; ?touch=1 / ?touch=0 force it (tests, desktop preview)
 //   installTouchUi({ registry, canvas })
 //     mode bar      bottom centre in portrait, top centre in landscape (the bottom edge is the thumbs'), one pill per mode
-//     thumbstick    left lower zone, appears where the thumb lands; hidden in Deity (one-finger pan owns the map)
-//                   8-way W/A/S/D past a dead zone; full deflection adds Shift (sprint / boost)
-//     buttons       right side, per mode (BUTTONS below); held for as long as the finger is down
+//     thumbstick    left lower zone, appears where the thumb lands, in every mode (Deity flies on W/A/S/D as on a
+//                   keyboard; one-finger pan and pinch still own the rest of the screen); 8-way W/A/S/D past a dead zone
+//     buttons       right side, per mode (BUTTONS below); held for as long as the finger is down, except Fast, which
+//                   latches Shift (sprint / boost / fast flight) so the right thumb stays free; the stick ring turns gold
 //     pinch zoom    two fingers on the view in a body mode send wheel events (third-person zoom listens for wheel)
 //   Drag to look needs nothing here: the look input already takes a one-finger drag on the canvas
 //   (pointer-lock.js computes touch deltas from clientX/Y because iOS leaves movementX at 0).
@@ -38,15 +39,22 @@ const K = {
 
 // Per mode, top to bottom in the right-hand column. The big button is the thumb's home.
 export const BUTTONS = {
+  deity: [
+    { id: 'fast', label: 'Fast', key: 'shift', latch: true },
+    { id: 'down', label: 'Down', key: 'q' },
+    { id: 'up', label: 'Up', key: 'e', big: true },
+  ],
   pedestrian: [
     { id: 'view', label: 'View', key: 'v' },
     { id: 'board', label: 'Board', key: 'b' },
     { id: 'station', label: 'Platforms', key: 'e' },
+    { id: 'fast', label: 'Fast', key: 'shift', latch: true },
     { id: 'down', label: 'Dive', key: 'q' },
     { id: 'up', label: 'Jump', key: 'space', big: true },
   ],
   drone: [
     { id: 'view', label: 'View', key: 'v' },
+    { id: 'fast', label: 'Fast', key: 'shift', latch: true },
     { id: 'down', label: 'Sink', key: 'q' },
     { id: 'up', label: 'Rise', key: 'space', big: true },
   ],
@@ -57,9 +65,9 @@ export const BUTTONS = {
   ],
 };
 
-export const STICK = { radius: 52, dead: 0.22, axis: 0.38, sprint: 0.92 };
+export const STICK = { radius: 52, dead: 0.22, axis: 0.38 };
 
-/** The four movement keys and Shift that a stick vector holds. y is down-positive (screen space). */
+/** The movement keys a stick vector holds. y is down-positive (screen space). */
 export function stickKeys(nx, ny) {
   const held = new Set();
   const m = Math.hypot(nx, ny);
@@ -69,7 +77,6 @@ export function stickKeys(nx, ny) {
   if (uy > STICK.axis) held.add('s');
   if (ux < -STICK.axis) held.add('a');
   if (ux > STICK.axis) held.add('d');
-  if (m >= STICK.sprint) held.add('shift');
   return held;
 }
 
@@ -128,7 +135,8 @@ html.ug-touch .hover-tip { max-width: min(320px, calc(100vw - 24px)); }
 #${ROOT_ID} .stick-zone.is-active .stick { display: block; }
 #${ROOT_ID} .knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
   background: rgba(238,234,226,.55); box-shadow: 0 1px 6px rgba(0,0,0,.35); }
-#${ROOT_ID} .stick.is-sprint { border-color: rgba(201,184,150,.85); }
+#${ROOT_ID} .stick-zone.is-fast .stick, #${ROOT_ID} .stick-zone.is-fast .stick-hint { border-color: rgba(214,186,120,.95); }
+#${ROOT_ID} .stick-zone.is-fast .knob { background: rgba(214,186,120,.8); }
 
 #${ROOT_ID} .actions { position: absolute; right: calc(12px + env(safe-area-inset-right)); bottom: calc(64px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
@@ -137,6 +145,7 @@ html.ug-touch .hover-tip { max-width: min(320px, calc(100vw - 24px)); }
   min-height: 40px; padding: 0 14px; }
 #${ROOT_ID} .actions button.big { width: 72px; height: 72px; border-radius: 50%; padding: 0; font-size: 13px; }
 #${ROOT_ID} .actions button.is-down { background: rgba(201,184,150,.40); border-color: rgba(201,184,150,.8); }
+#${ROOT_ID} .actions button.is-on { background: rgba(214,186,120,.55); border-color: rgba(214,186,120,.95); color: #17130c; }
 
 @media (orientation: landscape) {
   #${ROOT_ID} .modes { bottom: auto; top: calc(8px + env(safe-area-inset-top)); }
@@ -182,6 +191,20 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
   // ── keys held by touch, so a mode change or a lost pointer can release them all ──
   const stickHeld = new Set();
   const buttonHeld = new Map(); // pointerId -> key name
+  // Fast latches Shift. It survives a mode change into a mode that has Fast; it ends on blur or backgrounding,
+  // where main.js clears every held key anyway.
+  let fast = false;
+  function setFast(on) {
+    on = !!on;
+    if (on !== fast) press('shift', on);
+    fast = on;
+    zone.classList.toggle('is-fast', fast);
+    for (const b of actions.querySelectorAll('[data-action=fast]')) {
+      b.classList.toggle('is-on', fast);
+      b.setAttribute('aria-pressed', fast ? 'true' : 'false');
+    }
+  }
+  const dropAll = () => { releaseAll(); setFast(false); };
   function releaseAll() {
     for (const k of stickHeld) press(k, false);
     stickHeld.clear();
@@ -214,6 +237,13 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
       b.dataset.action = def.id;
       b.textContent = def.label;
       if (def.big) b.classList.add('big');
+      if (def.latch) {
+        b.setAttribute('aria-pressed', 'false');
+        b.addEventListener('pointerdown', (e) => { e.preventDefault(); setFast(!fast); });
+        b.addEventListener('contextmenu', (e) => e.preventDefault());
+        actions.appendChild(b);
+        continue;
+      }
       const up = (e) => {
         if (!buttonHeld.has(e.pointerId)) return;
         press(buttonHeld.get(e.pointerId), false);
@@ -244,7 +274,6 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
     lastVec = { x: 0, y: 0 };
     zone.classList.remove('is-active');
     knob.style.transform = '';
-    stick.classList.remove('is-sprint');
     setStickKeys(new Set());
   }
   zone.addEventListener('pointerdown', (e) => {
@@ -267,9 +296,7 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
     if (m > STICK.radius) { dx *= STICK.radius / m; dy *= STICK.radius / m; }
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
     lastVec = { x: dx / STICK.radius, y: dy / STICK.radius };
-    const keys = stickKeys(lastVec.x, lastVec.y);
-    stick.classList.toggle('is-sprint', keys.has('shift'));
-    setStickKeys(keys);
+    setStickKeys(stickKeys(lastVec.x, lastVec.y));
   });
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
     zone.addEventListener(ev, (e) => { if (e.pointerId === stickId) endStick(); });
@@ -301,16 +328,24 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
   for (const ev of ['pointerup', 'pointercancel']) canvas?.addEventListener(ev, onViewUp);
 
   // Backgrounding the page can swallow pointerup; never leave a key held.
-  const onHide = () => { if (document.visibilityState === 'hidden') releaseAll(); };
+  const onHide = () => { if (document.visibilityState === 'hidden') dropAll(); };
   document.addEventListener('visibilitychange', onHide);
-  globalThis.addEventListener?.('blur', releaseAll);
+  globalThis.addEventListener?.('blur', dropAll);
 
   let builtFor = null;
   function render() {
     const id = registry.activeId;
     if (modes.childElementCount === 0) buildModes();
     for (const b of modes.children) b.setAttribute('aria-pressed', b.dataset.mode === id ? 'true' : 'false');
-    if (builtFor !== id) { builtFor = id; releaseAll(); buildActions(id); }
+    if (builtFor !== id) {
+      builtFor = id;
+      releaseAll();
+      buildActions(id);
+      // Keep Fast on into a mode that has it (re-pressed: a mode may read Shift on its own keydown); else end it.
+      const keep = fast && (BUTTONS[id] ?? []).some(d => d.latch);
+      setFast(false);
+      if (keep) setFast(true);
+    }
     zone.hidden = !BUTTONS[id];
   }
   registry.onChange?.(() => render());
@@ -319,11 +354,11 @@ export function installTouchUi({ registry, canvas, document = globalThis.documen
   return {
     element: root,
     render,
-    state: () => ({ mode: registry.activeId, stick: { ...lastVec, keys: [...stickHeld] }, buttons: [...buttonHeld.values()] }),
+    state: () => ({ mode: registry.activeId, fast, stick: { ...lastVec, keys: [...stickHeld] }, buttons: [...buttonHeld.values()] }),
     dispose() {
-      releaseAll();
+      dropAll();
       document.removeEventListener('visibilitychange', onHide);
-      globalThis.removeEventListener?.('blur', releaseAll);
+      globalThis.removeEventListener?.('blur', dropAll);
       canvas?.removeEventListener('pointerdown', onViewDown);
       canvas?.removeEventListener('pointermove', onViewMove);
       for (const ev of ['pointerup', 'pointercancel']) canvas?.removeEventListener(ev, onViewUp);

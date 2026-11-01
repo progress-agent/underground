@@ -24,9 +24,9 @@ test('a mostly-forward push stays forward only', () => {
   assert.equal(keys(0.15, -0.7), 'w');
 });
 
-test('full deflection adds Shift', () => {
-  assert.equal(keys(0, -1), 'shiftw');
-  assert.equal(keys(0, -0.8), 'w');
+test('the stick never holds Shift: sprint is the Fast button', () => {
+  assert.equal(keys(0, -1), 'w');
+  assert.equal(keys(1, 1), 'ds');
 });
 
 test('touch detection honours ?touch= and the coarse-pointer query', () => {
@@ -38,13 +38,20 @@ test('touch detection honours ?touch= and the coarse-pointer query', () => {
   assert.equal(isTouchDevice({ search: '', matchMedia: undefined }), false);
 });
 
-test('every body has a big thumb button bound to Space, and Deity has none', () => {
+test('every mode has one big thumb button: Space in the bodies, E (up) in Deity', () => {
   for (const id of ['pedestrian', 'drone', 'balloon']) {
     const big = BUTTONS[id].filter(b => b.big);
     assert.equal(big.length, 1, id);
     assert.equal(big[0].key, 'space', id);
   }
-  assert.equal(BUTTONS.deity, undefined);
+  assert.deepEqual(BUTTONS.deity.filter(b => b.big).map(b => b.key), ['e']);
+});
+
+test('Fast is a Shift latch in Deity, Walk and Drone; Balloon has no sprint', () => {
+  for (const id of ['deity', 'pedestrian', 'drone']) {
+    assert.deepEqual(BUTTONS[id].filter(b => b.latch).map(b => b.key), ['shift'], id);
+  }
+  assert.equal(BUTTONS.balloon.some(b => b.latch), false);
 });
 
 function fakeTarget() {

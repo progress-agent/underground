@@ -1,6 +1,7 @@
 // touch-ui.spec.js: the phone layout in the real app (D-058, 01Nov26u). An emulated iPhone (coarse pointer, no hover,
 // real touch events through CDP) in both orientations: the layout swaps in, the rotate wall stays away, the mode bar
-// switches bodies, the thumbstick drives a body through the real key path, drag looks, a tap pins the info under it,
+// switches bodies, the thumbstick drives a body and Deity through the real key path, Fast latches Shift, drag looks,
+// a tap pins the info under it,
 // and no key is left held. The stick's key mapping is pinned in touch-ui.test.mjs; this spec proves the wiring.
 //
 // Timing is gated on SIMULATED time (the modes' ctx.time), as modes-drone-balloon.spec.js explains.
@@ -84,9 +85,27 @@ for (const orient of ['portrait', 'landscape']) {
       await touch('touchEnd', []);
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
 
+      // Fast latches Shift on one tap and off on the next, and survives a switch into another mode that has it.
+      const fastBtn = page.locator('#ug-touch .actions button[data-action=fast]');
+      await fastBtn.tap();
+      expect(await page.evaluate(() => window.__ug.fpsControls.keys.has('shift'))).toBe(true);
+      await expect(page.locator('#ug-touch .stick-zone')).toHaveClass(/is-fast/);
+
       await page.tap('#ug-touch .modes button[data-mode=deity]');
       await expect.poll(() => page.evaluate(() => window.__ug.modes.activeId)).toBe('deity');
-      await expect(page.locator('#ug-touch .stick-zone')).toBeHidden();
+      expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual(['shift']);
+      await page.locator('#ug-touch .actions button[data-action=fast]').tap();
+      expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
+
+      // Deity flies on the stick too, as W does on a keyboard.
+      await expect(page.locator('#ug-touch .stick-zone')).toBeVisible();
+      const d0 = await camPos(page);
+      await touch('touchStart', [[sx, sy, 6]]);
+      for (let i = 1; i <= 5; i++) await touch('touchMove', [[sx, sy - i * 8, 6]]);
+      await page.evaluate(async () => { for (let i = 0; i < 40; i++) await new Promise(r => requestAnimationFrame(r)); });
+      await touch('touchEnd', []);
+      const d1 = await camPos(page);
+      expect(Math.hypot(d1.x - d0.x, d1.z - d0.z)).toBeGreaterThan(1);
       expect(await page.evaluate(() => [...window.__ug.fpsControls.keys])).toEqual([]);
     });
 
