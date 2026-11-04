@@ -144,6 +144,7 @@ export function createOpeningV2({ camera, intro, gate, path, vista, startAltM, m
   const frontNow = () => (risen ? 1e9 : riseUniforms.uRiseFront.value);
   return {
     update,
+    isCovered: () => phase === 'sky',
     rate: () => rate,
     onGateReady: () => mark('gate-done'),
     skipOpen: () => gate.stage() === 'done',

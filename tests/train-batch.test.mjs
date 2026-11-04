@@ -153,3 +153,68 @@ test('a hidden line still moves its trains (spatial audio reads their position)'
   updateTrains(system, sim, null, 0);
   trains.forEach((t, i) => { t.userData.curve.getPointAt(t.userData.t, p); assert.ok(t.position.distanceTo(p) < 1e-6, `train ${i} after show`); });
 });
+
+// Independent reference: Three's native lookAt, with moving/rotated parents
+// and several Master values. The optimized path must preserve each aim.
+test('shared train aiming matches native lookAt across parent and Master changes',async()=>{
+  const {bindMasterController,masterRatio}=await import('../src/true-proportion.js');
+  setTrainEconomies({batch:false,reusePose:false,cull:false});
+  const {group,system,trains}=line('central',0xdc241f);
+  try {
+    for(const master of [1,1.1,4,8]) {
+      const unbind=bindMasterController({value:master,base:5,onChange:()=>()=>{}});
+      try {
+        for(let frame=0;frame<4;frame++) {
+          group.position.set(frame*7,frame*3-30,7-frame*2);
+          group.rotation.set(frame*.03,frame*.17,-frame*.07);group.scale.setScalar(1+frame*.1);
+          updateTrains(system,sim,null,.37);
+          for(const train of trains) {
+            const reference=new THREE.Group();reference.parent=group;
+            reference.position.copy(train.position);reference.userData.sectionScale=train.userData.sectionScale;
+            reference.updateMatrix=train.updateMatrix;
+            const target=train.userData.curve.getPointAt(Math.min(train.userData.t+.001,.999));
+            target.sub(train.position);target.y*=masterRatio();target.add(train.position);
+            reference.lookAt(target);if(train.userData.dir===-1)reference.rotateY(Math.PI);
+            const got=train.quaternion.toArray(),expected=reference.quaternion.toArray();
+            assert.ok(got.every((v,i)=>Math.abs(v-expected[i])<1e-13),`Master ${master}, frame ${frame}`);
+          }
+        }
+      } finally {unbind();}
+    }
+  } finally {disposeTrains(system,trains);}
+});
+
+test('paused train and batch transforms remain exact across Master, parent and rebase changes',async()=>{
+  const {bindMasterController}=await import('../src/true-proportion.js');
+  setTrainEconomies({batch:true,reusePose:true,cull:false});
+  const {scene,group,system,trains}=line('central',0xdc241f);
+  const camera=new THREE.PerspectiveCamera();camera.position.set(7013,140,611);
+  const instance=new THREE.Matrix4(),drawn=new THREE.Matrix4();
+  try {
+    for(const [i,master] of [1,8,1.1,4,1].entries()) {
+      const unbind=bindMasterController({value:master,base:5,onChange:()=>()=>{}});
+      try {
+        group.position.set(5+i*31,-30+i*7,7-i*19);
+        group.rotation.set(i*.03,i*.17,-i*.07);group.scale.setScalar(1+i*.1);
+        for(let frame=0;frame<2;frame++) {
+          camera.position.x+=frame*99;
+          updateTrains(system,{paused:true,timeScale:1},camera,0);
+          scene.updateMatrixWorld(true);
+          const root=batchRoot(group),body=root.children[0];
+          const origin=group.worldToLocal(camera.position.clone());
+          origin.set(Math.round(origin.x/32)*32,Math.round(origin.y/32)*32,Math.round(origin.z/32)*32);
+          assert.ok(root.position.distanceTo(origin)<1e-12,'native worldToLocal rebase');
+          trains.forEach((train,j)=>{
+            const k=train.userData.sectionScale;
+            const expected=new THREE.Matrix4().makeRotationFromQuaternion(train.quaternion).scale(new THREE.Vector3(k,k,1));
+            expected.premultiply(new THREE.Matrix4().makeScale(1,5/master,1)).setPosition(train.position);
+            assert.ok(close(train.matrix.elements,expected.elements,1e-12),`local pose at Master ${master}`);
+            expected.premultiply(group.matrixWorld);
+            body.getMatrixAt(j,instance);drawn.multiplyMatrices(root.matrixWorld,instance);
+            assert.ok(close(drawn.elements,expected.elements),`paused instance at Master ${master}`);
+          });
+        }
+      } finally {unbind();}
+    }
+  } finally {disposeTrains(system,trains);}
+});

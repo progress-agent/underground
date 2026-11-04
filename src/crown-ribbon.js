@@ -20,6 +20,7 @@
 // bugs. Regression spec: tests/crown-ribbon.spec.js.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {computeVertexNormalsSteps} from './sliced-geometry.js';
 import { RENDER_ORDER } from './render-layers.js';
 import { setAxisAttribute, patchTrueProportionMaterial } from './true-proportion.js';
 
@@ -70,12 +71,18 @@ const UP = new THREE.Vector3(0, 1, 0);
 // off-view). Faces share no vertices so computeVertexNormals stays crisp.
 // `lateralOffset` shifts the section sideways along the ring `side` vector
 // (used by the casing edges).
-export function createCrownRibbonGeometry(curve, {
+export function createCrownRibbonGeometry(...args) {
+  const steps=createCrownRibbonGeometrySteps(...args);let step=steps.next();
+  while(!step.done)step=steps.next();return step.value;
+}
+
+export function* createCrownRibbonGeometrySteps(curve, {
   segments = 128,
   width = RIBBON_WIDTH,
   thickness = RIBBON_THICKNESS,
   baseRadius = RIBBON_BASE_RADIUS,
   lateralOffset = 0,
+  frames = null, // internal: colour and casing share identical curve samples
 } = {}) {
   const halfW = width / 2;
   const rings = []; // per ring: [bl, br, tl, tr]
@@ -86,14 +93,18 @@ export function createCrownRibbonGeometry(curve, {
 
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
-    const P = curve.getPointAt(t);
-    const T = curve.getTangentAt(t);
+    const cached=frames?.[i];
+    const P = cached ? cached.position : curve.getPointAt(t);
+    const T = cached ? null : curve.getTangentAt(t);
+    if(cached){side.copy(cached.side);up.copy(cached.up);}else {
     side.crossVectors(UP, T);
     // Near-vertical tangent guard: reuse the previous side vector.
     if (side.lengthSq() < 1e-8) side.copy(prevSide);
     side.normalize();
     prevSide.copy(side);
     up.crossVectors(T, side).normalize();
+    if(frames)frames.push({position:P,side:side.clone(),up:up.clone()});
+    }
 
     const low = P.clone().addScaledVector(up, baseRadius).addScaledVector(side, lateralOffset);
     const bl = low.clone().addScaledVector(side, -halfW);
@@ -102,6 +113,7 @@ export function createCrownRibbonGeometry(curve, {
     const tr = br.clone().addScaledVector(up, thickness);
     rings.push([bl, br, tl, tr]);
     axisYs.push(P.y);
+    if((i+1)%64===0)yield;
   }
 
   // Each face is a quad strip between ring corners A and B, wound so the
@@ -127,7 +139,7 @@ export function createCrownRibbonGeometry(curve, {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);
-  geo.computeVertexNormals();
+  yield* computeVertexNormalsSteps(geo,1000);
   setAxisAttribute(geo, axis);
   return geo;
 }
@@ -180,7 +192,12 @@ export function createCasingMaterial() {
 // these in lineMeshesById — setHoverHighlight hard-resets that map with
 // glass-material values (opacity/thickness) that would stomp the ribbon;
 // ribbons live in their own registry (lineRibbonsById in main.js).
-export function buildCrownRibbons({
+export function buildCrownRibbons(...args) {
+  const steps=buildCrownRibbonsSteps(...args);let step=steps.next();
+  while(!step.done)step=steps.next();return step.value;
+}
+
+export function* buildCrownRibbonsSteps({
   lineId,
   colour,
   curves,             // [{ curve, segments, baseRadius? }, ...]
@@ -193,9 +210,15 @@ export function buildCrownRibbons({
   const colourGeos = [];
   const casingGeos = [];
   for (const { curve, segments, baseRadius = RIBBON_BASE_RADIUS } of curves) {
-    colourGeos.push(createCrownRibbonGeometry(curve, { segments, baseRadius: baseRadius + lift }));
+    const frames=casing?[]:null;
+    colourGeos.push(yield* createCrownRibbonGeometrySteps(curve, { segments, baseRadius: baseRadius + lift, frames }));
+    yield;
     if (casing) {
-      casingGeos.push(...createCasingGeometries(curve, { segments, baseRadius: baseRadius + lift - CASING_DROP }));
+      const offset=RIBBON_WIDTH/2+CASING_WIDTH/2;
+      for(const lateralOffset of [-offset,offset]) {
+        casingGeos.push(yield* createCrownRibbonGeometrySteps(curve,{segments,width:CASING_WIDTH,thickness:RIBBON_THICKNESS,baseRadius:baseRadius+lift-CASING_DROP,lateralOffset,frames}));
+        yield;
+      }
     }
   }
 

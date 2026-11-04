@@ -170,16 +170,24 @@ export function networksLine(building) {
 
 const _boxBounds = new WeakMap();
 /** The plan bounds { x0, x1, z0, z1 } of an InstancedMesh of axis-aligned boxes, cached per instance count. */
-function boxMeshBounds(mesh) {
+export function prepareBoxMeshBounds(mesh) {
   const n = mesh.count, c = _boxBounds.get(mesh);
   if (c && c.n === n) return c;
   const a = mesh.instanceMatrix.array;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  let y0 = Infinity, y1 = -Infinity, height = 0;
+  const chunks=[];
+  let chunk;
   for (let i = 0, o = 12; i < n; i++, o += 16) {
+    if(i%64===0){chunk={x0:Infinity,x1:-Infinity,z0:Infinity,z1:-Infinity,y0:Infinity,y1:-Infinity,height:0};chunks.push(chunk);}
     const h = Math.max(Math.abs(a[o - 12]), Math.abs(a[o - 2])) / 2, x = a[o], z = a[o + 2];
+    y0 = Math.min(y0,a[o+1]); y1 = Math.max(y1,a[o+1]); height = Math.max(height,Math.abs(a[o-7]));
+    chunk.x0=Math.min(chunk.x0,x-h);chunk.x1=Math.max(chunk.x1,x+h);
+    chunk.z0=Math.min(chunk.z0,z-h);chunk.z1=Math.max(chunk.z1,z+h);
+    chunk.y0=Math.min(chunk.y0,a[o+1]);chunk.y1=Math.max(chunk.y1,a[o+1]);chunk.height=Math.max(chunk.height,Math.abs(a[o-7]));
     if (x - h < x0) x0 = x - h; if (x + h > x1) x1 = x + h; if (z - h < z0) z0 = z - h; if (z + h > z1) z1 = z + h;
   }
-  const b = { n, x0, x1, z0, z1 };
+  const b = { n, x0, x1, z0, z1, y0, y1, height, chunks };
   _boxBounds.set(mesh, b);
   return b;
 }
@@ -203,19 +211,46 @@ export function rayBlockedByBoxes(meshes, ox, oy, oz, dx, dy, dz, tMax, scale = 
   if (!(end > 0)) return false;
   for (const mesh of meshes) {
     if (!mesh || mesh.visible === false || !mesh.count || !mesh.instanceMatrix) continue;
-    const bb = boxMeshBounds(mesh);
+    const bb = prepareBoxMeshBounds(mesh);
     let r = slab(ox, dx, bb.x0, bb.x1, 0, end);
     if (r) r = slab(oz, dz, bb.z0, bb.z1, r[0], r[1]);
+    // A conservative height interval rejects rays passing above a whole tile.
+    if (r && scale >= 0) r = slab(oy,dy,bb.y0,bb.y1+bb.height*scale,r[0],r[1]);
     if (!r) continue;
     const a = mesh.instanceMatrix.array;
-    for (let i = 0, o = 0; i < mesh.count; i++, o += 16) {
+    for(let first=0;first<mesh.count;first+=64) {
+      const c=bb.chunks[first/64];
+      let interval=slab(ox,dx,c.x0,c.x1,r[0],r[1]);
+      if(interval)interval=slab(oz,dz,c.z0,c.z1,interval[0],interval[1]);
+      if(interval && scale>=0)interval=slab(oy,dy,c.y0,c.y1+c.height*scale,interval[0],interval[1]);
+      if(!interval)continue;
+      const last=Math.min(first+64,mesh.count);
+      for (let i = first, o = first*16; i < last; i++, o += 16) {
       const hx = Math.abs(a[o]) / 2, hz = Math.abs(a[o + 10]) / 2, x = a[o + 12], y = a[o + 13], z = a[o + 14];
-      let q = slab(ox, dx, x - hx, x + hx, r[0], r[1]);
-      if (!q) continue;
-      q = slab(oz, dz, z - hz, z + hz, q[0], q[1]);
-      if (!q) continue;
-      q = slab(oy, dy, y, y + Math.abs(a[o + 5]) * scale, q[0], q[1]);
-      if (q) return true;
+      // Keep the slab arithmetic and inclusive edges, without allocating
+      // up to three interval arrays for every candidate building.
+      let lo = interval[0], hi = interval[1], t0, t1;
+      if (Math.abs(dx) < 1e-12) { if (ox < x - hx || ox > x + hx) continue; }
+      else {
+        t0 = (x - hx - ox) / dx; t1 = (x + hx - ox) / dx;
+        if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
+        lo = Math.max(t0, lo); hi = Math.min(t1, hi); if (lo > hi) continue;
+      }
+      if (Math.abs(dz) < 1e-12) { if (oz < z - hz || oz > z + hz) continue; }
+      else {
+        t0 = (z - hz - oz) / dz; t1 = (z + hz - oz) / dz;
+        if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
+        lo = Math.max(t0, lo); hi = Math.min(t1, hi); if (lo > hi) continue;
+      }
+      const top = y + Math.abs(a[o + 5]) * scale;
+      if (Math.abs(dy) < 1e-12) { if (oy < y || oy > top) continue; }
+      else {
+        t0 = (y - oy) / dy; t1 = (top - oy) / dy;
+        if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
+        lo = Math.max(t0, lo); hi = Math.min(t1, hi); if (lo > hi) continue;
+      }
+      return true;
+      }
     }
   }
   return false;

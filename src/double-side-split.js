@@ -181,5 +181,16 @@ export function installDoubleSideSplit({ renderer, scene, enabled = true, rescan
     rescan: () => { lastScan = -Infinity; },
     entries,
     pairOf: material => pairs.get(material) ?? null,
+    // Let opening preparation initialize the actual derivatives, rather than
+    // fresh lookalikes that leave these materials cold at the first crossing.
+    materialsFor: object => {
+      if (!on || !qualifiesForSplit(object)) return [object.material];
+      if (!pairs.has(object.material)) lastScan = -Infinity;
+      const pair = pairFor(object.material);
+      return [pair.back, pair.front];
+    },
+    // Zero-count preparation uses the real scene's light state, with already
+    // selected one-sided materials, so it needs no temporary back children.
+    renderPrepared: (world,camera) => render(world,camera),
   };
 }

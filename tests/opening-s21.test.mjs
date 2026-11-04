@@ -110,3 +110,25 @@ test('precompilation uses the composer target and restores it before async readi
   resolveCompile(); await new Promise(r=>setImmediate(r));
   assert.equal(gate.stage(),'warming'); assert.equal(current,original);
 });
+
+// The watched v2 opening already compiled its representatives under the cover.
+// The loading gate must still wait for their asynchronous readiness, without
+// rendering extra poses over the moving camera or compiling the scene again.
+test('prepared opening waits for shaders without extra compiles or warm-up renders', async () => {
+  let resolve;
+  const ready = new Promise(r => { resolve = r; });
+  const forbidden = () => assert.fail('watched opening must not repeat preparation');
+  const s = setup({compileScene:false,warmFractions:[],beforeCompile:()=>ready,
+    renderer:{info:{programs:[]},compileAsync:forbidden},composer:{render:forbidden}});
+  s.layers.a = true; s.gate.frame();
+  await new Promise(r=>setImmediate(r));
+  assert.equal(s.gate.stage(),'compiling');
+  assert.equal(s.events.length,0);
+  resolve(); await new Promise(r=>setImmediate(r));
+  assert.equal(s.gate.stage(),'warming');
+  s.gate.frame();
+  assert.equal(s.gate.stage(),'reveal');
+  s.gate.frame();
+  assert.equal(s.gate.stage(),'done');
+  assert.deepEqual(s.events.map(e=>e.name),['ug:landing-lock','ug:opening-reveal']);
+});

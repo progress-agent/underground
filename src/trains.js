@@ -47,9 +47,17 @@ const STRIP_X = 4.0;              // outside capsule surface at STRIP_Y
 const TRAIN_BORE_FILL = CAPSULE_RADIUS / 4.5;
 export function trainSectionScale(lineId) { return TRAIN_BORE_FILL * boreRadiusM(lineId) / CAPSULE_RADIUS; }
 const _trainScale = new THREE.Vector3();
+const trainMatrixInputs = new WeakMap();
 function trueTrainMatrix() {
-  const k = this.userData.sectionScale ?? 1;
-  composeTrueProportionMatrix(this.matrix, this.position, this.quaternion, _trainScale.set(k, k, 1));
+  const k = this.userData.sectionScale ?? 1, ratio = masterRatio();
+  const p = this.position, q = this.quaternion;
+  let c = trainMatrixInputs.get(this);
+  // The batch writer and scene traversal both request this same local matrix.
+  // Preserve it while its pose and the true-proportion inputs are unchanged.
+  if (c && c[0]===p.x && c[1]===p.y && c[2]===p.z && c[3]===q.x && c[4]===q.y && c[5]===q.z && c[6]===q.w && c[7]===k && c[8]===ratio) return;
+  if (!c) {c = new Float64Array(9);trainMatrixInputs.set(this,c);}
+  c[0]=p.x;c[1]=p.y;c[2]=p.z;c[3]=q.x;c[4]=q.y;c[5]=q.z;c[6]=q.w;c[7]=k;c[8]=ratio;
+  composeTrueProportionMatrix(this.matrix, p, q, _trainScale.set(k, k, 1));
   this.matrixWorldNeedsUpdate = true;
 }
 // ── /s25:S ──
@@ -157,6 +165,9 @@ export function createTrainSystem({ scene, renderer, camera }) {
  * so trains never synchronise at stations.
  */
 export function createTrains({ system, leftCurve, rightCurve, stationUs, lineId, colour, group }) {
+  // Spread pure timetable preparation over the branch builders, rather than
+  // charging every curve to the first frame after the whole network attaches.
+  planLength(leftCurve); planLength(rightCurve);
   const cfg = LINE_CONFIG[lineId] || LINE_CONFIG_DEFAULT;
   const lengthM = leftCurve.getLength();
   const avgSpeedMps = 12; // ~43 km/h including dwell
@@ -231,6 +242,9 @@ function branchKey(lineId, curve, stationUs) {
 // trains by minutes of timetable.) Motion stays linear in the curve parameter u.
 const PLAN_SAMPLES = 256;
 const _planLengths = new WeakMap(); // curve -> { L3d, plan }
+export function prepareTrainCurve(curve) {
+  return planLength(curve);
+}
 function planLength(curve) {
   const L3d = curve.getLength();
   const c = _planLengths.get(curve);
@@ -357,6 +371,11 @@ export function createTrain({ system, curve, stationUs, lineId, colour, dir, pha
   wR.position.set(STRIP_X, STRIP_Y, 0);
   nearGroup.add(wR);
 
+  // These authored offsets never change. The train's parent matrix carries
+  // its motion and true-proportion correction, including every Master value.
+  for (const part of [nearGroup,...nearGroup.children]) {
+    part.updateMatrix();part.matrixAutoUpdate=false;
+  }
   train.add(nearGroup);
 
   // ── Simulation userData ──
@@ -519,7 +538,7 @@ function syncBatches(camera) {
     if (camera?.position) {
       const parent = b.root.parent;
       _origin.copy(camera.position);
-      if (parent) { parent.updateWorldMatrix(true, false); parent.worldToLocal(_origin); }
+      if (parent) _origin.applyMatrix4(aimParent(parent).inverseWorld);
       _origin.set(Math.round(_origin.x / REBASE_STEP) * REBASE_STEP, Math.round(_origin.y / REBASE_STEP) * REBASE_STEP, Math.round(_origin.z / REBASE_STEP) * REBASE_STEP);
       if (!_origin.equals(b.root.position)) { b.root.position.copy(_origin); b.root.updateMatrix(); b.dirty = true; }
     }
@@ -599,6 +618,7 @@ function placeHidden(train, byCull = false) { // s16:R: byCull counts the render
 // ── /s24:R ──
 
 export function updateTrains(system, sim, camera, dt) {
+  aimEpoch++;
   const simDt = sim.paused ? 0 : (dt * sim.timeScale);
   const reuse = trainEconomies.reusePose;
   const culled = _culledNow; // s16:R
@@ -645,13 +665,56 @@ export function updateTrains(system, sim, camera, dt) {
 /**
  * Orient train along curve tangent.
  */
+let aimEpoch = 0;
+const aimParents = new WeakMap();
+const aimMatrix = new THREE.Matrix4(), aimRotation = new THREE.Matrix4();
+const aimPosition = new THREE.Vector3();
+
+function aimParent(parent) {
+  let cached = aimParents.get(parent);
+  if (!cached) {
+    cached = {epoch:-1,inverse:new THREE.Quaternion(),inverseWorld:new THREE.Matrix4()};
+    aimParents.set(parent,cached);
+  }
+  if (cached.epoch !== aimEpoch) {
+    if (parent.matrixWorldAutoUpdate) parent.updateWorldMatrix(true,false);
+    aimRotation.extractRotation(parent.matrixWorld);
+    cached.inverse.setFromRotationMatrix(aimRotation).invert();
+    cached.inverseWorld.copy(parent.matrixWorld).invert();
+    cached.epoch = aimEpoch;
+  }
+  return cached;
+}
+
+// Object3D.lookAt's same matrix/quaternion operations, sharing the unchanged
+// parent transform across a line's trains. Rendering updates their world
+// matrices afterwards; no caller consumes the intermediate pre-aim matrix.
+function aimTrain(train, target) {
+  if (!train.matrixAutoUpdate) { train.lookAt(target); return; }
+  const parent = train.parent;
+  if (!parent) {
+    aimMatrix.lookAt(target,train.position,train.up);
+    train.quaternion.setFromRotationMatrix(aimMatrix);
+    return;
+  }
+  const cached = aimParent(parent);
+  const e=parent.matrixWorld.elements, p=train.position;
+  // Translation column of parent.matrixWorld * train.matrix, in the exact
+  // order used by Matrix4.multiplyMatrices. Rotation cannot affect it.
+  aimPosition.set(e[0]*p.x+e[4]*p.y+e[8]*p.z+e[12],
+    e[1]*p.x+e[5]*p.y+e[9]*p.z+e[13],
+    e[2]*p.x+e[6]*p.y+e[10]*p.z+e[14]);
+  aimMatrix.lookAt(target,aimPosition,train.up);
+  train.quaternion.setFromRotationMatrix(aimMatrix).premultiply(cached.inverse);
+}
+
 function orient(train) {
   const ud = train.userData;
   const uAhead = Math.min(ud.t + 0.001, 0.999);
   ud.curve.getPointAt(uAhead, _lookTarget); // s24:R: same point, no per-frame allocation
   // s25:S aim along the displayed track: a canonical rise is shown x the Master ratio.
   _lookTarget.sub(train.position); _lookTarget.y *= masterRatio(); _lookTarget.add(train.position);
-  train.lookAt(_lookTarget);
+  aimTrain(train,_lookTarget);
 
   if (ud.dir === -1) train.rotateY(Math.PI);
 }

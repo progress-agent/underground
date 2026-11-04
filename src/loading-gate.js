@@ -37,6 +37,7 @@ export function createOpeningGate({
   intro, renderer, composer, scene, camera, items, el = null,
   capMs = 45000, coreIds = null, graceMs = 10000, beforeCompile = null, whileWaiting = null,
   onReady = null, keepRunning = false, // s21:V2: onReady(snapshot) replaces the veil fade and intro.begin(); keepRunning keeps the gate working once the descent plays
+  compileScene = true, warmFractions = WARM_FRACTIONS,
   revealDetail = null, // s21:L: () => object merged into the reveal event's timeline (the workers' job times)
   now = () => performance.now(), dispatch = (name, detail) => {
     try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch (_) { /* noop */ }
@@ -106,7 +107,7 @@ export function createOpeningGate({
     const previousTarget = canSetTarget ? renderer.getRenderTarget() : null;
     try {
       if (canSetTarget) renderer.setRenderTarget(compileTarget);
-      p = typeof renderer.compileAsync === 'function'
+      p = !compileScene ? Promise.resolve() : typeof renderer.compileAsync === 'function'
         ? renderer.compileAsync(scene, camera)
         : Promise.resolve(renderer.compile(scene, camera));
     } catch (e) { p = Promise.reject(e); }
@@ -127,8 +128,11 @@ export function createOpeningGate({
   }
 
   function warmStep() {
+    if (!warmFractions.length) {
+      readiness.settle(WARMUP_ID); timeline.warmed = ms(); stage = 'reveal'; return;
+    }
     const params = intro.getParams();
-    const f = WARM_FRACTIONS[warmIndex++];
+    const f = warmFractions[warmIndex++];
     // s21:V2: the view may be on screen now, so the camera is saved and restored around the warm-up render (which the
     // same frame's ordinary render overwrites) instead of snapping back to pose 0.
     const savedPos = camera.position.clone(), savedQuat = camera.quaternion.clone();
@@ -142,8 +146,8 @@ export function createOpeningGate({
       console.warn('[opening] warm-up render failed', e);
     }
     camera.position.copy(savedPos); camera.quaternion.copy(savedQuat); camera.updateMatrixWorld(true); // s21:V2 (was intro.primeStart())
-    readiness.setProgress(WARMUP_ID, warmIndex / WARM_FRACTIONS.length);
-    if (warmIndex >= WARM_FRACTIONS.length) {
+    readiness.setProgress(WARMUP_ID, warmIndex / warmFractions.length);
+    if (warmIndex >= warmFractions.length) {
       readiness.settle(WARMUP_ID);
       timeline.warmed = ms();
       stage = 'reveal';

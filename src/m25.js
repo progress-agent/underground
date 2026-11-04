@@ -9,6 +9,49 @@ import { rasterSignedDistanceMask, MAP_EDGE_SDF_BAND_M } from './m25-edge.js';
  * Fetch M25 route data from public/data/m25.json.
  * Format matches thames.json convention: { name, crs, points: [{ e, n }, ...] }
  */
+export function createWaterfallMaterial() {
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x1a3d5c,
+      emissive: 0x0a1e3d,
+      emissiveIntensity: 0.25,
+      roughness: 0.3,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    // Inject vertex alpha into the shader
+    material.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace(
+        'void main() {',
+        `attribute float alpha;
+varying float vAlpha;
+void main() {`
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>
+  vAlpha = alpha;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'void main() {',
+        `varying float vAlpha;
+void main() {`
+      );
+      // r161 chunk is <opaque_fragment> (was <output_fragment> in older three);
+      // the old name silently no-ops the injection, so the fall never faded.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `#include <opaque_fragment>
+  gl_FragColor.a *= vAlpha;`
+      );
+    };
+
+    return material;
+}
+
 export async function loadM25Data() {
   try {
     const res = await bootFetch('/data/m25.json', { cache: 'no-store' }) /* s21:L */;
@@ -506,45 +549,7 @@ export function createThamesWaterfalls(thamesPoints, m25Points, getSurfaceY, cro
     geometry.computeVertexNormals();
 
     // Custom material with vertex alpha for fade-out
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x1a3d5c,
-      emissive: 0x0a1e3d,
-      emissiveIntensity: 0.25,
-      roughness: 0.3,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.45,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-
-    // Inject vertex alpha into the shader
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace(
-        'void main() {',
-        `attribute float alpha;
-varying float vAlpha;
-void main() {`
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <uv_vertex>',
-        `#include <uv_vertex>
-  vAlpha = alpha;`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'void main() {',
-        `varying float vAlpha;
-void main() {`
-      );
-      // r161 chunk is <opaque_fragment> (was <output_fragment> in older three);
-      // the old name silently no-ops the injection, so the fall never faded.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <opaque_fragment>',
-        `#include <opaque_fragment>
-  gl_FragColor.a *= vAlpha;`
-      );
-    };
-
+    const material = createWaterfallMaterial();
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `thamesWaterfall_${ep.dirSign > 0 ? 'east' : 'west'}`;
     mesh.renderOrder = RENDER_ORDER.SURFACE_WATER;

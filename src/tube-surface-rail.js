@@ -41,12 +41,13 @@
 // follows Master.
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {yieldMain} from './yield-main.js';
+import {mergeGeometriesSteps} from './sliced-geometry.js';
 import { VERTICAL_EXAGGERATION } from './terrain.js';
 import { RENDER_ORDER } from './render-layers.js';
 import {
   MATS, BASE_LIFT, STRIPE_LIFT, STRIPE_HALF_W, CLASS_LIFT_M, SAMPLE_STEP_M,
-  buildPath, buildCorridor, stationOnRail, createStripeMaterial, stripGeometry, offsetBand,
+  buildPath, buildCorridorSteps, stationOnRail, createStripeMaterial, stripGeometry, offsetBand,
   llToScene, branchClasses, createRailMorph, normaliseForMerge, drawnOpenFlags, stripeColour,
 } from './surface-rail.js';
 import { createStationMarkers } from './stations.js';
@@ -127,6 +128,19 @@ const DRESSING_MAT = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexCol
 // of the source is laid on (by its v2 class) is sampleForSurfaceRail in
 // dlr-profile.js, shared with the data builder.
 const PROFILE_CLASS = { elevated: 'viaduct', embankment: 'embankment', surface: 'surface', cutting: 'cutting', tunnel: 'tunnel' };
+export function createBeyondEdgeMaterial(color = 0xffffff) {
+  const material = new LineMaterial({ color: color, linewidth: BEYOND_EDGE_MIN_PX, worldUnits: false, transparent: true, depthTest: true, depthWrite: false, fog: true });
+    material.onBeforeCompile = shader => {
+      shader.uniforms.uNearM = { value: new THREE.Vector2(...BEYOND_EDGE_NEAR_M) };
+      shader.uniforms.uFadeM = { value: new THREE.Vector2(...BEYOND_EDGE_FADE_M) };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', 'uniform vec2 uNearM;\nuniform vec2 uFadeM;\nvoid main() {')
+        .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n gl_FragColor.a *= smoothstep( uNearM.x, uNearM.y, vFogDepth ) * ( 1.0 - smoothstep( uFadeM.x, uFadeM.y, vFogDepth ) );\n#endif');
+    };
+    material.customProgramCacheKey = () => 'ug-beyond-edge-line';
+  return material;
+}
+
 export const DLR_MATCH_M = SURFACE_RAIL_DLR_MATCH_M;
 /** s01:R: how far an open platform may be from a DLR station's mapped point, and from the drawn track. */
 export const DLR_OPEN_PLATFORM_M = 250, DLR_PLATFORM_ON_TRACK_M = 30;
@@ -253,7 +267,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   const morph = createRailMorph(getY);
   // About 200 ms of building on the M2 Max (0.8 s at the weak setup's 4x CPU
   // throttle), during the opening: yield between lines so no frame carries it.
-  const breathe = () => new Promise(r => setTimeout(r, 0));
+  const breathe = yieldMain;
   const groups = new Map(), lineInfo = new Map(), grids = new Map(), stationLayers = new Map();
   const names = new Map(data.lines.map(l => [l.id, l.id === 'dlr' ? 'DLR' : `${l.name} line`]));
   for (const [id, r] of overground?.userData.registry ?? []) names.set(id, `${r.name} line`);
@@ -326,7 +340,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   // keeps, per merged piece, its first face and its source, so a hover hit's
   // faceIndex names the path (or the shared-track span) under the pointer: at a
   // flyover the upper and the lower track are different paths.
-  const addMerged = (info, geos, mat, part, { morphed = true, colours = null, sources = null, beyondEdge = false } = {}) => {
+  function* addMergedSteps(info, geos, mat, part, { morphed = true, colours = null, sources = null, beyondEdge = false } = {}) {
     if (!geos.length) return null;
     // The viaduct piers are indexed BoxGeometry with uv; the deck strips are
     // not. mergeGeometries refuses the mix and returns null, which silently
@@ -335,12 +349,12 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     // (D-042 item 4), when its masonry went through the same normaliseForMerge
     // (surface-rail.js). Every piece is made position + normal, non-indexed,
     // so the viaducts stand on their piers.
-    const norm = geos.map(normaliseForMerge);
+    const norm=[];for(const geo of geos) {norm.push(normaliseForMerge(geo));yield;}
     if (colours) norm.forEach((n, k) => { const c = colours[k], a = new Float32Array(n.attributes.position.count * 3);
       for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); });
     const firstFace = new Int32Array(norm.length);
     for (let k = 1; k < norm.length; k++) firstFace[k] = firstFace[k - 1] + norm[k - 1].attributes.position.count / 3;
-    const merged = mergeGeometries(norm, false);
+    const merged = yield* mergeGeometriesSteps(norm);
     for (const g of norm) g.dispose();
     if (!merged) { console.warn(`surface rail: ${info.line.id} ${part} did not merge`); return null; }
     const mesh = new THREE.Mesh(merged, mat);
@@ -350,9 +364,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     if (sources) faceSources.set(mesh, { firstFace, sources });
     info.group.add(mesh);
     info.meshes.push(mesh);
-    if (morphed) morph.add(mesh);
+    if (morphed) yield* morph.addSteps(mesh);
     return mesh;
-  };
+  }
   const faceSources = new WeakMap(); // mesh -> { firstFace, sources }
   // s14:F: split one list of strip geometries (and the parallel list of sources) into the part on the map and the
   // part beyond the map edge, by triangle centroid, so the cull can hide the second from a camera below the hidden
@@ -384,34 +398,37 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     return res;
   };
   const hasBeyondEdge = info => !info.isDlr && info.paths.some(path => path.some(p => isOffMapEdge(p))); // s14:F
-  const buildOwn = (info) => {
+  function* buildOwnSteps(info) {
     const out = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] };
     const from = { stripe: [], ballast: [], masonry: [], earth: [], cutShadow: [] }; // the path each geometry came from
     for (const path of info.paths) {
       const before = Object.fromEntries(Object.keys(out).map(k => [k, out[k].length]));
-      buildCorridor(path, out, { skipTunnel: true, pierShortRuns: info.isDlr, structureClear });
+      yield* buildCorridorSteps(path, out, { skipTunnel: true, pierShortRuns: info.isDlr, structureClear });
       for (const k of Object.keys(out)) for (let j = before[k]; j < out[k].length; j++) from[k].push({ samples: path, own: true, morphed: !info.isDlr });
+      yield;
     }
     const dressingGeos = DRESSING_PARTS.flatMap(part => out[part]), dressingColours = DRESSING_PARTS.flatMap(part => out[part].map(() => MATS[part].color));
     const dressingSrc = DRESSING_PARTS.flatMap(part => from[part]);
     if (!hasBeyondEdge(info)) { // every line but the Central and the Metropolitan: exactly as before
-      addMerged(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
-      addMerged(info, dressingGeos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours: dressingColours, sources: dressingSrc });
+      yield* addMergedSteps(info, out.stripe, info.stripeMat, 'stripe', { morphed: !info.isDlr, sources: from.stripe });
+      yield;
+      yield* addMergedSteps(info, dressingGeos, DRESSING_MAT, 'dressing', { morphed: !info.isDlr, colours: dressingColours, sources: dressingSrc });
       return;
     }
     // s14:F: the part beyond the map edge in meshes of its own (same group, same part names), flagged for the cull.
     const st = splitBeyondEdge(out.stripe, from.stripe);
-    addMerged(info, st.on, info.stripeMat, 'stripe', { sources: st.onSrc });
+    yield* addMergedSteps(info, st.on, info.stripeMat, 'stripe', { sources: st.onSrc });
     const dr = splitBeyondEdge(dressingGeos.map((g, k) => { const n = normaliseForMerge(g), c = dressingColours[k], a = new Float32Array(n.attributes.position.count * 3);
       for (let i = 0; i < a.length; i += 3) { a[i] = c.r; a[i + 1] = c.g; a[i + 2] = c.b; } n.setAttribute('color', new THREE.BufferAttribute(a, 3)); return n; }), dressingSrc);
-    addMerged(info, dr.on, DRESSING_MAT, 'dressing', { sources: dr.onSrc });
-    addMerged(info, st.off, info.stripeMat, 'stripe', { sources: st.offSrc, beyondEdge: true });
-    addMerged(info, dr.off, DRESSING_MAT, 'dressing', { sources: dr.offSrc, beyondEdge: true });
-  };
+    yield* addMergedSteps(info, dr.on, DRESSING_MAT, 'dressing', { sources: dr.onSrc });
+    yield* addMergedSteps(info, st.off, info.stripeMat, 'stripe', { sources: st.offSrc, beyondEdge: true });
+    yield* addMergedSteps(info, dr.off, DRESSING_MAT, 'dressing', { sources: dr.offSrc, beyondEdge: true });
+  }
+  const buildOwn=info=>{for(const step of buildOwnSteps(info)){ /* interactive rebuild */ }};
   for (const info of lineInfo.values()) {
     await breathe();
-    buildOwn(info);
-    addMerged(info, bandOut.get(info.line.id) || [], info.bandMat, 'band', { sources: bandSrc.get(info.line.id) });
+    for(const step of buildOwnSteps(info))await breathe();
+    for(const step of addMergedSteps(info, bandOut.get(info.line.id) || [], info.bandMat, 'band', { sources: bandSrc.get(info.line.id) }))await breathe();
     // Hover grid: own track, lines on it where a band says so.
     const spans = bandSpans.get(info.line.id) || [];
     for (const path of info.paths) path.forEach((p, i) => {
@@ -429,11 +446,13 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   legibility.userData = { kind: BEYOND_EDGE_KIND };
   const legByLine = new Map(); // lineId -> { line: LineSegments2, orig: Float32Array (canonical positions), bases: Float32Array }
   const legV = new THREE.Vector4();
-  function addLegibility(info) {
+  async function addLegibility(info) {
+    if(!hasBeyondEdge(info))return;
     const pts = [];
     for (const path of info.paths) {
       const open = drawnOpenFlags(path);
       for (let i = 0; i + 1 < path.length; i++) {
+        if(i%128===0)await breathe();
         if (!open[i] || !open[i + 1] || !isOffMapEdge(path[i]) || !isOffMapEdge(path[i + 1])) continue;
         const a = path[i], b = path[i + 1];
         pts.push(a.x, a.y + BEYOND_EDGE_LIFT, a.z, b.x, b.y + BEYOND_EDGE_LIFT, b.z);
@@ -441,15 +460,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     }
     if (!pts.length) return;
     const geometry = new LineSegmentsGeometry().setPositions(pts);
-    const material = new LineMaterial({ color: stripeColour(info.line.colour), linewidth: BEYOND_EDGE_MIN_PX, worldUnits: false, transparent: true, depthTest: true, depthWrite: false, fog: true });
-    material.onBeforeCompile = shader => {
-      shader.uniforms.uNearM = { value: new THREE.Vector2(...BEYOND_EDGE_NEAR_M) };
-      shader.uniforms.uFadeM = { value: new THREE.Vector2(...BEYOND_EDGE_FADE_M) };
-      shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'uniform vec2 uNearM;\nuniform vec2 uFadeM;\nvoid main() {')
-        .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\n gl_FragColor.a *= smoothstep( uNearM.x, uNearM.y, vFogDepth ) * ( 1.0 - smoothstep( uFadeM.x, uFadeM.y, vFogDepth ) );\n#endif');
-    };
-    material.customProgramCacheKey = () => 'ug-beyond-edge-line';
+    const material = createBeyondEdgeMaterial(stripeColour(info.line.colour));
     const line = new LineSegments2(geometry, material);
     line.name = `beyond-edge-track-${info.line.id}`;
     line.userData = { lineId: info.line.id, part: 'legibility' };
@@ -468,7 +479,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     legByLine.set(info.line.id, { line, orig, bases });
     legibility.add(line);
   }
-  if (BEYOND_EDGE_MIN_PX > 0) for (const info of lineInfo.values()) if (!info.isDlr) addLegibility(info);
+  if (BEYOND_EDGE_MIN_PX > 0) for (const info of lineInfo.values()) if (!info.isDlr) await addLegibility(info);
   function applyLegibility(ratio) {
     for (const { line, orig, bases } of legByLine.values()) {
       const arr = line.geometry.attributes.instanceStart.data.array;
@@ -516,6 +527,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   const markerStations = new Map(); // lineId -> stations
   const seen = new Set();
   for (const line of data.lines) {
+    await breathe();
     const info = lineInfo.get(line.id), stations = [];
     if (info.isDlr) {
       if (!dlrProfile) continue;
@@ -555,9 +567,9 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   };
 
   // ── Master (true proportions) ────────────────────────────────────────────────
-  function setHeightScale(ratio, { rebuildDlr = true } = {}) {
+  function setHeightScale(ratio, { rebuildDlr = true, morphNow = true } = {}) {
     structureScale = ratio;
-    morph.apply(ratio);
+    if(morphNow)morph.apply(ratio);
     applyLegibility(ratio); // s14:F
     const dlr = lineInfo.get('dlr');
     if (rebuildDlr && dlr && dlrProfile) {
@@ -685,7 +697,14 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   };
   // The DLR was just built from the profile at this scale; the Tube corridors
   // and markers take it now.
-  setHeightScale(heightScale, { rebuildDlr: false });
+  const steps=morph.applySteps(heightScale);
+  let step=steps.next();
+  while(!step.done) {
+    const start=performance.now();
+    do {step=steps.next();} while(!step.done && performance.now()-start<3);
+    if(!step.done)await breathe();
+  }
+  setHeightScale(heightScale, { rebuildDlr: false, morphNow: false });
   // Lines wholly in tunnel (Victoria, Waterloo & City) have nothing to draw.
   for (const g of groups.values()) if (g.children.length) scene.add(g);
   if (legibility.children.length) scene.add(legibility); // s14:F

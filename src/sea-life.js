@@ -202,7 +202,7 @@ const mirrorX = pts => pts.map(([x, y, z]) => [-x, y, z]);
 // ── Materials ───────────────────────────────────────────────────────────
 // One shared opaque material: flat Lambert, baked vertex tones, a faint
 // emissive of the submerged fog so the near side never reads as pure black.
-function createMaterials() {
+export function createSeaLifeMaterials() {
   const body = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide,
     emissive: new THREE.Color(0x44665d).multiplyScalar(0.12) });
   body.name = 'sea-life-body';
@@ -402,7 +402,7 @@ function buildOctopus(mat) {
 export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, topY = navigation?.topY ?? 12, waterLevelM = 2 } = {}) {
   const river = buildRiverFrame(thamesPoints, { VE, topY, waterLevelM });
   if (!river) throw new Error('Sea life needs the Thames centreline');
-  const mat = createMaterials();
+  const mat = createSeaLifeMaterials();
   const group = new THREE.Group();
   group.name = 'seaLife';
   group.visible = false;

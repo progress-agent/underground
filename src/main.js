@@ -22,6 +22,9 @@ import { openingHooks } from './opening-hooks.js';
 import { createOpeningPath, accelerateOpeningPath, cappedStartAltM } from './opening-path.js';
 import { VISTA_BY_ID } from './opening-vistas.js';
 import { createOpeningV2 } from './opening-v2.js';
+import { createOpeningPrograms } from './opening-programs.js';
+import { createOpeningUploads } from './opening-uploads.js';
+import {yieldMain,setLoadingSliceBudget} from './yield-main.js';
 import { createAssemblyMask } from './assembly-mask.js';
 const s21V2Url = new URLSearchParams(window.location.search);
 const s21V2StartReq = Number(s21V2Url.get('ostart'));
@@ -59,7 +62,7 @@ import { createViewRange } from './view-range.js';
 import { resolveBuildingsPath, BUILDINGS_PATH_REV } from './buildings-path.js';
 // ── /s02:F ──
 // ── sprint:D ──
-import { registerGroundNight, updateNightScene, prepareNightScene } from './night-scene.js';
+import { registerGroundNight, updateNightScene } from './night-scene.js';
 import { createStars } from './stars.js';
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
@@ -114,7 +117,7 @@ const stationBuildingsPromise = loadStationBuildings().catch((err) => {
 import { loadTidewayData, createTidewaySystem, addTidewayToLegend, snapTidewayShaftsToTerrain } from './tideway.js';
 import { loadCrossrailData, createCrossrailTunnel, addCrossrailToLegend } from './crossrail.js';
 import { getInfraHazeStrength } from './infra-materials.js';
-import { buildCrownRibbons } from './crown-ribbon.js';
+import { buildCrownRibbonsSteps } from './crown-ribbon.js';
 import { createGeologicalStrata, addGeologyToLegend, getChalkSurfaceY, CHALK_TOP_Y, updateGeologyClarity, createChalkPlane } from './geology.js';
 import { chalkRingFromPoints } from './chalk-field.js'; // s21:L
 import { loadReservoirData, createReservoirs, createReservoirsSteps, addReservoirsToLegend } from './reservoirs.js';
@@ -123,7 +126,7 @@ import { createBridges } from './bridges.js';
 import { createOverground } from './overground.js';
 import { loadSewerData, createSewerTunnels, addSewersToLegend } from './sewers.js';
 import { lookupInfraMeta, lookupLineMeta } from './infra-meta.js';
-import { createTrainSystem, createTrains, updateTrains, disposeTrains } from './trains.js';
+import { createTrainSystem, createTrains, updateTrains, disposeTrains, prepareTrainCurve } from './trains.js';
 import { createSurfaceTexture, rasteriseTile, applySurfaceTexture, setSurfaceTextureEnabled, sceneBBoxToUVBounds } from './surface-texture.js';
 import { loadBakedGround } from './baked-ground.js';
 import { createTileBuildings, disposeTileGeometry, setSurfaceGeometryVisible, setBuildingHeightScale, getBuildingHeightScale, getBuildingMaterial } from './surface-geometry.js';
@@ -1364,6 +1367,9 @@ let thamesProfileSampler = null;
 let seaLife = null; // silent sea life in the Thames, drawn only while submerged
 // ── /sprint:C ──
 const thamesDataPromise = loadThamesData();
+let deferOpeningTubeGeometry = false;
+let resolveTubeTerrain;
+const tubeTerrainReady = new Promise(resolve => {resolveTubeTerrain=resolve;});
 // ── s21:L ── (approach E) Layers the descent never shows are built after landing, one at a time in slices of a few
 // milliseconds a frame, each compiled with renderer.compileAsync before it is attached (src/late-layers.js). On a deep
 // link the opening is bypassed and they start at once. The registry is lane V's hook 2 (src/opening-hooks.js).
@@ -1437,11 +1443,13 @@ function s21TryStartGeologyWork() {
   // Emergency debugging: ensure something is visible
   // Scene init
   
-  // Thames data must load before terrain so we can carve the river valley
+  // During the watched opening, collect the network first and make its
+  // geometry once against the terrain, rather than drawing and replacing it.
   thamesDataPromise.then(thamesData => {
     thamesProfileSampler = createThamesProfileSampler(thamesData?.points);
     tryCreateTerrainMesh({ opacity: 1.0, wireframe: false, thamesData, textureSource: openingWork,
       onBounds: (bounds) => { s21Bounds = bounds; s21TryStartGeologyWork(); } }) /* s21:L */.then(result => {
+      resolveTubeTerrain();
       if (!result) {
         grid.visible = true;
         s21SkipLayers(LATE_LAYER_ORDER); // s21:L
@@ -1519,7 +1527,7 @@ function s21TryStartGeologyWork() {
       }
 
       // Reposition tubes + stations to terrain-relative depth, then snap shafts.
-      snapAllTubesToTerrain();
+      if (!deferOpeningTubeGeometry || tubeStationsReady) snapAllTubesToTerrain();
       snapAllShaftsToTerrain();
       snapTidewayShaftsToTerrain(getStructuralSurfaceY);
       // ── s25:W ──
@@ -1888,8 +1896,8 @@ function s21TryStartGeologyWork() {
       // ── s21:L ── (the chain used to end here with no catch: an exception was an unhandled rejection; it still logs)
       }).catch(error => { console.error('M25 chain failed:', error); s21SkipLayers(['motorway', 'cliff']); });
       // ── /s21:L ──
-    });
-  });
+    }).catch(error => {resolveTubeTerrain();console.warn('Terrain creation failed:',error);});
+  }).catch(error => {resolveTubeTerrain();console.warn('Terrain source failed:',error);});
   
   // Legacy surface plane removed — terrain mesh provides surface visual at full opacity
 }
@@ -1942,7 +1950,11 @@ function placeTubeOnRailBridges(lineId, branchPts) {
 
 // Snap all tube centerPts, geometry, stations, and shaft platformY to terrain surface.
 // Called once after terrain loads so that depth is terrain-relative, not sea-level-relative.
-function snapAllTubesToTerrain({ onlyLine = null } = {}) {
+function snapAllTubesToTerrain(options) {
+  for (const step of snapAllTubesToTerrainSteps(options)) { /* interactive rebuild stays synchronous */ }
+}
+
+function* snapAllTubesToTerrainSteps({ onlyLine = null } = {}) {
   if (!terrain) return;
   let snappedTubes = 0;
   let snappedStations = 0;
@@ -1967,6 +1979,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       placeTubeOnRailBridges(lineId, branchPts);
       // ── /s25:E ──
     }
+    yield;
   }
 
   // 4a-ii. River-clearance clamp: ensure tubes pass below local river bed
@@ -2001,6 +2014,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
         }
       }
     }
+    yield;
   }
 
   // 4a-iii. Synthetic river-bed control points: prevent CatmullRom arcing into the river volume
@@ -2038,6 +2052,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
         }
       }
     }
+    yield;
   }
 
   // 4b. Rebuild tube geometry for each line
@@ -2101,7 +2116,9 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       const radius = boreRadiusM(lineId); // s25:S true bore, drawn round at every Master
 
       const leftMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+      yield;
       const rightMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+      yield;
       leftMesh.userData.lineId = lineId;
       rightMesh.userData.lineId = lineId;
       leftMesh.userData.type = 'tube-line';
@@ -2116,6 +2133,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
 
       // Recreate trains on new curves (density scales with track length)
       if (lineId === 'dlr' && centerPts._trains) {
+        prepareTrainCurve(leftCurve);prepareTrainCurve(rightCurve);
         for (const train of centerPts._trains) {
           const ud=train.userData;ud.curve=ud.dir>0?leftCurve:rightCurve;
           ud.curveLengthM=ud.curve.getLength();ud.stationUs=stationUs;
@@ -2127,14 +2145,16 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
         sim.trains.push(...branchTrains);
       }
       snappedTubes++;
+      yield;
     }
 
     // Rebuild crown ribbons on the snapped curves (same helper as the
     // initial build in addLineFromStopPoints — keep the two sites in lockstep).
-    attachCrownRibbons(lineId, colour, group, ribbonCurves);
+    yield* attachCrownRibbonsSteps(lineId, colour, group, ribbonCurves);
 
     lineMeshesById.set(lineId, newMeshes);
     lineCenterPoints.set(lineId, mergedCenterPts);
+    yield;
   }
 
   // 4c. Update station markers (terrain-relative depth + surfaceY for labels)
@@ -2171,6 +2191,7 @@ function snapAllTubesToTerrain({ onlyLine = null } = {}) {
       mesh.computeBoundingSphere();
     }
     snappedStations += stations.length;
+    yield;
   }
 
   // 4d. Update unified shaft platformY from updated centerPts
@@ -2684,8 +2705,12 @@ function extractBranches(sequences) {
 // Shared by addLineFromStopPoints AND the snapAllTubesToTerrain 4b rebuild so
 // the two sites cannot drift. Ribbons are pickable (Tier-2/3 hover from
 // above) and live in lineRibbonsById, NOT lineMeshesById (hover-stomp trap).
-function attachCrownRibbons(lineId, colour, group, ribbonCurves) {
-  const ribbons = buildCrownRibbons({
+function attachCrownRibbons(...args) {
+  const steps=attachCrownRibbonsSteps(...args);let step=steps.next();
+  while(!step.done)step=steps.next();return step.value;
+}
+function* attachCrownRibbonsSteps(lineId, colour, group, ribbonCurves) {
+  const ribbons = yield* buildCrownRibbonsSteps({
     lineId,
     colour,
     curves: ribbonCurves,
@@ -2699,7 +2724,7 @@ function attachCrownRibbons(lineId, colour, group, ribbonCurves) {
   return ribbons;
 }
 
-function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { branches = null } = {}) {
+function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { branches = null, deferGeometry = false } = {}) {
   // If branches provided, build one tube per branch. Otherwise treat stopPoints as single branch.
   const branchArrays = branches && branches.length > 0 ? branches : [stopPoints];
 
@@ -2743,6 +2768,7 @@ function addLineFromStopPoints(lineId, colour, stopPoints, depthAnchors, sim, { 
 
     allCenterPts.push(...centerPts);
     allBranchCenterPts.push(centerPts);
+    if(deferGeometry)continue;
 
     const stationUs = stationUsFromPolyline(centerPts).sort((a, b) => a - b);
     const { leftCurve, rightCurve } = buildOffsetCurvesFromCenterline(centerPts, twinTunnelsEnabled ? tunnelOffsetM : 0);
@@ -2869,6 +2895,7 @@ async function buildNetworkMvp() {
   // Track loading start time for minimum display duration
   window.loadingStartTime = Date.now();
   let usedCacheFallback = false;
+  const deferredLines=[];
   try {
     setNetStatus({ kind: 'warn', text: 'Loading TfL tube lines…' });
     const depthAnchors = await loadStationDepthAnchors();
@@ -3052,7 +3079,8 @@ async function buildNetworkMvp() {
         }
 
         const ds = debugDepthStats({ lineId: id, stopPoints: sps, anchors: depthAnchors });
-        addLineFromStopPoints(id, colour, sps, depthAnchors, sim, { branches });
+        addLineFromStopPoints(id, colour, sps, depthAnchors, sim, { branches, deferGeometry:deferOpeningTubeGeometry });
+        if(deferOpeningTubeGeometry)deferredLines.push({id,colour,sps,depthAnchors,branches});
         setLineVisible(id, true);
 
         // Station markers + labels + shafts for all lines
@@ -3167,13 +3195,24 @@ async function buildNetworkMvp() {
     }
     dbg(`Unified shafts: ${getShaftRegistry().size} stations from shaft registry`);
 
+    if(deferOpeningTubeGeometry)await tubeTerrainReady;
     // If terrain already loaded, snap tubes to terrain-relative depth.
     // (Handles race condition: terrain may load before or after network.)
     // snap is idempotent — safe to call even if terrain callback already ran.
     if (terrain) {
-      snapAllTubesToTerrain();
+      for (const step of snapAllTubesToTerrainSteps()) await yieldMain();
       snapAllShaftsToTerrain();
-      snapTidewayShaftsToTerrain(getStructuralSurfaceY);
+      // Tideway and terrain callbacks already snap whichever arrives second.
+      // Tube completion changes neither their source sites nor the terrain.
+    } else if(deferOpeningTubeGeometry) {
+      // Terrain failure keeps the existing flat fallback. No initial mesh was
+      // made, so build that fallback now rather than leaving empty groups.
+      dlrStationPoints.length=0;
+      for(const {id,colour,sps,depthAnchors,branches} of deferredLines) {
+        scene.remove(lineGroups.get(id));
+        addLineFromStopPoints(id,colour,sps,depthAnchors,sim,{branches});
+        await yieldMain();
+      }
     }
 
     tubeStationsReady = true;
@@ -3255,6 +3294,7 @@ const s21V2Path = accelerateOpeningPath(createOpeningPath({ C: s21V2Vista.C, sur
 intro.setPath(s21V2Path, { watchdogExtraMs: 50000, rate: () => s21V2?.rate() ?? 1, skipOpen: () => (s21V2 ? s21V2.skipOpen() : true) });
 // ── /s21:V2 ──
 intro.run();
+deferOpeningTubeGeometry = !intro.isBypassed();
 // Existing Share link now includes an exact canonical camera pose. A valid
 // view is an intentional location deep-link and follows the intro skip path.
 const sharedView = getUrlStringParam('view')?.split(',').map(Number);
@@ -3346,8 +3386,11 @@ const openingGate = createOpeningGate({
   ],
   beforeCompile: () => {
     for (const child of scene.children) applyShadowPolicy(child);
-    return prepareNightScene({scene,renderer,composer,camera,undergroundCull,stars:starSystem});
+    return openingPrograms.ready();
   },
+  // Programs are prepared under the cover. Ordinary opening frames upload the
+  // geometry; a second full render at seven hidden poses would stall descent.
+  compileScene: false, warmFractions: [],
   revealDetail: () => ({ work: openingWork.timings() }), // s21:L
   onReady: (snap) => { s21V2?.onGateReady(snap); }, keepRunning: true, // s21:V2: the director owns the cover and the moment; the gate keeps working in the descent
   whileWaiting: () => {
@@ -4511,7 +4554,16 @@ function s14bHoldWalker() {
 }
 // ── /s14:B ──
 
+const openingUploads = createOpeningUploads({renderer,camera,materialsFor:doubleSideSplit.materialsFor,renderPrepared:doubleSideSplit.renderPrepared});
+const openingPrograms = createOpeningPrograms({renderer, composer, scene, camera, undergroundCull, tubeMaterial: frostedTubeMaterial(0xffffff), stars: starSystem});
+if(window.__ugOpening)window.__ugOpening.uploads=openingUploads.stats;
+let openingUploadsPrimed=false;
+function openingLoadingBudget() {
+  if (intro.isPlaying()) return 6;
+  return intro.isRunning() && s21V2 && !s21V2.isCovered() ? 6 : 16;
+}
 function tick(frameTime) {
+  setLoadingSliceBudget(openingLoadingBudget());
   // Integrate against the display frame, not callback scheduling jitter.
   // GPU/DOM work can delay JS within a frame without changing its timestamp.
   const dt = lastFrameTime === null ? 0 : Math.max(0, (frameTime - lastFrameTime) / 1000);
@@ -4519,10 +4571,19 @@ function tick(frameTime) {
 
   // ── s24:O ──
   // Opening gate first: it may start the descent, whose frame 0 is drawn below.
+  if (openingPrograms.active) {
+    if (!intro.isBypassed() && s21V2?.isCovered()) {
+      for (const child of scene.children) applyShadowPolicy(child);
+      openingPrograms.prepare();
+      if (!openingUploadsPrimed) {openingUploads.prime(scene);openingUploadsPrimed=true;}
+    } else openingPrograms.stop();
+  }
+  if (!intro.isBypassed() && intro.isRunning()) openingUploads.frame(scene,4,openingGate.stage()==='done' && buildingsPath==='baked');
   openingGate.frame();
   // ── /s24:O ──
   // ── s21:V2 ──
   s21V2?.update(dt);
+  setLoadingSliceBudget(openingLoadingBudget());
   // ── /s21:V2 ──
   // Cinematic intro — owns camera while running (no-op when not running)
   intro.update(dt);

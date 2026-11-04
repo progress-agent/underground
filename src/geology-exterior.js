@@ -40,7 +40,7 @@ function bngToScene(e, n) {
 // Inject a per-vertex alpha attribute → varying → gl_FragColor.a multiply.
 // Same pattern the Thames waterfalls use (m25.js), so the fade composites
 // identically. Kept local so the column material owns its own shader patch.
-function injectVertexAlpha(material) {
+export function injectVertexAlpha(material) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace(
       'void main() {',

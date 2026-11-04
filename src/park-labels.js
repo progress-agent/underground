@@ -228,7 +228,7 @@ export function createParkGeometry(layout,atlas,terrainTriangles) {
   return geometry;
 }
 
-function createMaterial(atlas,height,uniforms) {
+export function createParkLabelMaterial(atlas,height,uniforms) {
   // Preserve the two-unit terrain lift at distant views where depth quantisation
   // can otherwise merge the inscription with its surface. Real occluders still win.
   const material=new THREE.MeshBasicMaterial({color:INK,map:atlas.texture,transparent:true,opacity:.72,alphaTest:.02,depthTest:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1,side:THREE.FrontSide,fog:true});
@@ -266,7 +266,7 @@ export async function createParkLabels({getSurfaceY,getTrianglesForBounds=getTer
     if(!triangles.length)throw Error(`No final terrain triangles for ${park.name}`);
     for(const side of [1,-1]) {
     const layout=createParkLayout({...park,ring},{side,metrics:ch=>atlas.chars.get(ch)?.ink});
-    const geometry=createParkGeometry(layout,atlas,triangles),material=createMaterial(atlas,layout.height,uniforms);
+    const geometry=createParkGeometry(layout,atlas,triangles),material=createParkLabelMaterial(atlas,layout.height,uniforms);
     const mesh=new THREE.Mesh(geometry,material);mesh.name=`park-${park.id}-${side===1?'top':'underside'}-${ringIndex}`;
     mesh.userData={parkId:park.id,side,glyphs:layout.glyphs.length,repetitions:layout.repetitions,letterHeight:layout.height,placementDiagnostics:layout.diagnostics,glyphFootprints:layout.glyphs.map(g=>({character:g.character,repeat:g.repeat,points:g.footprint}))};
     group.add(mesh);

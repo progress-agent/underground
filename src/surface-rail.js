@@ -21,6 +21,7 @@
 // and buildPath applies the terrain floor AFTER smoothing.
 
 import * as THREE from 'three';
+import {computeVertexNormalsSteps,computeBoundingSphereSteps} from './sliced-geometry.js';
 import proj4 from 'proj4';
 import { BNG_REF_E, BNG_REF_N } from './coordinates.js';
 import { VERTICAL_EXAGGERATION, getTerrainMeshSurfaceY as renderedFloorY } from './terrain.js';
@@ -288,7 +289,9 @@ export const PIER_SIDE_M = 5;
 // its centre and both deck edges are clear; a pier only when its centre and
 // its four corners are. Every other archetype (stripe, ballast, earth skirts,
 // cutting bands) is built exactly as before.
-export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = false, structureClear = null } = {}) {
+export function buildCorridor(...args) {for(const step of buildCorridorSteps(...args)) { /* same synchronous API */ }}
+
+export function* buildCorridorSteps(path, out, { skipTunnel = false, pierShortRuns = false, structureClear = null } = {}) {
   if (path.length < 2) return;
 
   // Split into runs of "kind" so tunnel sections drop the ballast bed and
@@ -317,6 +320,7 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
     // Identity stripe always renders (it IS the line on the map).
     const stripe = offsetRails(run, STRIPE_HALF_W, (p) => p.y + STRIPE_LIFT);
     out.stripe.push(stripGeometry(stripe.left, stripe.right));
+    yield;
     if (cls === 'tunnel') continue;
 
     // Ballast/deck bed.
@@ -325,7 +329,11 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
       // s01:R: the deck only over samples whose centre and edges are clear,
       // in stretches of two samples or more (the rails of the whole run, so a
       // stretch's edges are those the full deck would have had).
-      const clear = run.map((p, j) => structureClear(p.x, p.z) && structureClear(bed.left[j].x, bed.left[j].z) && structureClear(bed.right[j].x, bed.right[j].z));
+      const clear=[];
+      for(let j=0;j<run.length;j++) {
+        const p=run[j];clear.push(structureClear(p.x,p.z) && structureClear(bed.left[j].x,bed.left[j].z) && structureClear(bed.right[j].x,bed.right[j].z));
+        if((j+1)%128===0)yield;
+      }
       for (let a = 0; a < run.length;) {
         if (!clear[a]) { a++; continue; }
         let b = a; while (b + 1 < run.length && clear[b + 1]) b++;
@@ -376,6 +384,7 @@ export function buildCorridor(path, out, { skipTunnel = false, pierShortRuns = f
         piers++;
       };
       for (let j = 1; j < run.length; j++) {
+        if(j%128===0)yield;
         acc += Math.hypot(run[j].x - run[j - 1].x, run[j].z - run[j - 1].z);
         if (acc < PIER_SPACING_M) continue;
         acc = 0;
@@ -412,22 +421,41 @@ export function stationOnRail(station, paths, getSurfaceY, projectStation, netwo
  */
 export function createRailMorph(getTerrainMeshSurfaceY) {
   const morphs = [];
-  return {
+  const api = {
     morphs,
-    add(mesh) {
+    *addSteps(mesh) {
       const p = mesh.geometry.attributes.position, original = p.array.slice(), bases = new Float32Array(p.count);
-      for (let i = 0; i < p.count; i++) bases[i] = getTerrainMeshSurfaceY({ x: p.getX(i), z: p.getZ(i) });
+      // Merged triangles repeat their corners. Sample each distinct plan
+      // coordinate once, preserving the exact Float32 base at every vertex.
+      const sampled=new Map();
+      for (let i = 0; i < p.count; i++) {
+        const x=p.getX(i),z=p.getZ(i);
+        let row=sampled.get(x);if(!row)sampled.set(x,row=new Map());
+        let base=row.get(z);
+        if(base===undefined){base=getTerrainMeshSurfaceY({x,z});row.set(z,base);}
+        bases[i]=base;
+        if((i+1)%1024===0)yield;
+      }
       const m = { mesh, original, bases };
       morphs.push(m);
       return m;
     },
+    add(mesh) {const steps=api.addSteps(mesh);let step=steps.next();while(!step.done)step=steps.next();return step.value;},
     remove(mesh) { const i = morphs.findIndex(m => m.mesh === mesh); if (i >= 0) morphs.splice(i, 1); },
-    apply(ratio) {
+    *applySteps(ratio) {
       for (const { mesh, original, bases } of morphs) {
         const p = mesh.geometry.attributes.position;
-        for (let i = 0; i < p.count; i++) p.setY(i, original[i * 3 + 1] < bases[i] ? original[i * 3 + 1] : bases[i] + (original[i * 3 + 1] - bases[i]) * ratio);
-        p.needsUpdate = true; mesh.geometry.computeVertexNormals(); mesh.geometry.computeBoundingSphere();
+        for (let i = 0; i < p.count; i++) {
+          p.setY(i, original[i * 3 + 1] < bases[i] ? original[i * 3 + 1] : bases[i] + (original[i * 3 + 1] - bases[i]) * ratio);
+          if((i+1)%12000===0)yield;
+        }
+        p.needsUpdate = true;
+        yield* computeVertexNormalsSteps(mesh.geometry);
+        yield* computeBoundingSphereSteps(mesh.geometry);
+        yield;
       }
     },
+    apply(ratio) { for(const step of api.applySteps(ratio)) { /* same arithmetic, synchronous for controls */ } },
   };
+  return api;
 }
