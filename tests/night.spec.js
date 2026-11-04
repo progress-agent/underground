@@ -6,6 +6,11 @@ test('circular clock mouse, keyboard, persistence and legacy migration',async({p
  await boot(page);expect(await page.evaluate(()=>window.__ugSun.hour)).toBe(9);
  await page.evaluate(()=>localStorage.removeItem('ug:prefs:v2')); // init script is removed below by a fresh context in persistence tests
  for(const h of [12,18,23.8,.2,6]){const p=await point(page,h);await page.mouse.click(p.x,p.y);expect(await page.evaluate(()=>window.__ugSun.hour)).toBeCloseTo(h,1);}
+ for(const hours of [[23,23.8,.2,1],[1,.2,23.8,23]]){
+   const start=await point(page,hours[0]);await page.mouse.move(start.x,start.y);await page.mouse.down();
+   for(const h of hours.slice(1)){const q=await point(page,h);await page.mouse.move(q.x,q.y);expect(await page.evaluate(()=>window.__ugSun.hour)).toBeCloseTo(h,1);}
+   await page.mouse.up();
+ }
  await page.locator('#sunTime').focus();await page.keyboard.press('Home');await page.keyboard.press('ArrowLeft');expect(await page.evaluate(()=>window.__ugSun.hour)).toBeCloseTo(24-1/6,5);
  const prefs=await page.evaluate(()=>JSON.parse(localStorage.getItem('ug:prefs:v2')));expect(prefs.clockHour).toBeCloseTo(24-1/6,5);
  await expect(page.locator('#sunTime')).toHaveAttribute('aria-valuetext','23:50');
@@ -31,11 +36,14 @@ test.describe('phone menu clock',()=>{
  const {defaultBrowserType,...phone}=devices['iPhone 15 Pro'];test.use(phone);
  test('touch drag crosses midnight in either direction without moving the camera',async({page,context})=>{
  await boot(page);await page.locator('#sunTime').scrollIntoViewIfNeeded();
+ const before=await page.evaluate(()=>window.__ug.camera.position.toArray());
  const c=await context.newCDPSession(page),touch=(type,pts)=>c.send('Input.dispatchTouchEvent',{type,touchPoints:pts.map(p=>({...p,id:4}))});
  for(const hours of [[23,23.8,.2,1],[1,.2,23.8,23]]){
    await touch('touchStart',[await point(page,hours[0])]);for(const h of hours.slice(1))await touch('touchMove',[await point(page,h)]);await touch('touchEnd',[]);
    expect(await page.evaluate(()=>window.__ugSun.hour)).toBeCloseTo(hours.at(-1),1);
  }
  expect(await page.evaluate(()=>[...window.__ug.fpsControls.keys])).toEqual([]);
+ const after=await page.evaluate(()=>window.__ug.camera.position.toArray());
+ expect(Math.hypot(...after.map((v,i)=>v-before[i]))).toBeLessThan(.0001);
  });
 });
