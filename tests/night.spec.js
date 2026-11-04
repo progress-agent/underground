@@ -19,10 +19,13 @@ test('saved night restores; lit material only in the air, moon has no shadows',a
  await boot(page);await page.evaluate(()=>{window.__ugSun.setHour(23);window.__ug.camera.position.set(2952.9,337.8,-732.9);window.__ug.controls.target.set(1910.1,196.2,-783.7);window.__ug.controls.update();});
  await expect.poll(()=>page.evaluate(()=>window.__ug.scene.getObjectByName('surfaceGeometry')?.children.filter(x=>x.name.startsWith('baked-buildings-')).some(x=>x.material.name==='night-buildings'))).toBe(true);
  expect(await page.evaluate(()=>window.__ugSun.status.active)).toBe(false);
+ expect(await page.evaluate(()=>document.body.classList.contains('ug-night'))).toBe(true);
+ expect(await page.evaluate(()=>{const e=[...document.querySelectorAll('.station-label-surface')].find(e=>!e.style.color),s=getComputedStyle(e);return[s.color,s.webkitTextStrokeWidth]})).toEqual(['rgb(255, 255, 255)','1px']);
  await page.reload();await page.waitForFunction(()=>!!window.__ugSun);expect(await page.evaluate(()=>window.__ugSun.hour)).toBe(23);
  await page.waitForFunction(()=>window.__ug?.groundReady);
  await page.evaluate(()=>{window.__ug.camera.position.set(0,-100,0);window.__ug.controls.target.set(0,-100,500);window.__ug.controls.update();});
  await expect.poll(()=>page.evaluate(()=>window.__ugSun.status.airWeight)).toBe(0);
+ expect(await page.evaluate(()=>document.body.classList.contains('ug-night'))).toBe(false);
 });
 test.describe('phone menu clock',()=>{
  const {defaultBrowserType,...phone}=devices['iPhone 15 Pro'];test.use(phone);

@@ -26,6 +26,8 @@ export function updateNightScene({scene,sun,phone=false}) {
   nightUniforms.uNightLit.value = litFraction(sun.hour);
   nightUniforms.uWindowBlend.value = phone ? 2.5 : 1.7;
   const on = amount > 0;
+  // Keep the existing chipless names readable over bright night windows.
+  if(on !== active && typeof document !== 'undefined') document.body.classList.toggle('ug-night',on);
   setNightBuildings(on,scene);
   if(on !== active || seenVersion !== groundVersion){
     for(const pair of grounds) scene.traverse(o=>{if(o.material===(on?pair.day:pair.night))o.material=on?pair.night:pair.day});
