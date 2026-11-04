@@ -19,7 +19,7 @@
 export const KEY_OWNING_SELECTOR = '#ug-physics-panel';
 
 export function isFormInput(target) {
-  return !!(target?.matches?.('input, select, textarea') || target?.isContentEditable);
+  return !!(target?.matches?.('input, select, textarea, [role="slider"]') || target?.isContentEditable);
 }
 
 /** True when a Space event should drive the active mode, not the focused element. */

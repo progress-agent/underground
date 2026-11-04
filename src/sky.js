@@ -90,6 +90,7 @@
 // operations per pixel. Nothing is allocated per frame.
 
 import * as THREE from 'three';
+import { applyNightToSkyParams } from './night.js';
 import { CLEAR_SKY, DEFAULT_SKY_LOOK } from './sky-looks.js';
 
 const DEG = Math.PI / 180;
@@ -277,6 +278,7 @@ export function computeSkyParams(_lookName, state, { direction = null, out = cre
   out.aureoleCoreRad = look.aureoleCoreDeg * DEG;
   out.aureoleSkirt = look.aureoleSkirt;
   out.aureoleSkirtRad = look.aureoleSkirtDeg * DEG;
+  applyNightToSkyParams(out, state.night);
   return out;
 }
 

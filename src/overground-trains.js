@@ -1,3 +1,4 @@
+import { registerTrainWindows } from './night-scene.js';
 import * as THREE from 'three';
 import { trueHeadingBasis } from './true-proportion.js'; // s25:S
 
@@ -39,7 +40,7 @@ export function createOvergroundFleet(paths,colour,lineId){
  const materials=[
   new THREE.MeshStandardMaterial({color:BODY_GREY,roughness:.65,metalness:.15}),
   new THREE.MeshStandardMaterial({color:BODY_GREY,roughness:.6,metalness:.2}),
-  new THREE.MeshBasicMaterial({color:0x24384b,toneMapped:false}),
+  registerTrainWindows(new THREE.MeshBasicMaterial({color:0x24384b,toneMapped:false})),
  ];
  const meshes=[bodyGeometry,roofGeometry,windowGeometry].map((geometry,i)=>{
   const mesh=new THREE.InstancedMesh(geometry,materials[i],instances);

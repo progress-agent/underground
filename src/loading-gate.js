@@ -91,7 +91,8 @@ export function createOpeningGate({
     // Shadow participation flags are part of each program's key; settle them
     // for every current object before compiling (sun.js applies the same
     // policy lazily every 30 frames).
-    try { beforeCompile?.(); } catch (e) { console.warn('[opening] pre-compile step failed', e); }
+    let preparation = null;
+    try { preparation = beforeCompile?.(); } catch (e) { console.warn('[opening] pre-compile step failed', e); }
     const start = now();
     compile.programsBefore = renderer.info?.programs?.length ?? null;
     let p;
@@ -110,6 +111,7 @@ export function createOpeningGate({
         : Promise.resolve(renderer.compile(scene, camera));
     } catch (e) { p = Promise.reject(e); }
     finally { if (canSetTarget) renderer.setRenderTarget(previousTarget); }
+    if (preparation) p = Promise.all([p, preparation]);
     p.then(() => {
       compile.ms = Math.round(now() - start);
       compile.programsAfter = renderer.info?.programs?.length ?? null;

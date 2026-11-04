@@ -334,7 +334,15 @@ export function createLandmarkModels(data, { getSurfaceY, VE = 5, heightScale = 
     }
   }
   group.userData.pickables=[];
-  group.traverse(o=>{if(o.isMesh&&o.userData.type==='landmark')group.userData.pickables.push(o);});
+  group.traverse(o=>{
+    if(o.isMesh&&o.userData.type==='landmark'){
+      // Mesh.raycast already tests this exact local bound before visiting triangles.
+      // Without it, a label ray crossing a landmark's loose sphere scans its entire detailed model.
+      // Geometry stays local and immutable; the structure-height anchor scales the bound with the mesh.
+      if(!o.geometry.boundingBox)o.geometry.computeBoundingBox();
+      group.userData.pickables.push(o);
+    }
+  });
   group.userData.sites=LANDMARKS.length;
   group.userData.setHeightScale=(value)=>{for(const a of anchors)a.scale.y=VE*value;};
   group.userData.setHeightScale(heightScale);

@@ -83,7 +83,7 @@ import { createModeHud } from './hud.js';
 import { getWindAt, getSurfaceWind } from '../wind.js';
 
 function isFormInput(target) {
-  return target?.matches?.('input, select, textarea') || target?.isContentEditable;
+  return target?.matches?.('input, select, textarea, [role="slider"]') || target?.isContentEditable;
 }
 
 function sliderAccess(document, id) {

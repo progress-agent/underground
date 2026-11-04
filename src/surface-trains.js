@@ -1,3 +1,4 @@
+import { registerTrainWindows } from './night-scene.js';
 // Surface trains: the Tube and DLR trains on the open-air track (sprint
 // 30Sep26w, D-041 item 2, Lane T). Jordan, 30Sep26w: the open-air Tube and DLR
 // are drawn exactly like the Overground, trains included.
@@ -116,7 +117,7 @@ export function createSurfaceTrains({ scene, trainSystem, surfaceRail, overgroun
   // shadow rung against Lane R's head; measured 01Oct26h).
   const materials = {
     body: new THREE.MeshStandardMaterial({ color: BODY_GREY, roughness: .65, metalness: .15 }),
-    windows: new THREE.MeshBasicMaterial({ color: 0x24384b, toneMapped: false }),
+    windows: registerTrainWindows(new THREE.MeshBasicMaterial({ color: 0x24384b, toneMapped: false })),
   };
   const PARTS = ['body', 'windows'];
   const profiles = new Map(); // profile id -> { geos, meshes, capacity, slot }

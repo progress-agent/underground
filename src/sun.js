@@ -1,6 +1,6 @@
 // sun.js: time-of-day sun and near-camera shadows (sprint 23Sep26w, Lane D, D-037).
 //
-// One slider, labelled Dawn at one end and Dusk at the other, moves the sun
+// The clock uses the inherited Dawn-to-Dusk path from 06:00 to 18:00. It moves the sun
 // along a representative London sun path. It changes the sun's angle, colour
 // and strength, the cool ambient fill, the street-level sky bounce, the sky
 // tint and the air haze. It is lighting only: nothing here reads or drives
@@ -23,8 +23,8 @@
 // through the legacy colour and strengths at the legacy elevation. A fresh
 // visit therefore lights exactly as before; shadows are the only new default.
 //
-// NO NIGHT. Both ends of the slider stop with the sun 1.5 degrees above the
-// horizon: long, low, warm light, never darkness.
+// The daylight segment ends with the sun 1.5 degrees above the horizon.
+// night-clock.js extends it through midnight; night.js supplies moonlight and the night sky.
 //
 // SHADOWS. A single fitted directional shadow (not cascades), 2048 texels over
 // a 3km square around the camera's ground point, aligned to the sun's azimuth
@@ -44,9 +44,11 @@
 // which PCFSoftShadowMap does not otherwise read) makes the shader return
 // "fully lit" before it samples anything. See patchShadowChunk.
 
+import { wrapHour, nightAmount, mountClock } from './night-clock.js';
+import { applyNightToSunState } from './night.js';
 import { applyRise } from './opening-rise.js'; // s21:V2
 import * as THREE from 'three';
-import { getBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
+import { getBuildingMaterial, isBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
 import { setAirSun, resolveSunDirection, LEGACY_SUN_POSITION } from './environment.js';
 
 const DEG = Math.PI / 180;
@@ -237,10 +239,10 @@ export function sunPhaseLabel(t) {
  * below the local surface (clay, chalk, tunnels) or fully inside the river.
  * heightAboveSurface is camera y minus the local surface y (scene units).
  */
-export function airWeightFor({ heightAboveSurface, submergedBlend = 0 }) {
+export function airWeightFor({ heightAboveSurface, submergedBlend = 0, ramp = SUN_CONFIG.airRamp }) {
   if (!Number.isFinite(heightAboveSurface) || heightAboveSurface <= 0) return 0;
-  const ramp = THREE.MathUtils.smoothstep(heightAboveSurface, 0, SUN_CONFIG.airRamp);
-  return ramp * (1 - THREE.MathUtils.clamp(submergedBlend, 0, 1));
+  const air = THREE.MathUtils.smoothstep(heightAboveSurface, 0, ramp);
+  return air * (1 - THREE.MathUtils.clamp(submergedBlend, 0, 1));
 }
 
 /** Shadow strength from camera height above the ground (scene units). */
@@ -397,7 +399,7 @@ export function applyShadowPolicy(root) {
     if (o.castShadow !== cast || o.receiveShadow !== receive) {
       o.castShadow = cast; o.receiveShadow = receive; changed++;
     }
-    const wantsDepth = cast && (o.material === getBuildingMaterial());
+    const wantsDepth = cast && isBuildingMaterial(o.material);
     if (wantsDepth && o.customDepthMaterial !== buildingDepthMaterial) o.customDepthMaterial = buildingDepthMaterial;
   };
   const name = root.name || '';
@@ -435,7 +437,15 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
   const chunkOk = patchShadowChunk();
   let time = Number.isFinite(prefs[PREF_TIME]) ? THREE.MathUtils.clamp(prefs[PREF_TIME], 0, 1) : DEFAULT_SUN_TIME;
   let shadowsEnabled = prefs[PREF_SHADOWS] !== false;
+  let hour = Number.isFinite(prefs.clockHour) ? wrapHour(prefs.clockHour) : 6 + 12 * time;
   const state = sunState(time);
+  function clockState() {
+    time = THREE.MathUtils.clamp((hour - 6) / 12, 0, 1);
+    sunState(time, state);
+    state.hour = hour; state.night = nightAmount(hour);
+    applyNightToSunState(state);
+  }
+  clockState();
 
   renderer.shadowMap.enabled = chunkOk;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -462,10 +472,18 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
     const next = THREE.MathUtils.clamp(Number(t), 0, 1);
     if (!Number.isFinite(next)) return time;
     time = next;
-    sunState(time, state);
-    if (persist) { prefs[PREF_TIME] = time; savePrefs(prefs); }
+    hour = 6 + 12 * time;
+    clockState();
+    if (persist) { prefs[PREF_TIME] = time; prefs.clockHour = hour; savePrefs(prefs); }
     notify();
     return time;
+  }
+
+  function setHour(h, { persist = true } = {}) {
+    if (!Number.isFinite(Number(h))) return hour;
+    hour = wrapHour(Number(h)); clockState();
+    if (persist) { prefs.clockHour = hour; savePrefs(prefs); }
+    notify(); return hour;
   }
 
   function setShadowsEnabled(on, { persist = true } = {}) {
@@ -495,7 +513,8 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
 
     const groundY = Number.isFinite(surfaceY) ? surfaceY : 0;
     const height = camera.position.y - groundY;
-    const w = airWeightFor({ heightAboveSurface: height, submergedBlend });
+    const ramp = THREE.MathUtils.lerp(SUN_CONFIG.airRamp, 1, state.night ?? 0);
+    const w = airWeightFor({ heightAboveSurface: height, submergedBlend, ramp });
     status.airWeight = w;
     status.adaptiveShadows = !!adaptiveShadows;
 
@@ -522,7 +541,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
     }
 
     status.altitudeFade = shadowAltitudeFade(height);
-    const strength = chunkOk && shadowsEnabled && adaptiveShadows
+    const strength = chunkOk && shadowsEnabled && adaptiveShadows && !state.night
       ? SUN_CONFIG.shadowStrength * w * status.altitudeFade : 0;
     status.strength = strength;
     status.active = strength > 0;
@@ -536,10 +555,11 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
 
   const api = {
     get time() { return time; },
+    get hour() { return hour; },
     get shadowsEnabled() { return shadowsEnabled; },
     get state() { return state; },
     status,
-    setTime, setShadowsEnabled, update,
+    setTime, setHour, setShadowsEnabled, update,
     setAlongSnap(on) { alongSnap = !!on; return alongSnap; }, // s16:R: shadowSnap
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     mountControls: anchor => mountSunControls(api, anchor),
@@ -565,10 +585,6 @@ export function mountSunControls(system, anchor) {
   const row = document.createElement('p');
   row.className = 'small';
   row.id = 'sunControlRow';
-  row.innerHTML = `<label for="sunTime">Sun:</label>
-    <span style="opacity:0.7;">Dawn</span>
-    <input id="sunTime" type="range" min="0" max="1000" step="1" style="vertical-align: middle; width: 130px;" />
-    <span style="opacity:0.7;">Dusk</span>`;
   const toggleRow = document.createElement('p');
   toggleRow.className = 'small row';
   toggleRow.innerHTML = `<button id="sunShadows" type="button" aria-pressed="true" style="${BUTTON_STYLE}">Shadows: on</button>
@@ -576,11 +592,9 @@ export function mountSunControls(system, anchor) {
   parent.insertBefore(row, anchor ?? null);
   parent.insertBefore(toggleRow, anchor ?? null);
 
-  const input = row.querySelector('#sunTime');
+  const input = mountClock(system, row);
   const button = toggleRow.querySelector('#sunShadows');
   const render = () => {
-    input.value = String(Math.round(system.time * 1000));
-    input.setAttribute('aria-valuetext', sunPhaseLabel(system.time));
     const on = system.shadowsEnabled;
     button.textContent = `Shadows: ${on ? 'on' : 'off'}`;
     button.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -588,7 +602,6 @@ export function mountSunControls(system, anchor) {
     button.style.borderColor = on ? 'rgba(201,184,150,0.55)' : 'rgba(255,255,255,0.14)';
     button.style.color = on ? 'rgba(255,255,255,1)' : 'rgba(255,255,255,0.88)';
   };
-  input.addEventListener('input', () => system.setTime(Number(input.value) / 1000));
   button.addEventListener('click', () => system.setShadowsEnabled(!system.shadowsEnabled));
   system.onChange(render);
   render();

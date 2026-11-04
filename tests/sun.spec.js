@@ -36,12 +36,10 @@ const frames = (page, n = 3) => page.evaluate(n => new Promise(r => {
 }), n);
 
 async function setSlider(page, value) {
-  await page.evaluate(v => {
-    document.getElementById('hudDetails').open = true;
-    const e = document.getElementById('sunTime');
-    e.value = String(v);
-    e.dispatchEvent(new Event('input'));
-  }, value);
+  await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
+  const dial = page.locator('#sunTime'); await dial.scrollIntoViewIfNeeded();
+  const box = await dial.boundingBox(), a = ((6 + 12 * value / 1000) - 12) * Math.PI / 12;
+  await page.mouse.click(box.x + box.width / 2 + 57 * Math.sin(a), box.y + box.height / 2 - 57 * Math.cos(a));
   await frames(page, 3);
 }
 
@@ -99,12 +97,12 @@ test('slider moves and recolours the sun; shadows default on; both persist', asy
   await frames(page, 3);
   expect(await page.evaluate(() => window.__ugSun.status.active)).toBe(false);
   const prefs = await page.evaluate(() => JSON.parse(localStorage.getItem('ug:prefs:v2')));
-  expect(prefs.sunTime).toBe(1);
+  expect(prefs.clockHour).toBe(18);
   expect(prefs.sunShadows).toBe(false);
   await page.reload();
   await page.waitForFunction(() => !!window.__ugSun);
   await expect(page.locator('#sunShadows')).toHaveAttribute('aria-pressed', 'false');
-  expect(await page.locator('#sunTime').inputValue()).toBe('1000');
+  await expect(page.locator('#sunTime')).toHaveAttribute('aria-valuenow', '18.000');
   expect(await page.evaluate(() => window.__ugSun.time)).toBe(1);
   expect(errors).toEqual([]);
 });

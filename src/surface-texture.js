@@ -380,6 +380,8 @@ export function applySurfaceTexture(material, tex, bounds) {
   // Store references for runtime toggle
   material.userData.surfaceTex = tex;
   material.userData.surfaceEnabled = true;
+  const surfaceEnabledUniform = { value: 1.0 };
+  material.userData.surfaceEnabledUniform = surfaceEnabledUniform;
 
   material.onBeforeCompile = (shader, renderer) => {
     // ── Run existing M25 mask injection FIRST ──
@@ -393,7 +395,7 @@ export function applySurfaceTexture(material, tex, bounds) {
     shader.uniforms.surfaceBoundsMax = {
       value: new THREE.Vector2(bounds.maxU, bounds.maxV),
     };
-    shader.uniforms.surfaceEnabled = { value: 1.0 };
+    shader.uniforms.surfaceEnabled = surfaceEnabledUniform;
 
     // ── Fragment shader: uniform declarations ──
     // The M25 mask has already injected `uniform sampler2D m25Mask;` and
@@ -470,6 +472,7 @@ ${SURFACE_FRAG}
  */
 export function setSurfaceTextureEnabled(material, enabled) {
   material.userData.surfaceEnabled = enabled;
+  if (material.userData.surfaceEnabledUniform) material.userData.surfaceEnabledUniform.value = enabled ? 1.0 : 0.0;
 
   if (material.userData._surfaceShader) {
     const u = material.userData._surfaceShader.uniforms.surfaceEnabled;

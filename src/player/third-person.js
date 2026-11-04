@@ -9,7 +9,7 @@ export const ZOOM = Object.freeze({ perPx: 0.0015, pinchPerPx: 0.01, minStep: 0.
 export const easeOutCubic = (k) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
 
 function isFormInput(target) {
-  return target?.matches?.('input, select, textarea') || target?.isContentEditable;
+  return target?.matches?.('input, select, textarea, [role="slider"]') || target?.isContentEditable;
 }
 
 /** Zoom factor for one wheel event: negative deltaY brings the camera closer. Pure. */

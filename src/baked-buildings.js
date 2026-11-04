@@ -1,3 +1,4 @@
+import { isBuildingMaterial, getBuildingMaterial } from './surface-geometry.js';
 // baked-buildings.js — loads the offline-compiled building payload (UGB1)
 //
 // The counterpart to scripts/bake-surface.mjs. That compiler resolves, offline,
@@ -190,7 +191,7 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
   if (!t || t.count === 0) return null;
 
   const { view } = payload;
-  const mesh = new THREE.InstancedMesh(getSharedBoxGeometry(), material, t.count);
+  const mesh = new THREE.InstancedMesh(getSharedBoxGeometry(), isBuildingMaterial(material) ? getBuildingMaterial() : material, t.count);
   const m = mesh.instanceMatrix.array;   // Float32Array, zero-filled
 
   let minX = Infinity, minY = Infinity, minZ = Infinity;

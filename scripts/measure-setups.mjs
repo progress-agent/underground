@@ -93,7 +93,7 @@ export const PLAYER_VIEWS = {
   playerFootNoShadow: { player: 'foot', x: 2743.9, z: -760.9, yaw: Math.PI, shuttleS: 3, shadow: false },
 };
 Object.assign(ALL_VIEWS, PLAYER_VIEWS);
-const resolveAnyPose = async (page, pose) => {
+export const resolveAnyPose = async (page, pose) => {
   // ── s16:R ── the two walker presets (a station exit or a bridge deck) have their own placement
   if (pose?.player === 'foot' && (pose.station || pose.bridge)) return s16rResolveWalk(page, pose);
   // ── /s16:R ──
@@ -180,6 +180,8 @@ const s14dResolveVehicle = async (page, pose) => {
       const water = u.modes.ctx.waterSurfaceAt(x, z) ?? 0;
       b.place({ x, y: water + (upM + 1.5) * 5, z, dT: 60, vy: 0 });
       b.setView?.('third');
+      // A lone Balloon run and a run after Drone must face the same expensive southern city view.
+      b.view?.reset({yaw:Math.PI,pitch:-0.12});
     }
   }, pose);
   await page.waitForTimeout(1500);
@@ -329,14 +331,15 @@ export async function measure(args) {
   const r = await measureRun({ ...args, quality });
   return quality != null ? { ...r, quality } : r;
 }
-async function measureRun({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS, quality = null }) {
+async function measureRun({ setup, origin, label = origin, views = Object.keys(VIEWS), settleS = 24, arrivalS = settleS, quality = null, hour = null, phone = false, profile = false, warmViews = views, hook = null }) {
 // ── /s16:R ──
-  const { chromium } = await import('@playwright/test');
+  const { chromium, devices } = await import('@playwright/test');
   const S = SETUPS[setup]; if (!S) throw new Error(`unknown setup ${setup}`);
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=metal'] });
   const machineBefore = machineNote();
   try {
-    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: S.dpr });
+    const device = devices['iPhone 15 Pro'];
+    const page = await browser.newPage(phone ? {viewport:device.viewport,deviceScaleFactor:device.deviceScaleFactor,isMobile:true,hasTouch:true} : { viewport: VIEWPORT, deviceScaleFactor: S.dpr });
     const errors = []; page.on('pageerror', e => errors.push(String(e)));
     await page.addInitScript(() => {
       const raf = window.requestAnimationFrame.bind(window);
@@ -356,6 +359,7 @@ async function measureRun({ setup, origin, label = origin, views = Object.keys(V
     }
     await page.waitForFunction(() => window.__ug?.bakedStats?.tilesTotal > 0 && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal
       && window.__ug.groundReady && window.__ug.flightsGroup && window.__ug.motorwayGroup && window.__ug.landmarkGroup?.children.length, null, { timeout: 240000 });
+    if (hour != null) await page.evaluate(h=>window.__ugSun.setHour(h,{persist:false}), hour);
     const loadMs = Date.now() - t0;
     const info = await page.evaluate(() => {
       const u = window.__ug; u.controls.enableDamping = false; u.setRenderQualityMode('auto');
@@ -377,16 +381,19 @@ async function measureRun({ setup, origin, label = origin, views = Object.keys(V
     if (S.cpuThrottle > 1) { const cdp = await page.context().newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: S.cpuThrottle }); }
     // Warm-up: visit every standard view once so programs and uploads are settled.
     for (const [name, v0] of Object.entries(ALL_VIEWS)) {
-      if (!v0 || !views.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
+      if (!v0 || !warmViews.some(x => x === name || (x === 'arrival' && (name === 'streetBank' || name === 'riverGreenwich')))) continue;
       const v = await resolveAnyPose(page, v0); // s14:P (was resolvePose)
       await page.evaluate(pose => { const u = window.__ug; u.camera.position.fromArray(pose.p); u.controls.target.fromArray(pose.t); u.controls.update(); }, v);
       await page.waitForTimeout(1500);
     }
+    if(hook)await hook(page);
     const results = {};
     for (const name of views) {
       if (!(name in ALL_VIEWS)) { results[name] = { error: 'unknown view' }; continue; }
       const arrival = ALL_VIEWS[name] === null, pose = await resolveAnyPose(page, ALL_VIEWS[name] ?? VIEWS.riverGreenwich); // s14:P (was resolvePose)
       const ticks = Math.round((arrival ? arrivalS : settleS) * 4);
+      let profiler;
+      if(profile){profiler=await page.context().newCDPSession(page);await profiler.send('Profiler.enable');await profiler.send('Profiler.start');}
       const r = await page.evaluate(async ({ pose, arrival, street, ticks }) => {
         const u = window.__ug, sleep = ms => new Promise(res => setTimeout(res, ms));
         let arrivedAt = null;
@@ -415,19 +422,20 @@ async function measureRun({ setup, origin, label = origin, views = Object.keys(V
         const mean = a => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
         const sorted = [...iv].sort((a, b) => a - b);
         return { interval: mean(iv), intervalP95: sorted[Math.floor(sorted.length * 0.95)] ?? null, cpuMs: mean(rows.map(x => x[1])),
-          frames: rows.length, arrivedAt, trace,
+          frames: rows.length, arrivedAt, trace, camera: {position:u.camera.position.toArray(), quaternion:u.camera.quaternion.toArray()},
           calls: u.composer.renderer.info.render.calls };
       }, { pose, arrival, street: VIEWS.streetBank, ticks });
+      if(profiler) {r.profile=(await profiler.send('Profiler.stop')).profile;} // Keep attached: detaching resets the CPU throttle.
       const s = summariseTrace(r.trace);
-      results[name] = { ...s, fps: 1000 / r.interval, interval: r.interval, intervalP95: r.intervalP95, cpuMs: r.cpuMs, frames: r.frames, calls: r.calls,
-        ...(arrival ? { arrivedAt: r.arrivedAt } : {}),
+      results[name] = { ...s, fps: 1000 / r.interval, interval: r.interval, intervalP95: r.intervalP95, cpuMs: r.cpuMs, frames: r.frames, calls: r.calls, camera:r.camera,
+        ...(arrival ? { arrivedAt: r.arrivedAt } : {}), ...(r.profile ? {profile:r.profile} : {}),
         ...(setup === 'weak' ? { pass30: 1000 / r.interval >= WEAK_FPS_BAR } : {}), trace: r.trace };
       const v = results[name];
       console.log(`${label} ${setup} ${name.padEnd(15)} L${v.level} ${v.settled} ${v.fps.toFixed(1)}fps changes ${v.changesLast8s}` +
         (arrival ? ` arrivedAt L${v.arrivedAt} firstShadows ${v.firstShadowsMs ?? '-'}ms` : '') + (setup === 'weak' ? (v.pass30 ? '  >=30 ok' : '  BELOW 30') : ''));
     }
     return { tool: 'measure-setups', version: 1, setup, label, origin, when: new Date().toISOString(), viewport: VIEWPORT,
-      dpr: S.dpr, cpuThrottle: S.cpuThrottle, settleS, arrivalS, loadMs, info, machine: { before: machineBefore, after: machineNote() }, errors, views: results };
+      hour, phone, dpr: phone ? null : S.dpr, cpuThrottle: S.cpuThrottle, settleS, arrivalS, loadMs, info, machine: { before: machineBefore, after: machineNote() }, errors, views: results };
   } finally { await browser.close(); }
 }
 
@@ -445,7 +453,7 @@ async function main() {
     const [setup, origin] = pos;
     if (!setup || !origin) throw new Error('usage: run <as-lived|weak|both> <origin> [--label] [--out] [--views] [--settle] [--arrival-s]');
     const runs = [];
-    for (const s of setupsOf(setup)) runs.push(await measure({ setup: s, origin, label: opt.label ?? origin, views, settleS, arrivalS }));
+    for (const s of setupsOf(setup)) runs.push(await measure({ setup: s, origin, label: opt.label ?? origin, views, settleS, arrivalS, hour:opt.hour == null ? null : Number(opt.hour), phone:!!opt.phone, profile:!!opt.profile }));
     if (opt.out) await writeFile(opt.out, JSON.stringify(runs.length === 1 ? runs[0] : { runs }, null, 1));
     return;
   }

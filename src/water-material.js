@@ -1,3 +1,4 @@
+import { nightUniforms } from './night.js';
 import * as THREE from 'three';
 import { generateWaterNormalMap } from './textures.js';
 
@@ -164,6 +165,7 @@ export function createWaterMaterial(kind = 'thames', overrides = {}) {
 
     shader.uniforms.uWaterNormalMap = { value: getWaterNormalMap() };
     shader.uniforms.uTime = { value: elapsed };
+    shader.uniforms.uNightAmt = nightUniforms.uNightAmt;
     shader.uniforms.uFresnelTint = { value: new THREE.Color(params.fresnelTint) };
     shader.uniforms.uFresnelStrength = { value: params.fresnelStrength };
     shader.uniforms.uFresnelPower = { value: params.fresnelPower };
@@ -208,6 +210,7 @@ void main() {`
       'void main() {',
       `uniform sampler2D uWaterNormalMap;
 uniform float uTime;
+uniform float uNightAmt;
 uniform vec3 uFresnelTint;
 uniform float uFresnelStrength;
 uniform float uFresnelPower;
@@ -250,7 +253,7 @@ void main() {`
   vec3 waterViewDir = normalize( cameraPosition - vWaterWorldPosition );
   float waterFresnel = pow( 1.0 - clamp( abs(dot( normalize( vWaterWorldNormal ), waterViewDir )), 0.0, 1.0 ), uFresnelPower );
   waterFresnel *= uFresnelStrength * ( 0.30 + 0.70 * vWaterUpness );
-  gl_FragColor.rgb = mix( gl_FragColor.rgb, uFresnelTint, waterFresnel );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, uFresnelTint * (1.0 - 0.96 * uNightAmt), waterFresnel );
   float shoreline = smoothstep( 0.82, 1.0, abs( vWaterEdge ) ) * vWaterUpness;
   gl_FragColor.rgb *= 1.0 - shoreline * uEdgeDarkenStrength;
   gl_FragColor.a *= 1.0 - shoreline * uEdgeFadeStrength;

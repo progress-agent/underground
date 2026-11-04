@@ -59,6 +59,8 @@ import { createViewRange } from './view-range.js';
 import { resolveBuildingsPath, BUILDINGS_PATH_REV } from './buildings-path.js';
 // ── /s02:F ──
 // ── sprint:D ──
+import { registerGroundNight, updateNightScene, prepareNightScene } from './night-scene.js';
+import { createStars } from './stars.js';
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
 // ── s24:S ──
@@ -587,7 +589,7 @@ let _dragActive = false;
 let _fpsWasActive = false;
 
 function isFormInput(target) {
-  return target?.matches?.('input, select, textarea') || target?.isContentEditable;
+  return target?.matches?.('input, select, textarea, [role="slider"]') || target?.isContentEditable;
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1334,6 +1336,7 @@ sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? n
 // Visible sun disc and analytic sky (D-038).
 // updateEnvironment drives it each frame; nothing else in the tick changes.
 const skySystem = createSkySystem({ scene });
+const starSystem = createStars({scene, renderer});
 attachSky(skySystem);
 // ── s25:L ──
 // Clear is the only sky (D-039): the hidden Sky row and ?sky= are retired, so
@@ -1863,6 +1866,7 @@ function s21TryStartGeologyWork() {
           if (result.topMat) {
             const uvBounds = sceneBBoxToUVBounds(fullBBox);
             applySurfaceTexture(result.topMat, surfaceTexState.texture, uvBounds);
+            registerGroundNight(result.topMat, fullBBox);
             setSurfaceTextureEnabled(result.topMat, true); // hybrid surface on by default
             surfaceTextureMaterial = result.topMat;
           }
@@ -3340,7 +3344,10 @@ const openingGate = createOpeningGate({
     { id: 'infrastructure', label: 'Tunnelling the infrastructure', weight: 1,
       check: () => !!(crossrailMesh && tidewayMesh && sewersMesh) },
   ],
-  beforeCompile: () => { for (const child of scene.children) applyShadowPolicy(child); },
+  beforeCompile: () => {
+    for (const child of scene.children) applyShadowPolicy(child);
+    return prepareNightScene({scene,renderer,composer,camera,undergroundCull,stars:starSystem});
+  },
   revealDetail: () => ({ work: openingWork.timings() }), // s21:L
   onReady: (snap) => { s21V2?.onGateReady(snap); }, keepRunning: true, // s21:V2: the director owns the cover and the moment; the gate keeps working in the descent
   whileWaiting: () => {
@@ -4813,6 +4820,8 @@ function tick(frameTime) {
   // lighting updates below. Automatic quality level 1+ drops shadows first.
   sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
     adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
+  updateNightScene({scene, sun:sunSystem, phone:TOUCH_UI});
+  starSystem.update(camera, sunSystem.hour, (sunSystem.state.night ?? 0) * sunSystem.status.airWeight);
   // ── /sprint:D ──
   // ── s16:R ── shadowFloat: compare what the GPU receives (float32), so a last-bit wobble repeats nothing
   shadowCache.setFloat32(economies.on('shadowFloat'));

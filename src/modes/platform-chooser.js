@@ -217,7 +217,7 @@ export function createPlatformChooser({ document = globalThis.document, look = n
   const onKey = (e) => {
     if (!current || e.metaKey || e.ctrlKey || e.altKey) return;
     const target = e.target;
-    if (target?.matches?.('input, select, textarea') || target?.isContentEditable) return;
+    if (target?.matches?.('input, select, textarea, [role="slider"]') || target?.isContentEditable) return;
     const d = DIGITS.indexOf(e.key);
     if (d >= 0) {
       e.preventDefault(); e.stopImmediatePropagation();

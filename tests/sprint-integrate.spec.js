@@ -34,7 +34,7 @@ test.describe('Sprint 23Sep26w integration seams', () => {
     await boot(page);
     await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
     const state = () => page.evaluate(() => ({
-      sun: document.getElementById('sunTime')?.value ?? null,
+      sun: document.getElementById('sunTime')?.getAttribute('aria-valuenow') ?? null,
       shadows: document.getElementById('sunShadows')?.getAttribute('aria-pressed') ?? null,
       mode: window.__ug.modes.activeId,
       hint: document.getElementById('ug-mode-hint')?.textContent ?? '',

@@ -28,6 +28,7 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
+import { injectBuildingWindows } from './night.js';
 import { applyRise } from './opening-rise.js'; // s21:V2
 
 // -- Shared material (single instance across all tiles) -----------------------
@@ -58,6 +59,21 @@ buildingMat.onBeforeCompile = (shader) => {
 // Distinct cache key so this material never shares a compiled program with an
 // un-injected MeshStandardMaterial.
 buildingMat.customProgramCacheKey = () => 'building-height-scale-rise'; // s21:V2 (was 'building-height-scale')
+
+export const nightBuildingMat = buildingMat.clone();
+nightBuildingMat.name = 'night-buildings';
+nightBuildingMat.onBeforeCompile = shader => { buildingMat.onBeforeCompile(shader); injectBuildingWindows(shader); };
+nightBuildingMat.customProgramCacheKey = () => 'building-height-scale-rise-night-v1';
+let nightBuildings = false;
+export function setNightBuildings(on, scene) {
+  on = !!on;
+  if (on === nightBuildings) return;
+  nightBuildings = on;
+  const from = on ? buildingMat : nightBuildingMat, to = on ? nightBuildingMat : buildingMat;
+  scene.traverse(o => { if (o.material === from) o.material = to; });
+}
+export function isBuildingMaterial(m) { return m === buildingMat || m === nightBuildingMat; }
+export function getDayBuildingMaterial() { return buildingMat; }
 
 /**
  * s02:B: the building height law for a merged, non-instanced mesh (the station
@@ -104,7 +120,7 @@ export function getBuildingHeightScale() {
  * no second uniform to keep in step.
  */
 export function getBuildingMaterial() {
-  return buildingMat;
+  return nightBuildings ? nightBuildingMat : buildingMat;
 }
 
 // NOTE: buildings use a single flat colour, NOT per-instance `setColorAt`.
@@ -143,7 +159,7 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
   // its centre. Instance position is therefore baseY, NOT baseY + h/2.
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   boxGeo.translate(0, 0.5, 0);
-  const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, unique.length);
+  const mesh = new THREE.InstancedMesh(boxGeo, getBuildingMaterial(), unique.length);
 
   const dummy = new THREE.Object3D();
   let idx = 0;
