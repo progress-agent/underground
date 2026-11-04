@@ -10,3 +10,5 @@ Copyright David Nash and HYG contributors. This derived catalogue is distributed
 `src/stars.js` precesses J2000 coordinates to the device's date and applies Greenwich sidereal rotation at London's longitude (-0.1278 degrees), latitude 51.5 degrees, and the clock's London civil hour. The calendar date comes from the device. BST is resolved using the Europe/London timezone. Sidereal reference: https://aa.usno.navy.mil/faq/GAST. Atmospheric refraction, proper motion since J2000 and nutation are below the acceptance tolerance of one degree and are omitted. Polaris traces its real small circle around the celestial pole; it is not artificially pinned.
 
 The canopy is one point draw, loaded asynchronously only when night is visible. Magnitudes determine intensity, B-V determines a restrained tint, and low altitude fades stars into city haze. No per-star light, texture or scene object.
+
+On clock-change dates the offset is resolved at the selected civil hour. The repeated autumn hour uses its earlier occurrence; a time inside the missing spring hour advances by the gap. Both follow compatible civil-time disambiguation. The device's calendar date still selects the day.

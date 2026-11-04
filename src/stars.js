@@ -1,12 +1,27 @@
 // HYG v4.0 subset: see docs/star-catalogue.md. Equatorial coordinates are J2000.
 import * as THREE from 'three';
 const RAD = Math.PI / 180;
+const HOUR_MS = 3600000;
+let londonOffsetFormatter, offsetDay, dayOffsets;
+function londonOffset(instant) {
+  londonOffsetFormatter ||= new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/London',timeZoneName:'shortOffset'});
+  const part = londonOffsetFormatter.formatToParts(new Date(instant)).find(p=>p.type==='timeZoneName').value;
+  return part === 'GMT' ? 0 : Number(part.replace('GMT',''));
+}
 export function clockDate(hour, date = new Date()) {
   // Device's calendar date, selected London civil hour, including British Summer Time.
-  const midday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12));
-  const part = new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/London',timeZoneName:'shortOffset'}).formatToParts(midday).find(p=>p.type==='timeZoneName').value;
-  const offset = part === 'GMT' ? 0 : Number(part.replace('GMT',''));
-  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) + (hour - offset) * 3600000);
+  const day = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  if (day !== offsetDay) {
+    offsetDay = day;
+    dayOffsets = [...new Set([londonOffset(day - 12*HOUR_MS), londonOffset(day + 36*HOUR_MS)])];
+  }
+  const wall = Math.round(day + hour*HOUR_MS);
+  if (dayOffsets.length === 1) return new Date(wall - dayOffsets[0]*HOUR_MS);
+  // At the autumn fold use the earlier occurrence. At the spring gap advance
+  // by its length, matching the usual civil-time compatible disambiguation.
+  const candidates = dayOffsets.map(offset=>wall-offset*HOUR_MS).sort((a,b)=>a-b);
+  const instant = candidates.find(value=>value+londonOffset(value)*HOUR_MS === wall);
+  return new Date(instant ?? wall-dayOffsets[0]*HOUR_MS);
 }
 export function starDirection(raHours, decDeg, instant, out = new THREE.Vector3()) {
   const jd = instant.getTime() / 86400000 + 2440587.5, days = jd - 2451545, T = days / 36525;
