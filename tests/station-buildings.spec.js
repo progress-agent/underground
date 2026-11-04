@@ -658,7 +658,8 @@ test('white stays under the bloom threshold at noon, and bloom on or off leaves 
   await installPixelHelpers();
   const r = await page.evaluate(async () => {
     const u = window.__ug, T = window.__ugTHREE, rr = u.composer.renderer, sb = u.stationBuildings;
-    const sun = document.getElementById('sunTime'); window.__sunBefore = sun.value; sun.value = '500'; sun.dispatchEvent(new Event('input', { bubbles: true }));
+    window.__sunBefore = window.__ugSun.hour; window.__ugSun.setHour(12, { persist: false });
+    if (Number(document.getElementById('sunTime').getAttribute('aria-valuenow')) !== 12) throw Error('The clock must show noon for the bloom check');
     const out = [];
     for (const [name, up, dx, dz] of [['Euston', 400, 0, 1], [sb.siteKeyOf("King's Cross St. Pancras") && "King's Cross St. Pancras", 15, 0, 120]]) {
       const key = sb.siteKeyOf(name), b = sb.data.buildings.find(q => q.key === sb.data.sites[key].building);
@@ -683,7 +684,7 @@ test('white stays under the bloom threshold at noon, and bloom on or off leaves 
   });
   console.log('brightest station pixel (linear luminance, pre-bloom)', JSON.stringify(r));
   for (const x of r) { expect(x.n, `${x.name}: station pixels`).toBeGreaterThan(500); expect(x.max, `${x.name}: under the bloom threshold 0.88`).toBeLessThan(0.88); }
-  await page.evaluate(() => { const sun = document.getElementById('sunTime'); sun.value = window.__sunBefore; sun.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.evaluate(() => { window.__ugSun.setHour(window.__sunBefore, { persist: false }); });
 });
 
 test('every viaduct pavilion stands beside the drawn DLR deck, never under it (at least 4.5 m from its centreline)', async () => {

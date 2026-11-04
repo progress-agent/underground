@@ -942,6 +942,8 @@ test('B14-6.2 a surface train in front of a station building: hover says "Train"
 
 test('B14-6.3 an aircraft in front of a station building: hover names the aircraft, not the station', async () => {
   const B = onPage(page); await B.leaveWalk();
+  // Flights are a late layer, including when a prior failure has restarted this worker.
+  await page.waitForFunction(() => !!window.__ug?.flightsGroup?.userData.setElapsed, null, { timeout: 120000 });
   const found = await page.evaluate(async (fn) => {
     const u = window.__ug, sb = u.stationBuildings, fl = u.flightsGroup, scale = u.getBuildingHeightScale();
     if (!fl?.userData.setElapsed) return { none: true, why: 'no flights' };

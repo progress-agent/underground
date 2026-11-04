@@ -213,8 +213,8 @@ test('Clear is the only sky: ?sky= is ignored, keeps the opening, and there is n
   expect(api).toEqual({ look: 'clear', looks: ['clear'], setLook: 'undefined', mount: 'undefined' });
   await page.evaluate(() => { document.getElementById('hudDetails').open = true; });
   expect(await page.locator('#skyLookRow, #skyLook').count()).toBe(0);
-  // Double-clicking "Sun:" used to reveal the row; it reveals nothing now.
-  await page.dblclick('label[for="sunTime"]');
+  // Double-clicking the time control still reveals no retired Sky row.
+  await page.dblclick('#sunTime');
   expect(await page.locator('#skyLookRow, #skyLook').count()).toBe(0);
   // The picture with ?sky= is the picture without it.
   const uniforms = () => page.evaluate(() => {
