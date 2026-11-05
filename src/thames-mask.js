@@ -50,7 +50,10 @@ export function initThamesMask(points) {
     const dz = bz - az;
     const lenSq = dx * dx + dz * dz;
 
-    segments.push({ ax, az, bx, bz, dx, dz, lenSq, halfW });
+    const reach = Math.abs(halfW) + 1e-6; // conservative at floating-point endpoints
+    segments.push({ ax, az, bx, bz, dx, dz, lenSq, halfW,
+      minX: Math.min(ax, bx) - reach, maxX: Math.max(ax, bx) + reach,
+      minZ: Math.min(az, bz) - reach, maxZ: Math.max(az, bz) + reach });
   }
 
   console.log(`Thames mask: ${segments.length} segments initialised`);
@@ -67,6 +70,7 @@ export function isInThames(x, z) {
   if (!segments) return false;
 
   for (const seg of segments) {
+    if (x < seg.minX || x > seg.maxX || z < seg.minZ || z > seg.maxZ) continue;
     // Distance from point to line segment
     let t;
     if (seg.lenSq < 1e-8) {

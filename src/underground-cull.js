@@ -109,7 +109,7 @@ export function cullModeFor({ belowSurface, submerged, insideness }) {
 }
 
 export function createUndergroundCull({ scene }) {
-  const set = [], hidden = [];
+  const set = [], hidden = [], matrixUpdates = [];
   const status = { active: false, mode: null, hidden: 0 };
   /**
    * Run `draw` with the underground set hidden when `mode` is set; restores it
@@ -124,11 +124,20 @@ export function createUndergroundCull({ scene }) {
     if (!m) { status.hidden = 0; return draw(); }
     collectUndergroundLayers(scene, set, { linesOnly: m === 'lines', mode: m });
     hidden.length = 0;
-    for (const o of set) if (o.visible) { o.visible = false; hidden.push(o); }
+    matrixUpdates.length = 0;
+    for (const o of set) if (o.visible) {
+      o.visible = false; hidden.push(o);
+      // These subtrees contribute no draw. With the scene's identical local
+      // matrix cached, native traversal can leave their world matrices alone.
+      // Native forced updates still propagate, and the flag is restored before
+      // any between-frame consumer or the next below-ground render.
+      matrixUpdates.push(o.matrixWorldAutoUpdate); o.matrixWorldAutoUpdate = false;
+    }
     status.hidden = hidden.length;
     try { return draw(); } finally {
-      for (const o of hidden) o.visible = true;
+      for (let i = 0; i < hidden.length; i++) { hidden[i].visible = true; hidden[i].matrixWorldAutoUpdate = matrixUpdates[i]; }
       hidden.length = 0;
+      matrixUpdates.length = 0;
     }
   }
   return { render, status, collect: () => collectUndergroundLayers(scene, []) };

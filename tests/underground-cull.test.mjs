@@ -1,4 +1,5 @@
 import test from 'node:test';
+import * as THREE from 'three';
 import assert from 'node:assert/strict';
 import { collectUndergroundLayers, createUndergroundCull, isAboveGroundView, cullModeFor, INSIDE_MIN, BEYOND_EDGE_KIND } from '../src/underground-cull.js';
 
@@ -158,4 +159,18 @@ test("render takes 'below': hides only the beyond-edge railway for the draw, res
   cull.render('lines', () => {}); assert.equal(cull.status.active, true);
   cull.render(true, () => {}); assert.equal(cull.status.active, true);
   cull.render(null, () => {}); assert.equal(cull.status.active, false); assert.equal(cull.status.hidden, 0);
+});
+
+test('culled matrix work is omitted only inside the render and native forced updates still propagate', async () => {
+  const {installMatrixCache}=await import('../src/matrix-cache.js');
+  const scene=new THREE.Scene(),root=new THREE.Group(),child=new THREE.Object3D();root.name='line:test';root.add(child);scene.add(root);
+  installMatrixCache(scene);scene.updateMatrixWorld();scene.updateMatrixWorld();
+  let calls=0;const update=child.updateMatrixWorld;child.updateMatrixWorld=function(force){calls++;return update.call(this,force)};
+  const cull=createUndergroundCull({scene});
+  cull.render('full',()=>{scene.updateMatrixWorld();assert.equal(calls,0)});
+  assert.equal(root.matrixWorldAutoUpdate,true);assert.equal(root.visible,true);
+  child.position.x=7;cull.render(null,()=>scene.updateMatrixWorld());assert.equal(child.matrixWorld.elements[12],7);
+  calls=0;cull.render('full',()=>scene.updateMatrixWorld(true));assert.equal(calls,1);
+  assert.throws(()=>cull.render('full',()=>{throw Error('draw failed')}),/draw failed/);
+  assert.equal(root.matrixWorldAutoUpdate,true);assert.equal(root.visible,true);
 });

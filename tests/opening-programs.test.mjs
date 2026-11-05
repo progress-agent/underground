@@ -15,8 +15,8 @@ test('early preparation covers future ground hooks without changing the scene or
   applyM25Mask(material,texture);installAirportDockTerrainMask(material);applyRiverBedMaterial(material);
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),material);mesh.name='terrainMesh';scene.add(mesh);
   const camera=new THREE.PerspectiveCamera(),target={},previous={};let current=previous;
-  const keys=new Set(),targets=[],prepared=[];
-  const renderer={getRenderTarget:()=>current,setRenderTarget:t=>{current=t;},compile(group,camera,world){
+  const keys=new Set(),targets=[],prepared=[];let reflected=0;
+  const renderer={info:{programs:[{getUniforms(){reflected++;}}]},getRenderTarget:()=>current,setRenderTarget:t=>{current=t;},compile(group,camera,world){
     targets.push(current);group.traverse(o=>{if(o.material){keys.add(o.material.customProgramCacheKey());prepared.push(o);}});
     assert.equal(scene.children.length,1);assert.equal(mesh.parent,scene);
   }};
@@ -24,6 +24,8 @@ test('early preparation covers future ground hooks without changing the scene or
   const preparation=createOpeningPrograms({renderer,composer:{readBuffer:target},scene,camera,
     undergroundCull:{render:(mode,draw)=>draw()},tubeMaterial:new THREE.MeshStandardMaterial()});
   preparation.prepare();await preparation.ready();
+  assert.equal(reflected,1,'linking also completes lazy first-use reflection');
+  preparation.prepare();assert.equal(reflected,1,'an unchanged program is reflected once');
   assert.ok(prepared.some(o=>o.isInstancedMesh&&o.material.isMeshStandardMaterial&&o.material.vertexColors),'motorway coloured instances are prepared');
   assert.ok(prepared.some(o=>o.isInstancedMesh&&o.material.isMeshBasicMaterial&&o.material.side===THREE.DoubleSide&&!o.material.map),'distant double-sided traffic is prepared');
   assert.equal(current,previous);assert.ok(targets.every(t=>t===target));

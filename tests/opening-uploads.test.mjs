@@ -34,3 +34,22 @@ test('opening uploads initialize the actual transparent derivatives and restore 
   assert.equal(geometry.drawRange.count,Infinity);assert.equal(target,originalTarget);
   assert.deepEqual(renderer.shadowMap,{autoUpdate:true,needsUpdate:true});
 });
+
+test('opening preparation reuses a real draw and removes its observer when finished or skipped',()=>{
+  const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera();
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());scene.add(mesh);
+  let target=null,prepared=0;
+  const direct=()=>{};
+  const renderer={renderBufferDirect:direct,shadowMap:{},getRenderTarget:()=>target,setRenderTarget:t=>{target=t;},render:()=>{prepared++;}};
+  const uploads=createOpeningUploads({renderer,camera});
+  assert.equal(renderer.renderBufferDirect,direct,'a bypassed opening observes nothing');
+  uploads.prime(scene);
+  renderer.renderBufferDirect(camera,scene,mesh.geometry,mesh.material,mesh,null);
+  const before=prepared;
+  uploads.frame(scene,Infinity,true);
+  assert.equal(prepared,before,'the already drawn object needs no zero-count render');
+  assert.equal(uploads.stats.skippedDrawn,1);
+  assert.equal(renderer.renderBufferDirect,direct);
+  const cancelled=createOpeningUploads({renderer,camera});cancelled.prime(scene);cancelled.stop();
+  assert.equal(renderer.renderBufferDirect,direct,'an interrupted opening restores ownership too');
+});

@@ -85,8 +85,12 @@ export function* createCrownRibbonGeometrySteps(curve, {
   frames = null, // internal: colour and casing share identical curve samples
 } = {}) {
   const halfW = width / 2;
-  const rings = []; // per ring: [bl, br, tl, tr]
-  const axisYs = []; // per ring: centreline height (s25:S true-proportion axis)
+  // Keep the native double-precision corner arithmetic without retaining
+  // five temporary Vector3 objects per ring.
+  const rings = new Float64Array((segments + 1) * 12);
+  const axisYs = new Float64Array(segments + 1);
+  const low = new THREE.Vector3(), bl = new THREE.Vector3(), br = new THREE.Vector3(), tl = new THREE.Vector3(), tr = new THREE.Vector3();
+  const corners = [bl, br, tl, tr];
   const prevSide = new THREE.Vector3(1, 0, 0);
   const side = new THREE.Vector3();
   const up = new THREE.Vector3();
@@ -106,13 +110,14 @@ export function* createCrownRibbonGeometrySteps(curve, {
     if(frames)frames.push({position:P,side:side.clone(),up:up.clone()});
     }
 
-    const low = P.clone().addScaledVector(up, baseRadius).addScaledVector(side, lateralOffset);
-    const bl = low.clone().addScaledVector(side, -halfW);
-    const br = low.clone().addScaledVector(side, halfW);
-    const tl = bl.clone().addScaledVector(up, thickness);
-    const tr = br.clone().addScaledVector(up, thickness);
-    rings.push([bl, br, tl, tr]);
-    axisYs.push(P.y);
+    low.copy(P).addScaledVector(up, baseRadius).addScaledVector(side, lateralOffset);
+    bl.copy(low).addScaledVector(side, -halfW); br.copy(low).addScaledVector(side, halfW);
+    tl.copy(bl).addScaledVector(up, thickness); tr.copy(br).addScaledVector(up, thickness);
+    for (let j = 0; j < 4; j++) {
+      const k = i * 12 + j * 3, v = corners[j];
+      rings[k] = v.x; rings[k + 1] = v.y; rings[k + 2] = v.z;
+    }
+    axisYs[i] = P.y;
     if((i+1)%64===0)yield;
   }
 
@@ -120,25 +125,30 @@ export function* createCrownRibbonGeometrySteps(curve, {
   // outward normal is cross(T, B-A): top (tl,tr)->up, bottom (br,bl)->-up,
   // left (bl,tl)->-side, right (tr,br)->+side. Ring corner order: 0=bl 1=br 2=tl 3=tr.
   const FACES = [[2, 3], [1, 0], [0, 2], [3, 1]];
-  const positions = [];
-  const axis = [];
-  const indices = [];
+  const count = 8 * (segments + 1);
+  const positions = new Float32Array(count * 3), axis = new Float32Array(count);
+  const indices = new (count >= 65536 ? Uint32Array : Uint16Array)(segments * 24);
+  let vertexOffset = 0, indexOffset = 0;
   for (const [a, b] of FACES) {
-    const base = positions.length / 3;
+    const base = vertexOffset;
     for (let i = 0; i <= segments; i++) {
-      const r = rings[i];
-      positions.push(r[a].x, r[a].y, r[a].z, r[b].x, r[b].y, r[b].z);
-      axis.push(axisYs[i], axisYs[i]);
+      for (let sideIndex = 0; sideIndex < 2; sideIndex++) {
+        const corner = sideIndex === 0 ? a : b;
+        const r = i * 12 + corner * 3, k = vertexOffset * 3;
+        positions[k] = rings[r]; positions[k + 1] = rings[r + 1]; positions[k + 2] = rings[r + 2];
+        axis[vertexOffset++] = axisYs[i];
+      }
     }
     for (let i = 0; i < segments; i++) {
       const o = base + i * 2;
-      indices.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
+      indices[indexOffset++] = o; indices[indexOffset++] = o + 2; indices[indexOffset++] = o + 1;
+      indices[indexOffset++] = o + 1; indices[indexOffset++] = o + 2; indices[indexOffset++] = o + 3;
     }
   }
 
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setIndex(indices);
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
   yield* computeVertexNormalsSteps(geo,1000);
   setAxisAttribute(geo, axis);
   return geo;

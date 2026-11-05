@@ -39,6 +39,7 @@ let _frameToken = -1;
 let _accepted = [];
 let _measureContext;
 let _fontReady = false;
+let _watchingFonts = false;
 
 // ── s02:B ── Surface labels hang above the station's building (D-047
 // rail-overground-markers: "the label hanging in the air above the station
@@ -139,7 +140,11 @@ function beginLabelFrameIfNeeded(camera, renderer, terrainSurfaceY, w, h) {
   if (token === _frameToken) return;
   _frameToken = token;
   _accepted.length = 0;
-  _fontReady=document.fonts?.check('12px "IM Fell English"') ?? true;
+  if (!_watchingFonts && document.fonts) {
+    document.fonts.addEventListener('loading', () => { _fontReady = false; });
+    _watchingFonts = true;
+  }
+  if (!_fontReady) _fontReady=document.fonts?.check('12px "IM Fell English"') ?? true;
 
   const surfY = Number.isFinite(terrainSurfaceY) ? terrainSurfaceY : 0;
   const altY = Math.max(0, camera.position.y - surfY);

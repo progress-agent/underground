@@ -209,6 +209,7 @@ export function createSkyParams() {
     clear: new THREE.Color(),
     // Abyss haze (below the dome's opaque line): the fog colour, distances and
     // weight environment.js gives the abyss dome.
+    abyssScale: 1,
     haze: new THREE.Color(), hazeNear: 1, hazeFar: 2, hazeWeight: 0,
   };
 }
@@ -278,6 +279,7 @@ export function computeSkyParams(_lookName, state, { direction = null, out = cre
   out.aureoleCoreRad = look.aureoleCoreDeg * DEG;
   out.aureoleSkirt = look.aureoleSkirt;
   out.aureoleSkirtRad = look.aureoleSkirtDeg * DEG;
+  out.abyssScale = 1 - 0.985 * (state.night ?? 0);
   applyNightToSkyParams(out, state.night);
   return out;
 }
@@ -295,7 +297,7 @@ export function displaySunDirection(p, ratio = 1, out = p.sunDirDisplay) {
  */
 export function skyRadianceAt(dir, p, out = new THREE.Color()) {
   skyCoreAt(dir, p, out);
-  return abyssOver(dir, out);
+  return abyssOver(dir, p, out);
 }
 
 // The sky before the below-horizon abyss (skyRadiance() in the shader).
@@ -334,11 +336,11 @@ function skyCoreAt(dir, p, out) {
 }
 
 // The abyss over the sky below its opaque line (as in the shader, without the haze).
-function abyssOver(dir, out) {
+function abyssOver(dir, p, out) {
   if (dir.y < 0) {
     const below = Math.asin(Math.min(1, -dir.y / Math.hypot(dir.x, dir.y, dir.z))) / DEG;
     const w = abyssWeight(below);
-    if (w > 0) out.lerp(abyssColorAt(below, _abyss), w);
+    if (w > 0) out.lerp(abyssColorAt(below, _abyss).multiplyScalar(p.abyssScale), w);
   }
   return out;
 }
@@ -388,7 +390,7 @@ export function skyWithAureoleAt(dir, p, out = new THREE.Color(), angle = displa
     const l = lumaOf(out);
     if (l > SKY_CEILING) out.multiplyScalar(glowCeiling(l) / l);
   }
-  return abyssOver(dir, out);
+  return abyssOver(dir, p, out);
 }
 
 /**
@@ -449,6 +451,7 @@ uniform vec3 uSunDirDisplay;
 uniform float uWeight;
 uniform float uDiscWeight;
 uniform vec3 uClear;
+uniform float uAbyssScale;
 uniform vec3 uHaze;
 uniform float uHazeNear;
 uniform float uHazeFar;
@@ -516,7 +519,7 @@ void main() {
   }
   if ( d.y < 0.0 ) {
     float below = degrees( asin( min( -d.y, 1.0 ) ) );
-    vec3 abyssHazed = mix( abyss( below ), uHaze, abyssHaze( d, uHazeNear, uHazeFar ) * uHazeWeight );
+    vec3 abyssHazed = mix( abyss( below ) * uAbyssScale, uHaze, abyssHaze( d, uHazeNear, uHazeFar ) * uHazeWeight );
     sky = mix( sky, abyssHazed, smoothstep( ${f(ABYSS_OPAQUE_DEG - 0.2)}, ${f(ABYSS_OPAQUE_DEG)}, below ) );
   }
   vec3 col = mix( uClear, sky, uWeight );
@@ -567,6 +570,7 @@ function createSkyMesh() {
     uWeight: { value: 0 },
     uDiscWeight: { value: 0 },
     uClear: { value: new THREE.Color() },
+    uAbyssScale: { value: 1 },
     uHaze: { value: new THREE.Color() },
     uHazeNear: { value: 1 },
     uHazeFar: { value: 2 },
@@ -614,6 +618,7 @@ function writeUniforms(u, p) {
   u.uWeight.value = p.weight;
   u.uDiscWeight.value = p.discWeight;
   u.uClear.value.copy(p.clear);
+  u.uAbyssScale.value = p.abyssScale;
   u.uHaze.value.copy(p.haze);
   u.uHazeNear.value = p.hazeNear;
   u.uHazeFar.value = p.hazeFar;

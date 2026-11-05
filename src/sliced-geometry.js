@@ -21,7 +21,7 @@ export function* computeVertexNormalsSteps(geometry, perStep = 6000) {
   if (normalAttribute === undefined) {
     normalAttribute = new THREE.BufferAttribute(new Float32Array(positionAttribute.count * 3), 3);
     geometry.setAttribute('normal', normalAttribute);
-  } else {
+  } else if (index) {
     // reset existing normals to zero
     for (let i = 0, il = normalAttribute.count; i < il; i++) {
       normalAttribute.setXYZ(i, 0, 0, 0);
@@ -47,6 +47,19 @@ export function* computeVertexNormalsSteps(geometry, perStep = 6000) {
       normalAttribute.setXYZ(vC, _nC.x, _nC.y, _nC.z);
       if (++n % perStep === 0) yield;
     }
+  } else if (!positionAttribute.isInterleavedBufferAttribute && !positionAttribute.normalized
+    && !normalAttribute.isInterleavedBufferAttribute && !normalAttribute.normalized
+    && positionAttribute.itemSize === 3 && normalAttribute.itemSize === 3) {
+    // Triangle soup is the large rail/road case. Same arithmetic and Float32
+    // stores as Vector3 + setXYZ, without nine attribute calls per triangle.
+    const p = positionAttribute.array, normal = normalAttribute.array;
+    for (let i = 0; i < p.length; i += 9) {
+      const cbx = p[i + 6] - p[i + 3], cby = p[i + 7] - p[i + 4], cbz = p[i + 8] - p[i + 5];
+      const abx = p[i] - p[i + 3], aby = p[i + 1] - p[i + 4], abz = p[i + 2] - p[i + 5];
+      const x = cby * abz - cbz * aby, y = cbz * abx - cbx * abz, z = cbx * aby - cby * abx;
+      for (let k = i; k < i + 9; k += 3) { normal[k] = x; normal[k + 1] = y; normal[k + 2] = z; }
+      if (++n % perStep === 0) yield;
+    }
   } else {
     // non-indexed elements (unconnected triangle soup)
     for (let i = 0, il = positionAttribute.count; i < il; i += 3) {
@@ -65,9 +78,15 @@ export function* computeVertexNormalsSteps(geometry, perStep = 6000) {
   // normalizeNormals()
   const normals = geometry.attributes.normal;
   for (let i = 0, il = normals.count; i < il; i++) {
-    _vector.fromBufferAttribute(normals, i);
-    _vector.normalize();
-    normals.setXYZ(i, _vector.x, _vector.y, _vector.z);
+    if (!normals.isInterleavedBufferAttribute && !normals.normalized && normals.itemSize === 3) {
+      const a = normals.array, k = i * 3, x = a[k], y = a[k + 1], z = a[k + 2];
+      const inverse = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+      a[k] = x * inverse; a[k + 1] = y * inverse; a[k + 2] = z * inverse;
+    } else {
+      _vector.fromBufferAttribute(normals, i);
+      _vector.normalize();
+      normals.setXYZ(i, _vector.x, _vector.y, _vector.z);
+    }
     if ((i + 1) % (perStep * 3) === 0) yield;
   }
   normalAttribute.needsUpdate = true;

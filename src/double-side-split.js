@@ -23,6 +23,7 @@
 // version changes flow through), overriding only `side`.
 
 import * as THREE from 'three';
+import { isShown } from './render-economies.js';
 
 const DEFAULT_OBJECT_BEFORE_RENDER = THREE.Object3D.prototype.onBeforeRender;
 const DEFAULT_MATERIAL_BEFORE_RENDER = THREE.Material.prototype.onBeforeRender;
@@ -133,9 +134,11 @@ export function installDoubleSideSplit({ renderer, scene, enabled = true, rescan
     if (!on || targetScene !== scene || scene.overrideMaterial) return;
     if (renders - lastScan >= rescanFrames) { rescan(); lastScan = renders; }
     for (const [mesh, e] of entries) {
-      if (!mesh.parent || !qualifiesForSplit(mesh)) continue;
+      if (!mesh.parent || !qualifiesForSplit(mesh) || !isShown(mesh)) continue;
       const original = mesh.material, p = pairFor(original);
-      syncUniforms(original, p);
+      // Many meshes share this same pair. No shader can compile during this
+      // preparation loop, so one uniform-map check per scene render suffices.
+      if (p.syncedRender !== renders) { syncUniforms(original, p); p.syncedRender = renders; }
       const back = e.back;
       back.geometry = mesh.geometry;
       back.material = p.back;
@@ -171,7 +174,12 @@ export function installDoubleSideSplit({ renderer, scene, enabled = true, rescan
   const render = renderer.render.bind(renderer);
   renderer.render = function renderWithDoubleSideSplit(targetScene, camera) {
     before(targetScene);
-    try { return render(targetScene, camera); } finally { if (attached.length) after(); renders++; }
+    try { return render(targetScene, camera); } finally {
+      if (attached.length) after();
+      // Post-processing quads are separate scenes. Counting them made the
+      // 60-frame city rescan run several times more often than intended.
+      if (targetScene === scene) renders++;
+    }
   };
 
   return {

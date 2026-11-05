@@ -247,10 +247,15 @@ export { normaliseForMerge };
 /** Uniform grid for "which lines run here" hover lookups. */
 class SampleGrid {
   constructor(cell = 100) { this.cell = cell; this.cells = new Map(); }
-  add(x, z, lines) { const k = `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`; if (!this.cells.has(k)) this.cells.set(k, []); this.cells.get(k).push({ x, z, lines }); }
+  add(x, z, lines) {
+    const cx = Math.floor(x / this.cell), cz = Math.floor(z / this.cell);
+    let row = this.cells.get(cx); if (!row) { row = new Map(); this.cells.set(cx, row); }
+    let cell = row.get(cz); if (!cell) { cell = []; row.set(cz, cell); }
+    cell.push({ x, z, lines });
+  }
   nearest(x, z, near = 60) {
     const c = this.cell, cx = Math.floor(x / c), cz = Math.floor(z / c); let best = null;
-    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const s of this.cells.get(`${cx + dx},${cz + dz}`) || []) {
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const s of this.cells.get(cx + dx)?.get(cz + dz) || []) {
       const d = Math.hypot(s.x - x, s.z - z); if (d <= near && (!best || d < best.d)) best = { d, s };
     }
     return best?.s ?? null;
@@ -431,10 +436,11 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
     for(const step of addMergedSteps(info, bandOut.get(info.line.id) || [], info.bandMat, 'band', { sources: bandSrc.get(info.line.id) }))await breathe();
     // Hover grid: own track, lines on it where a band says so.
     const spans = bandSpans.get(info.line.id) || [];
+    const ownLines = [info.line.id], ownGrid = gridFor(info.line.id);
     for (const path of info.paths) path.forEach((p, i) => {
       if (p.cls === 'tunnel' || p.offMap) return;
       const span = spans.find(s => s.path === path && i >= s.i0 && i <= s.i1);
-      gridFor(info.line.id).add(p.x, p.z, span ? span.lines : [info.line.id]);
+      ownGrid.add(p.x, p.z, span ? span.lines : ownLines);
     });
   }
   // ── s14:F: the minimum-width line along the beyond-edge track (BEYOND_EDGE_MIN_PX) ──────────────────────
@@ -697,13 +703,7 @@ export async function createTubeSurfaceRail({ scene, getTerrainMeshSurfaceY, pro
   };
   // The DLR was just built from the profile at this scale; the Tube corridors
   // and markers take it now.
-  const steps=morph.applySteps(heightScale);
-  let step=steps.next();
-  while(!step.done) {
-    const start=performance.now();
-    do {step=steps.next();} while(!step.done && performance.now()-start<3);
-    if(!step.done)await breathe();
-  }
+  for (const step of morph.applySteps(heightScale)) await breathe();
   setHeightScale(heightScale, { rebuildDlr: false, morphNow: false });
   // Lines wholly in tunnel (Victoria, Waterloo & City) have nothing to draw.
   for (const g of groups.values()) if (g.children.length) scene.add(g);

@@ -53,6 +53,9 @@ export function createOpeningV2({ camera, intro, gate, path, vista, startAltM, m
     capLow = hi;
   }
 
+  // The governor only chooses between these two fixed caps. Their bisections
+  // are pure and need not be repeated forty times per visible frame.
+  const capLowMs = path.msAtArc(capLow), approachMs = path.msAtArc(path.uA);
   let ticks = 0, clock = 0;
   let phase = 'sky';             // sky | tilt | descent
   let tiltT = 0;
@@ -127,7 +130,7 @@ export function createOpeningV2({ camera, intro, gate, path, vista, startAltM, m
       const played = intro.getPlayedMs();
       // Governor: where the camera may be at most.
       const cap = !cityComplete ? capLow : (!gateDone ? path.uA : 1);
-      const target = cap >= 1 ? 1 : Math.min(1, Math.max(0, (path.msAtArc(cap) - played) / 600));
+      const target = cap >= 1 ? 1 : Math.min(1, Math.max(0, ((cap === capLow ? capLowMs : approachMs) - played) / 600));
       rate += (target - rate) * Math.min(1, step / 0.25);
       if (!holding && rate < 0.5 && target < 0.5) { holding = true; holdEver = record.holdEver = true; record.holds.push({ start: performance.now(), end: null }); mark('hold-start'); }
       else if (holding && rate >= 0.5) { holding = false; record.holds.at(-1).end = performance.now(); mark('hold-end'); }

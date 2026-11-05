@@ -296,16 +296,16 @@ function anchorOf(ud, clock) {
 }
 
 /** Pure state of a train at simulation time simT: { t, pausedLeft, nextStationIndex }. */
-export function trainStateAt(ud, simT) {
+export function trainStateAt(ud, simT, out = {}) {
   const tt = timetable(ud), an = anchorOf(ud, simT), n = tt.stops.length;
   const w0 = ud.dir > 0 ? an.u : 1 - an.u;
   const elapsed = simT - an.clock;
   if (elapsed < an.hold) {
     // Hand-built train still holding where it was placed.
     const nx = tt.stops.find(s => s.w > w0) ?? tt.stops[0];
-    return { t: an.u, pausedLeft: an.hold - elapsed, nextStationIndex: nx?.index ?? 0 };
+    out.t = an.u; out.pausedLeft = an.hold - elapsed; out.nextStationIndex = nx?.index ?? 0; return out;
   }
-  if (!(tt.P > 0) || !Number.isFinite(tt.P)) return { t: ud.t, pausedLeft: 0, nextStationIndex: 0 };
+  if (!(tt.P > 0) || !Number.isFinite(tt.P)) { out.t = ud.t; out.pausedLeft = 0; out.nextStationIndex = 0; return out; }
   // Timetable time at the anchor: departing w0 (after its hold, if it was held at a stop).
   // Cached per (timetable, anchor): a resnap or a new anchor recomputes it.
   let tau0;
@@ -324,12 +324,12 @@ export function trainStateAt(ud, simT) {
   let lo = 0, hi = n - 1, i = -1;
   while (lo <= hi) { const m = (lo + hi) >> 1; if (tt.arr[m] <= tau) { i = m; lo = m + 1; } else hi = m - 1; }
   if (i >= 0 && tau < tt.arr[i] + tt.d) {
-    return { t: tt.stops[i].u, pausedLeft: tt.arr[i] + tt.d - tau, nextStationIndex: tt.stops[(i + 1) % n].index };
+    out.t = tt.stops[i].u; out.pausedLeft = tt.arr[i] + tt.d - tau; out.nextStationIndex = tt.stops[(i + 1) % n].index; return out;
   }
   const w = Math.min(Math.max((tau - tt.d * (i + 1)) / Math.max(1e-9, tt.T1), 0), 1);
   let u = ud.dir > 0 ? w : 1 - w;
   u = ((u % 1) + 1) % 1;
-  return { t: u, pausedLeft: 0, nextStationIndex: n ? tt.stops[(i + 1) % n].index : 0 };
+  out.t = u; out.pausedLeft = 0; out.nextStationIndex = n ? tt.stops[(i + 1) % n].index : 0; return out;
 }
 // ── /s25:H ──
 
@@ -631,7 +631,7 @@ export function updateTrains(system, sim, camera, dt) {
   for (const train of system.allTrains) {
     const ud = train.userData;
     const prevT = ud.t;
-    const st = trainStateAt(ud, system.simTime);
+    const st = trainStateAt(ud, system.simTime, ud._frameState ??= {});
     ud.t = st.t; ud._pausedLeft = st.pausedLeft; ud.nextStationIndex = st.nextStationIndex;
 
     // Dwell at stations

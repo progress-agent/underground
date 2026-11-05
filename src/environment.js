@@ -188,11 +188,15 @@ export function createSkyDome(scene) {
   // edge and the horizon reads as distant haze rather than a dark slot, at
   // every Master height. Weight 0 (no sky, flat look, underground) leaves the
   // abyss exactly as before.
+  // The unlit slate texture must follow the night too, including steep rays
+  // where distant-ground haze has faded out. Day and non-air views keep 1.
+  const abyssScale = { value: 1 };
   const horizonHaze = { value: new THREE.Color() };
   const horizonHazeWeight = { value: 0 };
   const horizonHazeNear = { value: 1 };
   const horizonHazeFar = { value: 2 };
   material.onBeforeCompile = shader => {
+    shader.uniforms.uAbyssScale = abyssScale;
     shader.uniforms.uHorizonHaze = horizonHaze;
     shader.uniforms.uHorizonHazeWeight = horizonHazeWeight;
     shader.uniforms.uHorizonHazeNear = horizonHazeNear;
@@ -207,6 +211,7 @@ gl_Position.z = gl_Position.w;`);
     shader.fragmentShader = shader.fragmentShader.replace('void main() {', `
 uniform float uSubmergedSky;
 uniform vec3 uSubmergedSkyColor;
+uniform float uAbyssScale;
 uniform vec3 uHorizonHaze;
 uniform float uHorizonHazeWeight;
 uniform float uHorizonHazeNear;
@@ -214,7 +219,7 @@ uniform float uHorizonHazeFar;
 varying vec3 vDomeDir;
 ${ABYSS_HAZE_GLSL}
 void main() {`).replace('#include <map_fragment>', `#include <map_fragment>
-diffuseColor.rgb=mix(diffuseColor.rgb,uHorizonHaze,abyssHaze(normalize(vDomeDir),uHorizonHazeNear,uHorizonHazeFar)*uHorizonHazeWeight);
+diffuseColor.rgb=mix(diffuseColor.rgb*uAbyssScale,uHorizonHaze,abyssHaze(normalize(vDomeDir),uHorizonHazeNear,uHorizonHazeFar)*uHorizonHazeWeight);
 float aboveWaterHorizon=smoothstep(0.5,0.51,vMapUv.y);
 diffuseColor.rgb=mix(diffuseColor.rgb,uSubmergedSkyColor,aboveWaterHorizon*uSubmergedSky);
 diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
@@ -222,6 +227,7 @@ diffuseColor.a=mix(diffuseColor.a,aboveWaterHorizon*opacity,uSubmergedSky);
   };
   const sky = new THREE.Mesh(geometry, material);
   sky.userData.submergedSky = submergedSky;
+  sky.userData.abyssScale = abyssScale;
   sky.userData.horizonHaze = horizonHaze;
   sky.userData.horizonHazeWeight = horizonHazeWeight;
   sky.userData.horizonHazeNear = horizonHazeNear;
@@ -390,6 +396,7 @@ export function updateEnvironment(camera, scene, sky, renderer, { insideness = 1
     const ordinarySkyOpacity=skyBlend * (1 - chalkBlend) * (1 - submergedBlend);
     sky.material.opacity = Math.max(ordinarySkyOpacity,submergedBlend);
     sky.visible = (skyBlend > 0.01 && chalkBlend < 0.99 && submergedBlend < 0.99) || submergedBlend > 0.001;
+    if (sky.userData.abyssScale) sky.userData.abyssScale.value = 1 - 0.985 * (_air.state?.night ?? 0) * _air.weight;
     if(sky.userData.submergedSky)sky.userData.submergedSky.value=submergedBlend;
     if (sky.userData.horizonHazeWeight) {
       sky.userData.horizonHaze.value.copy(_fogColor);

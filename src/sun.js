@@ -493,10 +493,26 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
     return shadowsEnabled;
   }
 
+  let surfaceRoot = null;
+  const surfaceChildren = [];
   function runPolicy(full) {
     let changes = 0;
     for (const child of scene.children) {
-      if (full || child.name === 'surfaceGeometry') changes += applyShadowPolicy(child);
+      if (child.name === 'surfaceGeometry') {
+        // Tiles stream through this group's direct children. Check membership
+        // each frame; reapply the policy only when it changed or on the normal
+        // full audit. Landmarks arrive as a complete subtree, like other groups.
+        const children = child.children;
+        let changed = child !== surfaceRoot || children.length !== surfaceChildren.length;
+        if (!changed) for (let i = 0; i < children.length; i++) {
+          if (children[i] !== surfaceChildren[i]) { changed = true; break; }
+        }
+        if (full || changed) {
+          changes += applyShadowPolicy(child);
+          surfaceRoot = child; surfaceChildren.length = children.length;
+          for (let i = 0; i < children.length; i++) surfaceChildren[i] = children[i];
+        }
+      } else if (full) changes += applyShadowPolicy(child);
     }
     status.policyChanges += changes;
   }

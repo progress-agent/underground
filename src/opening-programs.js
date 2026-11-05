@@ -18,6 +18,15 @@ import {installAirportDockTerrainMask} from './airport-docks.js';
 
 export function createOpeningPrograms({renderer, composer, scene, camera, undergroundCull, tubeMaterial, stars}) {
   const seen = new WeakMap(), retained = [];
+  const reflected = new WeakSet();
+  function finishPrograms() {
+    // r161 compile() links programs but leaves uniforms/attributes lazy.
+    // Their first-use driver queries belong under the existing cover too.
+    for (const program of renderer.info?.programs ?? []) if (!reflected.has(program)) {
+      program.getUniforms(); // r161 onFirstUse fills both reflection caches
+      reflected.add(program);
+    }
+  }
   const proxies = new THREE.Group(), depthProxies = new THREE.Group();
   const shadowScene = Object.create(scene); shadowScene.fog = null;
   const geometry = new THREE.BoxGeometry(1,1,1);
@@ -103,13 +112,14 @@ export function createOpeningPrograms({renderer, composer, scene, camera, underg
         }
       }
     });
-    if (!proxies.children.length) return;
+    if (!proxies.children.length) { finishPrograms(); return; }
     const previous = renderer.getRenderTarget();
     try {
       renderer.setRenderTarget(composer.readBuffer);
       if(depthProxies.children.length)renderer.compile(depthProxies,camera,shadowScene);
       renderer.compile(proxies,camera,scene);
       undergroundCull.render('full',()=>renderer.compile(proxies,camera,scene));
+      finishPrograms();
     } finally {
       renderer.setRenderTarget(previous);
       for (const proxy of proxies.children) if (proxy.isInstancedMesh) proxy.dispose();

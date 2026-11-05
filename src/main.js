@@ -24,6 +24,8 @@ import { VISTA_BY_ID } from './opening-vistas.js';
 import { createOpeningV2 } from './opening-v2.js';
 import { createOpeningPrograms } from './opening-programs.js';
 import { createOpeningUploads } from './opening-uploads.js';
+import { installMatrixCache } from './matrix-cache.js';
+import { createTubeGeometrySteps } from './tube-geometry-steps.js';
 import {yieldMain,setLoadingSliceBudget} from './yield-main.js';
 import { createAssemblyMask } from './assembly-mask.js';
 const s21V2Url = new URLSearchParams(window.location.search);
@@ -335,6 +337,7 @@ renderer.domElement.style.webkitTapHighlightColor = 'transparent';
 initCushionLuma(renderer);
 
 const scene = new THREE.Scene();
+installMatrixCache(scene);
 // Re-enabled fog with lighter color for better above-ground visibility
 scene.fog = new THREE.Fog(0x1a2a3a, 800, 20000);
 
@@ -2115,9 +2118,9 @@ function* snapAllTubesToTerrainSteps({ onlyLine = null } = {}) {
       const segs = lineSegmentCount(lineId, centerPts);
       const radius = boreRadiusM(lineId); // s25:S true bore, drawn round at every Master
 
-      const leftMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(leftCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+      const leftMesh = new THREE.Mesh(tubeAxisAttribute((yield* createTubeGeometrySteps(leftCurve, segs, radius, 10, false))), frostedTubeMaterial(colour)); // s25:S
       yield;
-      const rightMesh = new THREE.Mesh(tubeAxisAttribute(new THREE.TubeGeometry(rightCurve, segs, radius, 10, false)), frostedTubeMaterial(colour)); // s25:S
+      const rightMesh = new THREE.Mesh(tubeAxisAttribute((yield* createTubeGeometrySteps(rightCurve, segs, radius, 10, false))), frostedTubeMaterial(colour)); // s25:S
       yield;
       leftMesh.userData.lineId = lineId;
       rightMesh.userData.lineId = lineId;
@@ -4579,6 +4582,7 @@ function tick(frameTime) {
     } else openingPrograms.stop();
   }
   if (!intro.isBypassed() && intro.isRunning()) openingUploads.frame(scene,4,openingGate.stage()==='done' && buildingsPath==='baked');
+  else openingUploads.stop();
   openingGate.frame();
   // ── /s24:O ──
   // ── s21:V2 ──
