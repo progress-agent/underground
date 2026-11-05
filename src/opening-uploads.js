@@ -1,11 +1,16 @@
-// Upload buffers without drawing the city or disturbing its camera. Three's
-// zero-count draw still initializes every attribute and the index buffer.
+// Prepare buffers and a real draw pipeline in a tiny matching render target,
+// without drawing into the city or disturbing its camera. Zero-instance draws
+// return before GL, and zero-vertex draws need not exercise the driver pipeline.
 import * as THREE from 'three';
 import {prepareBoxMeshBounds} from './station-buildings.js';
 
-export function createOpeningUploads({renderer, camera, materialsFor = object => [object.material],
+export function createOpeningUploads({renderer, camera, renderTarget = null, materialsFor = object => [object.material],
   renderPrepared = (world,view) => renderer.render(world,view)}) {
-  const target = new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
+  const target = renderTarget?.clone() ?? new THREE.WebGLRenderTarget(2,2,{type:THREE.HalfFloatType,depthBuffer:true});
+  // Texture.clone shares its Source in r161. The city depth attachment must
+  // never share the warm target's resized image or GL storage.
+  if(target.depthTexture)target.depthTexture.source=new THREE.Source({...target.depthTexture.image,width:2,height:2});
+  target.setSize(2,2);
   const warmChildren = [];
   let world = null;
   const material = new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false,depthTest:false});
@@ -26,7 +31,9 @@ export function createOpeningUploads({renderer, camera, materialsFor = object =>
   const direct = renderer.renderBufferDirect;
   const observeDraw = typeof direct === 'function' ? function (camera, scene, geometry, material, object, group) {
     const result = direct.call(this, camera, scene, geometry, material, object, group);
-    remember(object, material);
+    const available=Math.min(geometry.drawRange.count,(geometry.index?.count??geometry.attributes.position?.count??0)-geometry.drawRange.start);
+    const primitive=object.isPoints?1:object.isLine?2:3;
+    if(available>=primitive && (!object.isInstancedMesh||object.count>0) && (!geometry.isInstancedBufferGeometry||geometry.instanceCount>0))remember(object, material);
     return result;
   } : null;
   let observing = false;
@@ -40,16 +47,25 @@ export function createOpeningUploads({renderer, camera, materialsFor = object =>
   }
   function render(object, material = object.material) {
     if(object.isInstancedMesh && /^(baked-)?buildings-/.test(object.name)) prepareBoxMeshBounds(object);
-    const proxy=object.isInstancedMesh ? new THREE.InstancedMesh(object.geometry,material,1) : new THREE.Mesh(object.geometry,material);
-    if(object.isInstancedMesh) {proxy.instanceMatrix=object.instanceMatrix;proxy.count=0;}
+    const Type = object.isPoints ? THREE.Points : object.isLineSegments ? THREE.LineSegments : object.isLineLoop ? THREE.LineLoop : object.isLine ? THREE.Line : THREE.Mesh;
+    const proxy=object.isInstancedMesh ? new THREE.InstancedMesh(object.geometry,material,1) : new Type(object.geometry,material);
+    if(object.isInstancedMesh) {proxy.instanceMatrix=object.instanceMatrix;proxy.count=Math.min(1,object.instanceMatrix.count);}
+    proxy.receiveShadow=object.receiveShadow;
     proxy.frustumCulled=false;
     const range=object.geometry.drawRange, count=range.count;
+    const instances=object.geometry.isInstancedBufferGeometry?object.geometry.instanceCount:null;
     const previous=renderer.getRenderTarget(), shadow=renderer.shadowMap.needsUpdate;
     const autoShadow=renderer.shadowMap.autoUpdate;renderer.shadowMap.autoUpdate=false;renderer.shadowMap.needsUpdate=false;
     const children=world.children;
-    warmChildren.push(proxy);proxy.parent=world;world.children=warmChildren;range.count=0;
+    warmChildren.push(proxy);proxy.parent=world;world.children=warmChildren;
+    const available = (object.geometry.index?.count ?? object.geometry.attributes.position.count) - range.start;
+    range.count=Math.min(count,Math.max(0,available),object.isPoints?1:object.isLine?2:3);
+    if(instances!==null)object.geometry.instanceCount=Math.min(1,instances);
+    // Automatic may change MSAA during the watched tilt. Match the current
+    // scene attachment; the tiny target never changes the visible quality.
+    if(renderTarget && target.samples!==renderTarget.samples){target.dispose();target.samples=renderTarget.samples;}
     try {renderer.setRenderTarget(target);renderPrepared(world,camera);remember(object,material);}
-    finally {range.count=count;world.children=children;warmChildren.pop();proxy.parent=null;renderer.setRenderTarget(previous);renderer.shadowMap.needsUpdate=shadow;renderer.shadowMap.autoUpdate=autoShadow;}
+    finally {if(instances!==null)object.geometry.instanceCount=instances;range.count=count;world.children=children;warmChildren.pop();proxy.parent=null;renderer.setRenderTarget(previous);renderer.shadowMap.needsUpdate=shadow;renderer.shadowMap.autoUpdate=autoShadow;}
     // Do not dispose an instance proxy: its matrix buffer belongs to the city.
   }
   function lights(scene) {

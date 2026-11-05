@@ -439,6 +439,7 @@ const _batchOf = new WeakMap();                // line group -> batch
 const _stripL = new THREE.Matrix4().makeTranslation(-STRIP_X, STRIP_Y, 0);
 const _stripR = new THREE.Matrix4().makeTranslation(STRIP_X, STRIP_Y, 0);
 const _m = new THREE.Matrix4();
+const _batchBase = new THREE.Matrix4();
 export const trainBatchStats = { batches: 0, instances: 0, uploads: 0, frames: 0, syncMs: 0 };
 
 function makeBatchMeshes(batch, capacity) {
@@ -479,7 +480,7 @@ function addToBatch(group, train, lineId, colour) {
   if (batch.trains.length > batch.capacity) {
     const capacity = Math.max(8, batch.capacity * 2, batch.trains.length);
     if (batch.body) { batch.root.remove(batch.body, batch.win); batch.body.dispose(); batch.win.dispose(); }
-    Object.assign(batch, makeBatchMeshes(batch, capacity), { capacity, last: null });
+    Object.assign(batch, makeBatchMeshes(batch, capacity), { capacity, last: new Float32Array(capacity * 16) });
     batch.root.add(batch.body, batch.win);
   }
   batch.dirty = true;
@@ -544,20 +545,24 @@ function syncBatches(camera) {
     }
     _rebase.makeTranslation(-b.root.position.x, -b.root.position.y, -b.root.position.z);
     const bodyArr = b.body.instanceMatrix.array, winArr = b.win.instanceMatrix.array;
-    if (!b.last || b.last.length !== n * 16) { b.last = new Float32Array(n * 16).fill(NaN); b.dirty = true; }
+    if (!b.last || b.last.length < n * 16) { b.last = new Float32Array(b.capacity * 16); b.dirty = true; }
     let changed = b.dirty;
     for (let i = 0; i < n; i++) {
       const t = b.trains[i];
       t.updateMatrix();
       const e = t.matrix.elements, o = i * 16;
-      let same = true;
-      for (let k = 0; k < 16; k++) if (b.last[o + k] !== Math.fround(e[k])) { same = false; break; }
-      if (same && !b.dirty) continue;
+      if (!b.dirty) {
+        let same = true;
+        for (let k = 0; k < 16; k++) if (b.last[o + k] !== Math.fround(e[k])) { same = false; break; }
+        if (same) continue;
+      }
       changed = true;
       for (let k = 0; k < 16; k++) b.last[o + k] = e[k];
-      _m.multiplyMatrices(_rebase, t.matrix).toArray(bodyArr, o);
-      _m.multiplyMatrices(_rebase, t.matrix).multiply(_stripL).toArray(winArr, 2 * o);
-      _m.multiplyMatrices(_rebase, t.matrix).multiply(_stripR).toArray(winArr, 2 * o + 16);
+      // Retain the double-precision base; Float32 bodyArr would change the
+      // strip products. Each output keeps the same native arithmetic.
+      _batchBase.multiplyMatrices(_rebase, t.matrix).toArray(bodyArr, o);
+      _m.copy(_batchBase).multiply(_stripL).toArray(winArr, 2 * o);
+      _m.copy(_batchBase).multiply(_stripR).toArray(winArr, 2 * o + 16);
     }
     if (b.body.count !== n) { b.body.count = n; b.win.count = 2 * n; changed = true; }
     if (changed) {

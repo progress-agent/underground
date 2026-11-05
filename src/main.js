@@ -4557,7 +4557,7 @@ function s14bHoldWalker() {
 }
 // ── /s14:B ──
 
-const openingUploads = createOpeningUploads({renderer,camera,materialsFor:doubleSideSplit.materialsFor,renderPrepared:doubleSideSplit.renderPrepared});
+const openingUploads = createOpeningUploads({renderer,camera,renderTarget:composer.readBuffer,materialsFor:doubleSideSplit.materialsFor,renderPrepared:doubleSideSplit.renderPrepared});
 const openingPrograms = createOpeningPrograms({renderer, composer, scene, camera, undergroundCull, tubeMaterial: frostedTubeMaterial(0xffffff), stars: starSystem});
 if(window.__ugOpening)window.__ugOpening.uploads=openingUploads.stats;
 let openingUploadsPrimed=false;
