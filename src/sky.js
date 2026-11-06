@@ -205,7 +205,7 @@ export function createSkyParams() {
     sunDirDisplay: new THREE.Vector3(0, 1, 0),
     fogCoupling: 1, fogGain: 1, fogMaxLum: 0.6,
     // Mixing weights. weight 0 = the legacy clear colour, 1 = this sky.
-    weight: 0, discWeight: 0,
+    weight: 0, discWeight: 0, night: 0,
     clear: new THREE.Color(),
     // Abyss haze (below the dome's opaque line): the fog colour, distances and
     // weight environment.js gives the abyss dome.
@@ -280,6 +280,7 @@ export function computeSkyParams(_lookName, state, { direction = null, out = cre
   out.aureoleSkirt = look.aureoleSkirt;
   out.aureoleSkirtRad = look.aureoleSkirtDeg * DEG;
   out.abyssScale = 1 - 0.985 * (state.night ?? 0);
+  out.night = state.night ?? 0;
   applyNightToSkyParams(out, state.night);
   return out;
 }
@@ -450,6 +451,7 @@ uniform float uMasterRatio;
 uniform vec3 uSunDirDisplay;
 uniform float uWeight;
 uniform float uDiscWeight;
+uniform float uNightHalo;
 uniform vec3 uClear;
 uniform float uAbyssScale;
 uniform vec3 uHaze;
@@ -538,6 +540,14 @@ void main() {
   // Deterministic sub-quantum dither against banding in the smooth gradient.
   float n = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
   col *= 1.0 + ( n - 0.5 ) * 0.008;
+  // The inherited relative dither vanishes in the dark moon halo. Give that
+  // small region a linear-light noise floor, about one final 8-bit quantum
+  // through AgX + sRGB. Day and sky beyond twelve degrees retain their exact
+  // previous path. Static screen-space noise cannot crawl as the clock moves.
+  if ( uNightHalo > 0.0 && sunCos > 0.9781476 ) {
+    col += vec3( ( n - 0.5 ) * 0.00025 * uNightHalo
+      * smoothstep( 0.9781476, 0.9945219, sunCos ) );
+  }
   gl_FragColor = vec4( max( col, vec3( 0.0 ) ), 1.0 );
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -569,6 +579,7 @@ function createSkyMesh() {
     uSunDirDisplay: { value: new THREE.Vector3(0, 1, 0) },
     uWeight: { value: 0 },
     uDiscWeight: { value: 0 },
+    uNightHalo: { value: 0 },
     uClear: { value: new THREE.Color() },
     uAbyssScale: { value: 1 },
     uHaze: { value: new THREE.Color() },
@@ -617,6 +628,7 @@ function writeUniforms(u, p) {
   u.uSunDirDisplay.value.copy(p.sunDirDisplay);
   u.uWeight.value = p.weight;
   u.uDiscWeight.value = p.discWeight;
+  u.uNightHalo.value = p.night * p.weight * p.discWeight;
   u.uClear.value.copy(p.clear);
   u.uAbyssScale.value = p.abyssScale;
   u.uHaze.value.copy(p.haze);
