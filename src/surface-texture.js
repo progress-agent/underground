@@ -174,7 +174,11 @@ export function createSurfaceTexture(fullBBox, size = 4096) {
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearFilter;
+  // s24:S comparison preview only. Average subpixel roads/park edges at altitude
+  // and blend between mip levels as we move; keep near-ground magnification intact.
+  // DataTexture defaults generateMipmaps to false, so both settings are needed.
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
   tex.needsUpdate = true;
 
   console.log(`Surface texture created: ${size}×${size} (empty, awaiting tiles)`);
