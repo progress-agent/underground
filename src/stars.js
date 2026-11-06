@@ -1,5 +1,6 @@
 // HYG v4.0 subset: see docs/star-catalogue.md. Equatorial coordinates are J2000.
 import * as THREE from 'three';
+import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 const RAD = Math.PI / 180;
 const HOUR_MS = 3600000;
 let londonOffsetFormatter, offsetDay, dayOffsets;
@@ -40,23 +41,41 @@ export function starDirection(raHours, decDeg, instant, out = new THREE.Vector3(
   const north = Math.cos(lat)*Math.sin(d)-Math.sin(lat)*Math.cos(d)*Math.cos(H);
   return out.set(east, Math.sin(lat)*Math.sin(d)+Math.cos(lat)*Math.cos(d)*Math.cos(H), -north);
 }
-export function createStars({scene, renderer}) {
-  const uniforms = {uRotation:{value:new THREE.Matrix3()},uWeight:{value:0},uPixels:{value:1}};
+export function createStars({scene, renderer, composer, camera, bloomPass}) {
+  const uniforms = {uRotation:{value:new THREE.Matrix3()},uWeight:{value:0},uPixels:{value:1},uGain:{value:1}};
   const material = new THREE.ShaderMaterial({name:'catalogue-stars',uniforms,depthWrite:false,depthTest:true,
     transparent:true,blending:THREE.AdditiveBlending,
     vertexShader:`attribute float magnitude; attribute float tint; uniform mat3 uRotation; uniform float uPixels; varying float vAlpha; varying vec3 vTint;
     void main(){vec3 d=uRotation*position; gl_Position=projectionMatrix*vec4(d,0.0); gl_Position.z=gl_Position.w;
     gl_PointSize=uPixels*(2.0+max(0.0,3.0-magnitude)*0.6); vAlpha=smoothstep(0.03,0.3,position.y)*clamp(pow(2.512,(2.5-magnitude)*0.55),0.12,2.0);
     vTint=mix(vec3(0.72,0.83,1.0),vec3(1.0,0.85,0.67),clamp(tint/1.8,0.0,1.0));}`,
-    fragmentShader:`uniform float uWeight; varying float vAlpha; varying vec3 vTint;
-    // Lift radiance, not alpha (which clamps on the brightest stars), retaining
-    // the catalogue's relative brightness, point size and soft point profile.
-    void main(){float r=length(gl_PointCoord-0.5)*2.0; if(r>1.0)discard; gl_FragColor=vec4(vTint*1.25,uWeight*vAlpha*(1.0-smoothstep(0.1,1.0,r)));}`});
+    fragmentShader:`uniform float uWeight; uniform float uGain; varying float vAlpha; varying vec3 vTint;
+    void main(){float r=length(gl_PointCoord-0.5)*2.0; if(r>1.0)discard; gl_FragColor=vec4(vTint*uGain,uWeight*vAlpha*(1.0-smoothstep(0.1,1.0,r)));}`});
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(0),3));
   geometry.setAttribute('magnitude',new THREE.BufferAttribute(new Float32Array(0),1));
   geometry.setAttribute('tint',new THREE.BufferAttribute(new Float32Array(0),1));
   const points=new THREE.Points(geometry,material);points.name='real-stars';points.frustumCulled=false;points.renderOrder=-1e8;points.visible=false;points.raycast=()=>{};scene.add(points);
+  // Retain the live star contribution to bloom. Add the lift to the same HDR
+  // scene target afterwards, before lens and OutputPass: raising the original
+  // radiance alone produces large bloom patches long before AgX lifts peaks.
+  // Share geometry/material so catalogue updates, draw ranges, depth testing
+  // and the opening's existing shader warm-up apply to both draws.
+  const liftScene=new THREE.Scene(),liftPoints=points.clone(),liftPass=new Pass();
+  liftScene.add(liftPoints);liftPoints.visible=true;
+  liftPass.name='catalogue-star-lift';liftPass.needsSwap=false;
+  liftPass.render=(r,_write,read)=>{
+    if(!points.visible || !uniforms.uWeight.value || !geometry.attributes.position.count)return;
+    const target=r.getRenderTarget(),autoClear=r.autoClear,samples=read.samples;
+    try {
+      // r161 selects the existing resolved colour/depth framebuffer at zero
+      // samples. Draw only these soft points there, avoiding a second full
+      // MSAA resolve; restore the scene's sample count before the next pass.
+      read.samples=0;uniforms.uGain.value=5;r.autoClear=false;r.setRenderTarget(read);
+      r.render(liftScene,camera);
+    } finally { read.samples=samples;uniforms.uGain.value=1;r.autoClear=autoClear;r.setRenderTarget(target); }
+  };
+  composer.insertPass(liftPass,composer.passes.indexOf(bloomPass)+1);
   let catalogue=null,pending=null,lastHour=null,lastDate=null,nextDateCheck=0;
   const v=new THREE.Vector3();
   const load=()=>pending ||= fetch('/data/stars-hyg.json').then(r=>{if(!r.ok)throw Error('Star catalogue unavailable');return r.json()}).then(rows=>{
