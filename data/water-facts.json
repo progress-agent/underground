@@ -74,8 +74,10 @@
     "level": {
       "aodM": 29,
       "source": "https://uklakes.ceh.ac.uk/detail.html?wbid=42488",
-      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
-      "referenceType": "lake-elevation"
+      "meaning": "ESTIMATE of operating top water level: retained published lake elevation/altitude, which is not identified as a TWL. No stated sourced TWL found; W2 not met for this reservoir.",
+      "referenceType": "lake-elevation",
+      "estimated": true,
+      "researchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "bank": {
       "heightM": 15.549,
@@ -85,7 +87,9 @@
       "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
       "groundAodM": 15.577,
       "sourceSha256": "d5dc9c99a1413447f87b5d4b6b6c28c18b1fe91302f53720441c92a773eeb656",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "crestResearchCheck": "Watts (2004) graph gives about 31.1 m and a conditional derivation 31\u201332 m; EA measured 31.126 m is consistent. Retain EA measurement, not a claimed stated crest.",
+      "crestResearchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -166,19 +170,21 @@
     "reason": "Sourced depth supports swimming and exploration.",
     "bank": {
       "heightM": 12.283,
-      "freeboardM": 1.5,
+      "freeboardM": 1.368,
       "crestAodM": 23.008,
       "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28536000%2C537500%29&subset=N%28192800%2C195500%29",
-      "freeboardSource": "Estimated 1.5 m freeboard, based on the historical design freeboard in https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/; no site-specific freeboard published.",
+      "freeboardSource": "Computed crestAodM minus level.aodM; both citations retained. No assumed freeboard.",
       "groundAodM": 10.725,
       "sourceSha256": "07a1b9e1cb15e00f76862ba989c501043478f32a5ae145f3aeb753444f09a281",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "crestResearchCheck": "No published crest in reservoir-levels research; retain independently measured EA dry-ground crest."
     },
     "level": {
-      "aodM": 21.508,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28536000%2C537500%29&subset=N%28192800%2C195500%29",
-      "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "aodM": 21.64,
+      "source": "https://archive.org/details/sim_engineering_1952-12-19_174_4534",
+      "referenceType": "authorised-twl",
+      "estimated": false,
+      "meaning": "Authorised 1952 TWL, 71 ft OD \u00d7 0.3048 = 21.6408 m, rounded to 21.64 m. Current operating TWL is not established; no evidence that Girling adopted KGV's lowered 20.18 m level."
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -199,8 +205,10 @@
     "level": {
       "aodM": 23,
       "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642525",
-      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
-      "referenceType": "lake-elevation"
+      "meaning": "ESTIMATE of operating top water level: retained published lake elevation/altitude, which is not identified as a TWL. No stated sourced TWL found; W2 not met for this reservoir.",
+      "referenceType": "lake-elevation",
+      "estimated": true,
+      "researchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "bank": {
       "heightM": 9.214,
@@ -210,7 +218,9 @@
       "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
       "groundAodM": 15.331,
       "sourceSha256": "cf0f27b0d27de1d667f14fc32afd5f061051f93d2ddb9fb4f11a8bf3447aa816",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "crestResearchCheck": "Watts (2004) graph about 24.4 m and derived crest 25.0 m; EA measured 24.545 m differs by 0.455 m from derived value. Retain measured EA crest.",
+      "crestResearchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -231,8 +241,10 @@
     "level": {
       "aodM": 26,
       "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642490",
-      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
-      "referenceType": "lake-elevation"
+      "meaning": "ESTIMATE of operating top water level: retained published lake elevation/altitude, which is not identified as a TWL. No stated sourced TWL found; W2 not met for this reservoir.",
+      "referenceType": "lake-elevation",
+      "estimated": true,
+      "researchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "bank": {
       "heightM": 11.425,
@@ -242,7 +254,9 @@
       "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
       "groundAodM": 16.08,
       "sourceSha256": "e908854d391624a36039ea80d13ab83ec0ff8c7496683ec94edbe540f287211e",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "crestResearchCheck": "No numerical crest found in research; retain EA dry-ground measurement.",
+      "crestResearchSource": "https://britishdams.org/2004conf/papers/watts.pdf"
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -259,20 +273,27 @@
     "mode": "VOLUME",
     "reason": "Sourced depth supports swimming and exploration.",
     "bank": {
-      "heightM": 14.99,
-      "freeboardM": 1.5,
-      "crestAodM": 25.701,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511100%2C512700%29&subset=N%28166100%2C168000%29",
-      "freeboardSource": "Estimated 1.5 m freeboard, based on the historical design freeboard in https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/; no site-specific freeboard published.",
+      "heightM": 14.739,
+      "freeboardM": 1.83,
+      "crestAodM": 25.45,
+      "source": "https://archive.org/details/sim_engineer_1957-02-01_203_5271",
+      "freeboardSource": "Computed crestAodM minus level.aodM; both citations retained. No assumed freeboard.",
       "groundAodM": 10.711,
-      "sourceSha256": "3843aa536d81ea3ff3f7669dddaec0dc7028fff2b6f47d97831fff1931e48328",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      "method": "Published bank top: 83.50 ft OD Newlyn \u00d7 0.3048 = 25.4508 m, rounded to 25.45 m (1957 design table).",
+      "terrainMeasurement": {
+        "crestAodM": 25.701,
+        "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511100%2C512700%29&subset=N%28166100%2C168000%29",
+        "sourceSha256": "3843aa536d81ea3ff3f7669dddaec0dc7028fff2b6f47d97831fff1931e48328",
+        "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      },
+      "crestResearchCheck": "Published crest replaces EA transect estimate; raw EA measurement retained under terrainMeasurement."
     },
     "level": {
-      "aodM": 24.201,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511100%2C512700%29&subset=N%28166100%2C168000%29",
-      "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "aodM": 23.62,
+      "source": "https://archive.org/details/sim_engineer_1957-02-01_203_5271",
+      "referenceType": "design-twl",
+      "estimated": false,
+      "meaning": "1957 Walton South (now QEII) design TWL, 77.50 ft OD Newlyn \u00d7 0.3048 = 23.622 m, rounded to 23.62 m. Not a live level."
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -451,13 +472,16 @@
       "sourceSha256": "60101e2c8ba6ac36c3e7451a2759afdd5984d3083e228b747ed9ca389744ba46",
       "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
       "freeboardM": 1.5,
-      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey.",
+      "crestResearchCheck": "No numerical TWL or crest found in research; retain estimated water and EA dry-ground crest.",
+      "crestResearchSource": "https://britishdams.org/assets/documents/conferences/2006/papers/Paper%2013%20Kilby.PDF"
     },
     "level": {
       "aodM": 14.576,
       "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28535600%2C536800%29&subset=N%28190900%2C191900%29",
       "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed.",
+      "researchSource": "https://britishdams.org/assets/documents/conferences/2006/papers/Paper%2013%20Kilby.PDF"
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -477,20 +501,32 @@
       "typicalChoice": "Published UKCEH mean replaces the research delivery's historic capacity/area derivation. Maximum and rendered depth retain the cited research figure."
     },
     "bank": {
-      "crestAodM": 15.947,
-      "heightM": 8.187,
+      "crestAodM": 15.55,
+      "heightM": 7.79,
       "groundAodM": 7.76,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534800%2C535800%29&subset=N%28189500%2C191000%29",
-      "sourceSha256": "c27044f2c60d9a7247c74794bf052df9ead9bbc7476bf9626c9b5b71ae274d3f",
-      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
-      "freeboardM": 1.5,
-      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+      "source": "https://britishdams.org/assets/documents/conferences/2006/papers/Paper%2013%20Kilby.PDF",
+      "method": "Published embankment crest 15.55 m OD, Figure 4, Kilby and Ridley (2006).",
+      "freeboardM": 1.46,
+      "freeboardSource": "Computed crestAodM minus level.aodM; both citations retained. No assumed freeboard.",
+      "terrainMeasurement": {
+        "crestAodM": 15.947,
+        "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534800%2C535800%29&subset=N%28189500%2C191000%29",
+        "sourceSha256": "c27044f2c60d9a7247c74794bf052df9ead9bbc7476bf9626c9b5b71ae274d3f",
+        "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+      },
+      "crestResearchCheck": "Published crest replaces EA transect estimate; raw EA measurement retained under terrainMeasurement."
     },
     "level": {
-      "aodM": 14.447,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534800%2C535800%29&subset=N%28189500%2C191000%29",
-      "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "aodM": 14.09,
+      "source": "https://britishdams.org/assets/documents/conferences/2006/papers/Paper%2013%20Kilby.PDF",
+      "referenceType": "target-twl",
+      "estimated": false,
+      "meaning": "2006 published target TWL selected; design 14.69 m and restricted 13.37 m also published. Restricted operation is documented for 2004\u201305; present operating choice is uncertain. Not a live level.",
+      "publishedAlternativesAodM": {
+        "design": 14.69,
+        "target": 14.09,
+        "restricted": 13.37
+      }
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -555,14 +591,16 @@
       "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535800%29&subset=N%28188600%2C189500%29",
       "sourceSha256": "01c358aba5d9f8454af1b5e431c9e4cfdef5e5cb3e77ee018489bf6412120ddf",
       "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
-      "freeboardM": 1.5,
-      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+      "freeboardM": 0.422,
+      "freeboardSource": "Computed crestAodM minus level.aodM; both citations retained. No assumed freeboard.",
+      "crestResearchCheck": "No published crest in reservoir-levels research; retain independently measured EA dry-ground crest."
     },
     "level": {
-      "aodM": 9.772,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535800%29&subset=N%28188600%2C189500%29",
-      "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "aodM": 10.85,
+      "source": "https://archive.org/details/b20409382/page/84/mode/2up",
+      "referenceType": "historic-twl",
+      "estimated": false,
+      "meaning": "1899 shared high-level group TWL, 35.60 ft Liverpool OD \u00d7 0.3048 = 10.85088 m, rounded to 10.85 m. Historical datum; no modern operating survey. Same source level as No. 5."
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },
@@ -585,14 +623,16 @@
       "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535900%29&subset=N%28188200%2C189100%29",
       "sourceSha256": "368381797ea2b2bc009d261f1ae83a417e971d7f84a078fcbd82a2fb0e904fd8",
       "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
-      "freeboardM": 1.5,
-      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+      "freeboardM": 0.609,
+      "freeboardSource": "Computed crestAodM minus level.aodM; both citations retained. No assumed freeboard.",
+      "crestResearchCheck": "No published crest in reservoir-levels research; retain independently measured EA dry-ground crest."
     },
     "level": {
-      "aodM": 9.959,
-      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535900%29&subset=N%28188200%2C189100%29",
-      "estimated": true,
-      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+      "aodM": 10.85,
+      "source": "https://archive.org/details/b20409382/page/84/mode/2up",
+      "referenceType": "historic-twl",
+      "estimated": false,
+      "meaning": "1899 shared high-level group TWL, 35.60 ft Liverpool OD \u00d7 0.3048 = 10.85088 m, rounded to 10.85 m. Historical datum; no modern operating survey. Same source level as No. 4."
     },
     "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
   },

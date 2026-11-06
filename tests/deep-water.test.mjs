@@ -111,3 +111,22 @@ test('off-screen basins and dormant animals leave render traversal, and return o
  assert.ok(!b.group.visible);assert.ok(water.bodies[1].group.visible);water.group.updateMatrixWorld(true);assert.equal(animalMatrixVisits,0);assert.ok(water.contains(0,90,0),'off-screen water retains physical membership');
  for(const b of water.bodies)b.life.dispose();
 });
+
+test('published reservoir TWLs replace freeboard guesses and unresolved levels stay estimates',()=>{
+ const byId=new Map(data.bodies.map(b=>[b.id,b]));
+ for(const[id,water,crest]of[
+  ['way/23129884',21.64,23.008],['way/147638018',23.62,25.45],
+  ['way/3171810',14.09,15.55],['way/3172042',10.85,11.272],['way/3172043',10.85,11.459]
+ ]){
+  const s=byId.get(id),body=buildWaterBody(s,s.rings[0],()=>s.bank.groundAodM*5);
+  assert.equal(s.level.estimated,false,s.name);
+  assert.equal(body.waterY,water*5,s.name+' published TWL');
+  assert.equal(body.crestY,crest*5,s.name+' crest');
+  assert.ok(Math.abs(s.bank.freeboardM-(crest-water))<.00001,s.name+' freeboard');
+  let bed=Infinity;
+  for(let i=1;i<body.basinPos.length;i+=3)bed=Math.min(bed,body.basinPos[i]);
+  assert.ok(Math.abs((body.waterY-bed)/5-s.depth.renderM)<s.depth.renderM*.1,s.name+' depth');
+ }
+ for(const id of ['way/23161630','way/147855517','way/147855519','way/147855520'])assert.equal(byId.get(id).level.estimated,true,id);
+ assert.deepEqual(byId.get('way/3171810').level.publishedAlternativesAodM,{design:14.69,target:14.09,restricted:13.37});
+});

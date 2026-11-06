@@ -9,6 +9,7 @@
 // write depth and the terrain is masked open over the wet polygons).
 
 import { test, expect } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import UPNG from 'upng-js';
 import * as THREE from 'three';
 import { FORESHORE_SITE_IDS } from '../src/tideway-platforms.js';
@@ -53,7 +54,7 @@ async function ready(page) {
     const u = window.__ug;
     return !!(u && u.intro && !u.intro.isRunning() && u.thamesMesh && u.airportDockGroup && u.tidewayPlatforms
       && u.tidewayPlatforms.children.length && u.getSewerRoutes().length && u.scene.getObjectByName('reservoirs')
-      && u.scene.getObjectByName('canals'));
+      && u.scene.getObjectByName('canals') && u.deepWater?.bodies.length);
   }, null, { timeout: 180000 });
   await page.evaluate(() => { window.__ug.sim.paused = true; window.__ug.controls.enableDamping = false; });
 }
@@ -196,7 +197,8 @@ test.describe('lane W: in the running app', () => {
   // Pixel occlusion: a magenta marker under each water body, seen from above.
   const CASES = [
     { name: 'King George V Dock', where: 'dock', x: 13100, z: 60 },
-    { name: 'Royal Albert Dock', where: 'dock', x: 12400, z: -190 },
+    // Keep the entire 40 m marker under the mapped water, clear of the quay.
+    { name: 'Royal Albert Dock', where: 'dock', x: 12400, z: -230 },
     { name: 'King George V Reservoir', where: 'reservoir' },
     { name: "Regent's Canal", where: 'canal' },
   ];
@@ -205,8 +207,18 @@ test.describe('lane W: in the running app', () => {
       await ready(page);
       const setup = await page.evaluate(c => {
         const u = window.__ug, THREE = window.__ugTHREE;
-        let x = c.x, z = c.z, waterY;
-        if (c.where === 'dock') waterY = u.getAirportDockSurfaceY({ x, z }, 5);
+        let x = c.x, z = c.z, waterY, markerY;
+        if (c.where === 'dock') {
+          // Fixture correction, acceptance erratum 5: the old fixed offset
+          // could put the marker inside the sourced water, above its bed.
+          const body = u.deepWater.at(x, z);
+          if (!body || body.spec.kind !== 'dock') throw Error(`No deep-water dock at ${c.name}`);
+          for (const dx of [-20, 0, 20]) for (const dz of [-20, 0, 20]) {
+            if (!body.containsXZ(x + dx, z + dz)) throw Error(`Marker footprint leaves ${c.name}`);
+          }
+          waterY = body.waterY;
+          markerY = body.bedAt(x, z) - 10 * u.VERTICAL_EXAGGERATION;
+        }
         else if (c.where === 'reservoir') {
           const m = u.scene.getObjectByName('reservoirs').children.find(o => o.isMesh && o.userData.name === c.name);
           m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox;
@@ -221,13 +233,14 @@ test.describe('lane W: in the running app', () => {
         const marker = new THREE.Mesh(new THREE.BoxGeometry(size, 4, size),
           new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, opacity: 1, fog: false, toneMapped: false, depthWrite: true }));
         marker.name = 'lane-w-occlusion-marker'; marker.renderOrder = 2;
-        marker.position.set(x, waterY - 60, z);
+        markerY ??= waterY - 60;
+        marker.position.set(x, markerY, z);
         u.scene.add(marker);
         const eye = { x: x + 1, y: waterY + (c.where === 'canal' ? 250 : 300), z: z + 1 };
-        u.camera.position.set(eye.x, eye.y, eye.z); u.controls.target.set(x, waterY - 60, z);
-        u.camera.lookAt(x, waterY - 60, z); u.controls.update();
+        u.camera.position.set(eye.x, eye.y, eye.z); u.controls.target.set(x, markerY, z);
+        u.camera.lookAt(x, markerY, z); u.controls.update();
         // The same marker in open air proves the camera can see it.
-        return { x, z, waterY };
+        return { x, z, waterY, markerY };
       }, c);
       await frames(page); await page.waitForTimeout(600); await frames(page);
       const count = async () => {
@@ -242,8 +255,33 @@ test.describe('lane W: in the running app', () => {
       await page.evaluate(w => { window.__ug.scene.getObjectByName('lane-w-occlusion-marker').position.y = w + 20; }, setup.waterY);
       await frames(page); await page.waitForTimeout(300); await frames(page);
       const shown = await count();
+      const measurement = { name: c.name, ...setup, hidden, shown };
       expect(shown, `${c.name}: control marker visible`).toBeGreaterThan(200);
       expect(hidden, `${c.name}: marker under the water is hidden`).toBeLessThan(20);
+      if (c.where === 'dock') {
+        // The physical bed hides the ordinary marker even without D-040's
+        // cull. Also probe the cull itself: a line-group sentinel deliberately
+        // bypasses depth testing, so the bed cannot give a false pass.
+        await page.evaluate(({ markerY }) => {
+          const u = window.__ug, THREE = window.__ugTHREE;
+          const marker = u.scene.getObjectByName('lane-w-occlusion-marker');
+          marker.position.y = markerY;
+          marker.material.depthTest = false;
+          const line = new THREE.Group(); line.name = 'line:lane-w-occlusion-control';
+          u.scene.add(line); line.add(marker);
+        }, setup);
+        await frames(page);
+        const culled = await count();
+        measurement.culled = culled;
+        expect(culled, `${c.name}: below-bed underground line is culled`).toBeLessThan(20);
+        await page.evaluate(() => window.__ug.economies.set('underAbove', false));
+        await frames(page);
+        const unculled = await count();
+        measurement.unculled = unculled;
+        expect(unculled, `${c.name}: disabling underground cull exposes the sentinel`).toBeGreaterThan(200);
+        await page.evaluate(() => window.__ug.economies.set('underAbove', true));
+      }
+      await writeFile(test.info().outputPath('occlusion.json'), JSON.stringify(measurement, null, 2));
     });
   }
 });
