@@ -8,12 +8,13 @@ import { collectUndergroundLayers, createUndergroundCull, isAboveGroundView, cul
 // and children are read.
 const node = (name, extra = {}) => ({ name, visible: true, userData: {}, children: [], ...extra });
 function scene() {
-  const whirl = node('tideway-whirlpools');
+  const whirl = node('tideway-platforms');
   const tidewayTunnel = node('tideway-tunnel-west');
   const kids = [
     node('terrainMesh'), node('terrainUnderside'), node('geological-strata'), node('geology-exterior'),
     node('crossrail-tunnel'), node('sewer-tunnels'), node('thamesRiver'), node('surfaceGeometry'), node('overground'),
-    node('tideway-system', { children: [tidewayTunnel, node('tideway-glow-west'), whirl] }),
+    node('tideway-system', { children: [tidewayTunnel, node('tideway-glow-west')] }),
+    whirl,
     node('line:central'), node('line:dlr'),
     node('', { userData: { kind: 'station-markers', surfaceOnly: false } }),
     node('', { userData: { kind: 'station-markers', surfaceOnly: true } }),
@@ -30,7 +31,7 @@ test('the set is the underground layers, less what is seen from above ground', (
     'crossrail-tunnel', 'geological-strata', 'geology-exterior', 'line:central', 'line:dlr', 'sewer-tunnels',
     'station-markers', 'terrainUnderside', 'tideway-glow-west', 'tideway-tunnel-west', 'unified-shafts',
   ]);
-  assert.ok(!collectUndergroundLayers(sc).includes(sc.whirl), 'whirlpools are seen through the water');
+  assert.ok(!collectUndergroundLayers(sc).includes(sc.whirl), 'permanent platforms are above ground');
   const markers = collectUndergroundLayers(sc).filter(o => o.userData.kind === 'station-markers');
   assert.equal(markers.length, 1);
   assert.equal(markers[0].userData.surfaceOnly, false, 'Overground markers stay');

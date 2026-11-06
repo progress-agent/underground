@@ -11,27 +11,11 @@
 import { test, expect } from '@playwright/test';
 import UPNG from 'upng-js';
 import * as THREE from 'three';
-import { FORESHORE_SITE_IDS, findNearest, buildWhirlpoolGeometry, createWhirlpoolMaterial } from '../src/tideway-whirlpool.js';
+import { FORESHORE_SITE_IDS } from '../src/tideway-platforms.js';
+import { findNearest } from '../src/tideway-site-search.js';
 import { DOCK_DEPTHS, AIRPORT_DOCK_DATA, createAirportDockWater } from '../src/airport-docks.js';
 
 test.describe('lane W: pure contracts (node)', () => {
-  test('whirlpool geometry lies on the floor it is given and is deterministic', () => {
-    const floorAt = (x, z) => -40 + 0.01 * x - 0.02 * z;
-    const a = buildWhirlpoolGeometry({ cx: 100, cz: 50, innerR: 0.5, outerR: 24, floorAt });
-    const b = buildWhirlpoolGeometry({ cx: 100, cz: 50, innerR: 0.5, outerR: 24, floorAt });
-    expect(Array.from(a.attributes.position.array)).toEqual(Array.from(b.attributes.position.array));
-    const p = a.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const f = floorAt(p.getX(i), p.getZ(i));
-      expect(p.getY(i) - f).toBeGreaterThan(0);          // on, never under, the bed
-      expect(p.getY(i) - f).toBeLessThan(0.5);
-      expect(Math.hypot(p.getX(i) - 100, p.getZ(i) - 50)).toBeLessThanOrEqual(24.001);
-    }
-    const m = createWhirlpoolMaterial();
-    expect(m.transparent).toBe(true); expect(m.depthWrite).toBe(false);
-    expect(m.userData.whirlpoolUniforms.uTime.value).toBe(0);
-  });
-
   test('findNearest walks out to the nearest satisfying point', () => {
     expect(findNearest(() => true, 5, 6)).toEqual({ x: 5, z: 6, moved: 0 });
     const r = findNearest((x) => x > 40, 0, 0, 100, 4);
@@ -67,8 +51,8 @@ async function ready(page) {
   await page.goto('/?skip=1');
   await page.waitForFunction(() => {
     const u = window.__ug;
-    return !!(u && u.intro && !u.intro.isRunning() && u.thamesMesh && u.airportDockGroup && u.tidewayWhirlpools
-      && u.tidewayWhirlpools.children.length && u.getSewerRoutes().length && u.scene.getObjectByName('reservoirs')
+    return !!(u && u.intro && !u.intro.isRunning() && u.thamesMesh && u.airportDockGroup && u.tidewayPlatforms
+      && u.tidewayPlatforms.children.length && u.getSewerRoutes().length && u.scene.getObjectByName('reservoirs')
       && u.scene.getObjectByName('canals'));
   }, null, { timeout: 180000 });
   await page.evaluate(() => { window.__ug.sim.paused = true; window.__ug.controls.enableDamping = false; });
@@ -76,7 +60,7 @@ async function ready(page) {
 const frames = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
 
 test.describe('lane W: in the running app', () => {
-  test('Tideway: no shaft rises above ground, bed or water; foreshore sites are whirlpools on the bed', async ({ page }) => {
+  test('Tideway: every shaft stays below ground or bed; no foreshore whirlpool remains', async ({ page }) => {
     await ready(page);
     const r = await page.evaluate(() => {
       const u = window.__ug, nav = u.thamesMesh.userData.navigation, TOP = u.WATER_TOP_Y;
@@ -103,35 +87,20 @@ test.describe('lane W: in the running app', () => {
             inRiver: !!m.userData.inRiver, open: m.geometry.parameters.openEnded });
         }
       }
-      const whirl = u.tidewayWhirlpools.children.map(w => {
-        const p = w.geometry.attributes.position; let maxAbove = -Infinity, maxY = -Infinity, dry = 0;
-        for (let i = 0; i < p.count; i += 7) {
-          const x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = u.getTerrainMeshSurfaceY({ x, z });
-          maxAbove = Math.max(maxAbove, y - f); maxY = Math.max(maxY, y);
-          if (!nav.containsXZ(x, z)) dry++;
-        }
-        return { id: w.userData.shaftId, maxAbove, maxY, dry, renderOrder: w.renderOrder, centreWet: nav.containsXZ(w.userData.centre.x, w.userData.centre.z) };
-      });
+      const whirl=[];
+      if(u.scene.getObjectByName('tideway-whirlpools')) throw Error('retired whirlpools remain');
       return { shafts, whirl, TOP };
     });
     expect(r.shafts.length).toBe(21 + 5);      // 21 Tideway shaft sites (Acton..Abbey Mills) + 5 Lee Tunnel shafts
     for (const s of r.shafts) {
       expect(s.open, s.id).toBe(true);                                   // no cap anywhere
       expect(s.worst, `${s.id} top below its ground or bed across the whole footprint`).toBeLessThan(0);
-      if (s.wetRim || s.inRiver) expect(s.top, `${s.id} under the water top`).toBeLessThan(r.TOP);
+      if (s.wetRim) expect(s.top, `${s.id} under the water top`).toBeLessThan(r.TOP);
       // A land shaft's wall stays out of the modelled river altogether.
       if (!s.inRiver) expect(s.wetRim, `${s.id} land shaft footprint in the river`).toBe(0);
     }
-    // Every foreshore site is a whirlpool in the modelled river; nothing else is.
-    expect(r.whirl.map(w => w.id).sort()).toEqual(['albert', 'blackfriars', 'chambers', 'chelsea', 'heathwall', 'kemp', 'putney', 'victoria']);
-    for (const w of r.whirl) {
-      expect(w.centreWet, w.id).toBe(true);
-      expect(w.dry, `${w.id} disc lies in the water`).toBe(0);
-      expect(w.maxY, `${w.id} below the water top`).toBeLessThan(r.TOP);
-      expect(w.maxAbove, `${w.id} lies on the bed`).toBeLessThan(0.6);
-      expect(w.renderOrder).toBeLessThan(1);                              // before SURFACE_WATER
-    }
-    expect(r.shafts.filter(s => s.inRiver).map(s => s.id).sort()).toEqual(r.whirl.map(w => w.id).sort());
+    expect(r.whirl).toEqual([]);
+    expect(r.shafts.filter(s => s.inRiver).map(s => s.id).sort()).toEqual([...FORESHORE_SITE_IDS].sort());
   });
 
   // Fix round 1 (verifier): moving a foreshore shaft into open water, or a land
@@ -174,29 +143,12 @@ test.describe('lane W: in the running app', () => {
     expect(r.out.length).toBe(21 + 5);
     // Some sites really are moved (the foreshore ones into open water), so the
     // check below is not vacuous.
-    expect(r.out.filter(s => s.moved > 20).length).toBeGreaterThanOrEqual(5);
+    expect(r.out.filter(s => s.inRiver).length).toBe(8); // D-060: corrected source axes replace open-water relocation.
     for (const s of r.out) {
       expect(s.d, `${s.id} shaft axis to ${s.line} centreline (moved ${s.moved} m)`).toBeLessThan(2);
       // The shaft runs down to the tunnel's centreline depth where it meets it.
       expect(s.dy, `${s.id} shaft bottom to ${s.line} centreline`).toBeLessThan(8);
     }
-  });
-
-  test('Tideway whirlpools turn with simulation time only', async ({ page }) => {
-    await ready(page);
-    const t = await page.evaluate(async () => {
-      const u = window.__ug, uni = u.tidewayWhirlpools.children[0].material.userData.whirlpoolUniforms;
-      u.setTidewayWhirlpoolTime(123.5);
-      const a = uni.uTime.value;
-      await new Promise(r => setTimeout(r, 400));                        // paused: no advance
-      const b = uni.uTime.value;
-      u.sim.paused = false;
-      await new Promise(r => setTimeout(r, 600));
-      const c = uni.uTime.value;
-      u.sim.paused = true;
-      return { a, b, c };
-    });
-    expect(t.a).toBe(123.5); expect(t.b).toBe(123.5); expect(t.c).toBeGreaterThan(123.5);
   });
 
   test('Victorian sewers: every crown under the modelled river bed', async ({ page }) => {

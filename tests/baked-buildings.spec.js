@@ -80,6 +80,21 @@ const countStationHidesPayload = async (page) => page.evaluate(async () => {
   return n;
 });
 
+// D-060: independently count payload centres in the researched cleared Chambers
+// operational area. Do not call the implementation's building predicate here.
+const countTidewayHidesPayload = page => page.evaluate(async()=>{
+  const {parseBakedBuildings,BAKED_URL}=await import('/src/baked-buildings.js');
+  const payload=parseBakedBuildings(await(await fetch(BAKED_URL)).arrayBuffer()),u=window.__ug;
+  const c=u.llToXZ(51.50074,-.06549),a=u.llToXZ(51.50076,-.06483),b=u.llToXZ(51.50120,-.06684),dx=b.x-a.x,dz=b.z-a.z;
+  const sign=Math.sign(dx*(c.z-a.z)-dz*(c.x-a.x));let count=0;
+  for(const t of payload.tiles)for(let i=0,o=t.offset;i<t.count;i++,o+=10){
+    const x=t.minX+payload.view.getUint16(o,true)*.1,z=t.minZ+payload.view.getUint16(o+2,true)*.1,lx=x-c.x,n=c.z-z;
+    if(!((Math.abs(lx)<=20&&Math.abs(n)<=15)||(lx>=18&&lx<=36&&Math.abs(n)<=12.5)))continue;
+    if(sign*(dx*(z-a.z)-dz*(x-a.x))>=0)count++;
+  }
+  return count;
+});
+
 async function bootLive(page) {
   await page.goto('/?buildings=live');
   await page.waitForFunction(
@@ -120,7 +135,10 @@ test('baked path places buildings where the live path places them', async ({ pag
   const stationHides = await countStationHidesPayload(page);
   expect(stationHides, 'station hides: the boxes under the station buildings').toBeGreaterThan(200);
   expect(await page.evaluate(() => window.__ug.stationBuildings.hidden.baked), 'the app hid exactly those').toBe(stationHides);
-  expect(stats.buildings, 'not every on-map baked building became an instance').toBe(stats.buildingsTotal - offMap - stationHides);
+  const tidewayHides=await countTidewayHidesPayload(page);
+  console.log('Chambers permanent-works replacements:',tidewayHides);
+  expect(tidewayHides).toBe(1);
+  expect(stats.buildings, 'all map, station and Tideway replacements accounted for').toBe(stats.buildingsTotal - offMap - stationHides - tidewayHides);
 
   const baked = await page.evaluate(collect, WINDOW_M);
   expect(baked.length).toBeGreaterThan(1000);
@@ -222,7 +240,7 @@ test('baked path survives a round trip back to live and forward again', async ({
     { timeout: 60000 });
   const bakedCount = await page.evaluate(() => window.__ug.buildingInstanceCount);
   // s02:B: minus the station hides (their own category).
-  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal) - await countOffMapPayload(page) - await countStationHidesPayload(page));
+  expect(bakedCount).toBe(await page.evaluate(() => window.__ug.bakedStats.buildingsTotal) - await countOffMapPayload(page) - await countStationHidesPayload(page) - await countTidewayHidesPayload(page));
 
   // Back to live. Tiles loaded while baked was active hold no building meshes,
   // so resetLoadedTiles() has to send them round the arrival path again. This
