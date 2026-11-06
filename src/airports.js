@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { aircraftLightLayout, aircraftPhase, createAircraftLightBatch } from './aircraft-lights.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import data from './airport-data.json';
 import { createAirportSuppression } from './airport-suppression.js';
@@ -63,14 +64,24 @@ export function* createAirportsSteps({getSurfaceY,VE=5,heightScale=1}={}) {
  for(const [mat,positions]of ground){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));yield* computeVertexNormalsSteps(g);const mesh=new THREE.Mesh(g,mats[mat]);mesh.name=`airport-surface-${site.id}-${mat}`;mesh.material.side=THREE.DoubleSide;mesh.userData={type:'airport',airportId:site.id,name:site.name,part:'surface'};group.add(mesh);surfaces.push(mesh);yield;}
  for(const [mat,parts]of batches){const g=yield* mergeGeometriesSteps(parts);for(const p of parts)p.dispose();const mesh=new THREE.Mesh(g,mats[mat]);mesh.name=`airport-architecture-${site.id}-${mat}`;mesh.userData={type:'airport',airportId:site.id,name:site.name,part:'architecture',features:features.get(mat)||[]};g.userData.original=new Float32Array(g.attributes.position.array);group.add(mesh);meshes.push(mesh);yield;}
  }
+ const lights=createAircraftLightBatch(stats.aircraft,'aircraft-parked-beacons');root.add(lights.points);
+ const matrix=new THREE.Matrix4();let beaconDirty=true;
+ root.userData.lights=lights;
+ root.userData.updateNight=(amount)=>{
+  if(amount>0&&beaconDirty){lights.reset();for(const group of root.children)for(const a of group.userData.aircraft||[]){
+   const beacon=aircraftLightLayout(a.length,{glider:a.model==='glider'}).find(l=>l.kind==='beacon');
+   matrix.makeRotationY(a.yaw);const e=matrix.elements;const k=VE*current;e[1]*=k;e[5]*=k;e[9]*=k;
+   matrix.setPosition(a.x,sample(a.x,a.z)+1.5,a.z);lights.add(beacon,matrix,aircraftPhase(`${group.name}:${a.x}:${a.z}`),true);
+  }lights.finish(amount);beaconDirty=false;}else lights.setAmount(amount);
+ };
  let current=heightScale;
- root.userData.setHeightScale=value=>{if(!Number.isFinite(value)||value<=0)throw new Error('Airport height scale must be positive');current=value;for(const m of meshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.airportBase,original=g.userData.original;for(let i=0;i<p.count;i++)p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*VE*value;p.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();}};
+ root.userData.setHeightScale=value=>{if(!Number.isFinite(value)||value<=0)throw new Error('Airport height scale must be positive');current=value;beaconDirty=true;for(const m of meshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.airportBase,original=g.userData.original;for(let i=0;i<p.count;i++)p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*VE*value;p.needsUpdate=true;g.computeVertexNormals();g.computeBoundingBox();g.computeBoundingSphere();}};
  root.userData.refreshTerrain=()=>{for(const m of meshes){const g=m.geometry,anchor=g.attributes.airportAnchor,base=g.attributes.airportBase,original=g.userData.original;for(let i=0;i<base.count;i++){const newBase=sample(anchor.getX(i),anchor.getY(i))+g.attributes.airportLift.getX(i),delta=newBase-base.array[i];original[i*3+1]+=delta;base.array[i]=newBase;}}for(const m of surfaces){const p=m.geometry.attributes.position;const lifts=m.geometry.userData.lifts;if(!lifts)continue;for(let i=0;i<p.count;i++)p.array[i*3+1]=sample(p.getX(i),p.getZ(i))+lifts[i];p.needsUpdate=true;m.geometry.computeBoundingSphere();}root.userData.setHeightScale(current);};
  for(const m of surfaces){const p=m.geometry.attributes.position;m.geometry.userData.lifts=Float32Array.from({length:p.count},(_,i)=>p.getY(i)-sample(p.getX(i),p.getZ(i)));yield;}
  // The initial height scale, as setHeightScale applies it, one mesh at a time (the call is 100+ ms at Heathrow).
  if(!Number.isFinite(heightScale)||heightScale<=0)throw new Error('Airport height scale must be positive');current=heightScale;
  for(const m of meshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.airportBase,original=g.userData.original;for(let i=0;i<p.count;i++){p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*VE*heightScale;if(i%60000===59999)yield;}p.needsUpdate=true;yield* computeVertexNormalsSteps(g);yield* computeBoundingBoxSteps(g);yield* computeBoundingSphereSteps(g);yield;}
- stats.drawCalls=meshes.length+surfaces.length;root.userData.stats=stats;root.userData.pickables=[...meshes,...surfaces];root.userData.dispose=()=>{for(const m of [...meshes,...surfaces])m.geometry.dispose();for(const m of Object.values(mats))m.dispose();root.removeFromParent();};return root;
+ stats.drawCalls=meshes.length+surfaces.length;root.userData.stats=stats;root.userData.pickables=[...meshes,...surfaces];root.userData.dispose=()=>{lights.dispose();for(const m of [...meshes,...surfaces])m.geometry.dispose();for(const m of Object.values(mats))m.dispose();root.removeFromParent();};return root;
 }
 
 /** Raycaster faceIndex is triangle-index into merged nonindexed geometry. */

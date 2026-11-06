@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { aircraftLightLayout, aircraftPhase, createAircraftLightBatch } from './aircraft-lights.js';
+import { nightUniforms } from './night.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import airportData from './airport-data.json' with { type: 'json' };
 import motorwayData from './m25-motorway-data.json' with { type: 'json' };
@@ -455,6 +457,11 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
       const a = lap(1), b = lap(-1), inside = p => p.samples.reduce((n, x) => n + (x.inside ? 1 : 0), 0);
       built = inside(b) > inside(a) ? b : a;
       built.anchorT = 0; built.elevation = elev;
+      // Final starts at the last centreline intercept, after downwind/base.
+      const final = circuitNodes({ end, elev, pattern: stream.pattern }).nodes.find(n => n.final);
+      built.finalS = built.samples.reduce((best, q) => Math.hypot(q.x-final.x,q.z-final.z) < best.d ? {d:Math.hypot(q.x-final.x,q.z-final.z),s:q.s} : best, {d:Infinity,s:0}).s;
+      const firstAir = built.samples.find(s => !s.ground);
+      built.climbEndS = (firstAir?.s || 0) + CIRCUIT_PATTERNS[stream.pattern || 'light'].up;
     }
     built.end = end;
     pathCache.set(key, built);
@@ -597,6 +604,13 @@ export function createTrafficModel({ getSurfaceY, VE = 5, boundary = motorwayDat
     rec.anchor = v.anchor; rec.tau = tau; rec.x = st.x; rec.y = st.y; rec.z = st.z; rec.altM = st.alt; rec.speedMps = st.v; rec.heading = st.heading;
     rec.pitch = st.pitch; rec.bank = st.bank; rec.onGround = st.ground; rec.visible = st.inside;
     rec.onFinal = stream.kind === 'arrival' && st.s >= path.fafS && st.s <= path.aimS;
+    // Landing lights follow the path role, including roll-out and circuit legs.
+    rec.phase = st.ground ? (stream.kind === 'arrival' ? 'rollout' : 'takeoff-roll')
+      : stream.kind === 'arrival' ? (st.s >= path.fafS ? 'final' : 'cruise')
+      : stream.kind === 'departure' ? 'climb'
+      : st.s >= path.finalS ? 'final' : st.s <= path.climbEndS ? 'climb' : 'circuit';
+    rec.landingLights = rec.phase === 'final' || rec.phase === 'rollout' || rec.phase === 'takeoff-roll'
+      || (rec.phase === 'climb' && st.alt - path.elevation <= 3000);
     rec.distanceToAimM = stream.kind === 'arrival' ? path.aimS - st.s : null; rec.elevationM = path.elevation;
     return rec;
   }
@@ -696,6 +710,8 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
   const root = new THREE.Group(); root.name = 'flights';
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .78, metalness: .05, fog: true });
   const meshes = {};
+  const lights = createAircraftLightBatch(capacity * 24 * 150, 'aircraft-flight-lights');
+  const layouts = Object.fromEntries(Object.entries(AIRCRAFT_TYPES).map(([id,t]) => [id, aircraftLightLayout(t.length,t)]));
   // ── s25:F ── separate meshes per type and livery (never per-instance colour)
   for (const model of Object.keys(AIRCRAFT_TYPES)) for (const livery of FLIGHT_LIVERIES) {
     const key = `${model}:${livery}`;
@@ -707,6 +723,7 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
     yield;
   }
   // ── /s25:F ──
+  root.add(lights.points);
   let elapsed = 0, current = [], lastCamera = null, floorPx = minPixels;
   // ── s24:R ── economies, switched on by the app (sprint 24Sep26h, D-038)
   // pool: allocation-free list (flightsInto); cull: aircraft whose bounding
@@ -742,7 +759,10 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
     // getHeightScale() is the app's structure factor (1 / Master since D-039),
     // so VE x it cancels the camera's Master / VE: true proportions on screen.
     const k = VE * Math.max(.05, Number(getHeightScale()) || 1);
-    const focal = floorPx > 0 && camera?.matrixWorldInverse ? focalPx(camera) : 0;
+    const night = nightUniforms.uNightAmt.value;
+    if (night > 0) lights.reset();
+    else lights.setAmount(0);
+    const focal = night === 0 && floorPx > 0 && camera?.matrixWorldInverse ? focalPx(camera) : 0;
     for (const key in meshes) counts[key] = 0; // s24:R: counts is reused, not rebuilt
     for (let fi = 0; fi < n; fi++) {
       const f = current[fi]; // s24:R: indexed, so the pool's spare records are never read
@@ -774,6 +794,10 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
       el[1] *= k; el[5] *= k; el[9] *= k;
       el[12] = f.x; el[13] = f.y; el[14] = f.z;
       mesh.setMatrixAt(i, m); counts[f.meshKey] = i + 1;
+      if (night > 0) {
+        const phase = aircraftPhase(f.id);
+        for (const light of layouts[f.model]) if (light.kind !== 'landing' || f.landingLights) lights.add(light, m, phase);
+      }
     }
     let draws = 0;
     for (const key in meshes) {
@@ -790,7 +814,9 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
       // ── /s24:R ──
       mesh.instanceMatrix.needsUpdate = true;
     }
-    stats.drawCalls = draws; // s25:F
+    if (night > 0) lights.finish(night, camera);
+    stats.lightPoints = night > 0 ? lights.count : 0;
+    stats.drawCalls = draws + (lights.points.visible ? 1 : 0); // s25:F
     stats.flights = n; stats.visible = n; stats.culled = culled; stats.renders = (stats.renders || 0) + 1; // s24:R: n, not current.length
   }
 
@@ -838,8 +864,8 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
     // The module's own setter, so dev tooling reaches the same module instance
     // the scene imported (a fresh dynamic import can be a separate HMR copy).
     setWindSource,
-    traffic, meshes, stats, pick, formatLabel: formatFlightLabel,
-    dispose() { for (const mesh of Object.values(meshes)) { mesh.geometry.dispose(); mesh.dispose?.(); } material.dispose(); root.removeFromParent(); },
+    traffic, meshes, stats, lights, prepareLights: (renderer,camera,scene,target) => lights.prepare(renderer,camera,scene,target), pick, formatLabel: formatFlightLabel,
+    dispose() { lights.dispose(); for (const mesh of Object.values(meshes)) { mesh.geometry.dispose(); mesh.dispose?.(); } material.dispose(); root.removeFromParent(); },
   };
   // s21:L: the first list (render below) builds a path for each stream's variants; build them here, one stream at a
   // time, with the module's own memoised functions (flightVariant and pathFor cache by stream and variant), so the render
