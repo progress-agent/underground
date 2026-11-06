@@ -399,8 +399,8 @@ function buildOctopus(mat) {
  * @param {Array}  [o.bridges]      bridges.json bridges (for the pier anchor)
  * @param {number} [o.VE=5] @param {number} [o.topY] @param {number} [o.waterLevelM=2]
  */
-export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, topY = navigation?.topY ?? 12, waterLevelM = 2 } = {}) {
-  const river = buildRiverFrame(thamesPoints, { VE, topY, waterLevelM });
+export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, topY = navigation?.topY ?? 12, waterLevelM = 2, habitat = null } = {}) {
+  const river = habitat?.frame ?? buildRiverFrame(thamesPoints, { VE, topY, waterLevelM });
   if (!river) throw new Error('Sea life needs the Thames centreline');
   const mat = createSeaLifeMaterials();
   const group = new THREE.Group();
@@ -472,8 +472,9 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
 
   const speciesState = {};
   for (const base of SEA_LIFE_SPECIES) {
-    const spec = { ...base };
-    if (spec.anchor) spec.S0 = river.nearestS(spec.anchor.e - BNG_REF_E, -(spec.anchor.n - BNG_REF_N));
+    const spec = habitat ? habitat.species(base) : { ...base };
+    if (!spec) continue;
+    if (!habitat && spec.anchor) spec.S0 = river.nearestS(spec.anchor.e - BNG_REF_E, -(spec.anchor.n - BNG_REF_N));
     speciesState[spec.id] = spec;
 
     if (spec.id === 'blue-whale' || spec.id === 'turtle' || spec.id === 'hammerhead' || spec.id === 'bottlenose-whale') {
@@ -490,6 +491,12 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
         addCreature({ id, spec, root, holder, animate: (t) => made.animate(t, id),
           pose: t => { const p = pathPose(spec, i, t); p.roll = 0.12 * Math.sin(t * 0.21 + i); return p; } });
       }
+     } else if (spec.id === 'octopus' && habitat) {
+      const { root, holder } = makeRoot('sea-life:octopus');
+      const made = buildOctopus(mat); holder.add(made.body);
+      const P = placeSLF(spec, { S: spec.S0, l: 0, f: 0.15 });
+      addCreature({ id: 'octopus', spec, root, holder, animate: t => made.animate(t, 'octopus'),
+        pose: t => ({ ...P, yaw: 0, pitch: 0, roll: 0.04 * Math.sin(t * 0.07) }) });
     } else if (spec.id === 'octopus') {
       const bridge = bridges.find(b => b.curatedSlug === spec.pier.bridge);
       const anchors = bridge ? bridgePierAnchors(bridge) : [];
@@ -758,6 +765,6 @@ export function createSeaLife({ thamesPoints, navigation, bridges = [], VE = 5, 
     },
   };
   group.userData.seaLife = api;
-  group.userData.stats = { species: SEA_LIFE_SPECIES.length, individuals: SEA_LIFE_SPECIES.reduce((n, s) => n + (s.count ?? 1), 0) };
+  group.userData.stats = { species: Object.keys(speciesState).length, individuals: Object.values(speciesState).reduce((n, s) => n + (s.count ?? 1), 0) };
   return api;
 }

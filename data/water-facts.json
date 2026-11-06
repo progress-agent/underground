@@ -1,0 +1,854 @@
+{
+  "way/147189989": {
+    "name": "Queen Mary Reservoir",
+    "depth": {
+      "typicalM": 10.62,
+      "maxM": 11.6,
+      "renderM": 11.6,
+      "source": "https://repository.royalholloway.ac.uk/file/5b91ecf4-94c0-4b83-98a0-3af128b3ec2a/1/10096234.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "bank": {
+      "heightM": 12.145,
+      "freeboardM": 1.855,
+      "crestAodM": 24.415,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28505900%2C508400%29&subset=N%28168600%2C170800%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 12.27,
+      "sourceSha256": "705f9a68a4e787998b8e1647fc568ccff6d63e943b24f83fecb35f14a3275062",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "level": {
+      "aodM": 22.56,
+      "source": "https://britishdams.org/2008conf/papers/Construction%20remedial%20works%20and%20discontinuance/P%2022%20Oyeyemi%20final.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147855503": {
+    "name": "Wraysbury Reservoir",
+    "depth": {
+      "typicalM": 16.8,
+      "maxM": 21.6,
+      "renderM": 21.6,
+      "source": "https://uklakes.ceh.ac.uk/detail.html?wbid=42417",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "mode": "VOLUME",
+    "reason": "Wet outline wholly outside the actual motorway barrier ring, so omitted under the map erratum. Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 31.1,
+      "source": "https://en.wikipedia.org/wiki/Wraysbury_Reservoir",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "bank": {
+      "heightM": 16.123,
+      "freeboardM": 1.741,
+      "crestAodM": 32.841,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28501600%2C503400%29&subset=N%28173300%2C175900%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 16.718,
+      "sourceSha256": "3b54a97388615ca154b73362a2dbb0318f4a3cef5a9952b83a859460ee433532",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json",
+    "mapStatus": "outside-map; source inventory only, no rendered volume or bank"
+  },
+  "way/147855517": {
+    "name": "King George VI Reservoir",
+    "depth": {
+      "typicalM": 13.2,
+      "maxM": 17,
+      "renderM": 17,
+      "source": "https://uklakes.ceh.ac.uk/detail.html?wbid=42488",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "maximumSource": "https://en.wikipedia.org/wiki/King_George_VI_Reservoir"
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 29,
+      "source": "https://uklakes.ceh.ac.uk/detail.html?wbid=42488",
+      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
+      "referenceType": "lake-elevation"
+    },
+    "bank": {
+      "heightM": 15.549,
+      "freeboardM": 2.126,
+      "crestAodM": 31.126,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28503500%2C504800%29&subset=N%28172100%2C174400%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 15.577,
+      "sourceSha256": "d5dc9c99a1413447f87b5d4b6b6c28c18b1fe91302f53720441c92a773eeb656",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3172115": {
+    "name": "King George V Reservoir (South)",
+    "depth": {
+      "typicalM": 5.72,
+      "maxM": 7.5,
+      "renderM": 7.5,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "conflict": "EA CDE mean 8.122 m exceeds the historic 7.5 m maximum. Use research historic design maximum 7.5 m, not an inconsistent maximum inferred from the mean."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 20.18,
+      "source": "https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "bank": {
+      "heightM": 9.615,
+      "freeboardM": 2.32,
+      "crestAodM": 22.5,
+      "source": "https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 12.812,
+      "sourceSha256": "3c46931eda1de7b2201bdec76556a98b17033b794f3ba6774387485d1084c620",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/23130091": {
+    "name": "King George V Reservoir (North)",
+    "depth": {
+      "typicalM": 5.72,
+      "maxM": 7.5,
+      "renderM": 7.5,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "conflict": "EA CDE mean 8.122 m exceeds the historic 7.5 m maximum. Use research historic design maximum 7.5 m, not an inconsistent maximum inferred from the mean."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 20.18,
+      "source": "https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "bank": {
+      "heightM": 8.189,
+      "freeboardM": 2.32,
+      "crestAodM": 22.5,
+      "source": "https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 14.198,
+      "sourceSha256": "6baafb57122f66a9bbb636718228a26e821247634d70701ae23d41f35d9451eb",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/23129884": {
+    "name": "William Girling Reservoir",
+    "depth": {
+      "typicalM": 12.2,
+      "maxM": 12.5,
+      "renderM": 12.5,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "historicCapacityMeanM": 12.3,
+      "typicalSource": "https://uklakes.ceh.ac.uk/detail.html?wbid=41659",
+      "typicalChoice": "Published UKCEH mean replaces the research delivery's historic capacity/area derivation. Maximum and rendered depth retain the cited research figure."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "bank": {
+      "heightM": 12.283,
+      "freeboardM": 1.5,
+      "crestAodM": 23.008,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28536000%2C537500%29&subset=N%28192800%2C195500%29",
+      "freeboardSource": "Estimated 1.5 m freeboard, based on the historical design freeboard in https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/; no site-specific freeboard published.",
+      "groundAodM": 10.725,
+      "sourceSha256": "07a1b9e1cb15e00f76862ba989c501043478f32a5ae145f3aeb753444f09a281",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "level": {
+      "aodM": 21.508,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28536000%2C537500%29&subset=N%28192800%2C195500%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147855520": {
+    "name": "Staines South Reservoir",
+    "depth": {
+      "typicalM": 7.502,
+      "maxM": 8.9916,
+      "renderM": 8.9916,
+      "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642525",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "maximumSource": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "maximumMeaning": "Historic MWB depth in feet times 0.3048; flat illustrative bed, not modern sounding."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 23,
+      "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642525",
+      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
+      "referenceType": "lake-elevation"
+    },
+    "bank": {
+      "heightM": 9.214,
+      "freeboardM": 1.545,
+      "crestAodM": 24.545,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28504400%2C506200%29&subset=N%28172000%2C173400%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 15.331,
+      "sourceSha256": "cf0f27b0d27de1d667f14fc32afd5f061051f93d2ddb9fb4f11a8bf3447aa816",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147855519": {
+    "name": "Staines North Reservoir",
+    "depth": {
+      "typicalM": 9.27,
+      "maxM": 11.8872,
+      "renderM": 11.8872,
+      "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642490",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "maximumSource": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "maximumMeaning": "Historic MWB depth in feet times 0.3048; flat illustrative bed, not modern sounding."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 26,
+      "source": "https://environment.data.gov.uk/catchment-planning/WaterBody/GB30642490",
+      "meaning": "Published water-body elevation/altitude reference, not identified by its source as operating TWL or a contemporary water-level survey. The W2 tolerance is unverified.",
+      "referenceType": "lake-elevation"
+    },
+    "bank": {
+      "heightM": 11.425,
+      "freeboardM": 1.505,
+      "crestAodM": 27.505,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28504400%2C505800%29&subset=N%28172800%2C174400%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 16.08,
+      "sourceSha256": "e908854d391624a36039ea80d13ab83ec0ff8c7496683ec94edbe540f287211e",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147638018": {
+    "name": "Queen Elizabeth II Reservoir",
+    "depth": {
+      "typicalM": 15.3,
+      "maxM": 17.8,
+      "renderM": 17.8,
+      "source": "https://www.researchgate.net/publication/364241577_Floating_solar_panels_on_reservoirs_impact_phytoplankton_populations_A_modelling_experiment",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "bank": {
+      "heightM": 14.99,
+      "freeboardM": 1.5,
+      "crestAodM": 25.701,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511100%2C512700%29&subset=N%28166100%2C168000%29",
+      "freeboardSource": "Estimated 1.5 m freeboard, based on the historical design freeboard in https://waterprojectsonline.com/case-studies/kgv-reservoir-2023/; no site-specific freeboard published.",
+      "groundAodM": 10.711,
+      "sourceSha256": "3843aa536d81ea3ff3f7669dddaec0dc7028fff2b6f47d97831fff1931e48328",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "level": {
+      "aodM": 24.201,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511100%2C512700%29&subset=N%28166100%2C168000%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147637938": {
+    "name": "Island Barn Reservoir",
+    "depth": {
+      "typicalM": 8.35,
+      "maxM": 9.1,
+      "renderM": 9.1,
+      "source": "https://waterprojectsonline.com/wp-content/uploads/case_studies/2018/Thames_Water_Island_Barn_Reservoir_2018.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 17.59,
+      "source": "https://waterprojectsonline.com/wp-content/uploads/case_studies/2018/Thames_Water_Island_Barn_Reservoir_2018.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "bank": {
+      "heightM": 9.992,
+      "freeboardM": 1.402,
+      "crestAodM": 18.992,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28513300%2C514500%29&subset=N%28166500%2C167600%29",
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard.",
+      "groundAodM": 9,
+      "sourceSha256": "acb0d171669d501b88ff16950438305edb3771519664065f19751169a1b3cdf1",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/122304315": {
+    "name": "Royal Victoria Dock",
+    "depth": {
+      "typicalM": null,
+      "maxM": 9.1,
+      "renderM": 9.1,
+      "source": "https://www.victorianlondon.org/thames/royalalbertdock.htm",
+      "model": "Illustrative level bed at estimated depth; vertical quay walls; not surveyed bathymetry.",
+      "estimated": true,
+      "meaning": "Reasoned illustrative 9.1m basin estimate, near the historical 28ft entrance depth (8.5344m) and the research range 8.5-9.5m. No modern basin survey; not a measured maximum."
+    },
+    "mode": "VOLUME",
+    "reason": "Deep enclosed dock; historical entrance depth and research 8.5-9.5m estimate support a volume. Rendered 9.1m is explicitly estimated.",
+    "level": {
+      "aodM": 4.26,
+      "source": "https://www.newham.gov.uk/downloads/file/1384/newham-sfra-2017-part1",
+      "meaning": "Inherited live-game 4.26m AOD reference; source currently unavailable, as recorded by the research. Retained for visual and navigation continuity, not a verified modern survey.",
+      "unverified": true
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/121158887": {
+    "name": "Royal Albert Dock",
+    "depth": {
+      "typicalM": null,
+      "maxM": 9,
+      "renderM": 9,
+      "source": "https://royaldockswaterways.com/explore/royal-albert-dock/",
+      "model": "Illustrative level bed at published maximum; vertical quay walls; not surveyed bathymetry.",
+      "estimated": false,
+      "meaning": "Operator Key Figures: up to 9m deep, checked 06Nov26f. Illustrative bed at published maximum, not a current hydrographic survey."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 4.26,
+      "source": "https://www.newham.gov.uk/downloads/file/1384/newham-sfra-2017-part1",
+      "meaning": "Inherited live-game 4.26m AOD reference; source currently unavailable, as recorded by the research. Retained for visual and navigation continuity, not a verified modern survey.",
+      "unverified": true
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/190792949": {
+    "name": "King George V Dock",
+    "depth": {
+      "typicalM": null,
+      "maxM": 11.6,
+      "renderM": 11.6,
+      "source": "https://alondoninheritance.com/london-infrastructure/king-george-v-dock-the-last-of-the-royals/",
+      "model": "Illustrative level bed at the sourced maximum (or typical if maximum unknown), with 3:1 shore slopes; not surveyed bathymetry."
+    },
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "level": {
+      "aodM": 4.26,
+      "source": "https://www.newham.gov.uk/downloads/file/1384/newham-sfra-2017-part1",
+      "meaning": "Inherited live-game 4.26m AOD reference; source currently unavailable, as recorded by the research. Retained for visual and navigation continuity, not a verified modern survey.",
+      "unverified": true
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147638019": {
+    "name": "Bessborough Reservoir",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 10.9,
+      "maxM": 12.8016,
+      "renderM": 12.8016,
+      "source": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic MWB 42 ft maximum; typical = capacity / area, as in research. Historical datum OD, not a live measurement."
+    },
+    "level": {
+      "aodM": 19.812,
+      "source": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "meaning": "Historical MWB 65ft OD reference (19.812m); not a contemporary operating survey. Independent checker could not retrieve a readable scan.",
+      "referenceType": "historic-water-reference"
+    },
+    "bank": {
+      "crestAodM": 20.834,
+      "heightM": 10.784,
+      "groundAodM": 10.05,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511600%2C512700%29&subset=N%28167600%2C168700%29",
+      "sourceSha256": "adf1af7e19e6f51848f1fb287ea6282e7b19dd621e742e878a94365047e5c85e",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.022,
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/147637935": {
+    "name": "Knight Reservoir",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 10.5,
+      "maxM": 12.8016,
+      "renderM": 12.8016,
+      "source": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic MWB 42 ft maximum; typical = capacity / area, as in research. Historical datum OD, not a live measurement."
+    },
+    "level": {
+      "aodM": 19.812,
+      "source": "https://www.niph.go.jp/toshokan/koten/Britain/PDF/100718330001.pdf",
+      "meaning": "Historical MWB 65ft OD reference (19.812m); not a contemporary operating survey. Independent checker could not retrieve a readable scan.",
+      "referenceType": "historic-water-reference"
+    },
+    "bank": {
+      "crestAodM": 20.87,
+      "heightM": 10.285,
+      "groundAodM": 10.585,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28511200%2C512200%29&subset=N%28167400%2C168400%29",
+      "sourceSha256": "31e2d66a866e342c7eaeaf944a712f99a90019ae276ad34fdee82a7ac101d384",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.058,
+      "freeboardSource": "Computed difference between the cited crestAodM and published level.aodM; see bank.source and level.source. No separate assumed freeboard."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/23161630": {
+    "name": "Banbury Reservoir",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 7.7,
+      "maxM": 8.5,
+      "renderM": 8.5,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "historicCapacityMeanM": 6.4,
+      "typicalSource": "https://uklakes.ceh.ac.uk/detail.html?wbid=47003",
+      "typicalChoice": "Published UKCEH mean replaces the research delivery's historic capacity/area derivation. Maximum and rendered depth retain the cited research figure."
+    },
+    "bank": {
+      "crestAodM": 16.076,
+      "heightM": 6.746,
+      "groundAodM": 9.33,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28535600%2C536800%29&subset=N%28190900%2C191900%29",
+      "sourceSha256": "60101e2c8ba6ac36c3e7451a2759afdd5984d3083e228b747ed9ca389744ba46",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.5,
+      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+    },
+    "level": {
+      "aodM": 14.576,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28535600%2C536800%29&subset=N%28190900%2C191900%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3171810": {
+    "name": "Lockwood Reservoir",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 6.3,
+      "maxM": 10.4,
+      "renderM": 10.4,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "historicCapacityMeanM": 9.4,
+      "typicalSource": "https://uklakes.ceh.ac.uk/detail.html?wbid=41865",
+      "typicalChoice": "Published UKCEH mean replaces the research delivery's historic capacity/area derivation. Maximum and rendered depth retain the cited research figure."
+    },
+    "bank": {
+      "crestAodM": 15.947,
+      "heightM": 8.187,
+      "groundAodM": 7.76,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534800%2C535800%29&subset=N%28189500%2C191000%29",
+      "sourceSha256": "c27044f2c60d9a7247c74794bf052df9ead9bbc7476bf9626c9b5b71ae274d3f",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.5,
+      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+    },
+    "level": {
+      "aodM": 14.447,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534800%2C535800%29&subset=N%28189500%2C191000%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3171812": {
+    "name": "High Maynard Reservoir",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 4.3,
+      "maxM": 5.8,
+      "renderM": 5.8,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3172113": {
+    "name": "Warwick Reservoir East",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 5.4,
+      "maxM": 5.8,
+      "renderM": 5.8,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/399271256": {
+    "name": "Warwick Reservoir West",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 5.8,
+      "maxM": 5.8,
+      "renderM": 5.8,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3172042": {
+    "name": "Walthamstow No. 4",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 5.8,
+      "renderM": 5.8,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "bank": {
+      "crestAodM": 11.272,
+      "heightM": 4.192,
+      "groundAodM": 7.08,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535800%29&subset=N%28188600%2C189500%29",
+      "sourceSha256": "01c358aba5d9f8454af1b5e431c9e4cfdef5e5cb3e77ee018489bf6412120ddf",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.5,
+      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+    },
+    "level": {
+      "aodM": 9.772,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535800%29&subset=N%28188600%2C189500%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3172043": {
+    "name": "Walthamstow No. 5",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 4.5,
+      "maxM": 5.8,
+      "renderM": 5.8,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "bank": {
+      "crestAodM": 11.459,
+      "heightM": 4.719,
+      "groundAodM": 6.74,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535900%29&subset=N%28188200%2C189100%29",
+      "sourceSha256": "368381797ea2b2bc009d261f1ae83a417e971d7f84a078fcbd82a2fb0e904fd8",
+      "method": "Crest = median 1m DTM transect maxima; low floodplain toe = 10th percentile of 80-120m outer transect medians, avoids neighbouring raised water. Raw samples in data/water-bank-profiles.json.",
+      "freeboardM": 1.5,
+      "freeboardSource": "Estimated 1.5m freeboard where no published TWL is available. Estimate, not a survey."
+    },
+    "level": {
+      "aodM": 9.959,
+      "source": "https://environment.data.gov.uk/spatialdata/lidar-composite-digital-terrain-model-dtm-1m/wcs?service=WCS&version=2.0.1&request=GetCoverage&coverageId=13787b9a-26a4-4775-8523-806d13af58fc__Lidar_Composite_Elevation_DTM_1m&format=image%2Ftiff&subset=E%28534900%2C535900%29&subset=N%28188200%2C189100%29",
+      "estimated": true,
+      "meaning": "Estimated operating water = measured EA DTM crest minus 1.5m assumed freeboard; no published TWL. Height estimate is disclosed."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/23782754": {
+    "name": "West India North (Import) Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 9.595,
+      "renderM": 9.595,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic depth / published bed reference, not a current hydrographic survey."
+    },
+    "level": {
+      "aodM": 4.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "quay": {
+      "aodM": 5.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "relation/18985240": {
+    "name": "West India Middle (Export / Eden) Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 8.5344,
+      "renderM": 8.5344,
+      "source": "https://www.british-history.ac.uk/node/39107",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic depth / published bed reference, not a current hydrographic survey."
+    },
+    "level": {
+      "aodM": 4.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "quay": {
+      "aodM": 5.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/183373686": {
+    "name": "West India South Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 9.6012,
+      "renderM": 9.6012,
+      "source": "https://www.british-history.ac.uk/node/39107",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic depth / published bed reference, not a current hydrographic survey."
+    },
+    "level": {
+      "aodM": 4.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "quay": {
+      "aodM": 5.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/187272267": {
+    "name": "Millwall Outer Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 7.3152,
+      "renderM": 7.3152,
+      "source": "https://www.british-history.ac.uk/survey-london/vols43-4/pp353-356",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic depth / published bed reference, not a current hydrographic survey."
+    },
+    "level": {
+      "aodM": 4.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "quay": {
+      "aodM": 5.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/183373683": {
+    "name": "Millwall Inner Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 8.8392,
+      "renderM": 8.8392,
+      "source": "https://www.british-history.ac.uk/survey-london/vols43-4/pp353-356",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh.",
+      "meaning": "Historic depth / published bed reference, not a current hydrographic survey."
+    },
+    "level": {
+      "aodM": 4.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf",
+      "meaning": "Published operating reference, not a live level"
+    },
+    "quay": {
+      "aodM": 5.23,
+      "source": "https://canalrivertrust.org.uk/media/document/zmUpxQ9NIYaB-zZBNjxG7w/2AkZHZL8bx5jSGXAQbHxKJIg8CVskm8cALO_UWgXyCM/aHR0cHM6Ly9jcnRwcm9kY21zdWtzMDEuYmxvYi5jb3JlLndpbmRvd3MubmV0L2RvY3VtZW50Lw/0190b755-a466-70ce-89cb-17d7c58a4549.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/259674282": {
+    "name": "Greenland Dock",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": null,
+      "maxM": 9.4488,
+      "renderM": 9.4488,
+      "source": "https://en.wikipedia.org/wiki/Greenland_Dock",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "level": {
+      "aodM": 4.0,
+      "source": "https://services.southwark.gov.uk/assets/attach/4256/South-dock-tide-datums.pdf",
+      "meaning": "Illustrative 4m AOD impound estimate using the cited local datum reference; the source does not establish an operating TWL.",
+      "estimated": true,
+      "estimateBasis": "Estimated impound datum; local south-dock chart datum in https://services.southwark.gov.uk/assets/attach/4256/South-dock-tide-datums.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/138040109": {
+    "name": "South Dock (Rotherhithe)",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 2.7,
+      "maxM": 3,
+      "renderM": 3,
+      "source": "https://www.pbo.co.uk/marina-guide/marina-guide-uk/south-dock-marina/",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "level": {
+      "aodM": 4.0,
+      "source": "https://services.southwark.gov.uk/assets/attach/4256/South-dock-tide-datums.pdf",
+      "meaning": "Illustrative 4m AOD impound estimate using the cited local datum reference; the source does not establish an operating TWL.",
+      "estimated": true,
+      "estimateBasis": "Estimated common Greenland / South Dock impound; https://services.southwark.gov.uk/assets/attach/4256/South-dock-tide-datums.pdf"
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "relation/5392": {
+    "name": "The Serpentine",
+    "mode": "2D",
+    "depth": {
+      "typicalM": 2.43,
+      "maxM": 5.3,
+      "renderM": null,
+      "source": "https://en.wikipedia.org/wiki/The_Serpentine",
+      "estimated": false
+    },
+    "level": {
+      "aodM": 14.96,
+      "source": "https://en.wikipedia.org/wiki/The_Serpentine",
+      "meaning": "Unverified published historic reference, not used for rendering"
+    },
+    "reason": "Shallow typical depth 2.43m (393700m3 / 162000m2); keep park-water artwork and avoid a volume for the isolated maximum 5.3m depression.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/19841953": {
+    "name": "The Long Water",
+    "mode": "2D",
+    "depth": {
+      "typicalM": null,
+      "maxM": null,
+      "renderM": null,
+      "source": "https://en.wikipedia.org/wiki/The_Long_Water"
+    },
+    "reason": "No separate reliable depth for this shallow upstream part of the same park lake. Preserve live artwork.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3171879": {
+    "name": "Low Maynard Reservoir",
+    "mode": "2D",
+    "depth": {
+      "typicalM": 1.5,
+      "maxM": 3,
+      "renderM": null,
+      "source": "https://en.wikipedia.org/wiki/Lee_Valley_Reservoir_Chain"
+    },
+    "reason": "Shallow mean 1.5m, maximum3m; retain live surface.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/3172040": {
+    "name": "Walthamstow No. 2",
+    "mode": "2D",
+    "depth": {
+      "typicalM": 1.45,
+      "maxM": null,
+      "renderM": null,
+      "source": "https://britishdams.org/2004conf/papers/peck.pdf"
+    },
+    "reason": "Shallow settling lagoon, design volume77000m3 / mapped53000m2 =1.45m before silt; retain live surface.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/4049122": {
+    "name": "East Reservoir (Woodberry Wetlands)",
+    "mode": "2D",
+    "depth": {
+      "typicalM": null,
+      "maxM": null,
+      "renderM": null,
+      "source": "https://www.wildlondon.org.uk/nature-reserves/woodberry-wetlands"
+    },
+    "reason": "Reedbed wetland; no current reliable bathymetry. Preserve live surface.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/4049105": {
+    "name": "West Reservoir",
+    "mode": "2D",
+    "depth": {
+      "typicalM": 3.9,
+      "maxM": null,
+      "renderM": null,
+      "source": "https://www.djo.org.uk/all-the-year-round/volume-vi/page-152.html",
+      "estimated": true
+    },
+    "reason": "3.9m is a derived historical combined mean for East and West, not a reliable current individual depth; keep live surface.",
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  },
+  "way/2954289": {
+    "name": "Brent Reservoir (Welsh Harp)",
+    "mode": "VOLUME",
+    "reason": "Sourced depth supports swimming and exploration.",
+    "depth": {
+      "typicalM": 3.1,
+      "maxM": 7,
+      "renderM": 7,
+      "source": "https://democracy.brent.gov.uk/Data/Welsh%20Harp%20Joint%20Consultative%20Committee/20071113/Agenda/reservoir%20history.pdf",
+      "estimated": false,
+      "model": "Illustrative level bed at sourced maximum or typical, with an unsurveyed shore slope; no surveyed bathymetric mesh."
+    },
+    "research": "Working/sprint-06Nov26f/R/water-research.md (06Nov26f), cited source checked as data; gaps supplemented by EA 1m DTM transects in data/water-bank-profiles.json"
+  }
+}
