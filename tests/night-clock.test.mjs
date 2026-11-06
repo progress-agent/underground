@@ -1,12 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {hourFromPoint,nightAmount,litFraction,wrapHour} from '../src/night-clock.js';
+import {hourFromPoint,clockMinute,nightAmount,litFraction,wrapHour} from '../src/night-clock.js';
 import {clockDate,starDirection} from '../src/stars.js';
 import {readFileSync} from 'node:fs';
 test('clock landmarks and midnight wrap in both directions',()=>{
  for(const [x,y,h]of [[0,-1,12],[1,0,18],[0,1,0],[-1,0,6]])assert.equal(hourFromPoint(x,y),h);
  assert.ok(hourFromPoint(.001,1)>23.99);assert.ok(hourFromPoint(-.001,1)<.01);
  assert.equal(wrapHour(24.5),.5);assert.equal(wrapHour(-.5),23.5);
+});
+test('all exact minutes survive polar round trips and subpixel input error',()=>{
+ for(let m=0;m<1440;m++){
+  const h=m/60,a=(h-12)*Math.PI/12;
+  assert.equal(clockMinute(hourFromPoint(57*Math.sin(a),-57*Math.cos(a))),m);
+  for(const error of [-.02,0,.02])assert.equal(clockMinute(h+error/60),m);
+ }
+ assert.equal(clockMinute(23+59.9/60),0);
+ assert.equal(clockMinute(9+12.49/60),9*60+12);
+ assert.equal(clockMinute(9+12.51/60),9*60+13);
 });
 test('daylight never pays a night term; nights fade on both sides and occupancy falls',()=>{
  for(let h=6;h<=18;h+=.01)assert.equal(nightAmount(h),0);

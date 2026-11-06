@@ -49,7 +49,9 @@ export function createStars({scene, renderer}) {
     gl_PointSize=uPixels*(2.0+max(0.0,3.0-magnitude)*0.6); vAlpha=smoothstep(0.03,0.3,position.y)*clamp(pow(2.512,(2.5-magnitude)*0.55),0.12,2.0);
     vTint=mix(vec3(0.72,0.83,1.0),vec3(1.0,0.85,0.67),clamp(tint/1.8,0.0,1.0));}`,
     fragmentShader:`uniform float uWeight; varying float vAlpha; varying vec3 vTint;
-    void main(){float r=length(gl_PointCoord-0.5)*2.0; if(r>1.0)discard; gl_FragColor=vec4(vTint,uWeight*vAlpha*(1.0-smoothstep(0.1,1.0,r)));}`});
+    // Lift radiance, not alpha (which clamps on the brightest stars), retaining
+    // the catalogue's relative brightness, point size and soft point profile.
+    void main(){float r=length(gl_PointCoord-0.5)*2.0; if(r>1.0)discard; gl_FragColor=vec4(vTint*1.25,uWeight*vAlpha*(1.0-smoothstep(0.1,1.0,r)));}`});
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(0),3));
   geometry.setAttribute('magnitude',new THREE.BufferAttribute(new Float32Array(0),1));
