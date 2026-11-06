@@ -447,7 +447,8 @@ function layerOf(items) { return { items, grid: buildGrid(items) }; }
 
 export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = () => null, getHeightScale = () => 1, VE = 5 } = {}) {
   let sources = { bridges: () => null, motorway: () => null, stationBuildings: () => null };
-  let bridgeLayer = emptyLayer(), motorLayer = emptyLayer(), stationLayer = emptyLayer();
+  let bridgeLayer = emptyLayer(), motorLayer = emptyLayer(), stationLayer = emptyLayer(), tidewayLayer = emptyLayer();
+  let lastTideway = null, lastTidewayVersion = -1;
   let bridgeCounts = { bridges: 0, decks: 0, ramps: 0, parapets: 0, piers: 0, towers: 0 };
   let motorSegments = 0;
   let errors = [];
@@ -528,6 +529,12 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
 
   /** Re-read the sources; rebuild what moved. Returns true if anything was rebuilt. */
   function update() {
+    const tw = sources.tideway?.() ?? null;
+    const tv = tw && shown(tw) ? tw.userData.version : -1;
+    if (tw !== lastTideway || tv !== lastTidewayVersion) {
+      tidewayLayer = layerOf(tv >= 0 ? tw.userData.solidRecords : []);
+      lastTideway = tw; lastTidewayVersion = tv; version++;
+    }
     scale = getHeightScale();
     const s = compareSources();
     if (s.same) return false;
@@ -536,7 +543,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     return true;
   }
 
-  const layers = () => [bridgeLayer, motorLayer, stationLayer];
+  const layers = () => [bridgeLayer, motorLayer, stationLayer, tidewayLayer];
 
   /** Ribbons with the corridor flag that cover (x, z) with the body's feet at or above underside - step. */
   function corridorsAt(x, z, feetY, step, out) {
@@ -576,7 +583,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
       visit(layer, x, x, z, z, (it) => {
         if (it.ring) {
           if (x < it.minX || x > it.maxX || z < it.minZ || z > it.maxZ) return false;
-          const top = it.base + it.h * scale;
+          const top = it.base + it.h * (it.absolute ? 1 : scale);
           if (top <= feetY + step && top > best && pointInRing(x, z, it.ring)) best = top;
           return false;
         }
@@ -601,7 +608,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     let found = false;
     visit(stationLayer, x - margin, x + margin, z - margin, z + margin, (it) => {
       if (!it.ring) return false;
-      const top = it.base + it.h * scale;
+      const top = it.base + it.h * (it.absolute ? 1 : scale);
       if (feetY < top - tol) return false;
       if (pointInRing(x, z, it.ring) || nearestOnRing(x, z, it.ring).d <= margin) { found = true; return true; }
       return false;
@@ -623,6 +630,10 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
         return false;
       });
     }
+    visit(tidewayLayer,x,x,z,z,it => {
+      if (it.base > feetY + 1e-6 && it.base < best && pointInRing(x,z,it.ring)) best=it.base;
+      return false;
+    });
     return best === Infinity ? null : best;
   }
 
@@ -637,7 +648,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
       if (!layer.grid) continue;
       visit(layer, x0, x1, z0, z1, (it) => {
         if (it.ring) {
-          const top = it.base + it.h * scale, under = it.base - it.skirt * scale;
+          const top = it.base + it.h * (it.absolute ? 1 : scale), under = it.base - it.skirt * (it.absolute ? 1 : scale);
           if (!(under < H && top - step > F)) return false;
           if (pointInRing(px, pz, it.ring)) return false; // never trap a body that starts inside
           prisms.push(it);
@@ -725,7 +736,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   }
 
   function segmentHitPrism(p, ax, ay, az, dx, dy, dz) {
-    const yb = p.base - p.skirt * scale, yr = p.base + p.h * scale;
+    const yb = p.base - p.skirt * (p.absolute ? 1 : scale), yr = p.base + p.h * (p.absolute ? 1 : scale);
     let t0 = 0, t1 = 1;
     if (Math.abs(dy) < 1e-12) { if (ay < yb || ay > yr) return null; }
     else { const s = (yb - ay) / dy, e = (yr - ay) / dy; t0 = Math.max(t0, Math.min(s, e)); t1 = Math.min(t1, Math.max(s, e)); }
@@ -794,7 +805,7 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
         version, bridges: bridgeCounts.bridges, decks: bridgeCounts.decks, ramps: bridgeCounts.ramps,
         parapets: bridgeCounts.parapets, piers: bridgeCounts.piers, towers: bridgeCounts.towers,
         motorwaySegments: motorSegments, stations: stationLayer.items.length, ribbons: rib,
-        prisms: stationLayer.items.length, errors: errors.slice(), buildMs,
+        tideway: tidewayLayer.items.length, prisms: stationLayer.items.length + tidewayLayer.items.length, errors: errors.slice(), buildMs,
       };
     },
   };

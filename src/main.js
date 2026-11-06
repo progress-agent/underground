@@ -103,7 +103,10 @@ import { WATER_LIFT as S25E_WATER_LIFT } from './render-layers.js';
 // Buildings between the outer barrier and the bake's support ring would stand
 // over the void now the ground ends at the barrier; suppress them alongside
 // any existing suppression (airports).
-const withOffMapSuppression = (suppress) => (b) => isOffMapEdge(b) || !!suppress?.(b);
+const withOffMapSuppression = (suppress) => {
+  const tidewayExcludes=createTidewayBuildingExclusion(llToXZ);
+  return (b) => isOffMapEdge(b) || tidewayExcludes(b) || !!suppress?.(b);
+};
 // ── /sprint:B ──
 // ── s02:B ── Station buildings (D-048 items 2 to 4). The data starts loading at
 // module evaluation: the baked path awaits it before its first tile builds, the
@@ -164,7 +167,7 @@ import { createUnderwaterSurface } from './underwater-surface.js';
 import { createSeaLife } from './sea-life.js';
 // ── /sprint:C ──
 // ── s25:W ──
-import { updateTidewayWhirlpools, setTidewayWhirlpoolTime, getTidewayWhirlpools } from './tideway.js';
+import { createTidewayPlatformsSteps, createTidewayBuildingExclusion } from './tideway-platforms.js';
 import { clampSewersUnderRiverBed, getSewerRoutes } from './sewers.js';
 import { getAirportDockBedY } from './airport-docks.js';
 // ── /s25:W ──
@@ -2387,6 +2390,13 @@ let applySoloSelection = () => {};
 
 // ---------- Tideway + Lee Tunnel (Super Sewer system) ----------
 let tidewayMesh = null;
+let tidewayPlatforms = null;
+lateLayers.define('tidewayPlatforms', {
+  deps: () => !!terrain,
+  steps: () => createTidewayPlatformsSteps({ llToXZ, floorAt: (x,z) => getTerrainMeshSurfaceY({x,z}), VE: VERTICAL_EXAGGERATION }),
+  objects: g => [g],
+  attach: g => { tidewayPlatforms = g; scene.add(g); },
+});
 loadTidewayData().then(tidewayData => {
   if (tidewayData) {
     tidewayMesh = createTidewaySystem(tidewayData, llToXZ, sim.verticalScale);
@@ -4834,9 +4844,6 @@ function tick(frameTime) {
   // ── sprint:C ──
   seaLife?.update(surfaceSimulationDt, camera, { submerged });
   // ── /sprint:C ──
-  // ── s25:W ──
-  updateTidewayWhirlpools(surfaceSimulationDt, camera);
-  // ── /s25:W ──
 
   // Update living-water shader uniforms.
   updateWater(dt);
@@ -5095,6 +5102,7 @@ modeSystem.ctx.stationBuildings = () => {
 // Walker, the Drone and the Balloon collide with the 41 Thames bridges, the M25's crossings (the motorway while it is
 // drawn, else the registry deck) and the station buildings through the calls they already make (src/modes/solids.js).
 modeSystem.collision.setSolidSources({
+  tideway: () => tidewayPlatforms,
   bridges: () => bridgesGroup,
   motorway: () => motorwayGroup,
   stationBuildings: () => (stationBuildingState.index && stationBuildingsMesh
@@ -5356,8 +5364,7 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
   // ── s25:W ──
-  Object.defineProperty(window.__ug, 'tidewayWhirlpools', { get: () => getTidewayWhirlpools(), enumerable: true });
-  window.__ug.setTidewayWhirlpoolTime = setTidewayWhirlpoolTime;
+  Object.defineProperty(window.__ug, 'tidewayPlatforms', { get: () => tidewayPlatforms, enumerable: true });
   window.__ug.getSewerRoutes = getSewerRoutes;
   window.__ug.getAirportDockBedY = getAirportDockBedY;
   // ── /s25:W ──

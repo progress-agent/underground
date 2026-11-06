@@ -36,7 +36,7 @@ test.beforeAll(async ({ browser }) => {
   // this spec on c820ea9 on both machines), so the wait includes them.
   await page.waitForFunction(() => window.__ug?.bakedStats?.tilesTotal > 0
     && window.__ug.bakedStats.tilesBuilt === window.__ug.bakedStats.tilesTotal
-    && window.__ug.groundReady && window.__ug.economies && window.__ug.scene.getObjectByName('tideway-whirlpools')?.children.length
+    && window.__ug.groundReady && window.__ug.economies && window.__ug.tidewayPlatforms?.children.length
     && window.__ug.overground?.userData.stationsAttached && window.__ug.surfaceRail?.stationLayers.size > 0
     && window.__ug.stationBuildings?.ready, // s02:B: the station buildings are what stand now; the spheres are never in the scene
   null, { timeout: 180000 });
@@ -81,10 +81,10 @@ test('underground and in the river everything is drawn', async () => {
 // s02:B (D-048 item 4): the white spheres retired, so the D-040 carve-out for surfaceOnly station markers
 // (six Overground layers and nine surface-rail layers, 15 in all) became "station buildings are never in the set".
 // The six + nine layers still exist as data (userData.surfaceOnly stays true) but are never added to the scene.
-test('the whirlpools and the station buildings are never in the set; no station-markers object is in the scene', async () => {
+test('the permanent platforms and the station buildings are never in the set; no station-markers object is in the scene', async () => {
   const c = await page.evaluate(() => {
     const u = window.__ug, set = u.undergroundCull.collect();
-    const whirl = u.scene.getObjectByName('tideway-whirlpools');
+    const whirl = u.scene.getObjectByName('tideway-platforms');
     const group = u.scene.getObjectByName('station-buildings');
     const overgroundIds = u.overground.userData.stationSets.map(s => s.id);
     const overgroundMarkers = overgroundIds.map(id => u.lineShaftLayers.get(id)?.stationsLayer.mesh);

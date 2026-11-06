@@ -27,16 +27,14 @@
 // the bar is still up, so the underground appearing at the crossing costs no
 // frame.
 //
-// NOT IN THE SET, though the harness hid them: the Tideway whirlpools, which
-// sit on the river bed and are meant to be seen through the water from above,
-// and the Overground station markers, which are surface markers.
+// Surface-only Overground station markers stay outside the set.
 
 /** Top-level scene objects that are wholly underground, by name. */
 export const UNDERGROUND_LAYER_NAMES = new Set([
   'terrainUnderside', 'geological-strata', 'geology-exterior', 'crossrail-tunnel', 'sewer-tunnels',
 ]);
 /** Children of an underground group that are seen from above ground. */
-export const SEEN_FROM_ABOVE = new Set(['tideway-whirlpools']);
+export const SEEN_FROM_ABOVE = new Set(); // D-060: no foreshore carve-out remains.
 /** How far inside the map edge the camera must be: M25 insideness 1 is at
  * least half the 1500m edge band (750m) inside the ring. */
 export const INSIDE_MIN = 0.999;

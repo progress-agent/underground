@@ -1,0 +1,1200 @@
+{
+  "version": 1,
+  "datum": "m AOD (ATD minus 100)",
+  "attribution": "Contains information from OpenStreetMap, \u00a9 OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright. Source plans/photos credited in docs/tideway-platform-research.md; photos not included.",
+  "sourceRecord": "docs/tideway-platform-research.md",
+  "sites": [
+    {
+      "id": "putney",
+      "siteId": "putney",
+      "name": "Putney Embankment Foreshore",
+      "anchor": [
+        51.466834,
+        -0.215267
+      ],
+      "deckAOD": 5.54,
+      "outline": [
+        [
+          -20.6,
+          4.7
+        ],
+        [
+          -18.7,
+          7
+        ],
+        [
+          -10.5,
+          17.3
+        ],
+        [
+          -9.7,
+          17.6
+        ],
+        [
+          -8.9,
+          17.6
+        ],
+        [
+          18.6,
+          -1.1
+        ],
+        [
+          19.3,
+          -2.4
+        ],
+        [
+          19.2,
+          -3.8
+        ],
+        [
+          8.8,
+          -19.1
+        ]
+      ],
+      "wall": "granite",
+      "shaft": [
+        -8,
+        6
+      ],
+      "shaftDiameter": 6,
+      "columns": [
+        {
+          "x": -12,
+          "z": 13,
+          "height": 5,
+          "diameter": 0.95,
+          "color": "#2b241f",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "kiosks": [
+        [
+          -15,
+          -1,
+          3.5,
+          3,
+          2.8
+        ]
+      ],
+      "benches": [
+        [
+          -8,
+          -4
+        ],
+        [
+          0,
+          -9
+        ],
+        [
+          7,
+          -13
+        ]
+      ],
+      "fenders": true,
+      "stairs": true,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, putney sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "**Relative to the existing embankment:** the deck stands about 1 m above the Embankment pavement at the west end (ESTIMATED from about seven steps of about 150 mm in photo putney-3). The Embankment road here is known to flood on big tides, which is why the deck is set higher.",
+        "**River wall:** at low tide the outer wall stands about 4 to 5 m above the foreshore gravel (ESTIMATED from photo putney-2, using the 4.5 m tall vertical fender spacing and the railing). Foreshore level is not published; about +0.5 to +1.0 m AOD is a reasonable assumption (ESTIMATED).",
+        "**Diameter:** about 0.9 to 1.0 m at the base, flaring slightly to the top (ESTIMATED: in photo putney-1 and the Commons close-up its width roughly equals the 1.1 m handrail height; height to width about 5.5:1). DCO allowed \"0.6m internal dia ventilation column, minimum 4m to 8m maximum height\" (MEASURED, DCO layout).",
+        "**Kiosk:** one electrical and control kiosk at the **west end of the platform, on the landward side**, marking the junction with the existing embankment beside the steps (PUTEF.12, photo putney-3). Clad in Cornish granite in horizontal coursed bands, with sandblasted dark-panel reliefs of a Thames skiff (Tideway 2023). Size about 3.5 m x 3 m in plan and about 2.5 to 3 m tall above the deck (ESTIMATED from photo putney-3; DCO allowed \"2.5m from new foreshore structure\"). A second, main kiosk is on Waterman's Green across the road, against the bridge abutment (PUTEF.06)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "chelsea",
+      "siteId": "chelsea",
+      "name": "Chelsea Quay",
+      "anchor": [
+        51.484892,
+        -0.153987
+      ],
+      "deckAOD": 4.95,
+      "outline": [
+        [
+          23.4,
+          10.4
+        ],
+        [
+          25.8,
+          17.5
+        ],
+        [
+          12.2,
+          12.8
+        ],
+        [
+          6.8,
+          11.2
+        ],
+        [
+          -10.6,
+          6.1
+        ],
+        [
+          -20.3,
+          3.2
+        ],
+        [
+          -27,
+          1.2
+        ],
+        [
+          -22.7,
+          -1.5
+        ],
+        [
+          -19.4,
+          -7.8
+        ],
+        [
+          -14.3,
+          -11.9
+        ],
+        [
+          -9.4,
+          -13.7
+        ],
+        [
+          -3.9,
+          -14.2
+        ],
+        [
+          1.2,
+          -13
+        ],
+        [
+          3.6,
+          -12.3
+        ],
+        [
+          5.6,
+          -11.2
+        ],
+        [
+          10.1,
+          -8.6
+        ],
+        [
+          13.1,
+          -5.3
+        ],
+        [
+          15.1,
+          -2.5
+        ],
+        [
+          16.2,
+          1
+        ],
+        [
+          17,
+          4.1
+        ]
+      ],
+      "wall": "brick",
+      "shaft": [
+        -5,
+        -2
+      ],
+      "shaftDiameter": 12,
+      "columns": [
+        {
+          "x": -20,
+          "z": 0,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#2b241f",
+          "form": "vortex"
+        },
+        {
+          "x": -16,
+          "z": 1,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#2b241f",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "benches": [
+        [
+          -8,
+          -7
+        ],
+        [
+          1,
+          -7
+        ]
+      ],
+      "terraces": [
+        4.4
+      ],
+      "drum": [
+        -12,
+        2,
+        3.5,
+        1.5
+      ],
+      "accessEdge": 3,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, chelsea sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "**Relative to the embankment:** the public deck sits **below** the embankment pavement; you step down from Chelsea Embankment through the parapet opening (photo chelsea-1 shows the deck railing top roughly at pavement-parapet level). About 1 to 1.5 m lower (ESTIMATED from photo chelsea-1 and the DCO 4.95 vs 6.0 levels).",
+        "**Diameter:** about 1.1 to 1.3 m (ESTIMATED: 0.9 m internal per DCO plus wall thickness and the visible flare; in photo chelsea-1 the columns are about 4 to 4.5 diameters tall).",
+        "A separate small vent column (0.225 m internal, 6 m high in the DCO) was planned on the **north side of Chelsea Embankment**, in the line of the street trees (CHEEF.14). Not confirmed as built. Several slim dark posts, about 6 to 8 m tall, stand at the deck edges in photos chelsea-1 and chelsea-2; I could not confirm whether they are lighting columns or vent stacks (ESTIMATED: most likely lighting).",
+        "**Coloured drum:** a round brick drum about 3 to 4 m diameter and about 1.5 m high, with bands of coloured glazed brick and a black capping band, near the north-west of the deck (photos chelsea-1, chelsea-3). Function not stated (ESTIMATED: it encloses plant or a kiosk; CHEEF.19 required kiosks \"visually integrated into the design of the new river wall\").",
+        "**Footprint:** crescent, centroid 51.484892, -0.153987. Straight landward edge 55 m on bearing 073 from (-27.0, 1.2) to (25.8, 17.5); outer edge a smooth curve through the OSM vertices, maximum projection about 21.5 m at about (-4, -14). Add a planted intertidal terrace about 6 to 10 m wide wrapping each end, 0.5 to 1.5 m lower (ESTIMATED from DCO layout).",
+        "**Levels:** main deck +4.95 m AOD; lower terraces and walkway +4.40; parapet/wall top about +5.5 to +6.0; embankment pavement about +6.0 (ESTIMATED). MHWS about +4.03, MLWS about -2.05. Deck about 0.9 m above MHWS and about 1 to 1.5 m below the pavement."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "heathwall",
+      "siteId": "heathwall",
+      "name": "Heathwall Quay",
+      "anchor": [
+        51.483038,
+        -0.135954
+      ],
+      "deckAOD": 5.41,
+      "outline": [
+        [
+          -15.3,
+          -13.1
+        ],
+        [
+          -13.8,
+          5.7
+        ],
+        [
+          11,
+          13.7
+        ],
+        [
+          17.1,
+          -4.8
+        ]
+      ],
+      "wall": "concrete",
+      "shaft": [
+        -6,
+        -1
+      ],
+      "shaftDiameter": 10,
+      "columns": [
+        {
+          "x": 0,
+          "z": 0,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#2b241f",
+          "form": "vortex",
+          "latlon": [
+            51.4829,
+            -0.1354
+          ],
+          "onLand": true
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2
+      ],
+      "benches": [
+        [
+          0,
+          3
+        ],
+        [
+          7,
+          6
+        ]
+      ],
+      "screen": [
+        3,
+        2.7
+      ],
+      "totem": true,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, heathwall sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "**Facing:** the outer river wall is a plain grey concrete wall with a pale concrete coping (photo heathwall-1; brixtonbuzz photos of the outfall face show weathered concrete with timber rubbing strips on the older adjoining wall). Fair-faced concrete is ESTIMATED; no source names the wall finish. A PLA warning sign on the wall marks a submerged storm outlet extending 90 m.",
+        "**At Middle Wharf (land, east of the pumping station building): at least 1** dark twisted signature column is visible standing behind the boundary wall (photo heathwall-3, top left). The DCO put the shaft ventilation column zone at Middle Wharf (\"1.2m internal dia ventilation column of 4m minimum to 8m maximum height\") and a 6 m column for the pumping-station interception chamber on the foreshore structure. Count at Middle Wharf: 1 confirmed (ESTIMATED that there is only one; a second could be hidden).",
+        "**Security screen:** a tall black **vertical-fin steel fence**, about 2.5 to 3 m high (ESTIMATED), on a pale concrete plinth, along the landward (south) side separating the quay from the pumping station compound; it continues as \"high-quality architectural fencing around the pumping station compound\" (Tideway site page). Short steel anti-climb spikes at the fence ends over the water (Brixton Buzz).",
+        "**Deck:** flat at +5.41 m AOD; level with the Thames Path; MHWS about +4.0, MLWS about -2.2. Deck about 1.4 m above MHWS and about 6 m above the low-tide mud (ESTIMATED foreshore about -0.5 m AOD).",
+        "**Vent columns:** none on the platform. Place 1 signature column (5.1 m, about 1.2 m diameter, dark bronze) on land at Middle Wharf near 51.48290, -0.13540 (ESTIMATED from photo heathwall-3 and the DCO column zone)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "albert-isle",
+      "siteId": "albert",
+      "name": "Isle of Effra",
+      "anchor": [
+        51.487317,
+        -0.125642
+      ],
+      "deckAOD": 4.5,
+      "outline": [
+        [
+          11.5,
+          -2.2
+        ],
+        [
+          9.2,
+          -5.6
+        ],
+        [
+          8.2,
+          -7.1
+        ],
+        [
+          6.7,
+          -9.4
+        ],
+        [
+          4.8,
+          -12.2
+        ],
+        [
+          1.8,
+          -11.6
+        ],
+        [
+          -5.5,
+          -10.1
+        ],
+        [
+          -9.2,
+          -5.9
+        ],
+        [
+          -11.8,
+          -1.5
+        ],
+        [
+          -11.1,
+          2.1
+        ],
+        [
+          -10.6,
+          4.7
+        ],
+        [
+          -5.5,
+          10.5
+        ],
+        [
+          -2.8,
+          11.1
+        ],
+        [
+          0,
+          11.7
+        ],
+        [
+          6.6,
+          10
+        ],
+        [
+          10.4,
+          4
+        ]
+      ],
+      "wall": "concrete",
+      "shaft": [
+        0,
+        0
+      ],
+      "shaftDiameter": 6,
+      "columns": [
+        {
+          "x": 7,
+          "z": -4,
+          "height": 6,
+          "diameter": 0.4,
+          "color": "#203c31",
+          "form": "plain"
+        },
+        {
+          "x": 4,
+          "z": -8,
+          "height": 6,
+          "diameter": 0.4,
+          "color": "#203c31",
+          "form": "plain"
+        }
+      ],
+      "riverEdges": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "parapet": 1.1,
+      "benches": [
+        [
+          -5,
+          0
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          0,
+          -5
+        ]
+      ],
+      "terraces": [
+        2.2,
+        1.51,
+        1.2
+      ],
+      "dolphins": true,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, albert sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "**Projection into the river:** about 15 to 18 m beyond the original wall face (ESTIMATED from the DCO sheet 2 drawing at 1:400, where the shaft zone square of about 19 m sits mostly outside the old wall).",
+        "**Diameter:** about 1.2 to 1.4 m at the top, a little less at the base (ESTIMATED from photo albert-2 and the Hawkins\\Brown photo, where each column is about 4 diameters tall).",
+        "**Isle of Effra:** no signature columns. **Two slim dark green cylindrical columns**, about 0.4 m diameter and about 6 m tall, stand at the landward (south-east) side of the circle by the entrance (photo albert-1, Tidal Thames bridge photo). These match the DCO's \"2 No. 0.225m internal dia ventilation columns, 6m high\" serving the Brixton Storm Relief interception (ESTIMATED identification). One more 0.225 m, 6 m column was planned by the Clapham Storm Relief chamber under the bridge abutment (DCO), not confirmed.",
+        "**Terraces:** 3 to 4 concentric planted concrete-edged steps outside the parapet on the north and west, down to about +1.2 m AOD, then boulders to the foreshore (foreshore about 0 to -1 m AOD, ESTIMATED). Make them about 2 to 3 m wide each (ESTIMATED from DCO)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "albert-quay",
+      "siteId": "albert",
+      "name": "Effra Quay",
+      "anchor": [
+        51.488191,
+        -0.124388
+      ],
+      "deckAOD": 6.4,
+      "outline": [
+        [
+          -3.9,
+          17.8
+        ],
+        [
+          -7.6,
+          15
+        ],
+        [
+          -14.4,
+          0.1
+        ],
+        [
+          -14.4,
+          -5.7
+        ],
+        [
+          -11.9,
+          -11.6
+        ],
+        [
+          0.1,
+          -24.7
+        ],
+        [
+          1.6,
+          -21.6
+        ],
+        [
+          7.6,
+          -7.7
+        ],
+        [
+          18.8,
+          12.4
+        ],
+        [
+          14.8,
+          14.8
+        ],
+        [
+          10.9,
+          14.5
+        ]
+      ],
+      "wall": "buff",
+      "shaft": [
+        -5,
+        -10
+      ],
+      "shaftDiameter": 16,
+      "columns": [
+        {
+          "x": -10,
+          "z": -10,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#303131",
+          "form": "vortex"
+        },
+        {
+          "x": -8,
+          "z": -12,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#303131",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "kiosks": [
+        [
+          8,
+          4,
+          2.5,
+          2,
+          2.5
+        ],
+        [
+          10,
+          8,
+          2.5,
+          2,
+          2.5
+        ]
+      ],
+      "benches": [
+        [
+          3,
+          0
+        ],
+        [
+          8,
+          10
+        ]
+      ],
+      "trees": 3,
+      "fenders": true,
+      "bronzeSeats": 6,
+      "ramps": true,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, albert sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "**Projection into the river:** about 15 to 18 m beyond the original wall face (ESTIMATED from the DCO sheet 2 drawing at 1:400, where the shaft zone square of about 19 m sits mostly outside the old wall).",
+        "**Diameter:** about 1.2 to 1.4 m at the top, a little less at the base (ESTIMATED from photo albert-2 and the Hawkins\\Brown photo, where each column is about 4 diameters tall).",
+        "**Isle of Effra:** no signature columns. **Two slim dark green cylindrical columns**, about 0.4 m diameter and about 6 m tall, stand at the landward (south-east) side of the circle by the entrance (photo albert-1, Tidal Thames bridge photo). These match the DCO's \"2 No. 0.225m internal dia ventilation columns, 6m high\" serving the Brixton Storm Relief interception (ESTIMATED identification). One more 0.225 m, 6 m column was planned by the Clapham Storm Relief chamber under the bridge abutment (DCO), not confirmed.",
+        "**Terraces:** 3 to 4 concentric planted concrete-edged steps outside the parapet on the north and west, down to about +1.2 m AOD, then boulders to the foreshore (foreshore about 0 to -1 m AOD, ESTIMATED). Make them about 2 to 3 m wide each (ESTIMATED from DCO)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "victoria",
+      "siteId": "victoria",
+      "name": "Tyburn Quay",
+      "anchor": [
+        51.50552,
+        -0.12243
+      ],
+      "deckAOD": 5.4,
+      "outline": [
+        [
+          -20.648,
+          -25.227
+        ],
+        [
+          -17.808,
+          -25.894
+        ],
+        [
+          -8.661,
+          -28.228
+        ],
+        [
+          -4.573,
+          -12.225
+        ],
+        [
+          9.701,
+          -15.892
+        ],
+        [
+          15.59,
+          7.335
+        ],
+        [
+          4.989,
+          10.002
+        ],
+        [
+          8.246,
+          22.782
+        ],
+        [
+          -2.564,
+          25.56
+        ],
+        [
+          -4.989,
+          26.116
+        ],
+        [
+          -5.543,
+          23.782
+        ],
+        [
+          -8.384,
+          24.449
+        ]
+      ],
+      "wall": "granite",
+      "shaft": [
+        0,
+        0
+      ],
+      "shaftDiameter": 13,
+      "columns": [
+        {
+          "x": -0.7,
+          "z": 5.3,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#2b241f",
+          "form": "vortex"
+        },
+        {
+          "x": 1.3,
+          "z": 5.3,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#2b241f",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "terraces": [
+        5,
+        4.6,
+        4.2
+      ],
+      "kiosks": [
+        [
+          -12,
+          -12,
+          5,
+          3,
+          3
+        ],
+        [
+          -9,
+          16,
+          5,
+          3,
+          3
+        ]
+      ],
+      "canopy": true,
+      "trees": 3,
+      "benches": [
+        [
+          -2,
+          -12
+        ],
+        [
+          -2,
+          15
+        ]
+      ],
+      "bronzeRing": 14,
+      "sandbags": true,
+      "accessEdge": 11,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, victoria sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "Embankment terrace and footway level: about **4.4 m AOD** (ESTIMATED: raised platform 5.4 m minus the stated ~1 m level difference).",
+        "**Form**: Tideway's \"signature\" twisted vortex column (DCO type B for this site). A tall tapered cylinder that is round at the base and flares to a larger, slightly elliptical and obliquely cut top, with a single sharp helical ridge running up the side where the two surfaces meet; the poem by Dorothea Smartt (about 150 characters, 60 mm Doves font, lower 3.5 m only) is engraved along that ridge (MEASURED, City of London poetry report \u00a71.3.1). Two columns stand side by side about 2 m apart (ESTIMATED from photo victoria-2).",
+        "**Diameter**: 1.2 m internal (MEASURED, DCO-stage figure for the signature columns, Planning Statement P.4.60 range and Chambers Wharf drop-in \"1.2m in diameter at the base\"). External about 1.3 m at the base and about 1.6 to 1.8 m across the flared top (ESTIMATED from photo victoria-2, scaled against people beside them)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "blackfriars",
+      "siteId": "blackfriars",
+      "name": "Bazalgette Embankment",
+      "anchor": [
+        51.510793,
+        -0.106427
+      ],
+      "deckAOD": 5.4,
+      "outline": [
+        [
+          -88.612,
+          8.446
+        ],
+        [
+          -77.804,
+          -6.557
+        ],
+        [
+          -70.044,
+          -17.892
+        ],
+        [
+          -64.016,
+          -22.449
+        ],
+        [
+          -58.959,
+          -23.671
+        ],
+        [
+          -46.35,
+          -21.893
+        ],
+        [
+          -0.762,
+          -15.336
+        ],
+        [
+          60.275,
+          -7.001
+        ],
+        [
+          107.733,
+          -0.889
+        ],
+        [
+          127.34,
+          -0.556
+        ],
+        [
+          128.864,
+          8.113
+        ]
+      ],
+      "wall": "granite",
+      "shaft": [
+        -60,
+        -8
+      ],
+      "shaftDiameter": 24,
+      "columns": [
+        {
+          "x": -74,
+          "z": 0,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#66665e",
+          "form": "vortex"
+        },
+        {
+          "x": -79,
+          "z": 3,
+          "height": 4,
+          "diameter": 1.3,
+          "color": "#66665e",
+          "form": "vortex"
+        },
+        {
+          "x": -70,
+          "z": -3,
+          "height": 5.1,
+          "diameter": 1.3,
+          "color": "#66665e",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "trees": 71,
+      "fenders": true,
+      "rotunda": true,
+      "stages": true,
+      "ramps": true,
+      "westTerrace": true,
+      "benches": [
+        [
+          -40,
+          -8
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          40,
+          0
+        ]
+      ],
+      "hatches": 70,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, blackfriars sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "West end: a rounded nose, radius roughly 15 to 20 m (ESTIMATED from the vertex curve).",
+        "Deck: \"the new public space on top of the structure would be at the same height as the flood defences\" except where parapets are needed (MEASURED, Q.4.59). So the piazza is about **5.4 m AOD** (DERIVED); raised western terrace about 1 m higher (ESTIMATED). Guardian: most of the new spaces \"slope subtly up towards the flood defence line\".",
+        "A \"ribbed rotunda\" kiosk sits at the broad end; \"too small a diameter to cover the invisible drop shaft\", originally planned as a control cabin (MEASURED, Diamond Geezer). Diameter not found (ESTIMATED 6 to 8 m from his description).",
+        "**Height: 5.1 m above ground** (MEASURED, City of London poetry report \u00a71.3.2, Central contract). DCO cap 6 m (MEASURED, Sch.3 BLABF6(2)). Photo blackfriars-2 shows **one of the three noticeably shorter** than the other two (ESTIMATED about 3.5 to 4 m, though perspective and a temporary barrier around its base in Sept 2025 make this uncertain).",
+        "**Diameter**: 1.2 m internal (MEASURED, Q.4.60); external about 1.3 m base, 1.7 m top (ESTIMATED from photo).",
+        "**Position**: western tip. OSM nodes for two of them at **51.510768, -0.107495** and **51.510795, -0.107571** (6 m apart, DERIVED); the third is unmapped, ESTIMATED within ~5 m of these.",
+        "**Shaft**: flush, centred ~51.51072, -0.10730, under the broad end, 24 m internal; draw a field of flush rectangular hatches. A small ribbed round kiosk (~7 m diameter, ESTIMATED) at the broad end."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "kemp",
+      "siteId": "kemp",
+      "name": "King Edward Memorial Park Foreshore",
+      "anchor": [
+        51.50873,
+        -0.04733
+      ],
+      "deckAOD": 5.6,
+      "outline": [
+        [
+          34.296,
+          34.118
+        ],
+        [
+          34.643,
+          13.225
+        ],
+        [
+          30.763,
+          6.112
+        ],
+        [
+          -3.395,
+          -26.783
+        ],
+        [
+          -14.342,
+          -29.672
+        ],
+        [
+          -24.18,
+          -25.783
+        ],
+        [
+          -28.199,
+          -21.226
+        ],
+        [
+          -36.444,
+          -7.224
+        ],
+        [
+          -14.55,
+          5.557
+        ],
+        [
+          19.123,
+          25.227
+        ]
+      ],
+      "wall": "concrete",
+      "shaft": [
+        -7,
+        -4.4
+      ],
+      "shaftDiameter": 20,
+      "columns": [
+        {
+          "x": -6.2,
+          "z": -7.6,
+          "height": 5.4,
+          "diameter": 1.3,
+          "color": "#675344",
+          "form": "vortex"
+        },
+        {
+          "x": -8.6,
+          "z": -9,
+          "height": 5.4,
+          "diameter": 1.3,
+          "color": "#675344",
+          "form": "vortex"
+        },
+        {
+          "x": 25.0,
+          "z": 15,
+          "height": 6,
+          "diameter": 0.6,
+          "color": "#675344",
+          "form": "plain"
+        },
+        {
+          "x": 26.1,
+          "z": 16,
+          "height": 6,
+          "diameter": 0.6,
+          "color": "#675344",
+          "form": "plain"
+        },
+        {
+          "x": 27.2,
+          "z": 15,
+          "height": 6,
+          "diameter": 0.6,
+          "color": "#675344",
+          "form": "plain"
+        }
+      ],
+      "riverEdges": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "terraces": [
+        5.35,
+        5.1,
+        4.85,
+        4.6,
+        4.35,
+        4.15
+      ],
+      "fenders": true,
+      "boats": true,
+      "bandstand": true,
+      "mounds": true,
+      "kiosks": [
+        [
+          28,
+          49,
+          11.5,
+          2.223,
+          2.923
+        ]
+      ],
+      "benches": [
+        [
+          -10,
+          -14
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          10,
+          8
+        ]
+      ],
+      "trees": 7,
+      "publicAccess": true,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, kemp sections 1 to 5 and Build summary",
+        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "Lower floodable walkway: about **4.0 to 4.3 m AOD** (ESTIMATED: it is overtopped at higher spring tides, so it sits just above MHWS; no level found).",
+        "Diameter: 1.2 m internal (MEASURED, T.4.58, DCO stage). External ~1.3 m base, ~1.7 m top (ESTIMATED from photo kemp-3).",
+        "Form: \"slim and simple\", \"more linear\", clustered as a group of three in a flat planting bed (MEASURED, design summary \u00a73.3; committee \u00a78.25). Plain upright metal cylinders (ESTIMATED diameter 0.5 to 0.7 m: \"smaller diameter\" per T.4.59).",
+        "Position: eastern foreshore, around **51.50887, -0.04696** (ESTIMATED: centre of the DCO eastern column zone on KEMPF-250005, transferred to OSM coordinates; plus or minus 10 m).",
+        "**Electrical and control kiosk** on the east boundary by Free Trade Wharf: **11.5 m wide x 2.223 m deep x 2.923 m high**, 0.878 to 1.02 m from the boundary wall (MEASURED, committee \u00a78.11); brick back, full-height vertical hardwood fins on the front and sides, louvred doors, sedum/brown roof (MEASURED, design summary \u00a73.1; Tideway). Two ~2.3 m fences close the gap behind it (MEASURED, \u00a78.16). Approximate centre ~51.50917, -0.04692 (ESTIMATED from the DCO kiosk zone).",
+        "**Outline**: the OSM polygon in \u00a71: ~82 m along the old wall (bearing ~60\u00b0), ~33 m out at the rounded west end, ~22 m at the east corner, area ~2,100 m\u00b2. River face straight and running north-east; west corner a large-radius curve (~15 m, ESTIMATED from kemp-1).",
+        "**Levels** (m AOD): central square and wall tops ~5.2 to 5.9; curved terrace steps (5 to 6 risers, ESTIMATED from kemp-2) down to a lower walkway at ~4.0 to 4.3 that floods at big tides; MHWS 3.9; MLWS -2.8, with ~30 m of foreshore exposed at low water."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+    },
+    {
+      "id": "chambers",
+      "siteId": "chambers",
+      "name": "Chambers Wharf",
+      "anchor": [
+        51.50074,
+        -0.06549
+      ],
+      "deckAOD": 4.65,
+      "outline": [
+        [
+          -20,
+          -15
+        ],
+        [
+          -20,
+          15
+        ],
+        [
+          20,
+          15
+        ],
+        [
+          20,
+          -15
+        ]
+      ],
+      "wall": "concrete",
+      "shaft": [
+        0,
+        0
+      ],
+      "shaftDiameter": 25,
+      "columns": [
+        {
+          "x": 29,
+          "z": 3,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#282825",
+          "form": "vortex"
+        },
+        {
+          "x": 32,
+          "z": 3,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#282825",
+          "form": "vortex"
+        },
+        {
+          "x": 30.5,
+          "z": 5.5,
+          "height": 5.1,
+          "diameter": 1.2,
+          "color": "#282825",
+          "form": "vortex"
+        }
+      ],
+      "riverEdges": [],
+      "kiosks": [
+        [
+          32,
+          -5,
+          2.5,
+          16,
+          2.3
+        ]
+      ],
+      "publicAccess": false,
+      "waveform": true,
+      "riverWall": [
+        [
+          51.50076,
+          -0.06483
+        ],
+        [
+          51.5012,
+          -0.06684
+        ]
+      ],
+      "wallTopAOD": 5.3,
+      "sources": {
+        "figures": "docs/tideway-platform-research.md, chambers sections 1 to 5 and Build summary",
+        "outline": "DCO CHAWF-210005, anchored to OSM streets",
+        "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
+        "features": "Research build summary and credited source photographs; no photographs shipped"
+      },
+      "estimates": [
+        "Projection of the new wall face beyond the old line: **about 2 to 4 m** (ESTIMATED: the 1.5 m intertidal terrace plus the new wall thickness sit in front of the old wall).",
+        "**Operational area**: block-paved hardstanding over the shaft and air-treatment chamber, to be handed to Thames Water; size not stated. About 40 x 30 m (ESTIMATED from the DCO \"zone within which all permanent site structures would be located\" on CHAWF-210005, which encloses the shaft and kiosk zones).",
+        "Cover: flush ground-level access covers within block paving (MEASURED, S.4.55; CLWG Jun 2025 \"block paving over the shaft\"); covers \"specified to accept a paving treatment later\" for the housing scheme (S.4.66). A **bronze \"Tideway Plaque\"** (circular, ~1 m, ESTIMATED from slide 12 photo) is set into the hardstanding (MEASURED, CLWG minutes Dec 2025).",
+        "**Position**: they \"sit above the air treatment unit\", not over the shaft (MEASURED, CLWG notes Jun 2025); DCO zone is between the shaft and the east end of the river wall. ESTIMATED centre of the group **51.50079, -0.06505** (from the purple zone on CHAWF-210005), arranged as a loose triangle a few metres apart (photo chambers-1)."
+      ],
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "fenders": true
+    }
+  ]
+}

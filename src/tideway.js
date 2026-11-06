@@ -17,7 +17,8 @@ const trueBore = (mat) => patchTrueProportionMaterial(mat, { mode: 'axis' });
 import { getTerrainMeshSurfaceY } from './terrain.js';
 import { isInThames } from './thames-mask.js';
 import { WATER_TOP_Y } from './thames.js';
-import { FORESHORE_SITE_IDS, WHIRLPOOL, findNearest, buildWhirlpoolGeometry, createWhirlpoolMaterial } from './tideway-whirlpool.js';
+import { FORESHORE_SITE_IDS, TIDEWAY_PLATFORM_DATA } from './tideway-platforms.js';
+import { findNearest } from './tideway-site-search.js';
 
 // Infra haze band (see infra-materials.js). Wider than Crossrail's — Tideway
 // and Lee are shorter features that never formed a horizon band; the haze is
@@ -30,10 +31,6 @@ let leeTunnelData = null;
 
 // Shaft cylinders stored for terrain snapping
 let shaftMeshes = [];
-// Whirlpools on the river bed where a foreshore shaft meets it (25Sep26f).
-let whirlpoolGroup = null;
-let whirlpoolMaterial = null;
-let whirlpoolTime = 0;
 // Every tunnel tube and the route points it was built from, so a tunnel can be
 // rebuilt through its shafts' snapped positions (25Sep26f fix round 1): a shaft
 // moved into open water or off the bank takes its tunnel vertex with it, so the
@@ -244,7 +241,7 @@ function buildTunnelSection(points, llToXZ, VE, radius, segments = 200, placeOf 
 function buildShaftCylinder(site, llToXZ, VE, material) {
   // Unit cylinder scaled per-shaft. Open-ended (25Sep26f, D-039): a shaft has
   // no cap, so nothing is drawn at or above the ground or river bed; a
-  // foreshore shaft's mouth is the whirlpool on the bed.
+  // foreshore shaft ends below the bed; its access cover is on the platform.
   const geo = new THREE.CylinderGeometry(1, 1, 1, 16, 1, true);
   const mesh = new THREE.Mesh(geo, material);
 
@@ -333,12 +330,6 @@ export function createTidewaySystem(data, llToXZ, verticalScale = 3.0) {
     shaftMeshes.push(mesh);
   }
   group.add(tidewayShaftsGroup);
-
-  whirlpoolGroup = new THREE.Group();
-  whirlpoolGroup.name = 'tideway-whirlpools';
-  whirlpoolMaterial?.dispose();
-  whirlpoolMaterial = createWhirlpoolMaterial();
-  group.add(whirlpoolGroup);
 
   // ---- 2c. Connection tunnel spurs ----
 
@@ -464,24 +455,11 @@ function findSite(sites, id) {
 
 // ---------- Terrain Snapping ----------
 //
-// Sprint 25Sep26f (D-039, Lane W). Idempotent: every call starts again from
-// each site's source position, so the several snap calls in main.js agree.
-//  - Foreshore sites (built in the river) and any site whose point lies in the
-//    modelled river: the shaft stands at the nearest point with open water all
-//    round a whirlpool disc, its top at the rendered bed under the funnel; a
-//    whirlpool marks where it meets the bed. Nothing stands above the bed.
-//  - Land sites: an underground-only shaft whose open top sits a metre below
-//    the ground. A land site whose mapped point falls in the modelled water is
-//    moved to the nearest dry ground instead of standing in the river.
-// The physical floor (getTerrainMeshSurfaceY, which includes the refined river
-// bed) is used, not the pre-refinement structural grid: that grid returns the
-// 2.15 m OD shelf in the channel, which is what stood the old cylinders up to
-// just under the water top.
-
+// D-060: researched foreshore axes stay fixed. Every open shaft top is hidden
+// below the lowest physical floor across its footprint, exactly as on land.
 const LAND_TOP_BELOW_M = 1.0;       // open land shaft top, metres below ground
 const WET_DEPTH_Y = 3;              // bed at least this far (canonical) below the water top
 const MAX_SITE_MOVE_M = 150;       // land sites mapped into the water
-const MAX_FORESHORE_MOVE_M = 300;  // foreshore sites mapped to a riverside centroid
 
 function floorAt(x, z, fallback) {
   const y = getTerrainMeshSurfaceY({ x, z });
@@ -492,10 +470,6 @@ function floorAt(x, z, fallback) {
 function isWetAt(x, z, fallback) {
   const f = floorAt(x, z, fallback);
   return f !== null && f < WATER_TOP_Y - WET_DEPTH_Y && isInThames(x, z);
-}
-function whirlpoolRadii(ud) {
-  const inner = ud.diameter / 2;
-  return { inner, outer: Math.max(WHIRLPOOL.minOuterM, inner * WHIRLPOOL.outerFactor) };
 }
 // A land shaft's whole footprint, not just its centre: the wall at radius r
 // (plus a little) and a ring half way in, 32 samples each, and the centre.
@@ -534,63 +508,29 @@ function footprintLowestFloor(x, z, r, fallback) {
   }
   return low;
 }
-function ringWet(x, z, outer, fallback) {
-  if (!isWetAt(x, z, fallback)) return false;
-  for (let k = 0; k < 12; k++) {
-    const a = (k / 12) * Math.PI * 2;
-    if (!isWetAt(x + Math.cos(a) * (outer + 4), z + Math.sin(a) * (outer + 4), fallback)) return false;
-  }
-  return true;
-}
-
 export function snapTidewayShaftsToTerrain(getStructuralFallback) {
   const ready = Number.isFinite(getTerrainMeshSurfaceY({ x: 0, z: 0 })) || !!getStructuralFallback;
   if (!ready) return;
-  for (const w of [...(whirlpoolGroup?.children ?? [])]) { w.geometry.dispose(); w.removeFromParent(); }
 
   for (const mesh of shaftMeshes) {
     const ud = mesh.userData;
     const src = ud.sourceXZ ?? ud.xz;
     const tunnelY = -(ud.depth * moduleVE);
-    const { inner, outer } = whirlpoolRadii(ud);
-    let river = false, at = { x: src.x, z: src.z, moved: 0 };
-    const wet = ud.foreshore ? findNearest((x, z) => ringWet(x, z, outer, getStructuralFallback), src.x, src.z, MAX_FORESHORE_MOVE_M, 6) : null;
-    if (wet) { river = true; at = wet; }
-    else if (footprintTouchesWater(src.x, src.z, inner, getStructuralFallback)) {
-      // A land site whose shaft wall (not only its centre) reaches into the
-      // river: the nearest ground where the whole footprint is dry.
-      const dry = findNearest((x, z) => footprintDry(x, z, inner, getStructuralFallback), src.x, src.z, MAX_SITE_MOVE_M, 2);
-      if (dry) at = dry;
+    const inner = ud.diameter / 2;
+    let river = ud.foreshore, at = { x: src.x, z: src.z, moved: 0 };
+    // Permanent shaft axes follow the researched covers, never an open-water search.
+    if (ud.foreshore) {
+      const s = TIDEWAY_PLATFORM_DATA.sites.find(s => s.siteId === ud.shaftId && s.id !== 'albert-isle');
+      if (s) { const q = moduleLlToXZ(...s.anchor); at = { x: q.x+s.shaft[0], z: q.z-s.shaft[1], moved: Math.hypot(q.x+s.shaft[0]-src.x,q.z-s.shaft[1]-src.z) }; }
+    } else if (footprintTouchesWater(src.x, src.z, inner, getStructuralFallback)) {
+      const dry = findNearest((x,z) => footprintDry(x,z,inner,getStructuralFallback),src.x,src.z,MAX_SITE_MOVE_M,2);
+      if (dry) at=dry;
     }
     const surfaceY = floorAt(at.x, at.z, getStructuralFallback);
     if (surfaceY === null) continue;
-    let topY;
-    if (river) {
-      // The shaft's open top sits just under the lowest bed sample across its
-      // mouth, so nothing of it rises into the water; the whirlpool marks it.
-      let low = surfaceY;
-      for (let k = 0; k < 16; k++) {
-        const a = (k / 16) * Math.PI * 2;
-        const f = floorAt(at.x + Math.cos(a) * inner, at.z + Math.sin(a) * inner, getStructuralFallback);
-        if (f !== null) low = Math.min(low, f);
-      }
-      topY = low - (WHIRLPOOL.dipM + WHIRLPOOL.shaftBelowBedM) * moduleVE;
-      const geometry = buildWhirlpoolGeometry({ cx: at.x, cz: at.z, innerR: 0.5, outerR: outer, VE: moduleVE,
-        floorAt: (x, z) => { const f = floorAt(x, z, getStructuralFallback); return f === null ? null : Math.min(f, WATER_TOP_Y - 1); } });
-      const whirl = new THREE.Mesh(geometry, whirlpoolMaterial);
-      whirl.name = `whirlpool-${ud.shaftId}`;
-      // Before the Thames water (SURFACE_WATER = 1), which composites over it.
-      whirl.renderOrder = RENDER_ORDER.SURFACE_WATER - 1;
-      // Hovering the whirlpool reads as its shaft.
-      whirl.userData = { type: 'tideway-shaft', shaftId: ud.shaftId, name: ud.name, depth: ud.depth, diameter: ud.diameter,
-        whirlpool: true, centre: { x: at.x, z: at.z } };
-      whirlpoolGroup?.add(whirl);
-    } else {
-      // Under the lowest floor across the whole footprint, so no part of the
-      // open top rises above sloping ground, a bank or a river bed.
-      const low = footprintLowestFloor(at.x, at.z, inner, getStructuralFallback) ?? surfaceY;
-      topY = Math.min(surfaceY, low) - LAND_TOP_BELOW_M * moduleVE;
-    }
+    // The entire open mouth stays below the lowest physical bed/ground sample.
+    const low = footprintLowestFloor(at.x,at.z,inner,getStructuralFallback) ?? surfaceY;
+    const topY = Math.min(surfaceY,low) - LAND_TOP_BELOW_M * moduleVE;
     ud.xz = { x: at.x, z: at.z };
     ud.inRiver = river;
     ud.movedM = at.moved;
@@ -626,22 +566,6 @@ function routeTunnelsThroughShafts() {
     if (b.glow) { b.glow.geometry.dispose(); b.glow.geometry = r.glowGeo; } else r.glowGeo.dispose();
   }
 }
-
-// Beyond this range a whirlpool is sub-pixel (and under dark water): skip its
-// draws. Visibility is a pure function of camera position.
-export const WHIRLPOOL_DRAW_RANGE = 3000;
-/** Advance the whirlpools' animation by simulation time (pause-aware). */
-export function updateTidewayWhirlpools(dt, camera = null) {
-  if (Number.isFinite(dt) && dt > 0) whirlpoolTime += dt;
-  if (whirlpoolMaterial) whirlpoolMaterial.userData.whirlpoolUniforms.uTime.value = whirlpoolTime;
-  const c = camera?.position;
-  if (c && whirlpoolGroup) for (const w of whirlpoolGroup.children) {
-    const k = w.userData.centre;
-    w.visible = Math.hypot(k.x - c.x, k.z - c.z, (w.geometry.boundingSphere?.center.y ?? 0) - c.y) < WHIRLPOOL_DRAW_RANGE;
-  }
-}
-export function setTidewayWhirlpoolTime(t) { whirlpoolTime = Math.max(0, +t || 0); updateTidewayWhirlpools(0); }
-export function getTidewayWhirlpools() { return whirlpoolGroup; }
 
 // ---------- Legend ----------
 
