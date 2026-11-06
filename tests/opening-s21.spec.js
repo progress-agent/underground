@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test';
 
 const EVENTS = ['ug:opening-reveal', 'ug:intro-done', 'ug:late-layer', 'ug:late-layers-done', 'ug:landing-lock'];
-const LAYER_IDS = ['canals', 'reservoirs', 'surfaceTrains', 'seaLife', 'motorway', 'cliff', 'airports', 'flights', 'corridor']; // corridor: the beyond-edge corridor, queued once its sources exist
+const LAYER_IDS = ['canals', 'reservoirs', 'surfaceTrains', 'seaLife', 'motorway', 'cliff', 'airports', 'flights', 'corridor', 'deepWater', 'tidewayPlatforms']; // corridor: the beyond-edge corridor, queued once its sources exist; deepWater and tidewayPlatforms: sprint 06Nov26f lanes W and T
 
 const RECORDER = () => {
   window.__ev = [];
