@@ -186,7 +186,9 @@ export function createOnFoot({ ctx, body, P, VE, getPhase, getRegime, look }) {
       blend = null;
       ctx.player?.update(0, figureState(), false);
       const l = lens();
-      if (l && Math.abs((l.get() ?? 0) - preferredMm()) > 1e-6) l.set(preferredMm());
+      // A blend can stop less than 1e-6 mm short. Even that residual changes
+      // Deity's projection, so restore the preferred lens exactly on exit.
+      if (l && l.get() !== preferredMm()) l.set(preferredMm());
     },
 
     /** A look delta from the pointer. True when the rig took it (third person). */
