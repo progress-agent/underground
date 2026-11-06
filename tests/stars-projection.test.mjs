@@ -8,7 +8,8 @@ for(const master of [1.1,5,10])test(`stars keep their real elevation when Master
  const originalFetch=globalThis.fetch;
  globalThis.fetch=async()=>({ok:true,json:async()=>[[11767,2.53,89.26,1.97,.6]]});
  try{
-  const scene=new THREE.Scene(),stars=createStars({scene,renderer:{getPixelRatio:()=>2}});
+  const composer={passes:[],insertPass(){}};
+  const scene=new THREE.Scene(),stars=createStars({scene,renderer:{getPixelRatio:()=>2},composer});
   await stars.load();
   const camera=new THREE.PerspectiveCamera(55,1.6,1,50000),ratio=master/5;
   createVerticalScaleController({camera,value:master});

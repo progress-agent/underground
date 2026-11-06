@@ -1353,7 +1353,7 @@ sunSystem.mountControls(document.getElementById('renderMode')?.closest('p') ?? n
 // Visible sun disc and analytic sky (D-038).
 // updateEnvironment drives it each frame; nothing else in the tick changes.
 const skySystem = createSkySystem({ scene });
-const starSystem = createStars({scene, renderer});
+const starSystem = createStars({scene, renderer, composer, camera, bloomPass});
 attachSky(skySystem);
 // ── s25:L ──
 // Clear is the only sky (D-039): the hidden Sky row and ?sky= are retired, so
