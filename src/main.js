@@ -1504,7 +1504,7 @@ function s21TryStartGeologyWork() {
             VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale });
         },
         prepare: (group) => applyShadowPolicy(group),
-        attach: (group) => { flightsGroup = group; scene.add(group); },
+        attach: (group) => { flightsGroup = group; scene.add(group); group.userData.prepareLights(renderer, camera, scene, composer.readBuffer); },
         onFail: (error) => {
           flightsInitError = error.message;
           flightsGroup = null;
@@ -4837,9 +4837,6 @@ function tick(frameTime) {
   // ── s25:W ──
   updateTidewayWhirlpools(surfaceSimulationDt, camera);
   // ── /s25:W ──
-  // ── sprint:F ──
-  flightsGroup?.userData.update(surfaceSimulationDt, camera);
-  // ── /sprint:F ──
 
   // Update living-water shader uniforms.
   updateWater(dt);
@@ -4886,6 +4883,9 @@ function tick(frameTime) {
   sunSystem.update({ camera, surfaceY: surfaceYAtCamera, submergedBlend: _submergedBlend,
     adaptiveShadows: renderQualityMode !== 'auto' || adaptiveQuality.get().shadows !== false });
   updateNightScene({scene, sun:sunSystem, phone:TOUCH_UI});
+  // D-060: use this frame's substrate-weighted night level, including dawn.
+  flightsGroup?.userData.update(surfaceSimulationDt, camera);
+  airportsGroup?.userData.updateNight((sunSystem.state.night ?? 0) * sunSystem.status.airWeight);
   starSystem.update(camera, sunSystem.hour, (sunSystem.state.night ?? 0) * sunSystem.status.airWeight);
   // ── /sprint:D ──
   // ── s16:R ── shadowFloat: compare what the GPU receives (float32), so a last-bit wobble repeats nothing

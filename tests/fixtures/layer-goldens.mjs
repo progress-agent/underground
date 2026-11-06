@@ -18,15 +18,18 @@ export function syntheticSurface({ x, z }) {
 }
 
 export function hashGroup(root) {
+  // D-060 adds separate, hidden-by-day point glows. Keep the original airframe
+  // and airport geometry hashes pinned to 7c2d4bd; lights have their own tests.
+  const nightGlow = o => o.isPoints && ['aircraft-flight-lights','aircraft-parked-beacons'].includes(o.name);
   const meshes = [];
   root.traverse((o) => {
-    if (!o.geometry) return;
+    if (!o.geometry || nightGlow(o)) return;
     const attrs = Object.entries(o.geometry.attributes).sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([name, a]) => `${name}:${a.itemSize}:${a.array.length}:${sha(a.array)}`);
     const index = o.geometry.index ? `${o.geometry.index.array.length}:${sha(o.geometry.index.array)}` : null;
     meshes.push({ name: o.name || o.type, type: o.type, attrs, index, count: o.isInstancedMesh ? o.count : undefined });
   });
-  return { children: root.children.length, meshes };
+  return { children: root.children.filter(o => !nightGlow(o)).length, meshes };
 }
 
 export async function layerHashes(repoRoot, { tmp = path.join(os.tmpdir(), 'ug-layer-goldens-cache') } = {}) {

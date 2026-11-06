@@ -12,7 +12,7 @@ test('nine airports retain mapped source layouts and four current Heathrow termi
 });
 test('airport geometry is finite, batched and carries stationary stand and queue aircraft',()=>{
  const g=api.createAirports({getSurfaceY:({x,z})=>x*.001+z*.0001});expect(g.userData.stats.drawCalls).toBeLessThan(100);expect(g.userData.stats.queued).toBe(3);
- for(const s of g.children)expect(s.userData.aircraft.length).toBeGreaterThan(0);
+ for(const s of g.children.filter(s=>s.userData.airport))expect(s.userData.aircraft.length).toBeGreaterThan(0);
  g.traverse(m=>{if(m.isMesh){expect(m.instanceColor).toBeUndefined();expect([...m.geometry.attributes.position.array].every(Number.isFinite)).toBeTruthy();expect([...m.geometry.attributes.normal.array].every(Number.isFinite)).toBeTruthy();}});
  const h=g.children[0];for(const a of h.userData.aircraft.filter(a=>a.state==='queued')){expect(a.source).toMatch(/^way\//);for(const r of h.userData.runways){const p=r.points[0],q=r.points.at(-1),d=Math.abs((q[0]-p[0])*(a.z-p[1])-(q[1]-p[1])*(a.x-p[0]))/Math.hypot(q[0]-p[0],q[1]-p[1]);expect(d).toBeGreaterThan(r.width/2+a.length/2);}}
  expect(g.userData.update).toBeUndefined();g.userData.dispose();
