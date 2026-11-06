@@ -7,6 +7,8 @@ import DATA from './tideway-platforms.json' with { type: 'json' };
 import { bindTrueProportion, structureYScale, onMasterChange } from './true-proportion.js';
 import { WATER_TOP_Y } from './thames.js';
 import { pointInRing } from './station-building-geometry.js';
+import { isInThames } from './thames-mask.js';
+import { approachFrame, approachPlan, approachSideFaces } from './tideway-approaches.js';
 export const TIDEWAY_PLATFORM_DATA = DATA;
 export const FORESHORE_SITE_IDS = new Set(DATA.sites.map(s => s.siteId));
 // The researched Chambers operational area is cleared land. One legacy map box
@@ -54,7 +56,7 @@ export function ventGeometry(h,d,plain=false) {
   // Top cut has a dark closed face. The shaft itself stays open below ground.
   return g;
 }
-export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
+export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z)=>!isInThames(x,z)&&floorAt(x,z)>WATER_TOP_Y}) {
   const group=new THREE.Group();group.name='tideway-platforms';
   const registry=new Map(),solidRecords=[];
   const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.86,metalness:.08,side:THREE.DoubleSide});
@@ -96,7 +98,17 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
       const len=Math.hypot(b[0]-a[0],b[1]-a[1]),n=Math.ceil(len/1.5),points=[];
       for(let i=0;i<=n;i++) {const t=i/n;points.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);}
       walls.push({points,top:y,color:c});
-      if(rail)railing(a,b,y+(data.parapet||0));
+      if(rail) {
+        // The Heathwall east entrance opens through this railing, beside the
+        // compound, rather than through the security screen at the back.
+        const access=data.outline[data.accessEdge]===a?approachFrame(data):null;
+        if(access){
+          const t=data.approach.edgeFraction,dt=(data.approach.widthM/2+.15)/len;
+          const at=v=>[a[0]+(b[0]-a[0])*v,a[1]+(b[1]-a[1])*v];
+          if(t>dt)railing(a,at(t-dt),y+(data.parapet||0));
+          if(t+dt<1)railing(at(t+dt),b,y+(data.parapet||0));
+        }else railing(a,b,y+(data.parapet||0));
+      }
       if(data.parapet) {const dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz),nx=-dz/l*.2,nz=dx/l*.2;
         slab([[a[0]+nx,a[1]+nz],[b[0]+nx,b[1]+nz],[b[0]-nx,b[1]-nz],[a[0]-nx,a[1]-nz]],y+data.parapet,c);
         const panel=new THREE.BoxGeometry(len,data.parapet,.4);panel.rotateY(Math.atan2(dz,dx));panel.translate((a[0]+b[0])/2,y+data.parapet/2,-(a[1]+b[1])/2);add(panel,c);solid([[a[0]+nx,a[1]+nz],[b[0]+nx,b[1]+nz],[b[0]-nx,b[1]-nz],[a[0]-nx,a[1]-nz]],y,y+data.parapet);}
@@ -179,7 +191,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
     if(data.totem)box(4,0,.6,.3,2.5,deck,colors.rail);
     if(data.drum){const[x,z,d,h]=data.drum;cylinder(x,z,d/2,h,deck,colors.brick);for(let i=0;i<5;i++){const g=new THREE.CylinderGeometry(d/2+.015,d/2+.015,.12,32,1,true);g.translate(x,deck+.2+i*.22,-z);add(g,['#b49355','#638e97','#d0c9b2','#b06d46','#45575a'][i]);}}
     // Stepped bands use the actual outside edges. Each terrace is a deck and solid wall.
-    if(data.terraces)for(let j=0;j<data.terraces.length;j++) {
+    if(data.terraces&&!data.endTerraces)for(let j=0;j<data.terraces.length;j++) {
       const levels=outwardTerraces?data.terraces:[...data.terraces].reverse();
       const y=levels[j]-datum,w=data.id==='albert-isle'?2.5:1.05;
       for(const i of data.riverEdges){
@@ -191,14 +203,6 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
         slab([q,r,s,t],y,data.id==='chelsea'?colors.brick:colors.concrete);wall(s,t,y,colors[data.wall],false);
         if(outward)box((s[0]+t[0])/2,(s[1]+t[1])/2,1,.7,.25,y,colors.green,false);
       }
-    }
-    if(data.publicAccess){
-      // Access follows the source's landward edge; bank-probed ramp closes the rendered bank gap.
-      const e=data.accessEdge??(data.outline.length-1),a=data.outline[e],b=data.outline[(e+1)%data.outline.length],mx=(a[0]+b[0])/2,mz=(a[1]+b[1])/2;
-      let nx=-(b[1]-a[1]),nz=b[0]-a[0],l=Math.hypot(nx,nz);nx/=l;nz/=l;if(pointInRing(mx+nx,mz+nz,data.outline)){nx=-nx;nz=-nz;}
-      let dist=3,ground;for(;dist<100;dist+=2){ground=floorAt(p.x+mx+nx*dist,p.z-mz-nz*dist);if(Number.isFinite(ground)&&ground>=WATER_TOP_Y)break;}
-      const endY=((ground??WATER_TOP_Y)-WATER_TOP_Y)/structureYScale();
-      for(let k=0;k<Math.ceil(dist/.6);k++){const t=k/Math.ceil(dist/.6),x=mx+nx*dist*t,z=mz+nz*dist*t,y=deck+(endY-deck)*t;box(x,z,3,1,.16,y-.16,colors[data.wall]);}
     }
     if(data.canopy){
       // The source canopy is perforated metal, not an opaque sheet.
@@ -235,16 +239,42 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
     }
     if(data.waveform){box(33,4,.18,.18,4,deck,'#e1e2dd');line([33,4],[31.8,4],deck+3.9,.09,'#e1e2dd');cylinder(31.8,4,.25,.35,deck+3.4,colors.bronze);}
     if(data.id==='putney') {
-      for(let i=0;i<7;i++)box(-17-i*.35,-4,3,.35,.15*(i+1),deck-1.05,colors.granite);
       for(const x of [12,15])box(x,0,1.3,.15,.8,deck-3.2,'#202625',false);
       for(let k=0;k<3;k++)line([-9+k*5,15-k*3],[-6+k*5,13-k*3],deck+1.1,.05,colors.bronze);
     }
-    if(data.id==='chelsea') {
-      for(const [x,z]of [[-24,-1],[21,9]])for(let j=0;j<3;j++) {
-        const ring=rect(x,z,6+j*1.5,4+j*1.4),y=deck-.55-j*.55;
-        slab(ring,y,colors.brick);add(polygon(rect(x,z,5+j*1.5,3+j*1.4),y+.02),colors.green);
-        const a=ring[0],b=ring[1];wall(a,b,y,colors.brick,false);
+    if(data.endTerraces) {
+      // A joined offset curve wraps each end. Three broad planted shelves
+      // total 8 m, independent of the narrow pedestrian floodable walkway.
+      rec.endTerraces=[];
+      for(const edges of data.endTerraces.edges) {
+        const chain=[...edges.map(i=>data.outline[i]),data.outline[(edges.at(-1)+1)%data.outline.length]];
+        const normals=edges.map(i=>{const a=data.outline[i],b=data.outline[(i+1)%data.outline.length],l=Math.hypot(b[0]-a[0],b[1]-a[1]);let nx=-(b[1]-a[1])/l,nz=(b[0]-a[0])/l;if(pointInRing((a[0]+b[0])/2+nx*.1,(a[1]+b[1])/2+nz*.1,data.outline)){nx=-nx;nz=-nz;}return[nx,nz];});
+        const offset=w=>chain.map((q,i)=>{
+          const a=normals[Math.max(0,i-1)],b=normals[Math.min(normals.length-1,i)],den=1+a[0]*b[0]+a[1]*b[1];
+          return[q[0]+(a[0]+b[0])/den*w,q[1]+(a[1]+b[1])/den*w];
+        });
+        const count=data.endTerraces.levelsAOD.length,width=data.endTerraces.widthM/count;
+        for(let j=0;j<count;j++) {
+          const inner=offset(j*width),outer=offset((j+1)*width),y=data.endTerraces.levelsAOD[j]-datum;
+          const ring=[...inner,...outer.toReversed()];slab(ring,y,colors.brick);
+          wall(inner[0],outer[0],y,colors.brick,false);
+          wall(outer.at(-1),inner.at(-1),y,colors.brick,false);
+          const planting=[...offset(j*width+.2),...offset((j+1)*width-.2).toReversed()];add(polygon(planting,y+.025),'#6b7750');
+          rec.endTerraces.push({ring:ring.map(([x,z])=>[p.x+x,p.z-z]),levelAOD:y+datum,widthM:width});
+          for(let i=0;i<outer.length-1;i++){
+            wall(outer[i],outer[i+1],y,colors.brick,false);
+            // Low native rush/sedge clumps on the whole bed, rather than a
+            // single isolated box on an otherwise bare narrow band.
+            const a=inner[i],b=inner[i+1],c=outer[i],d=outer[i+1],n=Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/1.2);
+            for(let k=0;k<n;k++)for(const t of [.3,.7]){
+              const f=(k+.5)/n,x=(a[0]+(b[0]-a[0])*f)*(1-t)+(c[0]+(d[0]-c[0])*f)*t,z=(a[1]+(b[1]-a[1])*f)*(1-t)+(c[1]+(d[1]-c[1])*f)*t;
+              const g=new THREE.ConeGeometry(.16,.3+(k%3)*.07,4);g.translate(x,y+.15,-z);add(g,k%3===0?'#8c9266':colors.green);
+            }
+          }
+        }
       }
+      // Keep a lower walking strip along the central river face.
+      for(const i of [10,11,12,13,14]){const a=data.outline[i],b=data.outline[i+1],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz),nx=dz/l,nz=-dx/l;slab([a,b,[b[0]+nx*1.05,b[1]+nz*1.05],[a[0]+nx*1.05,a[1]+nz*1.05]],4.4-datum,colors.brick);}
     }
     if(data.id==='albert-isle') {
       const ring=new THREE.RingGeometry(7.8,8,64);ring.rotateX(-Math.PI/2);ring.translate(0,deck+.03,0);add(ring,'#515955');
@@ -259,18 +289,41 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
       slab(clipOperationalArea(rect(27,0,18,25)),deck,colors.concrete);
       add(polygon(circle(4,3,.5,32),deck+.025),colors.bronze);
     }
-    // All rigid detail is one draw per site. Wall bottoms have independent bed-following vertices.
+    // Keep immutable rigid detail; refresh joins it with terrain-following works.
     const buffers=parts.map(g=>{g.deleteAttribute('uv');return g.index?g.toNonIndexed():g;});
     const merged=mergeGeometries(buffers);for(const g of buffers)g.dispose();
     const mesh=new THREE.Mesh(merged,mat);mesh.name=`tideway-detail-${data.id}`;root.add(mesh);for(const g of parts)g.dispose();
-    rec.walls=walls;rec.detail=mesh;
-    const wallMesh=new THREE.Mesh(new THREE.BufferGeometry(),mat);wallMesh.name=`tideway-wall-${data.id}`;root.add(wallMesh);rec.wallMesh=wallMesh;
+    rec.walls=walls;rec.detail=mesh;rec.staticDetailGeometry=merged;
+    // The approach shares the site's existing opaque draw. Retain immutable
+    // rigid detail so Master changes can replace only the terrain tie-in.
+    rec.approachMesh=mesh;
+    rec.wallMesh=mesh;
     yield;
   }
   function refresh() {
     solidRecords.length=0;const sy=structureYScale();
     for(const rec of registry.values()) {
       const {data,anchor:p}=rec;rec.deckY=WATER_TOP_Y+(data.deckAOD-datum)*sy;
+      const worldFloor=(x,z)=>floorAt(p.x+x,p.z-z);
+      rec.approach=approachPlan(data,{floorAt:worldFloor,dryAt:(x,z)=>isDryLand(p.x+x,p.z-z),sy,datum});
+      const pieces=[],approachSolids=[],slabs=rec.approach.slabs;
+      const bases=slabs.map(s=>Math.min(s.y-.18,...s.ring.map(([x,z])=>(worldFloor(x,z)-WATER_TOP_Y)/sy))-.02);
+      for(let i=0;i<slabs.length;i++){
+        const s=slabs[i],ring=s.ring.map(([x,z])=>[p.x+x,p.z-z]);
+        pieces.push(geometryColor(polygon(s.ring,s.y),colors[data.wall]));
+        approachSolids.push({ring,lo:bases[i],hi:s.y,kind:'deck'});
+      }
+      // Keep the full external boundary, including risers and any exposed
+      // lower interval where neighbouring terrain bases differ. Covered faces
+      // inside the same paved volume need no submitted triangles.
+      const faces=approachSideFaces(slabs,bases);
+      for(const {a,b,lo,hi} of faces){
+        const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute([a[0],hi,-a[1],a[0],lo,-a[1],b[0],lo,-b[1],a[0],hi,-a[1],b[0],lo,-b[1],b[0],hi,-b[1]],3));g.computeVertexNormals();pieces.push(geometryColor(g,colors[data.wall]));
+      }
+      rec.approachGeometry={bases,faces,originalFaceCount:slabs.length*4};
+      const buffers=pieces.map(g=>{g.deleteAttribute('uv');return g.index?g.toNonIndexed():g;});
+      const approachGeometry=mergeGeometries(buffers);for(const g of buffers)g.dispose();for(const g of pieces)g.dispose();
+      rec.approachSolids=approachSolids;
       const positions=[],cs=[];rec.wallSamples=[];
       for(const w of rec.walls)for(let i=0;i<w.points.length-1;i++) {
         const a=w.points[i],b=w.points[i+1];
@@ -280,12 +333,24 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5}) {
         const c=new THREE.Color(w.color);for(let k=0;k<6;k++)cs.push(c.r,c.g,c.b);
         rec.wallSamples.push({x:p.x+a[0],z:p.z-a[1],bottomY:WATER_TOP_Y+ya*sy,floorY:fa});
       }
-      const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(cs,3));g.computeVertexNormals();g.computeBoundingSphere();rec.wallMesh.geometry.dispose();rec.wallMesh.geometry=g;
-      for(const s of rec.solids){
+      const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('color',new THREE.Float32BufferAttribute(cs,3));g.computeVertexNormals();
+      // Same opaque material/transform: render every site's works in one draw.
+      // The wall range indexes the real merged buffer, retaining direct checks
+      // of its bed-following bottom vertices without a detached test mesh.
+      rec.wallVertexRange={start:rec.staticDetailGeometry.attributes.position.count+approachGeometry.attributes.position.count,count:g.attributes.position.count};
+      const batched=mergeGeometries([rec.staticDetailGeometry,approachGeometry,g]);
+      if(rec.detail.geometry!==rec.staticDetailGeometry)rec.detail.geometry.dispose();
+      rec.detail.geometry=batched;approachGeometry.dispose();g.dispose();
+      for(const s of [...rec.solids,...approachSolids]){
         const xs=s.ring.map(q=>q[0]),zs=s.ring.map(q=>q[1]);let base=s.land?s.land.position.y:WATER_TOP_Y+s.lo*sy,top=s.land?s.land.position.y+s.hi*sy:WATER_TOP_Y+s.hi*sy;
         if(s.kind==='deck'){base=Math.min(base,...s.ring.map(([x,z])=>floorAt(x,z)??base))-.05;}
         solidRecords.push({ring:s.ring,minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs),base,h:top-base,skirt:0,absolute:true,key:`tideway:${data.id}:${s.kind}`,deck:s.kind==='deck'});
       }
+      rec.group.updateMatrixWorld(true);
+      // Entire works, including separate land columns and the terrain tie-in.
+      // The checker derives masks from these bounds under W8 erratum 4.
+      rec.builtBounds=new THREE.Box3().setFromObject(rec.group);
+      for(const s of rec.solids)if(s.land)rec.builtBounds.union(new THREE.Box3().setFromObject(s.land));
     }
     version++;
   }

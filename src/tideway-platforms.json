@@ -1,7 +1,7 @@
 {
   "version": 1,
   "datum": "m AOD (ATD minus 100)",
-  "attribution": "Contains information from OpenStreetMap, \u00a9 OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright. Source plans/photos credited in docs/tideway-platform-research.md; photos not included.",
+  "attribution": "Contains information from OpenStreetMap, © OpenStreetMap contributors, ODbL 1.0 https://www.openstreetmap.org/copyright. Source plans/photos credited in docs/tideway-platform-research.md; photos not included.",
   "sourceRecord": "docs/tideway-platform-research.md",
   "sites": [
     {
@@ -105,7 +105,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, putney sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -115,7 +115,19 @@
         "**Diameter:** about 0.9 to 1.0 m at the base, flaring slightly to the top (ESTIMATED: in photo putney-1 and the Commons close-up its width roughly equals the 1.1 m handrail height; height to width about 5.5:1). DCO allowed \"0.6m internal dia ventilation column, minimum 4m to 8m maximum height\" (MEASURED, DCO layout).",
         "**Kiosk:** one electrical and control kiosk at the **west end of the platform, on the landward side**, marking the junction with the existing embankment beside the steps (PUTEF.12, photo putney-3). Clad in Cornish granite in horizontal coursed bands, with sandblasted dark-panel reliefs of a Thames skiff (Tideway 2023). Size about 3.5 m x 3 m in plan and about 2.5 to 3 m tall above the deck (ESTIMATED from photo putney-3; DCO allowed \"2.5m from new foreshore structure\"). A second, main kiosk is on Waterman's Green across the road, against the bridge abutment (PUTEF.06)."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 8,
+      "approach": {
+        "edgeFraction": 0.45,
+        "aodM": 4.54,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, putney Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain.",
+        "directionEastNorth": [
+          -0.4065930436783781,
+          -0.9136093786911081
+        ]
+      }
     },
     {
       "id": "chelsea",
@@ -271,7 +283,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, chelsea sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -283,7 +295,38 @@
         "**Footprint:** crescent, centroid 51.484892, -0.153987. Straight landward edge 55 m on bearing 073 from (-27.0, 1.2) to (25.8, 17.5); outer edge a smooth curve through the OSM vertices, maximum projection about 21.5 m at about (-4, -14). Add a planted intertidal terrace about 6 to 10 m wide wrapping each end, 0.5 to 1.5 m lower (ESTIMATED from DCO layout).",
         "**Levels:** main deck +4.95 m AOD; lower terraces and walkway +4.40; parapet/wall top about +5.5 to +6.0; embankment pavement about +6.0 (ESTIMATED). MHWS about +4.03, MLWS about -2.05. Deck about 0.9 m above MHWS and about 1 to 1.5 m below the pavement."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "approach": {
+        "edgeFraction": 0.5,
+        "aodM": 6,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, chelsea Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain."
+      },
+      "endTerraces": {
+        "widthM": 8,
+        "levelsAOD": [
+          4.4,
+          3.95,
+          3.5
+        ],
+        "edges": [
+          [
+            6,
+            7,
+            8,
+            9
+          ],
+          [
+            15,
+            16,
+            17,
+            18,
+            19
+          ]
+        ],
+        "source": "docs/tideway-platform-research.md, Chelsea Build summary: 6 to 10 m planted terraces wrapping each end, 0.5 to 1.5 m below deck. Chosen width 8 m and lower levels are estimates within that range; top 4.4 m from the DCO."
+      }
     },
     {
       "id": "heathwall",
@@ -356,7 +399,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, heathwall sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -367,7 +410,19 @@
         "**Deck:** flat at +5.41 m AOD; level with the Thames Path; MHWS about +4.0, MLWS about -2.2. Deck about 1.4 m above MHWS and about 6 m above the low-tide mud (ESTIMATED foreshore about -0.5 m AOD).",
         "**Vent columns:** none on the platform. Place 1 signature column (5.1 m, about 1.2 m diameter, dark bronze) on land at Middle Wharf near 51.48290, -0.13540 (ESTIMATED from photo heathwall-3 and the DCO column zone)."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 2,
+      "approach": {
+        "edgeFraction": 0.72,
+        "aodM": 5.41,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, heathwall Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain. East entrance continues east-south-east towards Middle Wharf, along the researched Thames Path, away from the pumping-station screen.",
+        "directionEastNorth": [
+          1,
+          -0.6
+        ]
+      }
     },
     {
       "id": "albert-isle",
@@ -510,7 +565,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, albert sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -520,7 +575,19 @@
         "**Isle of Effra:** no signature columns. **Two slim dark green cylindrical columns**, about 0.4 m diameter and about 6 m tall, stand at the landward (south-east) side of the circle by the entrance (photo albert-1, Tidal Thames bridge photo). These match the DCO's \"2 No. 0.225m internal dia ventilation columns, 6m high\" serving the Brixton Storm Relief interception (ESTIMATED identification). One more 0.225 m, 6 m column was planned by the Clapham Storm Relief chamber under the bridge abutment (DCO), not confirmed.",
         "**Terraces:** 3 to 4 concentric planted concrete-edged steps outside the parapet on the north and west, down to about +1.2 m AOD, then boulders to the foreshore (foreshore about 0 to -1 m AOD, ESTIMATED). Make them about 2 to 3 m wide each (ESTIMATED from DCO)."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 1,
+      "approach": {
+        "edgeFraction": 0.5,
+        "aodM": 4.5,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, albert Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain.",
+        "directionEastNorth": [
+          0.519667228248593,
+          -0.8543687563835796
+        ]
+      }
     },
     {
       "id": "albert-quay",
@@ -641,7 +708,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, albert sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -651,7 +718,15 @@
         "**Isle of Effra:** no signature columns. **Two slim dark green cylindrical columns**, about 0.4 m diameter and about 6 m tall, stand at the landward (south-east) side of the circle by the entrance (photo albert-1, Tidal Thames bridge photo). These match the DCO's \"2 No. 0.225m internal dia ventilation columns, 6m high\" serving the Brixton Storm Relief interception (ESTIMATED identification). One more 0.225 m, 6 m column was planned by the Clapham Storm Relief chamber under the bridge abutment (DCO), not confirmed.",
         "**Terraces:** 3 to 4 concentric planted concrete-edged steps outside the parapet on the north and west, down to about +1.2 m AOD, then boulders to the foreshore (foreshore about 0 to -1 m AOD, ESTIMATED). Make them about 2 to 3 m wide each (ESTIMATED from DCO)."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 6,
+      "approach": {
+        "edgeFraction": 0.5,
+        "aodM": 5.9,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, albert Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain."
+      }
     },
     {
       "id": "victoria",
@@ -788,16 +863,27 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, victoria sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
       "estimates": [
         "Embankment terrace and footway level: about **4.4 m AOD** (ESTIMATED: raised platform 5.4 m minus the stated ~1 m level difference).",
-        "**Form**: Tideway's \"signature\" twisted vortex column (DCO type B for this site). A tall tapered cylinder that is round at the base and flares to a larger, slightly elliptical and obliquely cut top, with a single sharp helical ridge running up the side where the two surfaces meet; the poem by Dorothea Smartt (about 150 characters, 60 mm Doves font, lower 3.5 m only) is engraved along that ridge (MEASURED, City of London poetry report \u00a71.3.1). Two columns stand side by side about 2 m apart (ESTIMATED from photo victoria-2).",
+        "**Form**: Tideway's \"signature\" twisted vortex column (DCO type B for this site). A tall tapered cylinder that is round at the base and flares to a larger, slightly elliptical and obliquely cut top, with a single sharp helical ridge running up the side where the two surfaces meet; the poem by Dorothea Smartt (about 150 characters, 60 mm Doves font, lower 3.5 m only) is engraved along that ridge (MEASURED, City of London poetry report §1.3.1). Two columns stand side by side about 2 m apart (ESTIMATED from photo victoria-2).",
         "**Diameter**: 1.2 m internal (MEASURED, DCO-stage figure for the signature columns, Planning Statement P.4.60 range and Chambers Wharf drop-in \"1.2m in diameter at the base\"). External about 1.3 m at the base and about 1.6 to 1.8 m across the flared top (ESTIMATED from photo victoria-2, scaled against people beside them)."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "approach": {
+        "edgeFraction": 0.25,
+        "aodM": 4.4,
+        "widthM": 3,
+        "insetM": 6,
+        "source": "docs/tideway-platform-research.md, victoria Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain.",
+        "directionEastNorth": [
+          -0.9880464918444319,
+          0.1541561868817165
+        ]
+      }
     },
     {
       "id": "blackfriars",
@@ -922,7 +1008,7 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, blackfriars sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
@@ -930,12 +1016,24 @@
         "West end: a rounded nose, radius roughly 15 to 20 m (ESTIMATED from the vertex curve).",
         "Deck: \"the new public space on top of the structure would be at the same height as the flood defences\" except where parapets are needed (MEASURED, Q.4.59). So the piazza is about **5.4 m AOD** (DERIVED); raised western terrace about 1 m higher (ESTIMATED). Guardian: most of the new spaces \"slope subtly up towards the flood defence line\".",
         "A \"ribbed rotunda\" kiosk sits at the broad end; \"too small a diameter to cover the invisible drop shaft\", originally planned as a control cabin (MEASURED, Diamond Geezer). Diameter not found (ESTIMATED 6 to 8 m from his description).",
-        "**Height: 5.1 m above ground** (MEASURED, City of London poetry report \u00a71.3.2, Central contract). DCO cap 6 m (MEASURED, Sch.3 BLABF6(2)). Photo blackfriars-2 shows **one of the three noticeably shorter** than the other two (ESTIMATED about 3.5 to 4 m, though perspective and a temporary barrier around its base in Sept 2025 make this uncertain).",
+        "**Height: 5.1 m above ground** (MEASURED, City of London poetry report §1.3.2, Central contract). DCO cap 6 m (MEASURED, Sch.3 BLABF6(2)). Photo blackfriars-2 shows **one of the three noticeably shorter** than the other two (ESTIMATED about 3.5 to 4 m, though perspective and a temporary barrier around its base in Sept 2025 make this uncertain).",
         "**Diameter**: 1.2 m internal (MEASURED, Q.4.60); external about 1.3 m base, 1.7 m top (ESTIMATED from photo).",
         "**Position**: western tip. OSM nodes for two of them at **51.510768, -0.107495** and **51.510795, -0.107571** (6 m apart, DERIVED); the third is unmapped, ESTIMATED within ~5 m of these.",
         "**Shaft**: flush, centred ~51.51072, -0.10730, under the broad end, 24 m internal; draw a field of flush rectangular hatches. A small ribbed round kiosk (~7 m diameter, ESTIMATED) at the broad end."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 10,
+      "approach": {
+        "edgeFraction": 0.05,
+        "aodM": 5.4,
+        "widthM": 4,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, blackfriars Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain.",
+        "directionEastNorth": [
+          0.17515591335541797,
+          0.9845407081561582
+        ]
+      }
     },
     {
       "id": "kemp",
@@ -1084,20 +1182,28 @@
       "publicAccess": true,
       "sources": {
         "figures": "docs/tideway-platform-research.md, kemp sections 1 to 5 and Build summary",
-        "outline": "\u00a9 OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
+        "outline": "© OpenStreetMap contributors, ODbL 1.0; retrieved 06Nov26f",
         "levels": "DCO illustrative drawings, ATD minus 100 = AOD; see research sections 2, not an as-built survey",
         "features": "Research build summary and credited source photographs; no photographs shipped"
       },
       "estimates": [
         "Lower floodable walkway: about **4.0 to 4.3 m AOD** (ESTIMATED: it is overtopped at higher spring tides, so it sits just above MHWS; no level found).",
         "Diameter: 1.2 m internal (MEASURED, T.4.58, DCO stage). External ~1.3 m base, ~1.7 m top (ESTIMATED from photo kemp-3).",
-        "Form: \"slim and simple\", \"more linear\", clustered as a group of three in a flat planting bed (MEASURED, design summary \u00a73.3; committee \u00a78.25). Plain upright metal cylinders (ESTIMATED diameter 0.5 to 0.7 m: \"smaller diameter\" per T.4.59).",
+        "Form: \"slim and simple\", \"more linear\", clustered as a group of three in a flat planting bed (MEASURED, design summary §3.3; committee §8.25). Plain upright metal cylinders (ESTIMATED diameter 0.5 to 0.7 m: \"smaller diameter\" per T.4.59).",
         "Position: eastern foreshore, around **51.50887, -0.04696** (ESTIMATED: centre of the DCO eastern column zone on KEMPF-250005, transferred to OSM coordinates; plus or minus 10 m).",
-        "**Electrical and control kiosk** on the east boundary by Free Trade Wharf: **11.5 m wide x 2.223 m deep x 2.923 m high**, 0.878 to 1.02 m from the boundary wall (MEASURED, committee \u00a78.11); brick back, full-height vertical hardwood fins on the front and sides, louvred doors, sedum/brown roof (MEASURED, design summary \u00a73.1; Tideway). Two ~2.3 m fences close the gap behind it (MEASURED, \u00a78.16). Approximate centre ~51.50917, -0.04692 (ESTIMATED from the DCO kiosk zone).",
-        "**Outline**: the OSM polygon in \u00a71: ~82 m along the old wall (bearing ~60\u00b0), ~33 m out at the rounded west end, ~22 m at the east corner, area ~2,100 m\u00b2. River face straight and running north-east; west corner a large-radius curve (~15 m, ESTIMATED from kemp-1).",
+        "**Electrical and control kiosk** on the east boundary by Free Trade Wharf: **11.5 m wide x 2.223 m deep x 2.923 m high**, 0.878 to 1.02 m from the boundary wall (MEASURED, committee §8.11); brick back, full-height vertical hardwood fins on the front and sides, louvred doors, sedum/brown roof (MEASURED, design summary §3.1; Tideway). Two ~2.3 m fences close the gap behind it (MEASURED, §8.16). Approximate centre ~51.50917, -0.04692 (ESTIMATED from the DCO kiosk zone).",
+        "**Outline**: the OSM polygon in §1: ~82 m along the old wall (bearing ~60°), ~33 m out at the rounded west end, ~22 m at the east corner, area ~2,100 m². River face straight and running north-east; west corner a large-radius curve (~15 m, ESTIMATED from kemp-1).",
         "**Levels** (m AOD): central square and wall tops ~5.2 to 5.9; curved terrace steps (5 to 6 risers, ESTIMATED from kemp-2) down to a lower walkway at ~4.0 to 4.3 that floods at big tides; MHWS 3.9; MLWS -2.8, with ~30 m of foreshore exposed at low water."
       ],
-      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures."
+      "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
+      "accessEdge": 8,
+      "approach": {
+        "edgeFraction": 0.5,
+        "aodM": 5.6,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, kemp Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain."
+      }
     },
     {
       "id": "chambers",
@@ -1194,7 +1300,15 @@
         "**Position**: they \"sit above the air treatment unit\", not over the shaft (MEASURED, CLWG notes Jun 2025); DCO zone is between the shaft and the east end of the river wall. ESTIMATED centre of the group **51.50079, -0.06505** (from the purple zone on CHAWF-210005), arranged as a loose triangle a few metres apart (photo chambers-1)."
       ],
       "modellingEstimates": "Unsurveyed furniture coordinates and low-detail profiles are interpreted from the cited build summary/photos. Bench footprints, tree crowns/trunks, rail section, paver pattern and access interpolation are schematic estimates, not surveyed figures.",
-      "fenders": true
+      "fenders": true,
+      "accessEdge": 3,
+      "approach": {
+        "edgeFraction": 0.5,
+        "aodM": 4.65,
+        "widthM": 3,
+        "insetM": 0,
+        "source": "docs/tideway-platform-research.md, chambers Height and Build summary; approach AOD derived from the stated deck/path relationship. Exact gateway position and terrain tie-in are modelling estimates. Dry-land tie-in is probed, with true-size steps (<=0.15 m riser, >=0.35 m tread), without altering terrain."
+      }
     }
   ]
 }
