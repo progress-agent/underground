@@ -160,6 +160,7 @@ import { getWaterTuningSurface } from './water-material.js';
 import { createMaterialResistance } from './material-resistance.js';
 import { applyRiverBedMaterial, setRiverMaterialSubmerged } from './river-materials.js';
 import { createUnderwaterSurface } from './underwater-surface.js';
+import { createLakeInteriorMask } from './water-interior-mask.js';
 // ── sprint:C ──
 import { createSeaLife } from './sea-life.js';
 // ── /sprint:C ──
@@ -453,6 +454,7 @@ composer.addPass(new OutputPass());
 const lensSystem = createLensSystem(camera, composer, controls);
 const underwaterSurface = createUnderwaterSurface({ camera, lensPass: lensSystem.pass,
   sceneTarget: composer.renderTarget1 });
+const lakeInteriorMask = createLakeInteriorMask(underwaterSurface);
 const renderQuality = createRenderQuality({ renderer, composer });
 let syncRenderQualityUi = () => {};
 // D-058 item 8: phones aim for 30 fps, so Automatic stops trading resolution for a 60 fps a phone cannot hold.
@@ -554,11 +556,16 @@ let _chalkClarity = 0;  // last computed inside-chalk clarity [0,1]
 // Shared water classification for readout, atmosphere and keyboard speed.
 // Thames membership follows rendered cross-sections AND actual carved terrain;
 // the narrower building suppression corridor is not a navigation boundary.
+function waterGroundAt(point) {
+  return deepWater?.groundAt(point.x,point.z) ?? getTerrainMeshSurfaceY(point);
+}
 function waterSurfaceAt(x,z) {
+  const lakeY=deepWater?.surfaceAt(x,z);if(lakeY!=null)return lakeY;
   const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
   return dockY ?? (thamesMesh?.userData.navigation?.containsXZ(x,z)?WATER_TOP_Y:null);
 }
 function isSubmergedAt(x, y, z) {
+  const lake=deepWater?.at(x,z);if(lake)return lake.contains({x,y,z});
   // Docks retain their published impounded surface reference. They have no
   // bathymetry dataset; do not fabricate a floor while fixing the Thames.
   const dockY=airportDockGroup?getAirportDockSurfaceY({x,z},VERTICAL_EXAGGERATION):null;
@@ -567,12 +574,13 @@ function isSubmergedAt(x, y, z) {
 }
 function classifySubstrateAt(point) {
   if(isSubmergedAt(point.x,point.y,point.z))return 'WATER';
-  const surface=getTerrainMeshSurfaceY(point);
+  const surface=waterGroundAt(point);
   if(point.y >= (surface ?? 0))return 'AIR';
   return point.y < getChalkSurfaceY(point.x,point.z) ? 'CHALK' : 'CLAY';
 }
 const materialResistance=createMaterialResistance({classify:classifySubstrateAt,
   riverNormal:(point,movement)=>{
+    const lake=deepWater?.outwardNormal(point,movement);if(lake)return lake;
     const dock=airportDockGroup?getAirportDockSurfaceY(point,VERTICAL_EXAGGERATION):null;
     return dock!==null?null:thamesMesh?.userData.navigation?.outwardNormal(point,movement);
   }});
@@ -1367,6 +1375,7 @@ let parkLabelsGroup = null;
 let parkUndersideController = null;
 let thamesProfileSampler = null;
 // ── sprint:C ──
+let deepWater = null; // s24:W, deferred independent reservoir/dock basins
 let seaLife = null; // silent sea life in the Thames, drawn only while submerged
 // ── /sprint:C ──
 const thamesDataPromise = loadThamesData();
@@ -1459,6 +1468,7 @@ function s21TryStartGeologyWork() {
         return;
       }
       terrain = result;
+      lakeInteriorMask.install(result.topMat,result.mesh);lakeInteriorMask.install(result.undersideMat,result.undersideMesh);
       scene.add(result.mesh);
       if (result.undersideMesh) scene.add(result.undersideMesh);
       // ── s25:E ──
@@ -1680,6 +1690,29 @@ function s21TryStartGeologyWork() {
           });
           // ── /s21:L ──
         } else s21SkipLayers(['canals']); // s21:L
+      });
+
+      // s24:W: data, geometry and animals begin only AFTER landing. Slow
+      // network is a waiting late layer and never joins the opening's gate.
+      let waterModule=null,waterData=null,waterError=null,waterStarted=false;
+      lateLayers.define('deepWater', {
+        name:'deepWater',
+        steps:function* () {
+          if(!waterStarted) {
+            waterStarted=true;
+            import('./deep-water.js').then(async m=>{waterModule=m;waterData=await m.loadDeepWaterData();}).catch(e=>{waterError=e;});
+          }
+          while(!waterData&&!waterError)yield;
+          if(waterError)throw waterError;
+          return yield* waterModule.createDeepWaterSteps(waterData,getTerrainMeshSurfaceY,getMapEdgeRing(),{VE:VERTICAL_EXAGGERATION,legacyCanals:canalsMesh});
+        },
+        objects:water=>[water.group,...lakeInteriorMask.proxies()],
+        prepare:water=>applyShadowPolicy(water.group),
+        attach:water=>{
+          deepWater=water;scene.add(water.group);water.setSolo(s21SoloValue);
+          water.hideLegacy(reservoirsMesh,airportDockGroup);
+        },
+        onFail:error=>console.warn('Deep water unavailable:',error.message),
       });
 
       // Apply M25 world boundary: mask terrain, add road ring + cliff pillar
@@ -3009,6 +3042,7 @@ async function buildNetworkMvp() {
       if (geologyExteriorGroup) geologyExteriorGroup.visible = val === 'all' || val === 'geology';
       if (reservoirsMesh) reservoirsMesh.visible = val === 'all' || val === 'reservoirs';
       if (canalsMesh) canalsMesh.visible = val === 'all' || val === 'canals';
+      deepWater?.setSolo(val);
       if (sewersMesh) sewersMesh.visible = val === 'all' || val === 'sewers';
 
       // Surface features: hybrid (texture + geometry) enabled for "all" mode
@@ -4641,13 +4675,15 @@ function tick(frameTime) {
   const azimuth = controls.getAzimuthalAngle();
   const dockAtCamera=airportDockGroup?getAirportDockInfo(camera.position):null;
   // Water's visual separation lift is not a physical elevation measurement.
-  const surfaceYAtCamera = dockAtCamera ? dockAtCamera.referenceLevelM*VERTICAL_EXAGGERATION
-    : s02HiddenGround.terrainSurfaceY({ x: camera.position.x, z: camera.position.z }); // s02:T: the hidden ground beyond the edge, the same call on the map
+  const lakeAtCamera=deepWater?.at(camera.position.x,camera.position.z);
+  const lakeGround=deepWater?.groundAt(camera.position.x,camera.position.z);
+  const surfaceYAtCamera = lakeAtCamera ? lakeAtCamera.waterY : lakeGround ?? (dockAtCamera ? dockAtCamera.referenceLevelM*VERTICAL_EXAGGERATION
+    : s02HiddenGround.terrainSurfaceY({ x: camera.position.x, z: camera.position.z })); // s02:T: the hidden ground beyond the edge, the same call on the map
   const realAltM = surfaceYAtCamera !== null
     ? Math.round((camera.position.y - surfaceYAtCamera) / VERTICAL_EXAGGERATION)
     : Math.round(camera.position.y / VERTICAL_EXAGGERATION);
   const cameraInsideM25 = isInsideM25(camera.position.x, camera.position.z);
-  const isUnderground = (cameraInsideM25 || s02Under) && (surfaceYAtCamera !== null
+  const isUnderground = !isSubmergedAt(camera.position.x,camera.position.y,camera.position.z) && (cameraInsideM25 || s02Under) && (surfaceYAtCamera !== null
     ? camera.position.y < surfaceYAtCamera
     : camera.position.y < 0);
 
@@ -4767,6 +4803,9 @@ function tick(frameTime) {
   const insideThames=thamesMesh?.userData.navigation?.contains(camera.position) ?? false;
   if (_shell) _shell.visible = insideThames || !belowSurface;
   setRiverMaterialSubmerged(insideThames);
+  deepWater?.update(sim.paused ? 0 : dt * sim.timeScale,camera,{submerged,belowSurface});
+  const waterMaskGeometry=deepWater?.active?.topMesh.geometry ?? thamesMesh?.userData.surfaceGeometry;
+  if(waterMaskGeometry!==underwaterSurface.geometry)underwaterSurface.setGeometry(waterMaskGeometry);
 
   // Material resistance is now transient and held-key-only. Chalk cruising,
   // mouse/touch pan and dolly keep their ordinary speeds.
@@ -4832,7 +4871,7 @@ function tick(frameTime) {
   // ── /s16:R ──
   motorwayGroup?.userData.update(surfaceSimulationDt, camera);
   // ── sprint:C ──
-  seaLife?.update(surfaceSimulationDt, camera, { submerged });
+  seaLife?.update(surfaceSimulationDt, camera, { submerged: insideThames });
   // ── /sprint:C ──
   // ── s25:W ──
   updateTidewayWhirlpools(surfaceSimulationDt, camera);
@@ -4944,7 +4983,8 @@ function tick(frameTime) {
     if (ready) adaptiveQuality.update(dt * 1000, frameTime);
     else adaptiveQuality.reset(frameTime);
   }
-  underwaterSurface.update(renderer,dt,insideThames?_submergedBlend:0);
+  underwaterSurface.update(renderer,dt,(insideThames||deepWater?.active)?_submergedBlend:0);
+  lakeInteriorMask.update(renderer,deepWater?.active);
   // ── s24:R ── last word on M25 culling, after fog and camera are final for
   // this frame: write any skipped chunk that could now show (fix round 1).
   if (motorwayGroup?.userData.revalidate) { camera.updateMatrixWorld(); motorwayGroup.userData.revalidate(camera); }
@@ -4962,7 +5002,7 @@ function tick(frameTime) {
     setLegibilityCssHeight(null);
   } else {
   // ── /s21:L ──
-  undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => (s21V2Mask ? s21V2Mask.render(() => composer.render(dt)) : composer.render(dt))); // s21:V2 (the mask) s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
+  lakeInteriorMask.render(() => undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => (s21V2Mask ? s21V2Mask.render(() => composer.render(dt)) : composer.render(dt)))); // s21:V2 (the mask) s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
   // ── s16:R ──
   setLegibilityCssHeight(null);
   // ── /s16:R ──
@@ -4977,7 +5017,7 @@ function tick(frameTime) {
 modeSystem = installModes({
   THREE, camera, controls, canvas: renderer.domElement, fpsControls,
   VE: VERTICAL_EXAGGERATION, masterHeight,
-  getTerrainY: s02HiddenGround.terrainY, // s02:T: the hidden ground (identical to the raw sampler on the map)
+  getTerrainY: (x,z) => deepWater?.groundAt(x,z) ?? s02HiddenGround.terrainY(x,z), // s02:T: the hidden ground (identical to the raw sampler on the map)
   getStructuralY: s02HiddenGround.structuralY, // s02:T
   isSubmergedAt, waterSurfaceAt,
   // Both render paths: live 'buildings-*' tiles and baked 'baked-buildings-*'.
@@ -5219,7 +5259,7 @@ if (import.meta.env.DEV) {
   window.__ug = {
     undergroundCull, get aboveGroundView() { return _aboveGroundView; },
     getTerrainRiverBed,
-    materialResistance, classifySubstrateAt, underwaterSurface,
+    materialResistance, classifySubstrateAt, underwaterSurface, lakeInteriorMask,
     get parkLabelsGroup() { return parkLabelsGroup; },
     camera, controls, scene, lineShaftLayers, getTerrainMeshSurfaceY, getStructuralSurfaceY, VERTICAL_EXAGGERATION,
     masterHeight, miniMap, llToXZ, sim, getShareUrl, dlrProfile,
@@ -5353,6 +5393,7 @@ if (import.meta.env.DEV) {
   window.__ug.getSurfaceWind = getSurfaceWind;
   // ── /sprint:integrate ──
   // ── sprint:C ──
+  Object.defineProperty(window.__ug, 'deepWater', { get: () => deepWater, enumerable: true });
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
   // ── s25:W ──

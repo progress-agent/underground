@@ -71,6 +71,7 @@ vec2 waterOffset(vec2 uv) {
       renderer.setRenderTarget(oldTarget);
       renderer.setClearColor(oldClear, oldAlpha);
     },
+    get geometry() { return maskMesh?.geometry; },
     get uniforms() { return uniforms; },
     get maskTarget() { return maskTarget; },
     dispose() { maskTarget.dispose(); maskMaterial.dispose(); },

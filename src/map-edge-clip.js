@@ -316,3 +316,50 @@ export function clipLineSegmentsToMapEdge(geometry, ox, oz, isOff) {
   }
   return { before, after, cut };
 }
+
+/** Difference of two simple polygons of matching winding. Used for the dry
+ * toe of adjacent reservoir banks: a bank must never extend into its neighbour's
+ * mapped water. Returns simple pieces; a wholly enclosed cutout is represented
+ * as a bridged ring (Earcut accepts the coincident bridge endpoints). */
+export function subtractPolygonRing(poly, ring) {
+  const ctx=ringContext(ring);
+  let P=openRing(poly);
+  if(P.length<3)return [];
+  if((signedArea(P)>0)!==ctx.ccw)P=P.slice().reverse();
+  const bb=bbox(P),segs=candidateSegments(ctx,bb.minX,bb.minZ,bb.maxX,bb.maxZ),X=[];
+  for(let i=0;i<P.length;i++)for(const c of segmentCrossings(P[i],P[(i+1)%P.length],ctx,segs))X.push({...c,i});
+  if(!X.length) {
+    if(pointInRing(P[0][0],P[0][1],ctx.pts))return [];
+    if(!pointInRing(ctx.pts[0][0],ctx.pts[0][1],P))return [P];
+    // Cutout wholly inside a face: join the nearest pair with a zero-width
+    // bridge. No extra area is introduced by the doubled bridge.
+    let pi=0,ri=0,best=Infinity;
+    for(let i=0;i<P.length;i++)for(let j=0;j<ctx.pts.length;j++){const d=(P[i][0]-ctx.pts[j][0])**2+(P[i][1]-ctx.pts[j][1])**2;if(d<best){best=d;pi=i;ri=j;}}
+    const outer=[...P.slice(pi),...P.slice(0,pi)],inner=[];
+    for(let j=0;j<=ctx.pts.length;j++)inner.push(ctx.pts[(ri-j+ctx.pts.length)%ctx.pts.length]);
+    return [[outer[0],...inner,outer[0],...outer.slice(1)]];
+  }
+  if(X.length%2)return pointInRing(P[0][0],P[0][1],ctx.pts)?[]:[P];
+  X.sort((a,b)=>a.i-b.i||a.t-b.t);X.forEach((x,k)=>x.sIdx=k);
+  const byRing=X.slice().sort((a,b)=>a.j-b.j||a.u-b.u);byRing.forEach((x,k)=>x.rIdx=k);
+  const startInside=pointInRing(P[0][0],P[0][1],ctx.pts);
+  X.forEach((x,k)=>{x.entry=(k%2===0)!==startInside;});
+  const out=[],visited=new Set(),n=P.length,m=ctx.pts.length;
+  for(const start of X) {
+    if(start.entry||visited.has(start))continue;
+    const piece=[];let cur=start,guard=0;
+    do {
+      visited.add(cur);piece.push(cur.pt);
+      const next=X[(cur.sIdx+1)%X.length];
+      const wraps=next.i<cur.i||(next.i===cur.i&&next.t<=cur.t);
+      if(next.i!==cur.i||wraps){const steps=((next.i-cur.i)%n+n)%n||n;for(let k=1;k<=steps;k++)piece.push(P[(cur.i+k)%n]);}
+      piece.push(next.pt);
+      const end=byRing[(next.rIdx-1+X.length)%X.length];
+      const rWrap=end.j>next.j||(end.j===next.j&&end.u>=next.u);
+      if(end.j!==next.j||rWrap){const steps=((next.j-end.j)%m+m)%m||m;for(let k=0;k<steps;k++)piece.push(ctx.pts[(next.j-k+m)%m]);}
+      cur=end;if(++guard>X.length+2)break;
+    }while(cur!==start);
+    if(piece.length>=3&&Math.abs(signedArea(piece))>1e-6)out.push(piece);
+  }
+  return out;
+}

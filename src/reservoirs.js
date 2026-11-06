@@ -136,6 +136,7 @@ export function* createReservoirsSteps(data, latLonToXZ, getTerrainSurfaceY) {
     const mesh = new THREE.Mesh(shapeGeometry, waterMaterial);
     mesh.userData = {
       type: 'reservoir',
+      waterBodyId: feature.id,
       name: feature.name,
       area: feature.area_ha
     };
@@ -158,6 +159,7 @@ export function* createReservoirsSteps(data, latLonToXZ, getTerrainSurfaceY) {
       // transparent surfaces flipped distance-sort order every frame.
       // Give the outline both a deliberately later tier AND a small extra
       // lift so it's unambiguously above the water polygon on both axes.
+      edgeLines.userData.waterBodyId = feature.id;
       edgeLines.renderOrder = RENDER_ORDER.WATER_EDGE;
       edgeLines.position.y = RESERVOIR_EDGE_LIFT;
       group.add(edgeLines);
