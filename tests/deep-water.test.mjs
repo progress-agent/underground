@@ -130,3 +130,18 @@ test('published reservoir TWLs replace freeboard guesses and unresolved levels s
  for(const id of ['way/23161630','way/147855517','way/147855519','way/147855520'])assert.equal(byId.get(id).level.estimated,true,id);
  assert.deepEqual(byId.get('way/3171810').level.publishedAlternativesAodM,{design:14.69,target:14.09,restricted:13.37});
 });
+test('a legacy canal mesh clipped by a basin keeps a current bounding box',()=>{
+ // Collision and camera-clearance code reads geometry.boundingBox directly;
+ // swapping in clipped geometry without one left it null and crashed them.
+ const source={...spec,mode:'VOLUME',rings:[square],level:{aodM:23},area:{ha:16}};
+ const canal=new THREE.BufferGeometry();
+ canal.setAttribute('position',new THREE.Float32BufferAttribute([-400,40,-400, 400,40,400, 400,40,-400, -400,40,-400, -400,40,400, 400,40,400],3));
+ canal.computeBoundingBox();
+ const legacyCanals=new THREE.Group();const mesh=new THREE.Mesh(canal);legacyCanals.add(mesh);
+ const steps=createDeepWaterSteps({bodies:[source]},()=>50,null,{legacyCanals});
+ let r;do{r=steps.next();}while(!r.done);
+ assert.notEqual(mesh.geometry,canal,'the basin clips the canal');
+ assert.ok(mesh.geometry.boundingBox,'clipped geometry has a bounding box');
+ const fresh=new THREE.Box3().setFromBufferAttribute(mesh.geometry.attributes.position);
+ assert.ok(mesh.geometry.boundingBox.equals(fresh),'and it matches the clipped vertices');
+});

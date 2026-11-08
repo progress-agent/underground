@@ -150,6 +150,6 @@ function* clipLegacyCanals(group,bodies) {
         }
       }
     }
-    if(changed){const next=new THREE.BufferGeometry();for(const [name,a]of attrs)next.setAttribute(name,new THREE.Float32BufferAttribute(out[name],a.itemSize));next.computeBoundingSphere();g.dispose();mesh.geometry=next;}
+    if(changed){const next=new THREE.BufferGeometry();for(const [name,a]of attrs)next.setAttribute(name,new THREE.Float32BufferAttribute(out[name],a.itemSize));next.computeBoundingBox();next.computeBoundingSphere();g.dispose();mesh.geometry=next;}
   }
 }
