@@ -1,4 +1,4 @@
-# Carried items, 18 November 2026
+# Carried items, 18Nov26w
 
 The four bank ground elevations and outlines in `src/reservoir-foot-data.json`
 are exact subsets of `public/data/deep-water.json`, including the Environment
