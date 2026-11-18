@@ -1,6 +1,7 @@
 // Lossless ground masks, not baked lighting. Four pixels per byte, each with
 // road/green bits, gzip-compressed on disk. The shader still receives the exact
-// RGBA bytes produced by surface-texture.js, at the original 4096 resolution.
+// mask values produced by surface-texture.js, at the original 4096 resolution.
+// WebGL2 phones expand directly to two-channel RG; desktop keeps the original RGBA.
 import { createSurfaceTexture } from './surface-texture.js';
 import { bootFetch } from './boot-fetch.js'; // s21:L
 
@@ -28,13 +29,14 @@ export function parseGround(buffer, expectedBBox) {
 /**
  * @param {object} bbox
  * @param {object} [opts]
+ * @param {boolean} [opts.compact=false] expand directly to RG8 on WebGL2 phones, without a full RGBA copy.
  * @param {boolean} [opts.paced=true]  one 32 KB chunk, then a setTimeout(0), at a time: the expansion shares the
  *   frame thread with a scene being watched (deep links keep this).
  * @param {number} [opts.sliceMs=48]  unpaced: expand in slices of this many milliseconds with one yield between,
  *   for use behind the opening veil, where nothing is being watched (sprint 21Oct26w, approach B: the paced
  *   pass took 1.57 s of wall clock for 0.3 s of work).
  */
-export async function loadBakedGround(bbox, { paced = true, sliceMs = 48 } = {}) {
+export async function loadBakedGround(bbox, { paced = true, sliceMs = 48, compact = false } = {}) {
   // s21:L: the request was started at HTML parse (index.html); the 15 s limit now covers the wait for its headers.
   const response = await Promise.race([
     bootFetch(GROUND_URL, { signal: AbortSignal.timeout(15000) }),
@@ -47,9 +49,10 @@ export async function loadBakedGround(bbox, { paced = true, sliceMs = 48 } = {})
   // includes CRC validation; unsupported decompression takes the live fallback.
   const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
   const { packed, size } = parseGround(await new Response(stream).arrayBuffer(), bbox);
-  const state = createSurfaceTexture(bbox, size);
+  const state = createSurfaceTexture(bbox, size, { compact });
   // Yield between chunks: expanding 16 million pixels must not monopolise the
   // frame thread during the opening descent, especially on slower machines.
+  const { channels, roadChannel, parkChannel } = state;
   const chunk = 32768;
   let sliceStart = performance.now();
   for (let start = 0; start < packed.length; start += chunk) {
@@ -57,9 +60,9 @@ export async function loadBakedGround(bbox, { paced = true, sliceMs = 48 } = {})
     for (let i = start; i < end; i++) {
       const bits = packed[i];
       for (let p = 0; p < 4; p++) {
-        const offset = (i * 4 + p) * 4;
-        state.pixels[offset + 2] = bits & (1 << (p * 2)) ? 255 : 0;
-        state.pixels[offset + 3] = bits & (2 << (p * 2)) ? 255 : 0;
+        const offset = (i * 4 + p) * channels;
+        state.pixels[offset + roadChannel] = bits & (1 << (p * 2)) ? 255 : 0;
+        state.pixels[offset + parkChannel] = bits & (2 << (p * 2)) ? 255 : 0;
       }
     }
     if (paced) await new Promise(resolve => setTimeout(resolve, 0));

@@ -44,7 +44,7 @@ export const riverCentrality = chain => {
   const b=masonryBounds.value;return smooth(b.x,b.y,chain)*(1-smooth(b.z,b.w,chain));
 };
 
-export function initialiseRiverBedMask(positions, totalChain) {
+export function initialiseRiverBedMask(positions, totalChain, { compact = false } = {}) {
   let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < positions.length; i += 3) {
     minX = Math.min(minX, positions[i]); maxX = Math.max(maxX, positions[i]);
@@ -69,7 +69,21 @@ export function initialiseRiverBedMask(positions, totalChain) {
     ctx.closePath(); ctx.fill();
   }
   bedUniforms.uRiverBedMask.value?.dispose();
-  const texture = new THREE.CanvasTexture(canvas);
+  let texture;
+  if (compact) {
+    const source = ctx.getImageData(0, 0, 2048, 2048).data;
+    const pixels = new Uint8Array(2048 * 2048 * 2);
+    // Keep exactly the rasterised R/G bytes, including canvas antialiasing. Reverse
+    // canvas rows to match CanvasTexture's flipped upload with a raw DataTexture.
+    for (let y = 0; y < 2048; y++) for (let x = 0; x < 2048; x++) {
+      const from = (y * 2048 + x) * 4, to = ((2047 - y) * 2048 + x) * 2;
+      pixels[to] = source[from]; pixels[to + 1] = source[from + 1];
+    }
+    texture = new THREE.DataTexture(pixels, 2048, 2048, THREE.RGFormat);
+    texture.name = 'phone-river-bed-material';
+    texture.needsUpdate = true;
+    canvas.width = canvas.height = 0; // the renderer retains the RG array, not the drawing canvas
+  } else texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.NoColorSpace;
   texture.generateMipmaps = false;
   texture.minFilter = texture.magFilter = THREE.LinearFilter;

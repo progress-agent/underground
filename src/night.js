@@ -161,6 +161,7 @@ ${HASH_GLSL}`)
  */
 export function installGroundGlow(material, bbox) {
   if (!material) return;
+  const roadChannel = material.userData.surfaceTex?.format === THREE.RGFormat ? 'r' : 'b';
   nightUniforms.uNightSize.value.set(bbox.maxX - bbox.minX, bbox.maxZ - bbox.minZ);
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey?.bind(material);
@@ -187,10 +188,10 @@ void main() {`)
  if ( uNightAmt > 0.001 && surfaceEnabled > 0.5 ) {
 		vec2 nSuv = ( vM25Uv - surfaceBoundsMin ) / ( surfaceBoundsMax - surfaceBoundsMin );
 		if ( nSuv.x >= 0.0 && nSuv.x <= 1.0 && nSuv.y >= 0.0 && nSuv.y <= 1.0 ) {
-			float nRoad = texture2D( surfaceTex, nSuv ).b;
+			float nRoad = texture2D( surfaceTex, nSuv ).${roadChannel};
 			// Two cheap taps either side give the lamp light a skirt on the pavement.
 			vec2 nPx = vec2( 2.5 / 4096.0 );
-			float nHalo = 0.5 * ( texture2D( surfaceTex, nSuv + nPx ).b + texture2D( surfaceTex, nSuv - nPx ).b );
+			float nHalo = 0.5 * ( texture2D( surfaceTex, nSuv + nPx ).${roadChannel} + texture2D( surfaceTex, nSuv - nPx ).${roadChannel} );
 			vec2 nWp = nSuv * uNightSize;           // metres across the map
 			// Lamp pools: value noise on a ~34 m cell, melting to its mean when the
 			// cells are smaller than a pixel (no shimmer at altitude).

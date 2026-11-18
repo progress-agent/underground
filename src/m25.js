@@ -105,13 +105,27 @@ function bngToMaskUV(e, n) {
  * @param {number} [band]   Signed-distance band in metres
  * @returns {THREE.CanvasTexture}
  */
-export function generateM25Mask(points, size = 2048, band = MAP_EDGE_SDF_BAND_M) {
+export function generateM25Mask(points, size = 2048, band = MAP_EDGE_SDF_BAND_M, { compact = false } = {}) {
+  const ring = points.map(p => { const { x, z } = bngToScene(p.e, p.n); return [x, z]; });
+  const field = rasterSignedDistanceMask(ring, size, xzToTerrainUV, band);
+  if (compact) {
+    // CanvasTexture uploads with flipY=true. Reverse the rows explicitly for a raw
+    // R8 DataTexture (flipY=false), preserving the identical signed-distance texels.
+    const pixels = new Uint8Array(field.length);
+    for (let y = 0; y < size; y++) pixels.set(field.subarray(y * size, (y + 1) * size), (size - 1 - y) * size);
+    const tex = new THREE.DataTexture(pixels, size, size, THREE.RedFormat);
+    tex.name = 'phone-map-edge-distance';
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.userData.signedDistanceBandM = band;
+    tex.needsUpdate = true;
+    return tex;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const ring = points.map(p => { const { x, z } = bngToScene(p.e, p.n); return [x, z]; });
-  const field = rasterSignedDistanceMask(ring, size, xzToTerrainUV, band);
   const image = ctx.createImageData(size, size);
   for (let k = 0; k < field.length; k++) {
     const o = k * 4, v = field[k];

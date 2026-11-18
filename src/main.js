@@ -1553,7 +1553,7 @@ function s21TryStartGeologyWork() {
 
       // Build Thames 3D volume (flat water level, no terrain sampling needed)
       if (thamesData) {
-        thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY);
+        thamesMesh = createThamesVolume(thamesData, getTerrainMeshSurfaceY, { compactMasks: TOUCH_UI && renderer.capabilities.isWebGL2 });
         if (thamesMesh) {
           scene.add(thamesMesh);
           underwaterSurface.setGeometry(thamesMesh.userData.surfaceGeometry);
@@ -1743,7 +1743,7 @@ function s21TryStartGeologyWork() {
         // ── /sprint:B ──
 
         // Generate mask and apply to both terrain materials
-        const maskTex = generateM25Mask(mapEdgePoints); // sprint:B
+        const maskTex = generateM25Mask(mapEdgePoints, undefined, undefined, { compact: TOUCH_UI && renderer.capabilities.isWebGL2 }); // sprint:B
         if (result.topMat) applyM25Mask(result.topMat, maskTex);
         if (result.undersideMat) applyM25Mask(result.undersideMat, maskTex);
         // Exact wet polygons hide terrain only when their water replacement
@@ -1893,12 +1893,12 @@ function s21TryStartGeologyWork() {
         }).then(async manifest => {
           const fullBBox = getFullSceneBBox();
 
-          // Create persistent 4096² texture spanning full M25 area
+          // Keep all 4096² texels; phones store only the two used mask channels.
           if (groundPath === 'baked') {
             try {
               // ── s21:L ── behind the opening veil nothing is watched, so the expansion runs in 48 ms slices;
               // a deep link keeps the per-chunk pacing over its live scene.
-              surfaceTexState = await loadBakedGround(fullBBox, { paced: intro.isBypassed() });
+              surfaceTexState = await loadBakedGround(fullBBox, { paced: intro.isBypassed(), compact: TOUCH_UI && renderer.capabilities.isWebGL2 });
               // ── /s21:L ──
               renderer.initTexture(surfaceTexState.texture);
               dbg('Baked ground ready: full-city parks and roads');
@@ -1907,7 +1907,7 @@ function s21TryStartGeologyWork() {
               console.warn(`Baked ground unavailable (${err.message}); using live tiles`);
             }
           }
-          if (!surfaceTexState) surfaceTexState = createSurfaceTexture(fullBBox, 4096);
+          if (!surfaceTexState) surfaceTexState = createSurfaceTexture(fullBBox, 4096, { compact: TOUCH_UI && renderer.capabilities.isWebGL2 });
 
           // Inject surface shader into terrain material (chains after M25 mask)
           if (result.topMat) {
