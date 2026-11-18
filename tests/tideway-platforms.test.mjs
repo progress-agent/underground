@@ -109,7 +109,9 @@ test('Chelsea planting shelves have closed end walls down to the physical floor'
 
 
 test('walls and approaches share the actual rendered site mesh, with the wall range in its live buffer',()=>{
- const g=make();let meshes=0;g.traverse(o=>{if(o.isMesh)meshes++;});assert.equal(meshes,11);
+ // Eight separately batched deck-column sets use cast metal; the ninth
+ // site's land column was already separate. Walls and approaches stay merged.
+ const g=make();let meshes=0;g.traverse(o=>{if(o.isMesh)meshes++;});assert.equal(meshes,19);
  for(const[id,r]of g.userData.registry){
   assert.equal(r.wallMesh,r.detail,id);assert.equal(r.approachMesh,r.detail,id);assert.ok(r.group.children.includes(r.detail),id);
   const p=r.detail.geometry.attributes.position,{start,count}=r.wallVertexRange;assert.ok(start>0&&count>0&&start+count===p.count,id);assert.equal(count%6,0,id);

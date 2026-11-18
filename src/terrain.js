@@ -17,6 +17,7 @@ import {
 import { RENDER_ORDER, WATER_LIFT } from './render-layers.js';
 import { buildThamesCrossSections } from './thames-profile.js';
 import { refineTerrainRiverBed } from './terrain-river-bed.js';
+import { correctedReservoirElevation, inReservoirFootRegion } from './reservoir-feet.js';
 
 export const TERRAIN_ORIGIN_BNG = [BNG_REF_E, BNG_REF_N];
 
@@ -671,6 +672,15 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       );
     }
 
+    // D-064: keep the pre-correction deltas only (a few hundred grid vertices),
+    // so the existing baked boxes can follow this runtime terrain without a bake.
+    const reservoirDeltas=new Map();
+    for(let i=0;i<pos.count;i++) {
+      const x=pos.getX(i)+centerX,z=pos.getZ(i)+centerZ;
+      const old=elevations[i],next=correctedReservoirElevation(x,z,old);
+      if(next!==old){reservoirDeltas.set(i,(next-old)*VE);elevations[i]=next;}
+    }
+
     // ── s21:L ── the normal map's input is final here (the river-bed refinement below changes the geometry, never
     // `elevations`), so a worker starts on it while the main thread builds the mesh.
     const normalPixelsPromise = textureSource
@@ -690,6 +700,7 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
 
     // Store module-level state for helper functions (xzToTerrainUV, terrainHeightToWorldY, getTerrainMeshSurfaceY)
     terrainState = {
+      reservoirDeltas,
       swSceneX, swSceneZ, neSceneX, neSceneZ,
       terrainW, terrainH, centerX, centerZ,
       VE,
@@ -881,6 +892,9 @@ export async function tryCreateTerrainMesh({ opacity = TERRAIN_CONFIG.opacity, w
       // ignore
     }
 
+    // The bake compiler already persists this metadata. Future payloads built
+    // from corrected terrain must not receive the legacy runtime delta twice.
+    meta.reservoirFeetVersion=1;
     return { mesh, undersideMesh, topMat, undersideMat, meta, widthM, heightM, heightSampler, contourLines };
   } catch (err) {
     console.error('Terrain mesh creation failed:', err);
@@ -1010,3 +1024,17 @@ export function getStructuralSurfaceY({x,z}={}) {
 }
 
 export function getTerrainRiverBed(){return terrainState?.riverBed ?? null;}
+
+/** Correction to an existing baked base, interpolated on the same grid. */
+export function getReservoirFootDelta(x,z) {
+  const s=terrainState;if(!s?.reservoirDeltas?.size)return 0;
+  // The city-wide baked loader calls this for every record. Almost all are
+  // outside these three small regions, so avoid four Map reads for those.
+  if(!inReservoirFootRegion(x,z))return 0;
+  const u=(x-s.swSceneX)/s.terrainW*s.segments,v=(z-s.neSceneZ)/s.terrainH*s.segmentsY;
+  if(u<0||v<0||u>=s.segments||v>=s.segmentsY)return 0;
+  const c=Math.floor(u),r=Math.floor(v),a=r*(s.segments+1)+c,du=u-c,dv=v-r;
+  const y00=s.reservoirDeltas.get(a)||0,y10=s.reservoirDeltas.get(a+1)||0;
+  const y01=s.reservoirDeltas.get(a+s.segments+1)||0,y11=s.reservoirDeltas.get(a+s.segments+2)||0;
+  return du+dv<=1?y00+(y10-y00)*du+(y01-y00)*dv:y11+(y01-y11)*(1-du)+(y10-y11)*(1-dv);
+}

@@ -30,6 +30,13 @@ export function createTidewayBuildingExclusion(project) {
 }
 const colors = { granite: '#a4a49c', buff: '#b4ad95', concrete: '#b1b1a5', brick: '#66504a', rail: '#343635', wood: '#71604a', bronze: '#79613e', green: '#668348' };
 const datum = WATER_TOP_Y / 5;
+// Render reflectance estimates, calibrated through AgX. Site finish names and
+// the survey sources stay in the data: bronze, grey iron, warm brown iron and
+// dark grey iron. The former near-black albedos lost all casting relief.
+export function ventFinishColor(color) {
+  return ({'#2b241f':'#796b58','#303131':'#666b67','#203c31':'#395c49',
+    '#66665e':'#85867b','#675344':'#92735a','#282825':'#60615b'})[color]??color;
+}
 function rect(x,z,w,d) { return [[x-w/2,z-d/2],[x+w/2,z-d/2],[x+w/2,z+d/2],[x-w/2,z+d/2]]; }
 function circle(x,z,r,n=20) { return Array.from({length:n},(_,i)=>[x+Math.cos(i/n*Math.PI*2)*r,z+Math.sin(i/n*Math.PI*2)*r]); }
 function geometryColor(g,c) {
@@ -60,10 +67,12 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
   const group=new THREE.Group();group.name='tideway-platforms';
   const registry=new Map(),solidRecords=[];
   const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.86,metalness:.08,side:THREE.DoubleSide});
+  const columnMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.58,metalness:.35,side:THREE.DoubleSide});
+  columnMat.name='tideway-cast-metal';
   let version=0;
   for(const data of DATA.sites) {
     const p=llToXZ(...data.anchor),root=new THREE.Group();root.name=`tideway-platform-${data.id}`;root.position.set(p.x,WATER_TOP_Y,p.z);bindTrueProportion(root);group.add(root);
-    const parts=[],walls=[],solids=[],deck=data.deckAOD-datum;
+    const parts=[],columnParts=[],walls=[],solids=[],deck=data.deckAOD-datum;
     const rec={data,group:root,anchor:p,deckY:0,columns:[],solids,wallSamples:[],deckRing:data.outline.map(([x,z])=>[p.x+x,p.z-z])};registry.set(data.id,rec);
     function clipOperationalArea(ring) {
       if(!data.riverWall)return ring;
@@ -171,14 +180,20 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       const q=c.latlon?llToXZ(...c.latlon):null,x=q?q.x-p.x:c.x,z=q?p.z-q.z:c.z;
       if(c.onLand) {
         const land=new THREE.Group();land.position.set(p.x+x,floorAt(p.x+x,p.z-z)??data.deckAOD*VE,p.z-z);bindTrueProportion(land);group.add(land);
-        const geo=geometryColor(ventGeometry(c.height,c.diameter),c.color);land.add(new THREE.Mesh(geo,mat));
+        const geo=geometryColor(ventGeometry(c.height,c.diameter),ventFinishColor(c.color));
+        const mesh=new THREE.Mesh(geo,columnMat);mesh.name=`tideway-vent-${data.id}`;land.add(mesh);
         const ring=circle(x,z,c.diameter*.65);solid(ring,0,c.height+.22,'column');solids[solids.length-1].land=land;
-        rec.columns.push({data:c,x:p.x+x,z:p.z-z,get baseLocal(){return(land.position.y-WATER_TOP_Y)/structureYScale();}});
+        rec.columns.push({data:c,mesh,x:p.x+x,z:p.z-z,get baseLocal(){return(land.position.y-WATER_TOP_Y)/structureYScale();}});
         continue;
       }
       const base=deck;
-      const g=ventGeometry(c.height,c.diameter,c.form==='plain');g.translate(x,base,-z);add(g,c.color);
+      const g=ventGeometry(c.height,c.diameter,c.form==='plain');g.translate(x,base,-z);
+      columnParts.push(geometryColor(g,ventFinishColor(c.color)));
       solid(circle(x,z,c.diameter*.65),base,base+c.height+.22,'column');rec.columns.push({data:c,x:p.x+x,z:p.z-z,baseLocal:base});
+    }
+    if(columnParts.length) {
+      const geometry=mergeGeometries(columnParts);for(const g of columnParts)g.dispose();
+      const mesh=new THREE.Mesh(geometry,columnMat);mesh.name=`tideway-vents-${data.id}`;root.add(mesh);rec.columnMesh=mesh;
     }
     for(const [x,z,w,d,h] of data.kiosks||[]) {
       const base=data.id==='victoria'?deck-1:deck;

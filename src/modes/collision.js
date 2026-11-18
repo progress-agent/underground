@@ -178,6 +178,14 @@ export function createCollisionService({
     return current.length;
   }
 
+  // A deferred bank can move an already indexed map box. Refresh only that
+  // tile's snapshot; ordinary per-frame sync retains its cheap identity check.
+  function invalidateBuilding(mesh) {
+    const e=entries.get(mesh);if(!e)return false;
+    if(e.grid)indexedBuildings-=e.count;
+    entries.delete(mesh);sync();return true;
+  }
+
   /**
    * Visit every building whose footprint overlaps the AABB [x0,x1]x[z0,z1].
    * fn(minX, maxX, minZ, maxZ, baseY, roofY) returning true stops the walk.
@@ -413,6 +421,7 @@ export function createCollisionService({
     solidStats: () => solidWorld.stats(),
     // ── /s14:S ──
     sync,
+    invalidateBuilding,
     buildingsNear,
     roofHeightAt,
     groundHeightAt,
