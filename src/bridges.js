@@ -516,7 +516,7 @@ function createBridgeMeshes(bridge, getTerrainMeshSurfaceY) {
   };
 }
 
-export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } = {}) {
+export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1, roadWidths = {} } = {}) {
   const res = await fetch('/data/bridges.json', { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch bridges.json: ${res.status}`);
   const data = await res.json();
@@ -527,7 +527,8 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
   group.renderOrder = RENDER_ORDER.SURFACE_BRIDGE;
 
   const registry = new Map();
-  for (const bridge of data.bridges) {
+  for (const source of data.bridges) {
+    const bridge = roadWidths[source.curatedSlug] ? {...source, deckWidthM:roadWidths[source.curatedSlug]} : source;
     const built = createBridgeMeshes(bridge, getTerrainMeshSurfaceY);
     group.add(built.bridgeGroup);
     registry.set(bridge.curatedSlug, {
@@ -562,7 +563,7 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
         const world=worldFromLocal(frame,attr.getX(i),attr.getZ(i));
         feet[i]=Math.min(getTerrainMeshSurfaceY(world),oldDeck-3);
       }
-      morphs.push({rec,mesh,original,feet,oldDeck,water,endGround});
+      morphs.push({rec,mesh,original,feet,oldDeck,water,endGround,baseGeometry:mesh.geometry,baseData:rec.data,road:null});
     }
   }
   // ── s25:S ── D-039: `ratio` is now always 1 / Master, so the span stands
@@ -572,9 +573,10 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
   // bank lower than the true clearance (before, a deck only ever ramped up, so
   // at true height it hung several metres over low embankments). Pier feet stay
   // on the terrain; a pier never inverts when a ramp dips towards its foot.
-  group.userData.setHeightScale=(ratio)=>{
-    for(const {rec,mesh,original,feet,oldDeck,water,endGround} of morphs) {
-      const attr=mesh.geometry.attributes.position,newDeck=water+(oldDeck-water)*ratio;
+  let currentRatio=heightScale, roadActive=false;
+  function morph(m,ratio,geometry,original,feet) {
+      const {rec,oldDeck,water,endGround}=m;
+      const attr=geometry.attributes.position,newDeck=water+(oldDeck-water)*ratio;
       const span=rec.deckSpan,rampLength=Math.min(85,span.length*.22);
       const landingA=endGround.a+2*ratio-newDeck, landingB=endGround.b+2*ratio-newDeck;
       for(let i=0;i<attr.count;i++) {
@@ -582,15 +584,49 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1 } 
         const blendA=1-THREE.MathUtils.smoothstep(x-span.aX,0,rampLength);
         const blendB=1-THREE.MathUtils.smoothstep(span.bX-x,0,rampLength);
         const deck=newDeck+(blendA>=blendB?blendA*landingA:blendB*landingB);
-        // Above the deck, scale the architecture. Below it, preserve the feet.
         const below=Math.max(0,deck-feet[i])/(oldDeck-feet[i]);
-        const target=y>=oldDeck ? deck+(y-oldDeck)*ratio :
-          feet[i]+(y-feet[i])*below;
-        attr.setY(i,target);
+        attr.setY(i,y>=oldDeck ? deck+(y-oldDeck)*ratio : feet[i]+(y-feet[i])*below);
       }
-      attr.needsUpdate=true;mesh.geometry.computeVertexNormals();
-      mesh.geometry.computeBoundingBox();mesh.geometry.computeBoundingSphere();
-      rec.deckY=newDeck;
+      attr.needsUpdate=true;geometry.computeVertexNormals();
+      geometry.computeBoundingBox();geometry.computeBoundingSphere();rec.deckY=newDeck;
+  }
+  group.userData.setHeightScale=(ratio)=>{
+    currentRatio=ratio;
+    for(const m of morphs) {
+      morph(m,ratio,m.baseGeometry,m.original,m.feet);
+      if(m.road)morph(m,ratio,m.road.geometry,m.road.original,m.road.feet);
+    }
+  };
+  // Offline compiler reads immutable VE5 positions/feet. No additional CPU copy is made here.
+  group.userData.roadMorphSources=()=>morphs;
+  group.userData.activateRoadWidths=(on)=>{
+    if(roadActive===!!on)return;
+    roadActive=!!on;
+    for(const m of morphs) {
+      m.mesh.geometry=roadActive&&m.road?m.road.geometry:m.baseGeometry;
+      m.rec.data=roadActive&&m.road?{...m.baseData,deckWidthM:m.road.width,roadWidthSource:'OSM road envelope, class widths estimated'}:m.baseData;
+    }
+    // Solids watches registry identity. Rebuild its deck/parapet bounds after a width switch.
+    group.userData.registry=new Map(registry);
+  };
+  group.userData.clearRoadWidths=()=>{
+    group.userData.activateRoadWidths(false);
+    for(const m of morphs)if(m.road){m.road.geometry.dispose();m.road=null;}
+  };
+  group.userData.prepareRoadWidths=function*(records,buffer){
+    group.userData.clearRoadWidths();
+    for(const r of records) {
+      const m=morphs.find(m=>m.rec.data.curatedSlug===r.slug&&m.mesh.name===r.mesh);
+      if(!m||m.original.length!==r.vertices*3)throw Error('Road bridge topology mismatch: '+r.slug);
+      const original=new Float32Array(buffer,r.offset,r.vertices*3),feet=new Float32Array(buffer,r.offset+r.vertices*12,r.vertices);
+      const geometry=new THREE.BufferGeometry();
+      for(const[name,attr]of Object.entries(m.baseGeometry.attributes)) {
+        geometry.setAttribute(name,name==='position'?new THREE.BufferAttribute(original.slice(),3):name==='normal'?new THREE.Float32BufferAttribute(new Float32Array(attr.count*3),3):attr.clone());
+      }
+      geometry.setIndex(m.baseGeometry.index.clone());
+      m.road={geometry,original,feet,width:r.width};
+      morph(m,currentRatio,geometry,original,feet);
+      yield; // at most one already-baked mesh's morph/normal update in a road-loading frame
     }
   };
   // ── /s25:S ──
