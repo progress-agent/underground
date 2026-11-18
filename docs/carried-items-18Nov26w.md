@@ -26,9 +26,12 @@ cast iron at Chambers. The colour conversion in `ventFinishColor`, roughness
 0.58 and metalness 0.35 are **rendering estimates** calibrated through the
 existing AgX exposure, not measurements of the real materials. They lift the
 previous almost-black diffuse reflectance enough to reveal the casting relief.
-The columns share one opaque, non-emissive Standard material and retain the
-same daylight, moonlight, fog and true-proportion transforms as the platforms.
-They are batched separately from the paving, one extra draw per deck site.
+The columns retain the same daylight, moonlight, fog and true-proportion
+transforms as the platforms. A normalised byte per vertex selects their
+roughness and metalness in the shared opaque, non-emissive Standard shader;
+paving retains its original 0.86 / 0.08 values. Columns, walls and approaches
+share each site's original draw. Primitive indices are retained rather than
+expanding all triangles, so the finish adds no texture or extra deck draw.
 
 The label occluder projects only nearby vent bounds, applies the existing lens
 mapping and checks that a vent is nearer than the station anchor. An overlap
@@ -46,3 +49,4 @@ bank layer arrives, with refreshed bounds; both building decoders use the same
 function for later arrivals. This also covers live tiles loaded after a flight.
 Tile bounds and any existing collision index are refreshed after an adjustment,
 including retained baked meshes from an early switch between building paths.
+The culling sphere retains the decoder's original box-derived policy.

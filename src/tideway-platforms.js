@@ -39,10 +39,37 @@ export function ventFinishColor(color) {
 }
 function rect(x,z,w,d) { return [[x-w/2,z-d/2],[x+w/2,z-d/2],[x+w/2,z+d/2],[x-w/2,z+d/2]]; }
 function circle(x,z,r,n=20) { return Array.from({length:n},(_,i)=>[x+Math.cos(i/n*Math.PI*2)*r,z+Math.sin(i/n*Math.PI*2)*r]); }
-function geometryColor(g,c) {
+function geometryColor(g,c,vent=false) {
   const v = new THREE.Color(c), a = new Float32Array(g.attributes.position.count*3);
   for(let i=0;i<a.length;i+=3) { a[i]=v.r; a[i+1]=v.g; a[i+2]=v.b; }
+  const finish=new Uint8Array(g.attributes.position.count);if(vent)finish.fill(255);
+  g.setAttribute('tidewayVent',new THREE.BufferAttribute(finish,1,true));
   g.setAttribute('color',new THREE.BufferAttribute(a,3)); return g;
+}
+function indexedGeometry(g) {
+  g.deleteAttribute('uv');const n=g.attributes.position.count;
+  if(!g.hasAttribute('tidewayVent'))g.setAttribute('tidewayVent',new THREE.BufferAttribute(new Uint8Array(n),1,true));
+  if(!g.index){const a=n>65535?new Uint32Array(n):new Uint16Array(n);for(let i=0;i<n;i++)a[i]=i;g.setIndex(new THREE.BufferAttribute(a,1));}
+  return g;
+}
+function finishMaterial() {
+  const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.86,metalness:.08,side:THREE.DoubleSide});
+  mat.name='tideway-physical-finishes';
+  const finish=mat.userData.ventFinish={roughness:.58,metalness:.35};
+  // A byte per vertex keeps the cast finish in the existing site's draw.
+  // Each triangle belongs wholly to paving or a column, so no finish blends
+  // across a real edge. Geometry indices and true-proportion roots stay intact.
+  mat.onBeforeCompile=shader=>{
+    shader.uniforms.uTidewayVentRoughness={value:finish.roughness};
+    shader.uniforms.uTidewayVentMetalness={value:finish.metalness};
+    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute float tidewayVent;\nvarying float vTidewayVent;')
+      .replace('#include <begin_vertex>','#include <begin_vertex>\nvTidewayVent=tidewayVent;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vTidewayVent;\nuniform float uTidewayVentRoughness;\nuniform float uTidewayVentMetalness;')
+      .replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=mix(roughnessFactor,uTidewayVentRoughness,vTidewayVent);')
+      .replace('#include <metalnessmap_fragment>','#include <metalnessmap_fragment>\nmetalnessFactor=mix(metalnessFactor,uTidewayVentMetalness,vTidewayVent);');
+  };
+  mat.customProgramCacheKey=()=>'ug-tideway-physical-finishes-v1';
+  return mat;
 }
 function polygon(ring,y) {
   const shape=new THREE.Shape(ring.map(([x,z])=>new THREE.Vector2(x,z)));
@@ -66,13 +93,11 @@ export function ventGeometry(h,d,plain=false) {
 export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z)=>!isInThames(x,z)&&floorAt(x,z)>WATER_TOP_Y}) {
   const group=new THREE.Group();group.name='tideway-platforms';
   const registry=new Map(),solidRecords=[];
-  const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.86,metalness:.08,side:THREE.DoubleSide});
-  const columnMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.58,metalness:.35,side:THREE.DoubleSide});
-  columnMat.name='tideway-cast-metal';
+  const mat=finishMaterial();
   let version=0;
   for(const data of DATA.sites) {
     const p=llToXZ(...data.anchor),root=new THREE.Group();root.name=`tideway-platform-${data.id}`;root.position.set(p.x,WATER_TOP_Y,p.z);bindTrueProportion(root);group.add(root);
-    const parts=[],columnParts=[],walls=[],solids=[],deck=data.deckAOD-datum;
+    const parts=[],walls=[],solids=[],deck=data.deckAOD-datum;
     const rec={data,group:root,anchor:p,deckY:0,columns:[],solids,wallSamples:[],deckRing:data.outline.map(([x,z])=>[p.x+x,p.z-z])};registry.set(data.id,rec);
     function clipOperationalArea(ring) {
       if(!data.riverWall)return ring;
@@ -82,7 +107,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       const out=[];for(let i=0;i<ring.length;i++){const q=ring[i],v=ring[(i+1)%ring.length],dq=d(q),dv=d(v);if(dq>=0)out.push(q);if((dq>=0)!==(dv>=0)){const t=dq/(dq-dv);out.push([q[0]+(v[0]-q[0])*t,q[1]+(v[1]-q[1])*t]);}}
       return out;
     }
-    function add(g,c) {parts.push(geometryColor(g,c));}
+    function add(g,c,vent=false) {parts.push(geometryColor(g,c,vent));}
     function solid(ring,lo,hi,kind='feature') {solids.push({ring:ring.map(([x,z])=>[p.x+x,p.z-z]),lo,hi,kind});}
     function box(x,z,w,d,h,y,c,collision=true) {
       const g=new THREE.BoxGeometry(w,h,d);g.translate(x,y+h/2,-z);add(g,c);
@@ -180,20 +205,16 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       const q=c.latlon?llToXZ(...c.latlon):null,x=q?q.x-p.x:c.x,z=q?p.z-q.z:c.z;
       if(c.onLand) {
         const land=new THREE.Group();land.position.set(p.x+x,floorAt(p.x+x,p.z-z)??data.deckAOD*VE,p.z-z);bindTrueProportion(land);group.add(land);
-        const geo=geometryColor(ventGeometry(c.height,c.diameter),ventFinishColor(c.color));
-        const mesh=new THREE.Mesh(geo,columnMat);mesh.name=`tideway-vent-${data.id}`;land.add(mesh);
+        const geo=geometryColor(ventGeometry(c.height,c.diameter),ventFinishColor(c.color),true);
+        const mesh=new THREE.Mesh(geo,mat);mesh.name=`tideway-vent-${data.id}`;land.add(mesh);
         const ring=circle(x,z,c.diameter*.65);solid(ring,0,c.height+.22,'column');solids[solids.length-1].land=land;
         rec.columns.push({data:c,mesh,x:p.x+x,z:p.z-z,get baseLocal(){return(land.position.y-WATER_TOP_Y)/structureYScale();}});
         continue;
       }
       const base=deck;
       const g=ventGeometry(c.height,c.diameter,c.form==='plain');g.translate(x,base,-z);
-      columnParts.push(geometryColor(g,ventFinishColor(c.color)));
+      add(g,ventFinishColor(c.color),true);
       solid(circle(x,z,c.diameter*.65),base,base+c.height+.22,'column');rec.columns.push({data:c,x:p.x+x,z:p.z-z,baseLocal:base});
-    }
-    if(columnParts.length) {
-      const geometry=mergeGeometries(columnParts);for(const g of columnParts)g.dispose();
-      const mesh=new THREE.Mesh(geometry,columnMat);mesh.name=`tideway-vents-${data.id}`;root.add(mesh);rec.columnMesh=mesh;
     }
     for(const [x,z,w,d,h] of data.kiosks||[]) {
       const base=data.id==='victoria'?deck-1:deck;
@@ -305,8 +326,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       add(polygon(circle(4,3,.5,32),deck+.025),colors.bronze);
     }
     // Keep immutable rigid detail; refresh joins it with terrain-following works.
-    const buffers=parts.map(g=>{g.deleteAttribute('uv');return g.index?g.toNonIndexed():g;});
-    const merged=mergeGeometries(buffers);for(const g of buffers)g.dispose();
+    const merged=mergeGeometries(parts.map(indexedGeometry));
     const mesh=new THREE.Mesh(merged,mat);mesh.name=`tideway-detail-${data.id}`;root.add(mesh);for(const g of parts)g.dispose();
     rec.walls=walls;rec.detail=mesh;rec.staticDetailGeometry=merged;
     // The approach shares the site's existing opaque draw. Retain immutable
@@ -336,8 +356,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
         const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute([a[0],hi,-a[1],a[0],lo,-a[1],b[0],lo,-b[1],a[0],hi,-a[1],b[0],lo,-b[1],b[0],hi,-b[1]],3));g.computeVertexNormals();pieces.push(geometryColor(g,colors[data.wall]));
       }
       rec.approachGeometry={bases,faces,originalFaceCount:slabs.length*4};
-      const buffers=pieces.map(g=>{g.deleteAttribute('uv');return g.index?g.toNonIndexed():g;});
-      const approachGeometry=mergeGeometries(buffers);for(const g of buffers)g.dispose();for(const g of pieces)g.dispose();
+      const approachGeometry=mergeGeometries(pieces.map(indexedGeometry));for(const g of pieces)g.dispose();
       rec.approachSolids=approachSolids;
       const positions=[],cs=[];rec.wallSamples=[];
       for(const w of rec.walls)for(let i=0;i<w.points.length-1;i++) {
@@ -353,7 +372,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       // The wall range indexes the real merged buffer, retaining direct checks
       // of its bed-following bottom vertices without a detached test mesh.
       rec.wallVertexRange={start:rec.staticDetailGeometry.attributes.position.count+approachGeometry.attributes.position.count,count:g.attributes.position.count};
-      const batched=mergeGeometries([rec.staticDetailGeometry,approachGeometry,g]);
+      const batched=mergeGeometries([rec.staticDetailGeometry,approachGeometry,indexedGeometry(g)]);
       if(rec.detail.geometry!==rec.staticDetailGeometry)rec.detail.geometry.dispose();
       rec.detail.geometry=batched;approachGeometry.dispose();g.dispose();
       for(const s of [...rec.solids,...approachSolids]){

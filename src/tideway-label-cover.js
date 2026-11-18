@@ -27,6 +27,7 @@ export function createTidewayLabelCover({getGroup,getFrame,distortNdc=(x,y)=>({x
         if(!behind&&right-left>=1)rectangles.push({x:left-1,y:up-1,w:right-left+2,h:down-up+2,distance});
       }
     }
+    if(!rectangles.length)return false;
     const anchorDistance=Math.hypot(info.x-camera.position.x,info.y-camera.position.y,info.z-camera.position.z);
     return rectangles.some(r=>r.distance<anchorDistance&&overlapArea(r,rect)>0);
   };

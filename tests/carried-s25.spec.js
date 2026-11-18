@@ -12,8 +12,13 @@ test('C1: actual four bank buffers meet surveyed rises; baked neighbours follow 
 });
 test('C3: every real vent uses opaque, non-emissive cast metal, with true structure scales',async({page})=>{
  await page.goto('/?skip=1');await page.waitForFunction(()=>window.__ug?.tidewayPlatforms,null,{timeout:180000});
- const rows=await page.evaluate(()=>{const u=window.__ug,out=[];for(const m of [1,1.1,10]){u.masterHeight.setValue(m);u.structureMorph.flush();u.tidewayPlatforms.traverse(o=>{if(!o.isMesh||!o.name.startsWith('tideway-vent'))return;out.push({name:o.name,material:o.material.name,emissive:o.material.emissive.getHex(),opaque:!o.material.transparent,scale:o.parent.scale.y*m/5});});}return out;});
- expect(rows.length).toBe(27);for(const r of rows){expect(r.material).toBe('tideway-cast-metal');expect(r.emissive).toBe(0);expect(r.opaque).toBe(true);expect(r.scale).toBeCloseTo(1,6);}
+ const result=await page.evaluate(()=>{const u=window.__ug,rows=[],meshes=new Set([...u.tidewayPlatforms.userData.registry.values()].flatMap(r=>r.columns.map(c=>c.mesh??r.detail)));
+  for(const m of [1,1.1,10]){u.masterHeight.setValue(m);u.structureMorph.flush();for(const o of meshes)rows.push({name:o.name,finish:o.material.userData.ventFinish,mask:o.geometry.attributes.tidewayVent.array.some(v=>v===255),emissive:o.material.emissive.getHex(),opaque:!o.material.transparent,scale:o.parent.scale.y*m/5});}
+  const renderer=u.composer.renderer,gl=renderer.getContext();renderer.compile(u.scene,u.camera);const uniforms=new Set();
+  for(const p of renderer.info.programs)for(let i=0;i<gl.getProgramParameter(p.program,gl.ACTIVE_UNIFORMS);i++)uniforms.add(gl.getActiveUniform(p.program,i).name);
+  return{rows,uniforms:[...uniforms]};});
+ expect(result.rows.length).toBe(27);for(const r of result.rows){expect(r.finish).toEqual({roughness:.58,metalness:.35});expect(r.mask).toBe(true);expect(r.emissive).toBe(0);expect(r.opaque).toBe(true);expect(r.scale).toBeCloseTo(1,6);}
+ expect(result.uniforms).toEqual(expect.arrayContaining(['uTidewayVentRoughness','uTidewayVentMetalness']));
 });
 test('C2: Wapping is hidden behind Chambers vents and visible in its ordinary street view',async({page})=>{
  await page.goto('/?skip=1');await page.waitForFunction(()=>window.__ug?.tidewayPlatforms&&window.__ug?.stationBuildings,null,{timeout:180000});

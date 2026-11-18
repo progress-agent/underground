@@ -31,7 +31,12 @@ export function anchorReservoirBuildings(water,group,retained=[],invalidate=()=>
       const j=i*16,x=a[j+12],z=a[j+14],before=a[j+13],after=reservoirBuildingBase(x,z,before);
       if(after-before>.01) {a[j+13]=after;touched=true;changed.push({x,z,before,after});}
     }
-    if(touched){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingBox();mesh.computeBoundingSphere();invalidate(mesh);}
+    if(touched){
+      mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingBox();
+      // Retain the decoder's box-derived culling sphere after moving bases.
+      if(!mesh.boundingSphere)mesh.computeBoundingSphere();
+      mesh.boundingBox.getBoundingSphere(mesh.boundingSphere);invalidate(mesh);
+    }
   };
   group?.traverse(visit);
   // An early switch to live detaches, but retains, the baked city. It must
