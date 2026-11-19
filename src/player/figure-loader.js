@@ -4,7 +4,7 @@
 // the walker simply stays in first person.
 import { createFigure } from './figure.js';
 
-export function createFigureLoader({ THREE, parent, manifest }) {
+export function createFigureLoader({ THREE, parent, manifest, prepare = null }) {
   let status = 'idle', figure = null, promise = null;
   async function run() {
     status = 'loading';
@@ -13,6 +13,9 @@ export function createFigureLoader({ THREE, parent, manifest }) {
       const gltf = await new GLTFLoader().loadAsync(manifest.url);
       figure = createFigure({ THREE, gltf, manifest });
       parent.add(figure.group);
+      // Readiness includes the real skinned programs, not only the downloaded
+      // model. Entering a body must never be their first compile.
+      await prepare?.(figure);
       status = 'ready';
       return figure;
     } catch (err) {

@@ -31,11 +31,17 @@ const RECT_PAD_PX = 6;
 export function createPlayer({
   THREE, scene, masterHeight, collision = null, sunInfo = null, distortNdc = (x, y) => ({ x, y }),
   isSubmergedAt = () => false, manifest = MANNEQUIN, groundShadowLift = () => 0,
+  prepare = null,
 }) {
   const group = new THREE.Group();
   group.name = 'player';
   scene.add(group);
-  const loader = createFigureLoader({ THREE, parent: group, manifest });
+  const loader = createFigureLoader({ THREE, parent: group, manifest,
+    prepare: async figure => {
+      ensureShadow();
+      await prepare?.(figure.group);
+    },
+  });
   const flames = createFlames({ THREE, mergeGeometries, composeMatrix: composeTrueProportionMatrix, parent: group, isSubmergedAt });
   let shadow = null, shadowEnabled = true, flyHold = false;
   let visible = false;

@@ -98,7 +98,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   bridgeMaterial.defines={ROAD_BRIDGE:1};bridgeMaterial.customProgramCacheKey=()=> 'road-surface-v4-bridge';
   const cue={value:0},cueOrigin={value:new THREE.Vector2()};let cueStrength=groundCueStrength(groundCue);
   for(const m of [material,bridgeMaterial])installGroundCue(m,cue,cueOrigin);
-  const stats={state:'waiting',loaded:0,pending:0,bytes:0,vertices:0,maxAttachMs:0,maxWidthMs:0,errors:[],disposed:0,manifest:null};
+  const stats={state:'waiting',loaded:0,pending:0,bytes:0,vertices:0,maxAttachMs:0,maxCompileMs:0,maxWidthMs:0,errors:[],disposed:0,manifest:null};
   let enabled=true,started=false,dead=false,records=[],lastX=Infinity,lastZ=Infinity,lastHeight=Infinity;
   const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set();
   let attachPromise=null,compiled=false,widthReady=false,widthJob=null,widthPending=null,loadController=null,generation=0;
@@ -153,7 +153,21 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     if(!compiled && compile) {
       const proxies=new THREE.Group();
       for(const m of [material,bridgeMaterial]){const p=new THREE.Mesh(mesh.geometry,m);p.receiveShadow=true;proxies.add(p);}
-      attachPromise=Promise.resolve(compile(proxies)).then(()=>{compiled=true;attach();}).catch(e=>{mesh.geometry.dispose();report(e);}).finally(()=>{attachPromise=null;proxies.clear();});
+      // compileAsync still synchronously creates/links programs. Preparing both
+      // variants inside this attachment used more than 8 ms on the weak setup.
+      // Give each variant its own task; retain direct timings for those tasks as
+      // well as attachment, so moving work cannot conceal an over-budget slice.
+      const token=generation;
+      const prepareOne=proxy=>new Promise((resolve,reject)=>setTimeout(()=>{
+        if(dead||!enabled||token!==generation){resolve();return;}
+        const t=performance.now();
+        try { Promise.resolve(compile(proxy)).then(resolve,reject); }
+        catch(e){reject(e);}
+        finally { stats.maxCompileMs=Math.max(stats.maxCompileMs,performance.now()-t); }
+      },0));
+      attachPromise=proxies.children.reduce((p,proxy)=>p.then(()=>prepareOne(proxy)),Promise.resolve())
+        .then(()=>{if(token===generation){compiled=true;attach();}else mesh.geometry.dispose();})
+        .catch(e=>{mesh.geometry.dispose();report(e);}).finally(()=>{attachPromise=null;proxies.clear();});
     } else attach();
     stats.maxAttachMs=Math.max(stats.maxAttachMs,performance.now()-t);
   }

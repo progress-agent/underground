@@ -5207,6 +5207,12 @@ modeSystem.ctx.tubeInterior.setDaylight(() => sunSystem.state.skyColor);
 const s14pSunDir = new THREE.Vector3();
 const s14pPlayer = createPlayer({
   THREE, scene, masterHeight, collision: modeSystem.collision, isSubmergedAt,
+  prepare: object => {
+    const target = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.readBuffer);
+    try { return renderer.compileAsync(object, camera, scene); }
+    finally { renderer.setRenderTarget(target); }
+  },
   groundShadowLift: () => roads.group.visible ? ROAD_CLEARANCE_CANON : 0,
   distortNdc: (x, y) => lensSystem.distortNdc(x, y),
   sunInfo: () => {

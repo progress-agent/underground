@@ -93,6 +93,41 @@ for(const scenario of ['toggle','range'])test(`an old download cannot attach twi
     releaseOld(raw);await flush();frame();assert.equal(roads.group.children.length,1);assert.equal(roads.stats.bytes,34);assert.equal(roads.stats.state,'ready');
   }finally{roads.dispose();globalThis.fetch=previous;}
 });
+test('road programs prepare in separate tasks before attachment, including a cancelled generation',async()=>{
+  const raw=new ArrayBuffer(66),header=new DataView(raw);
+  header.setUint32(0,0x34524755,true);header.setUint32(4,3,true);header.setUint32(8,3,true);
+  new Uint16Array(raw,32,9).set([0,10000,0,8,10000,0,0,10000,8]);
+  new Uint8Array(raw,50,9).set([20,20,20,20,148,20,20,20,20]);
+  new Uint16Array(raw,60,3).set([0,2,1]);
+  const rec={file:'test.bin.gz',tier:'desktop',x:0,z:0,size:8000,bytes:34,vertices:3,bounds:[0,0,0,1,1,1]};
+  const previous=globalThis.fetch,calls=[],resolvers=[];
+  globalThis.fetch=async url=>String(url).endsWith('manifest.json')
+    ?{ok:true,json:async()=>({format:'UGR4',records:[rec]})}
+    :{ok:true,body:{},headers:new Headers({'content-encoding':'gzip'}),arrayBuffer:async()=>raw};
+  const roads=createRoads({scene:new Scene(),compile:object=>{
+    calls.push(object);return new Promise(resolve=>resolvers.push(resolve));
+  }});
+  const frame=()=>roads.update({x:0,z:0,height:2});
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  const until=async check=>{for(let i=0;i<100&&!check();i++)await new Promise(resolve=>setTimeout(resolve,2));assert.ok(check());};
+  try{
+    frame();await flush();frame();await flush();frame();
+    assert.equal(calls.length,0,'attachment never invokes the compiler synchronously');
+    await until(()=>calls.length===1);
+    assert.equal(calls[0].material,roads.material);
+    assert.equal(roads.group.children.length,0);
+    resolvers.shift()();await until(()=>calls.length===2);
+    assert.equal(calls[1].material,roads.bridgeMaterial);
+    assert.equal(roads.group.children.length,0,'both programs finish before the first road appears');
+    roads.setEnabled(false);roads.setEnabled(true);resolvers.shift()();await flush();
+    assert.equal(roads.group.children.length,0,'an old preparation cannot attach into a new generation');
+    frame();await flush();frame();await flush();frame();await until(()=>calls.length===3);
+    resolvers.shift()();await until(()=>calls.length===4);resolvers.shift()();await flush();frame();
+    assert.equal(roads.group.children.length,1);assert.equal(roads.stats.bytes,34);
+    assert.equal(roads.stats.state,'ready');
+    assert.equal(roads.stats.errors.length,0);
+  }finally{roads.dispose();globalThis.fetch=previous;}
+});
 test('road bridge widths prepare one mesh at a time and restore original geometry exactly',async()=>{
   const {installNodeEnv}=await import('../scripts/bake-node-env.mjs');installNodeEnv();
   const terrain=await import('../src/terrain.js'),{initThamesMask}=await import('../src/thames-mask.js'),{loadM25Data,initM25Boundary}=await import('../src/m25.js');
