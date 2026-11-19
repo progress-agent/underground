@@ -41,16 +41,14 @@ test.describe('the figure\'s shadow', () => {
   });
   test.afterAll(async () => { if (!BASE) expect(errors, 'no console or page errors').toEqual([]); await page.close(); });
 
-  async function metric(p, { depthWriteOff = false, roadsOff = false } = {}) {
+  async function metric(p, { depthWriteOff = false } = {}) {
     await h.ev(([x, z, yaw]) => { const ped = window.__ug.modes.registry.get('pedestrian'); ped.setView('third'); ped.place(x, z, { yaw }); }, [p.x, p.z, p.yaw]);
     await h.wait(900);
     await h.ev(([pitch, zoom]) => { if (pitch !== null) { const r = window.__ug.modes.registry.get('pedestrian').onFoot.rig; r.pitch = pitch; r.zoom(zoom); } }, [p.pitch, p.zoom]);
     await h.wait(1500);
-    return h.ev(({depthWriteOff,roadsOff}) => {
+    return h.ev(({depthWriteOff}) => {
       const u = window.__ug, rend = u.composer.renderer, gl = rend.getContext(), cv = rend.domElement;
       u.sim.paused = true;
-      const roadVisible=u.roads?.group.visible;
-      if(roadsOff&&u.roads)u.roads.group.visible=false;
       const read = () => { u.composer.render(); const px = new Uint8Array(cv.width * cv.height * 4); gl.readPixels(0, 0, cv.width, cv.height, gl.RGBA, gl.UNSIGNED_BYTE, px); return px; };
       u.player.setShadowEnabled(false); const B = read();
       u.player.setShadowEnabled(true);
@@ -58,7 +56,6 @@ test.describe('the figure\'s shadow', () => {
       if (depthWriteOff) mat.depthWrite = false;
       const A = read();
       mat.depthWrite = was;
-      if(roadsOff&&u.roads)u.roads.group.visible=roadVisible;
       u.sim.paused = false;
       const rs = [];
       for (let i = 0; i < cv.width * cv.height; i++) {
@@ -69,7 +66,7 @@ test.describe('the figure\'s shadow', () => {
       const med = rs[Math.floor(rs.length / 2)] ?? 0;
       let dark = 0; for (const v of rs) if (v < med - 0.12) dark++;
       return { n: rs.length, med, dark };
-    }, {depthWriteOff,roadsOff});
+    }, {depthWriteOff});
   }
 
   const results = {};
@@ -92,11 +89,14 @@ test.describe('the figure\'s shadow', () => {
     // Sprint 18Nov: asphalt is an intended colour change. The three tests above
     // still require complete, speckle-free shadows ON roads; compare the legacy
     // tone against its original ground, as acceptance R9 specifies.
+    await h.ev(() => window.__ug.roads.setEnabled(false));
     for (const id of ['P1', 'P2', 'P3']) {
-      const unchanged=await metric(POSES.find(p=>p.id===id),{roadsOff:true});
+      const unchanged=await metric(POSES.find(p=>p.id===id));
       expect(Math.abs(unchanged.n - live[id].n) / live[id].n, `${id} mask size`).toBeLessThanOrEqual(0.02);
       expect(Math.abs(unchanged.med - live[id].med), `${id} median ratio`).toBeLessThanOrEqual(0.01);
     }
+    await h.ev(() => window.__ug.roads.setEnabled(true));
+    await page.waitForFunction(() => window.__ug.roads.stats.state === 'ready', null, {timeout:180000});
   });
 
   test('S-2: with the depth write off every overlap doubles (the pose contains overlaps), so the metric can see a speckle', async () => {

@@ -65,7 +65,7 @@ import { resolveBuildingsPath, BUILDINGS_PATH_REV } from './buildings-path.js';
 // ── /s02:F ──
 // ── sprint:D ──
 import { registerGroundNight, updateNightScene } from './night-scene.js';
-import { createRoads } from './roads.js';
+import { createRoads, ROAD_CLEARANCE_CANON } from './roads.js';
 import { createStars } from './stars.js';
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
@@ -5207,6 +5207,7 @@ modeSystem.ctx.tubeInterior.setDaylight(() => sunSystem.state.skyColor);
 const s14pSunDir = new THREE.Vector3();
 const s14pPlayer = createPlayer({
   THREE, scene, masterHeight, collision: modeSystem.collision, isSubmergedAt,
+  groundShadowLift: () => roads.group.visible ? ROAD_CLEARANCE_CANON : 0,
   distortNdc: (x, y) => lensSystem.distortNdc(x, y),
   sunInfo: () => {
     const L = atmosphereLights.sun;

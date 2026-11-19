@@ -22,6 +22,7 @@ const RECT_PAD_PX = 6;
  * @param {object} o.THREE
  * @param {object} o.scene
  * @param {{ ratio: number }} o.masterHeight
+ * @param {() => number} [o.groundShadowLift] canonical clearance above a visible ground overlay
  * @param {object} [o.collision]  standHeightAt for the shadow's plane
  * @param {() => ({ direction, strengthRatio, elevationDeg })} [o.sunInfo]  canonical direction towards the sun
  * @param {(x:number,y:number)=>{x:number,y:number}} [o.distortNdc]  lens.js distortNdc
@@ -29,7 +30,7 @@ const RECT_PAD_PX = 6;
  */
 export function createPlayer({
   THREE, scene, masterHeight, collision = null, sunInfo = null, distortNdc = (x, y) => ({ x, y }),
-  isSubmergedAt = () => false, manifest = MANNEQUIN,
+  isSubmergedAt = () => false, manifest = MANNEQUIN, groundShadowLift = () => 0,
 }) {
   const group = new THREE.Group();
   group.name = 'player';
@@ -88,7 +89,8 @@ export function createPlayer({
     shadowLight(sun.direction, rat, shadowDir);
     let slopeX = 0, slopeZ = 0;
     const g0 = collision?.groundHeightAt ? collision.groundHeightAt(st.x, st.z) : null;
-    if (g0 !== null && Math.abs(planeY - g0) < 0.05 / Math.max(1e-3, rat)) {
+    const onGround = g0 !== null && Math.abs(planeY - g0) < 0.05 / Math.max(1e-3, rat);
+    if (onGround) {
       const d = SHADOW.slopeProbeM;
       const gxp = collision.groundHeightAt(st.x + d, st.z), gxm = collision.groundHeightAt(st.x - d, st.z);
       const gzp = collision.groundHeightAt(st.x, st.z + d), gzm = collision.groundHeightAt(st.x, st.z - d);
@@ -97,7 +99,7 @@ export function createPlayer({
       const c = clampSlope(slopeX, slopeZ, shadowDir);
       slopeX = c.gx; slopeZ = c.gz;
     }
-    shadow.update({ light: shadowDir, planeY, x: st.x, z: st.z, slopeX, slopeZ, liftCanon: SHADOW.liftM / Math.max(1e-3, rat), opacity });
+    shadow.update({ light: shadowDir, planeY, x: st.x, z: st.z, slopeX, slopeZ, liftCanon: SHADOW.liftM / Math.max(1e-3, rat) + (onGround ? groundShadowLift() : 0), opacity });
   }
 
   /** The figure's rectangle on screen (CSS px, as the lens pass draws it), or null. Call after the camera is placed. */
