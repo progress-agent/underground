@@ -152,7 +152,7 @@ function distToSegment(px, py, ax, ay, bx, by) {
 // ─── Texture creation + incremental rasterisation ───────────────────────────
 
 /**
- * Create an empty RGBA DataTexture for the full surface area.
+ * Create an empty full-resolution surface DataTexture (RGBA by default, RG on WebGL2 phones).
  *
  * Channel encoding:
  *   R = unused (0)
@@ -164,12 +164,17 @@ function distToSegment(px, py, ax, ay, bx, by) {
  *
  * @param {object} fullBBox  { minX, maxX, minZ, maxZ } — full M25-area scene bbox
  * @param {number} [size]    Texture resolution in pixels (default 4096)
- * @returns {{ texture: THREE.DataTexture, pixels: Uint8Array, size: number, bbox: object }}
+ * @param {object} [options]
+ * @param {boolean} [options.compact=false] WebGL2 RG8: roads in R, greenery in G; default keeps desktop B/A.
+ * @returns {{ texture: THREE.DataTexture, pixels: Uint8Array, size: number, bbox: object, channels: number, roadChannel: number, parkChannel: number }}
  */
-export function createSurfaceTexture(fullBBox, size = 4096) {
-  const pixels = new Uint8Array(size * size * 4); // RGBA, initialised to 0
-
-  const tex = new THREE.DataTexture(pixels, size, size, THREE.RGBAFormat);
+export function createSurfaceTexture(fullBBox, size = 4096, { compact = false } = {}) {
+  // Phone only (selected by main.js): preserve every texel and its linear filtering,
+  // dropping the two unused channels. No temporary full-size RGBA copy is made.
+  const channels = compact ? 2 : 4;
+  const roadChannel = compact ? 0 : 2, parkChannel = compact ? 1 : 3;
+  const pixels = new Uint8Array(size * size * channels);
+  const tex = new THREE.DataTexture(pixels, size, size, compact ? THREE.RGFormat : THREE.RGBAFormat);
   tex.flipY = false;
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -178,7 +183,7 @@ export function createSurfaceTexture(fullBBox, size = 4096) {
   tex.needsUpdate = true;
 
   console.log(`Surface texture created: ${size}×${size} (empty, awaiting tiles)`);
-  return { texture: tex, pixels, size, bbox: fullBBox };
+  return { texture: tex, pixels, size, bbox: fullBBox, channels, roadChannel, parkChannel };
 }
 
 /**
@@ -192,7 +197,7 @@ export function createSurfaceTexture(fullBBox, size = 4096) {
  * @param {object} tileData  Parsed tile JSON (parks, roads arrays)
  */
 export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
-  const { pixels, size, bbox } = texState;
+  const { pixels, size, bbox, channels = 4, roadChannel = 2, parkChannel = 3 } = texState;
   const t0 = performance.now();
   let parkCount = 0, roadCount = 0;
 
@@ -203,8 +208,8 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
       const repair=getParkBoundaryRepair(park);
       for(const ring of repair?.rings || [park.polygon]) {
         rasterisePolygon(ring, bbox, size, pixels, (idx) => {
-          pixels[idx + 3] = 255; // A = green
-        },repair?.holes);
+          pixels[idx + parkChannel] = 255; // greenery channel
+        },repair?.holes,channels);
       }
       parkCount++;
     }
@@ -215,8 +220,8 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
     for (const green of tileData.greenery) {
       if (!green.polygon || green.polygon.length < 3) continue;
       rasterisePolygon(green.polygon, bbox, size, pixels, (idx) => {
-        pixels[idx + 3] = 255; // A = green (same channel as parks)
-      });
+        pixels[idx + parkChannel] = 255; // greenery channel (same channel as parks)
+      },[],channels);
       parkCount++;
     }
   }
@@ -224,7 +229,7 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
   if (tileData.roads) {
     for (const road of tileData.roads) {
       if (!road.points || road.points.length < 2) continue;
-      rasteriseRoad(road.points, road.width || 10, bbox, size, pixels);
+      rasteriseRoad(road.points, road.width || 10, bbox, size, pixels, channels, roadChannel);
       roadCount++;
     }
   }
@@ -244,7 +249,7 @@ export function rasteriseTile(texState, tileData, { quiet = false } = {}) {
  *
  * Polygon vertices are in scene coordinates [x, z].
  */
-function rasterisePolygon(polygon, bbox, size, pixels, paintFn, holes=[]) {
+function rasterisePolygon(polygon, bbox, size, pixels, paintFn, holes=[], channels=4) {
   // Convert polygon vertices to pixel coords
   const pxPoly = [];
   let minPx = size, maxPx = 0, minPy = size, maxPy = 0;
@@ -274,7 +279,7 @@ function rasterisePolygon(polygon, bbox, size, pixels, paintFn, holes=[]) {
         const sc = pxToScene(px, py, bbox, size);
         if(holes.some(hole=>pointInPolygon(sc.sceneX,sc.sceneZ,hole)))continue;
         if (isInThames(sc.sceneX, sc.sceneZ)) continue;
-        const idx = (py * size + px) * 4;
+        const idx = (py * size + px) * channels;
         paintFn(idx);
       }
     }
@@ -290,7 +295,7 @@ function rasterisePolygon(polygon, bbox, size, pixels, paintFn, holes=[]) {
  *
  * Points are in scene coordinates [x, z].
  */
-function rasteriseRoad(points, width, bbox, size, pixels) {
+function rasteriseRoad(points, width, bbox, size, pixels, channels=4, roadChannel=2) {
   const halfW = width / 2;
 
   // Convert all points to pixel space
@@ -323,8 +328,8 @@ function rasteriseRoad(points, width, bbox, size, pixels) {
         if (d <= halfWPx) {
           const sc = pxToScene(px, py, bbox, size);
           if (isInThames(sc.sceneX, sc.sceneZ)) continue;
-          const idx = (py * size + px) * 4;
-          pixels[idx + 2] = 255; // B = road
+          const idx = (py * size + px) * channels;
+          pixels[idx + roadChannel] = 255; // road channel
         }
       }
     }
@@ -376,6 +381,12 @@ const SURFACE_FRAG = /* glsl */ `
 export function applySurfaceTexture(material, tex, bounds) {
   // Capture the existing callback (M25 mask injection)
   const existingCompile = material.onBeforeCompile;
+  const compact = tex.format === THREE.RGFormat;
+  const fragment = compact ? SURFACE_FRAG.replace('sf.b', 'sf.r').replace('sf.a', 'sf.g') : SURFACE_FRAG;
+  if (compact) {
+    const previousKey = material.customProgramCacheKey.bind(material);
+    material.customProgramCacheKey = () => `${previousKey()}|surface-rg`;
+  }
 
   // Store references for runtime toggle
   material.userData.surfaceTex = tex;
@@ -447,7 +458,7 @@ void main() {`
       `#include <color_fragment>
 #ifndef SURFACE_INJECTED
 #define SURFACE_INJECTED
-${SURFACE_FRAG}
+${fragment}
 #endif`
     );
 

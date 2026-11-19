@@ -26,6 +26,11 @@ export const TERRAIN_ORIGIN_BNG = [BNG_REF_E, BNG_REF_N];
 export function applyParkUndersideTexture(material, texture, bounds) {
   const previous = material.onBeforeCompile;
   const enabled = { value: 1 };
+  const parkChannel = texture.format === THREE.RGFormat ? 'g' : 'a';
+  if (texture.format === THREE.RGFormat) {
+    const previousKey = material.customProgramCacheKey.bind(material);
+    material.customProgramCacheKey = () => `${previousKey()}|park-rg`;
+  }
   material.onBeforeCompile = function (shader, renderer) {
     previous?.call(this, shader, renderer);
     shader.uniforms.parkUndersideTexture = { value: texture };
@@ -43,7 +48,7 @@ export function applyParkUndersideTexture(material, texture, bounds) {
       vec2 parkUv = (vParkUndersideUv - parkUndersideBounds.xy) / (parkUndersideBounds.zw - parkUndersideBounds.xy);
       float undersideGreen = 0.0;
       if (all(greaterThanEqual(parkUv, vec2(0.0))) && all(lessThanEqual(parkUv, vec2(1.0)))) {
-        undersideGreen = texture2D(parkUndersideTexture, parkUv).a * parkUndersideEnabled;
+        undersideGreen = texture2D(parkUndersideTexture, parkUv).${parkChannel} * parkUndersideEnabled;
       }
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.35, 0.15), undersideGreen * 0.78);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

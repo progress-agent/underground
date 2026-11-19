@@ -161,7 +161,7 @@ export function createThamesVolume(thamesData, getTerrainMeshSurfaceY = null, op
   mesh.renderOrder = RENDER_ORDER.SURFACE_WATER; // draw after terrain so top face wins depth test at boundaries
   mesh.userData.navigation = createThamesNavigation(positions, getTerrainMeshSurfaceY, WATER_TOP_Y);
   mesh.userData.materialReach=configureRiverMaterialReach(thamesData.points);
-  initialiseRiverBedMask(positions, totalChain);
+  initialiseRiverBedMask(positions, totalChain, { compact: options.compactMasks === true });
 
   // The distortion mask draws only the water surface, not the volume's sides
   // or underside. It shares exact triangles with the visible mesh.
