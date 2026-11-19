@@ -1,4 +1,6 @@
 import { isBuildingMaterial, getBuildingMaterial } from './surface-geometry.js';
+import { getReservoirFootDelta } from './terrain.js';
+import { reservoirBuildingBase } from './reservoir-buildings.js';
 // baked-buildings.js — loads the offline-compiled building payload (UGB1)
 //
 // The counterpart to scripts/bake-surface.mjs. That compiler resolves, offline,
@@ -94,6 +96,7 @@ export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint 
     if(actual!==metadata.payloadSha256) throw new Error('baked payload checksum differs from metadata');
   }
   payload.airportSuppression = metadata.airportSuppression || null;
+  payload.reservoirFeetVersion = metadata.terrain?.reservoirFeetVersion ?? 0;
   return payload;
 }
 
@@ -203,7 +206,7 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
     const z = t.minZ + view.getUint16(off + 2, true) * 0.1;
     const h = view.getUint16(off + 4, true) * 0.1 * VE;
     const side = view.getUint16(off + 6, true) * 0.1;
-    const y = view.getInt16(off + 8, true) * 0.1 * VE;
+    const y = reservoirBuildingBase(x,z,view.getInt16(off + 8, true) * 0.1 * VE + (payload.reservoirFeetVersion ? 0 : getReservoirFootDelta(x,z)));
 
     // Only needed for older, unsuppressed payloads. New compiled payloads
     // already contain the shared source-footprint exclusion.

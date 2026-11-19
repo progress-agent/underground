@@ -87,6 +87,8 @@ import { loadStationBuildings, stationBuildingState, buildStationBuildingsWhenRe
 // ── /s02:B ──
 // ── s14:B ──
 import { addSurfaceLabelOccluder } from './stations.js';
+import { createTidewayLabelCover } from './tideway-label-cover.js';
+import { anchorReservoirBuildings } from './reservoir-buildings.js';
 // ── /s14:B ──
 import { createUnifiedShafts } from './shafts.js';
 import { registerStationForShafts, getShaftRegistry } from './shaft-registry.js';
@@ -1724,6 +1726,8 @@ function s21TryStartGeologyWork() {
         prepare:water=>applyShadowPolicy(water.group),
         attach:water=>{
           deepWater=water;scene.add(water.group);water.setSolo(s21SoloValue);
+          water.buildingAnchors=anchorReservoirBuildings(water,surfaceGeometryGroup,bakedMeshes,
+            mesh=>modeSystem.collision.invalidateBuilding(mesh));
           water.hideLegacy(reservoirsMesh,airportDockGroup);
         },
         onFail:error=>console.warn('Deep water unavailable:',error.message),
@@ -2435,6 +2439,8 @@ let applySoloSelection = () => {};
 // ---------- Tideway + Lee Tunnel (Super Sewer system) ----------
 let tidewayMesh = null;
 let tidewayPlatforms = null;
+addSurfaceLabelOccluder(createTidewayLabelCover({getGroup:()=>tidewayPlatforms,
+  getFrame:()=>renderer.info.render.frame,distortNdc:(x,y)=>lensSystem.distortNdc(x,y)}));
 lateLayers.define('tidewayPlatforms', {
   deps: () => !!terrain,
   steps: () => createTidewayPlatformsSteps({ llToXZ, floorAt: (x,z) => getTerrainMeshSurfaceY({x,z}), VE: VERTICAL_EXAGGERATION }),

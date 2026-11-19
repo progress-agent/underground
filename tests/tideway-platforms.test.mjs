@@ -109,12 +109,36 @@ test('Chelsea planting shelves have closed end walls down to the physical floor'
 
 
 test('walls and approaches share the actual rendered site mesh, with the wall range in its live buffer',()=>{
+ // Columns, walls and approaches use the original per-site draw. The land
+ // column and perforated canopy retain their separate transforms/materials.
  const g=make();let meshes=0;g.traverse(o=>{if(o.isMesh)meshes++;});assert.equal(meshes,11);
  for(const[id,r]of g.userData.registry){
   assert.equal(r.wallMesh,r.detail,id);assert.equal(r.approachMesh,r.detail,id);assert.ok(r.group.children.includes(r.detail),id);
   const p=r.detail.geometry.attributes.position,{start,count}=r.wallVertexRange;assert.ok(start>0&&count>0&&start+count===p.count,id);assert.equal(count%6,0,id);
   for(let i=start;i<start+count;i+=6){assert.ok(p.getY(i)>=p.getY(i+1),id);assert.ok(p.getY(i)>=p.getY(i+2),id);}
  }g.userData.dispose();
+});
+
+test('indexed site buffers retain a byte-sized cast finish distinct from paving',()=>{
+ const g=make();let material;
+ for(const r of g.userData.registry.values()){
+  const geo=r.detail.geometry,mask=geo.attributes.tidewayVent;material=r.detail.material;
+  assert.ok(geo.index);assert.equal(mask.count,geo.attributes.position.count);
+  assert.equal(mask.normalized,true);assert.equal(mask.array.BYTES_PER_ELEMENT,1);
+  assert.ok(mask.array.some(v=>v===0),'paving keeps its original finish');
+  assert.equal(mask.array.some(v=>v===255),r.columns.some(c=>!c.mesh));
+  for(const c of r.columns)if(c.mesh)assert.ok(c.mesh.geometry.attributes.tidewayVent.array.every(v=>v===255));
+ }
+ const shader={vertexShader:THREE.ShaderLib.standard.vertexShader,fragmentShader:THREE.ShaderLib.standard.fragmentShader,uniforms:{}};
+ material.onBeforeCompile(shader);
+ assert.equal(material.roughness,.86);assert.equal(material.metalness,.08);
+ assert.equal(shader.uniforms.uTidewayVentRoughness.value,.58);
+ assert.equal(shader.uniforms.uTidewayVentMetalness.value,.35);
+ assert.ok(shader.vertexShader.includes('vTidewayVent=tidewayVent'));
+ assert.ok(shader.fragmentShader.includes('roughnessFactor=mix('));
+ assert.ok(shader.fragmentShader.includes('metalnessFactor=mix('));
+ assert.equal(material.transparent,false);assert.equal(material.emissive.getHex(),0);
+ g.userData.dispose();
 });
 
 

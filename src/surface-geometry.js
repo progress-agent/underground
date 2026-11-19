@@ -28,6 +28,7 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
+import { reservoirBuildingBase } from './reservoir-buildings.js';
 import { injectBuildingWindows } from './night.js';
 import { applyRise } from './opening-rise.js'; // s21:V2
 
@@ -165,7 +166,7 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
   let idx = 0;
 
   for (const b of unique) {
-    const baseY = getTerrainMeshSurfaceY({ x: b.cx, z: b.cz });
+    const baseY = reservoirBuildingBase(b.cx,b.cz,getTerrainMeshSurfaceY({ x: b.cx, z: b.cz }));
     if (baseY === null || baseY === undefined || Number.isNaN(baseY)) continue;
 
     // Guard against degenerate OSM data: a zero-length scale axis (zero area
