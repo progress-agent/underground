@@ -17,7 +17,9 @@ export function roadBlockWanted(rec,{phone=false,x=0,z=0,height=0}={}) {
  * right pavement). Across is negative on OSM left. No new meshes/attributes needed by the cue. */
 export function createRoadMaterial({ratio={value:1}}={}) {
   const material=new THREE.MeshLambertMaterial({color:0x55504b,
-    side:THREE.FrontSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
+    // Like the terrain skin, roads test existing depth without writing it.
+    // Their 6cm clearance must not bury the figure's 2cm planar shadow.
+    depthWrite:false,side:THREE.FrontSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
   material.name='road-surface';
   material.onBeforeCompile=shader=>{
     shader.uniforms.uRoadRatio=ratio;
