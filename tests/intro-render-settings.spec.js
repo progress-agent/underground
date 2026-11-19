@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-for (const query of ['buildings=baked', 'ground=baked', 'buildings=baked&ground=live']) {
+for (const query of ['buildings=baked', 'ground=baked', 'buildings=baked&ground=live',
+  'groundcue=0', 'groundcue=.5', 'groundcue=1&buildings=baked']) {
   test(`render settings preserve the opening: ${query}`, async ({ page }) => {
     await page.goto(`/?${query}`);
     await page.waitForFunction(() => window.__ug?.intro);
@@ -30,7 +31,7 @@ test('the exact review URL completes its opening at the tuned underground pose',
   expect(state.orbit).toBe(true);expect(state.keyboard).toBe(true);
 });
 
-for (const query of ['fast=1&buildings=baked', 'skip=1&buildings=baked', 'hx=5&buildings=baked']) {
+for (const query of ['fast=1&buildings=baked', 'skip=1&buildings=baked', 'hx=5&buildings=baked', 'fast=1&groundcue=.75']) {
   test(`explicit skip/deep link still bypasses opening: ${query}`, async ({ page }) => {
     await page.goto(`/?${query}`);
     await page.waitForFunction(() => window.__ug?.intro);

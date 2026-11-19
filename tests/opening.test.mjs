@@ -206,3 +206,20 @@ test('gate: deep links bypass it entirely', () => {
   assert.equal(gate.getState().stage, 'done');
   assert.equal(compiled, false);
 });
+
+test('ground cue tuning preserves the opening and still honours an explicit skip', () => {
+  const saved = globalThis.window.location.search;
+  try {
+    for (const query of ['groundcue=0', 'groundcue=.5', 'groundcue=1&buildings=baked']) {
+      globalThis.window.location.search = '?' + query;
+      const { intro } = makeIntro(clock());
+      intro.run();
+      assert.notEqual(intro.getPhase(), 'bypassed', query);
+      assert.equal(intro.isRunning(), true, query);
+    }
+    globalThis.window.location.search = '?fast=1&groundcue=.75';
+    const { intro } = makeIntro(clock());
+    intro.run();
+    assert.equal(intro.getPhase(), 'bypassed');
+  } finally { globalThis.window.location.search = saved; }
+});

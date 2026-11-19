@@ -2,6 +2,7 @@
 // morphs. Each block is already indexed and bounded: a browser only creates typed-array views.
 import * as THREE from 'three';
 import {nightUniforms} from './night.js';
+import {groundCueStrength,groundCueWeight,installGroundCue} from './ground-cue.js';
 
 export function roadBlockWanted(rec,{phone=false,x=0,z=0,height=0}={}) {
   if(!phone)return rec.tier==='desktop';
@@ -88,10 +89,12 @@ export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
   return mesh;
 }
 
-export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,getBridges=()=>null,compile=null,onError=console.warn}={}) {
+export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,getBridges=()=>null,compile=null,onError=console.warn,groundCue=null}={}) {
   const group=new THREE.Group();group.name='roads';group.matrixAutoUpdate=false;
   const ratio={value:getRatio()},material=createRoadMaterial({ratio}),bridgeMaterial=createRoadMaterial({ratio});
   bridgeMaterial.defines={ROAD_BRIDGE:1};bridgeMaterial.customProgramCacheKey=()=> 'road-surface-v4-bridge';
+  const cue={value:0},cueOrigin={value:new THREE.Vector2()};let cueStrength=groundCueStrength(groundCue);
+  for(const m of [material,bridgeMaterial])installGroundCue(m,cue,cueOrigin);
   const stats={state:'waiting',loaded:0,pending:0,bytes:0,vertices:0,maxAttachMs:0,maxWidthMs:0,errors:[],disposed:0,manifest:null};
   let enabled=true,started=false,dead=false,records=[],lastX=Infinity,lastZ=Infinity,lastHeight=Infinity;
   const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set();
@@ -152,10 +155,15 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     stats.maxAttachMs=Math.max(stats.maxAttachMs,performance.now()-t);
   }
   return {group,material,bridgeMaterial,stats,
+    groundCue:{setStrength(v){cueStrength=groundCueStrength(v);},get strength(){return cueStrength;},get weight(){return cue.value;}},
     setEnabled(v){enabled=!!v;group.visible=enabled&&widthReady;if(!enabled){generation++;loadController?.abort();widthJob=null;widthPending=null;widthReady=false;getBridges()?.userData.clearRoadWidths?.();started=false;records=[];wanted.clear();for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);lastX=Infinity;}},
     get enabled(){return enabled;},
-    update({x,z,height=0,belowSurface=false,submerged=false}={}){
+    update({x,z,height=0,belowSurface=false,submerged=false,airborne=false}={}){
       const viewAllowed=enabled&&!belowSurface&&!submerged;group.visible=viewAllowed&&widthReady;ratio.value=getRatio();
+      // getRatio() is 1/Master. R's height is canonical/VE, hence divide by
+      // that ratio to gate on displayed physical metres at every Master.
+      cue.value=groundCueWeight(cueStrength,height/ratio.value,!viewAllowed||airborne);
+      cueOrigin.value.set(Math.floor(x/4)*4,Math.floor(z/4)*4);
       getBridges()?.userData.activateRoadWidths?.(viewAllowed&&widthReady);
       if(!isOpen()||!enabled||dead)return;
       if(!started){start();return;}
