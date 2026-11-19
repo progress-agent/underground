@@ -26,6 +26,31 @@ test('coverage includes all eight classes and the October total within 5%',()=>{
   assert.ok(Math.abs(manifest.stats.totalKm/29921-1)<.05);assert.ok(manifest.desktopGPUBytes<80e6);
   assert.match(manifest.source,/OpenStreetMap.*ODbL/);
 });
+test('merged roads near all four reservoir feet follow actual bank support before clearance',async()=>{
+  const {installNodeEnv}=await import('../scripts/bake-node-env.mjs');installNodeEnv();
+  const terrain=await import('../src/terrain.js'),{initThamesMask}=await import('../src/thames-mask.js'),{loadM25Data,initM25Boundary}=await import('../src/m25.js');
+  const thamesData=JSON.parse(fs.readFileSync(path.join(root,'public/data/thames.json')));initThamesMask(thamesData.points);const m25=await loadM25Data();initM25Boundary(m25.supportPoints??m25.points);await terrain.tryCreateTerrainMesh({thamesData});
+  const {RESERVOIR_FEET,inReservoirFootRegion}=await import('../src/reservoir-feet.js'),{createDeepWaterSteps}=await import('../src/deep-water.js');
+  const {anchorReservoirBuildings,reservoirBuildingBase}=await import('../src/reservoir-buildings.js');
+  const inventory=JSON.parse(fs.readFileSync(path.join(root,'public/data/deep-water.json'))),ids=new Set(RESERVOIR_FEET.map(b=>b.id));
+  const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.filter(b=>ids.has(b.id)).map(b=>({...b,seaLife:false}))},terrain.getTerrainMeshSurfaceY,m25.supportPoints??m25.points);
+  let step;do{step=steps.next();}while(!step.done);anchorReservoirBuildings(step.value,null);
+  const counts=new Map(RESERVOIR_FEET.map(b=>[b.id,0]));let raised=0;
+  const material=createRoadMaterial();
+  for(const rec of manifest.records.filter(r=>r.tier==='desktop')){
+    if(!RESERVOIR_FEET.some(b=>rec.x+rec.size>=b.minX&&rec.x<=b.maxX&&rec.z+rec.size>=b.minZ&&rec.z<=b.maxZ))continue;
+    const raw=gunzipSync(fs.readFileSync(path.join(dir,rec.file))),mesh=decodeRoadBlock(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength),material,material,rec),p=mesh.geometry.attributes.position;
+    for(let i=0;i<p.count;i++){
+      const x=mesh.position.x+p.getX(i)*.125,z=mesh.position.z+p.getZ(i)*.125;if(!inReservoirFootRegion(x,z))continue;
+      const ground=terrain.getTerrainMeshSurfaceY({x,z}),support=reservoirBuildingBase(x,z,ground),y=mesh.position.y+p.getY(i)*.05;
+      assert.ok(y>=support+.27,`${rec.file} ${x},${z}: road ${y} below support ${support}`);
+      if(support>ground+.3)raised++;
+      for(const b of RESERVOIR_FEET)if(x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ)counts.set(b.id,counts.get(b.id)+1);
+    }mesh.geometry.dispose();
+  }material.dispose();
+  assert.ok(raised>0,'exercise roads supported by grass above the DEM');
+  for(const [id,count]of counts)assert.ok(count>0,`no road samples near ${id}`);
+});
 test('tagged widths and left/right pavements override labelled estimates',()=>{
   assert.equal(metres("12 ft"),3.6576000000000004);assert.equal(metres('bad'),null);
   assert.deepEqual(dimensions({width:'7.2',sidewalk:'left','sidewalk:left:width':'1.8'},5),{width:7.2,left:1.8,right:0});

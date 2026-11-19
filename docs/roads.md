@@ -6,6 +6,10 @@ The source is the 80 October 2026 Overpass answers in `scripts/.cache/roads-over
 app's terrain and the drawn outer M25 barrier ring. It never changes the shared surface store.
 Run it again when the terrain or Thames bridge geometry changes. Tests regenerate into `/tmp`
 and compare the manifest, network and every geometry block byte for byte.
+The four corrected reservoir feet use the actual dry bank triangles via the same highest-support
+query as buildings and navigation, before road clearance. Rails nearby are sampled every 2m
+before simplification so narrow bank slopes are retained. These are compiler sampling choices,
+not surveyed dimensions. Bank data is ready before compiling, with no runtime refresh race.
 
 The binary `network.bin.gz` preserves OSM way ID, class, width, both pavement widths, layer,
 bridge and tunnel flags, and centreline in centimetres. Tunnels are retained in the data but

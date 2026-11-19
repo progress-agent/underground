@@ -20,7 +20,18 @@ const {createBridges}=await import('../../src/bridges.js');
 const thamesData=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/thames.json')));
 initThamesMask(thamesData.points);const m25=await loadM25Data();initM25Boundary(m25.supportPoints??m25.points);
 await terrain.tryCreateTerrainMesh({thamesData});
-const g=(x,z)=>terrain.getTerrainMeshSurfaceY({x,z})??0;
+// C lowers the coarse ground beneath four fine bank meshes. Compile roads
+// against those same dry support triangles, after they exist, before clearance.
+const {createDeepWaterSteps}=await import('../../src/deep-water.js');
+const {RESERVOIR_FEET,inReservoirFootRegion}=await import('../../src/reservoir-feet.js');
+const {anchorReservoirBuildings,reservoirBuildingBase}=await import('../../src/reservoir-buildings.js');
+const inventory=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/deep-water.json')));
+const feet=new Set(RESERVOIR_FEET.map(b=>b.id));
+const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.filter(b=>feet.has(b.id)).map(b=>({...b,seaLife:false}))},
+  terrain.getTerrainMeshSurfaceY,getMapEdgeRing());
+let bankStep;do{bankStep=steps.next();}while(!bankStep.done);
+anchorReservoirBuildings(bankStep.value,null);
+const g=(x,z)=>reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
 const network=buildNetwork(ROOT,getMapEdgeRing());
 const bridgeData=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/bridges.json'))).bridges;
 const bridgeRoadWidths={};
@@ -119,6 +130,12 @@ function append(c,pts,r,d){
   const gridX=bounds.widthM/(bounds.columns-1),gridZ=bounds.heightM/(bounds.rows-1);
   for(let i=1;i<rails.length;i++) {
     const a=rails[i-1],b=rails[i],cuts=[0,1];
+    // The bank slopes are finer than the DEM grid. Retain their contact along
+    // the rail as well as at endpoints; ordinary roads keep R's exact sampling.
+    if(a.some(p=>inReservoirFootRegion(p[0],p[1]))||b.some(p=>inReservoirFootRegion(p[0],p[1]))) {
+      const n=Math.ceil(Math.max(...a.map((p,s)=>Math.hypot(b[s][0]-p[0],b[s][1]-p[1])))/2);
+      for(let j=1;j<n;j++)cuts.push(j/n);
+    }
     if(!r.bridge&&!d)for(let side=0;side<2;side++){
       const p=a[side],q=b[side];
       const u=[(p[0]-bounds.minX)/gridX,(p[1]-bounds.minZ)/gridZ];
