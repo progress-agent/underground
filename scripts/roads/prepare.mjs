@@ -27,7 +27,7 @@ const {RESERVOIR_FEET,inReservoirFootRegion}=await import('../../src/reservoir-f
 const {anchorReservoirBuildings,reservoirBuildingBase}=await import('../../src/reservoir-buildings.js');
 const inventory=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/deep-water.json')));
 const feet=new Set(RESERVOIR_FEET.map(b=>b.id));
-const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.filter(b=>feet.has(b.id)).map(b=>({...b,seaLife:false}))},
+const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.map(b=>({...b,mode:feet.has(b.id)?b.mode:'2D',seaLife:false}))},
   terrain.getTerrainMeshSurfaceY,getMapEdgeRing());
 let bankStep;do{bankStep=steps.next();}while(!bankStep.done);
 anchorReservoirBuildings(bankStep.value,null);

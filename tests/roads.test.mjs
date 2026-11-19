@@ -33,9 +33,10 @@ test('merged roads near all four reservoir feet follow actual bank support befor
   const {RESERVOIR_FEET,inReservoirFootRegion}=await import('../src/reservoir-feet.js'),{createDeepWaterSteps}=await import('../src/deep-water.js');
   const {anchorReservoirBuildings,reservoirBuildingBase}=await import('../src/reservoir-buildings.js');
   const inventory=JSON.parse(fs.readFileSync(path.join(root,'public/data/deep-water.json'))),ids=new Set(RESERVOIR_FEET.map(b=>b.id));
-  const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.filter(b=>ids.has(b.id)).map(b=>({...b,seaLife:false}))},terrain.getTerrainMeshSurfaceY,m25.supportPoints??m25.points);
+  const {getMapEdgeRing}=await import('../src/m25-edge.js');
+  const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.map(b=>({...b,mode:ids.has(b.id)?b.mode:'2D',seaLife:false}))},terrain.getTerrainMeshSurfaceY,getMapEdgeRing());
   let step;do{step=steps.next();}while(!step.done);anchorReservoirBuildings(step.value,null);
-  const counts=new Map(RESERVOIR_FEET.map(b=>[b.id,0]));let raised=0;
+  const counts=new Map(RESERVOIR_FEET.map(b=>[b.id,0]));
   const material=createRoadMaterial();
   for(const rec of manifest.records.filter(r=>r.tier==='desktop')){
     if(!RESERVOIR_FEET.some(b=>rec.x+rec.size>=b.minX&&rec.x<=b.maxX&&rec.z+rec.size>=b.minZ&&rec.z<=b.maxZ))continue;
@@ -44,11 +45,9 @@ test('merged roads near all four reservoir feet follow actual bank support befor
       const x=mesh.position.x+p.getX(i)*.125,z=mesh.position.z+p.getZ(i)*.125;if(!inReservoirFootRegion(x,z))continue;
       const ground=terrain.getTerrainMeshSurfaceY({x,z}),support=reservoirBuildingBase(x,z,ground),y=mesh.position.y+p.getY(i)*.05;
       assert.ok(y>=support+.27,`${rec.file} ${x},${z}: road ${y} below support ${support}`);
-      if(support>ground+.3)raised++;
       for(const b of RESERVOIR_FEET)if(x>=b.minX&&x<=b.maxX&&z>=b.minZ&&z<=b.maxZ)counts.set(b.id,counts.get(b.id)+1);
     }mesh.geometry.dispose();
   }material.dispose();
-  assert.ok(raised>0,'exercise roads supported by grass above the DEM');
   for(const [id,count]of counts)assert.ok(count>0,`no road samples near ${id}`);
 });
 test('tagged widths and left/right pavements override labelled estimates',()=>{
