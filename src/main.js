@@ -65,6 +65,7 @@ import { resolveBuildingsPath, BUILDINGS_PATH_REV } from './buildings-path.js';
 // ── /s02:F ──
 // ── sprint:D ──
 import { registerGroundNight, updateNightScene } from './night-scene.js';
+import { createRoads } from './roads.js';
 import { createStars } from './stars.js';
 import { createSunSystem } from './sun.js';
 // ── /sprint:D ──
@@ -1400,6 +1401,16 @@ const lateLayers = createLateLayers({
   },
 });
 openingHooks.register({ lateLayers });
+// s25:R: data and buffers start only after landing; the off path allocates no road buffers.
+const roads = createRoads({ scene, phone: TOUCH_UI, groundCue: getUrlStringParam('groundcue'), getRatio: getBuildingHeightScale, getBridges: () => bridgesGroup,
+  compile: object => { const target = renderer.getRenderTarget(); renderer.setRenderTarget(composer.readBuffer);
+    try { return renderer.compileAsync(object, camera, scene); } finally { renderer.setRenderTarget(target); } },
+  isOpen: () => ['done','bypassed'].includes(intro.getPhase()) });
+roads.setEnabled(getUrlStringParam('roads') !== '0');
+const roadsToggle = document.getElementById('roadsVisible');
+if (roadsToggle) { roadsToggle.checked = roads.enabled;
+  roadsToggle.addEventListener('change', () => roads.setEnabled(roadsToggle.checked)); }
+
 // settled() and ug:late-layers-done wait for all eight; a layer whose parent step or data failed is skipped, so they never hang.
 lateLayers.expect(LATE_LAYER_ORDER);
 const s21SkipLayers = (ids) => { for (const id of ids) lateLayers.skip(id); };
@@ -4858,6 +4869,10 @@ function tick(frameTime) {
 
   // ── s21:L ── the late layers (motorway, airports, flights, cliff, reservoirs, canals, sea life, surface trains)
   // are built here after landing, a few milliseconds a frame (src/late-layers.js); nothing runs during the descent.
+  roads.update({ x: camera.position.x, z: camera.position.z,
+    height: (camera.position.y - (surfaceYAtCamera ?? 0)) / VERTICAL_EXAGGERATION,
+    belowSurface, submerged,
+    airborne: modeSystem?.registry.activeId === 'drone' || modeSystem?.registry.activeId === 'balloon' });
   lateLayers.pump(); // the registry's own budget: 4 ms a frame
   // ── /s21:L ──
   // ── s24:R ──
@@ -5294,7 +5309,7 @@ if (import.meta.env.DEV) {
     // ── s24:O ──
     openingGate,
     openingWork, // s21:L
-    lateLayers, openingHooks, // s21:L
+    lateLayers, openingHooks, roads, // s21:L, s25:R
     // ── /s24:O ──
     // ── sprint:A1 ──
     get modes() { return modeSystem; },

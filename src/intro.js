@@ -112,7 +112,7 @@ export function createIntro({ camera, controls, fpsControls, llToXZ, now = () =>
   function shouldSkipByUrl() {
     if (typeof window === 'undefined' || !window.location) return false;
     const sp = new URLSearchParams(window.location.search);
-    for (const setting of ['tuneIntro', 'buildings', 'ground', 'mh', 'bh', 'sky', 'ostart', 'ovista' /* s21:V2 */]) sp.delete(setting);
+    for (const setting of ['tuneIntro', 'buildings', 'ground', 'groundcue', 'mh', 'bh', 'sky', 'ostart', 'ovista' /* s21:V2 */]) sp.delete(setting);
     return sp.size > 0;
   }
 
