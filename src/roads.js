@@ -72,20 +72,28 @@ if (uNightAmt > .001) {
 export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
   const v=new DataView(buffer);
   if(v.byteLength<32||v.getUint32(0,true)!==0x34524755)throw Error('Invalid UGR4 road block');
-  const n=v.getUint32(4,true),ni=v.getUint32(8,true),bridge=!!v.getUint32(20,true);
-  const expected=32+n*(bridge?11:9)+(n%2)+ni*2;
-  if(!n||n>65000||ni%3||expected!==v.byteLength)throw Error('Invalid UGR4 road buffer lengths');
+  const n=v.getUint32(4,true),ni=v.getUint32(8,true),bridge=!!v.getUint32(20,true),farCount=v.getUint32(24,true);
+  const expected=32+n*(bridge?11:9)+(n%2)+(ni+farCount)*2;
+  if(!n||n>65000||ni%3||farCount%3||expected!==v.byteLength)throw Error('Invalid UGR4 road buffer lengths');
   const g=new THREE.BufferGeometry();let offset=32;
   g.setAttribute('position',new THREE.BufferAttribute(new Uint16Array(buffer,offset,n*3),3));offset+=n*6;
   g.setAttribute('roadData',new THREE.BufferAttribute(new Uint8Array(buffer,offset,n*3),3));offset+=n*3+(n%2);
   if(bridge){g.setAttribute('roadRise',new THREE.BufferAttribute(new Int16Array(buffer,offset,n),1));offset+=n*2;}
   g.setIndex(new THREE.BufferAttribute(new Uint16Array(buffer,offset,ni),1));
+
   if(record?.bounds) {
     const [x,z,lo,x1,z1,hi]=record.bounds, ox=v.getInt32(12,true),oz=v.getInt32(16,true);
     g.boundingBox=new THREE.Box3(new THREE.Vector3((x-ox)*8,(Math.min(lo,bridge?0:lo)+500)*20,(z-oz)*8),new THREE.Vector3((x1-ox)*8,(hi+500)*20,(z1-oz)*8));
   } else { g.computeBoundingBox(); }
   g.boundingSphere=new THREE.Sphere();g.boundingBox.getBoundingSphere(g.boundingSphere);
   const mesh=new THREE.Mesh(g,bridge?bridgeMaterial:material);
+  mesh.userData.roadNearGeometry=g;
+  if(farCount){
+    const far=new THREE.BufferGeometry();far.attributes={...g.attributes};
+    far.setIndex(new THREE.BufferAttribute(new Uint16Array(buffer,offset+ni*2,farCount),1));
+    far.boundingBox=g.boundingBox;far.boundingSphere=g.boundingSphere;
+    mesh.userData.roadFarGeometry=far;
+  }
   mesh.position.set(v.getInt32(12,true),-500,v.getInt32(16,true));mesh.scale.set(.125,.05,.125);
   mesh.matrixAutoUpdate=false;mesh.updateMatrix();mesh.renderOrder=1;mesh.receiveShadow=true;
   mesh.raycast=()=>{}; // road meshes are visual landscape; picking stays with terrain and infrastructure
@@ -103,7 +111,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set();
   let attachPromise=null,compiled=false,widthReady=false,widthJob=null,widthPending=null,loadController=null,generation=0;
   const report=e=>{stats.errors.push(String(e));onError('Roads unavailable:',e);};
-  const remove=(file,mesh)=>{group.remove(mesh);mesh.geometry.dispose();stats.bytes-=mesh.userData.roadBytes;stats.vertices-=mesh.geometry.attributes.position.count;resident.delete(file);stats.disposed++;stats.loaded=resident.size;};
+  const remove=(file,mesh)=>{group.remove(mesh);mesh.userData.roadNearGeometry.dispose();mesh.userData.roadFarGeometry?.dispose();stats.bytes-=mesh.userData.roadBytes;stats.vertices-=mesh.geometry.attributes.position.count;resident.delete(file);stats.disposed++;stats.loaded=resident.size;};
   async function bufferFrom(r) {
     if(!r.ok||!r.body)throw Error('Road asset HTTP '+r.status);
     return /gzip/i.test(r.headers.get('content-encoding')??'') ? r.arrayBuffer()
@@ -193,6 +201,12 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
       }
       if(Math.hypot(x-lastX,z-lastZ)>100||(height>120)!==(lastHeight>120)) {select(x,z,height);lastX=x;lastZ=z;lastHeight=height;}
       attachNext();fetchMore();
+      // Same vertex attributes, fewer triangles only beyond human-scale views.
+      // Keep the full index resident and restore it before returning to the street.
+      const far=height/ratio.value>=120;
+      for(const mesh of resident.values()){
+        mesh.geometry=far?(mesh.userData.roadFarGeometry??mesh.userData.roadNearGeometry):mesh.userData.roadNearGeometry;
+      }
       if(!inflight.size&&!ready.length&&!attachPromise&&resident.size===wanted.size)stats.state=stats.errors.length?'failed':'ready';
     },
     coverage:()=>({wanted:[...wanted],resident:[...resident.keys()]}),

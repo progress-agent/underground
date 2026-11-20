@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {installNodeEnv,ROOT} from '../bake-node-env.mjs';
 import {buildNetwork,CLASSES,WIDTHS} from './network.mjs';
+import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
 import {BNG_REF_E,BNG_REF_N} from '../../src/coordinates.js';
 import * as THREE from 'three';
 installNodeEnv();
@@ -23,16 +24,16 @@ await terrain.tryCreateTerrainMesh({thamesData});
 // C lowers the coarse ground beneath four fine bank meshes. Compile roads
 // against those same dry support triangles, after they exist, before clearance.
 const {createDeepWaterSteps}=await import('../../src/deep-water.js');
-const {RESERVOIR_FEET,inReservoirFootRegion}=await import('../../src/reservoir-feet.js');
-const {anchorReservoirBuildings,reservoirBuildingBase}=await import('../../src/reservoir-buildings.js');
+const {inReservoirFootRegion}=await import('../../src/reservoir-feet.js');
+const {anchorReservoirBuildings,reservoirRoadBase}=await import('../../src/reservoir-buildings.js');
 const inventory=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/deep-water.json')));
-const feet=new Set(RESERVOIR_FEET.map(b=>b.id));
-const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.map(b=>({...b,mode:feet.has(b.id)?b.mode:'2D',seaLife:false}))},
+const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.map(b=>({...b,seaLife:false}))},
   terrain.getTerrainMeshSurfaceY,getMapEdgeRing());
 let bankStep;do{bankStep=steps.next();}while(!bankStep.done);
 anchorReservoirBuildings(bankStep.value,null);
-const g=(x,z)=>reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
+const g=(x,z)=>reservoirRoadBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
 const network=buildNetwork(ROOT,getMapEdgeRing());
+const overpasses=roadOverpassConstraints(network.roads,g);
 const bridgeData=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/bridges.json'))).bridges;
 const bridgeRoadWidths={};
 for(const b of bridgeData.filter(b=>b.kind.includes('road'))) {
@@ -98,22 +99,30 @@ const netHead=Buffer.alloc(8);netHead.write('UGN1');netHead.writeUInt32LE(networ
 const networkBytes=zlib.gzipSync(Buffer.concat([netHead,...netParts]),{level:9});fs.writeFileSync(path.join(out,'network.bin.gz'),networkBytes);
 const groups=new Map();
 const LIFT=.30; // 6cm real in canonical VE5, plus polygon offset at render. Landscape follows Master.
-function group(key,x,z,size,tier){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,parts:[],pos:[],road:[],rise:[],idx:[]});return groups.get(key);}
+function group(key,x,z,size,tier){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,parts:[],pos:[],road:[],rise:[],idx:[],farIdx:[]});return groups.get(key);}
 function flush(c){
   if(!c.idx.length)return;
   // Weld identical vertices and remove quantisation-degenerate triangles. Side and pavement
   // metadata are part of the key, so this cannot erase K's carriageway edges or morph seams.
-  const pos=[],road=[],rise=[],idx=[],keys=new Map();
+  const pos=[],road=[],rise=[],idx=[],keys=new Map(),remap=new Map();
+  const vertex=j=>{
+    if(remap.has(j))return remap.get(j);
+    const p=c.pos.slice(j*3,j*3+3),r=c.road.slice(j*3,j*3+3),h=c.rise[j],key=[...p,...r,h].join(',');
+    let at=keys.get(key);if(at===undefined){at=pos.length/3;keys.set(key,at);pos.push(...p);road.push(...r);rise.push(h);}
+    remap.set(j,at);return at;
+  };
   for(let i=0;i<c.idx.length;i+=3){
     const ids=c.idx.slice(i,i+3),[a,b,d]=ids;
     const area=(c.pos[b*3]-c.pos[a*3])*(c.pos[d*3+2]-c.pos[a*3+2])-(c.pos[b*3+2]-c.pos[a*3+2])*(c.pos[d*3]-c.pos[a*3]);
     if(!area)continue;
-    for(const j of ids){const p=c.pos.slice(j*3,j*3+3),r=c.road.slice(j*3,j*3+3),h=c.rise[j],key=[...p,...r,h].join(',');
-      let at=keys.get(key);if(at===undefined){at=pos.length/3;keys.set(key,at);pos.push(...p);road.push(...r);rise.push(h);}idx.push(at);
-    }
+    for(const j of ids)idx.push(vertex(j));
   }
-  if(idx.length)c.parts.push({pos:Uint16Array.from(pos),road:Uint8Array.from(road),rise:rise.some(v=>v!==0)?Int16Array.from(rise):null,idx:Uint16Array.from(idx)});
-  c.pos=[];c.road=[];c.rise=[];c.idx=[];
+  // A near triangle can quantise to zero area while an aerial triangle still
+  // needs its endpoint. Weld those references too, rather than coercing an
+  // absent map entry to index zero (which creates a spurious long triangle).
+  const farIdx=Uint16Array.from(c.farIdx.map(vertex));
+  if(idx.length)c.parts.push({pos:Uint16Array.from(pos),road:Uint8Array.from(road),rise:rise.some(v=>v!==0)?Int16Array.from(rise):null,idx:Uint16Array.from(idx),farIdx});
+  c.pos=[];c.road=[];c.rise=[];c.idx=[];c.farIdx=[];
 }
 function append(c,pts,r,d){
   const half=(r.width+r.left+r.right)/2; // bands live in the same ribbon, outside the tagged carriageway
@@ -168,7 +177,7 @@ function append(c,pts,r,d){
         // into implausibly steep humps. The inferred clearance is the end-to-end chord
         // above the local terrain depression, never a fabricated absolute elevation.
         const t=point[2],a=g(r.p[0][0],r.p[0][1]),b=g(r.p.at(-1)[0],r.p.at(-1)[1]);
-        const datum=a+(b-a)*t;rise=Math.max(0,datum-y);y+=rise;
+        const datum=overpassDatum(t,a,b,overpasses.get(r));rise=Math.max(0,datum-y);y+=rise;
       }
       y+=LIFT;
       const qy=Math.round((y/5+100)*100);
@@ -197,10 +206,29 @@ function append(c,pts,r,d){
   const write=(kept,side)=>kept.map(t=>{const j=t*2+side,index=c.pos.length/3;c.pos.push(...rawPos.slice(j*3,j*3+3));c.road.push(...rawRoad.slice(j*3,j*3+3));c.rise.push(rawRise[j]);return{t,index};});
   const ls=write(left,0),rs=write(right,1);
   const triangle=(a,b,d)=>{const ids=[a,b,d],[p,q,r]=ids.map(i=>[c.pos[i*3],c.pos[i*3+2]]);if((q[1]-p[1])*(r[0]-p[0])-(q[0]-p[0])*(r[1]-p[1])<0)[ids[1],ids[2]]=[ids[2],ids[1]];c.idx.push(...ids);};
-  let li=0,ri=0;
-  while(li<ls.length-1||ri<rs.length-1){
-    if(ri===rs.length-1||(li<ls.length-1&&ls[li+1].t<=rs[ri+1].t)){triangle(ls[li].index,rs[ri].index,ls[li+1].index);li++;}
-    else{triangle(ls[li].index,rs[ri].index,rs[ri+1].index);ri++;}
+  const stitch=(left,right)=>{
+    let li=0,ri=0;
+    while(li<left.length-1||ri<right.length-1){
+      if(ri===right.length-1||(li<left.length-1&&left[li+1].t<=right[ri+1].t)){triangle(left[li].index,right[ri].index,left[li+1].index);li++;}
+      else{triangle(left[li].index,right[ri].index,right[ri+1].index);ri++;}
+    }
+  };
+  stitch(ls,rs);
+  if(c.tier==='desktop'){
+    const simplify=rail=>{
+      if(r.bridge||d||rail.length<3)return rail;
+      const tolerance=Math.min(2,r.width/4);
+      const at=k=>{const j=rail[k].index;return[c.pos[j*3]/(8*tolerance),c.pos[j*3+2]/(8*tolerance),c.pos[j*3+1]/100];};
+      // Aerial-only rendering tolerance: up to 2m (at most a quarter carriageway width)
+      // horizontally / 1m real vertically. Every road, width and endpoint is retained.
+      const keep=new Set([0,rail.length-1]),stack=[[0,rail.length-1]];
+      while(stack.length){const[a,b]=stack.pop();if(b-a<2)continue;const p=at(a),q=at(b),d=q.map((v,k)=>v-p[k]),l=d.reduce((s,v)=>s+v*v,0);let max=1,which=-1;
+        for(let i=a+1;i<b;i++){const v=at(i),t=l?Math.max(0,Math.min(1,v.reduce((s,v,k)=>s+(v-p[k])*d[k],0)/l)):0,err=v.reduce((s,v,k)=>s+(v-p[k]-t*d[k])**2,0);if(err>max){max=err;which=i;}}
+        if(which>=0){keep.add(which);stack.push([a,which],[which,b]);}
+      }
+      return rail.filter((_,i)=>keep.has(i));
+    };
+    const near=c.idx;c.idx=c.farIdx;stitch(simplify(ls),simplify(rs));c.farIdx=c.idx;c.idx=near;
   }
 }
 for(const r of network.roads){
@@ -251,8 +279,8 @@ for(const r of network.roads){
 }
 const records=[];let totalGPU=0,compressedBytes=0;
 for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){flush(c);for(let j=0;j<c.parts.length;j++){
-  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);
-  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer)]),body=zlib.gzipSync(raw,{level:9});
+  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);
+  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer)]),body=zlib.gzipSync(raw,{level:9});
   const file=c.key+'-'+j+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
   const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
   let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=(p.pos[i]/100-100)*5;lo=Math.min(lo,y);hi=Math.max(hi,y);}

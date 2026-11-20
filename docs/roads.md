@@ -6,8 +6,10 @@ The source is the 80 October 2026 Overpass answers in `scripts/.cache/roads-over
 app's terrain and the drawn outer M25 barrier ring. It never changes the shared surface store.
 Run it again when the terrain or Thames bridge geometry changes. Tests regenerate into `/tmp`
 and compare the manifest, network and every geometry block byte for byte.
-The four corrected reservoir feet use the actual dry bank triangles via the same highest-support
-query as buildings and navigation, before road clearance. Rails nearby are sampled every 2m
+The four corrected reservoir feet use the actual highest dry-bank triangles, including
+neighbouring reservoirs whose terrain was not changed, before road clearance. The compiler
+constructs the same full bank inventory as runtime; a four-body subset would miss overlapping
+neighbour surfaces. Underwater basin beds are excluded from this dry road support query. Rails nearby are sampled every 2m
 before simplification so narrow bank slopes are retained. These are compiler sampling choices,
 not surveyed dimensions. Bank data is ready before compiling, with no runtime refresh race.
 
@@ -44,16 +46,18 @@ original deck geometry; the roads-off opening and day look remain identical to l
 
 Thames road surfaces follow the bridge deck's own subdivided triangles at the two
 endpoints of its affine Master morph, including bank ramps. An additional 30m road approach
-blends deck ends into terrain. Other OSM bridge flags use the chord joining their terrain landings, held above the local
-terrain. This is an **informed estimate** derived from those two sampled elevations, rather
-than adding arbitrary headroom above already elevated landings. Its inferred clearance is
-the chord above the terrain depression; no surveyed deck elevation is claimed. The bridge
-ribbon itself is the deck surface; piers and parapets for these smaller crossings are not
-authored. Layer is preserved in the network for later
-refinement. No real-world height is asserted by a tooltip.
+blends deck ends into terrain. Other OSM bridges retain the chord joining their terrain landings, held above local terrain.
+A mapped crossing over a lower-layer, non-tunnel road now constrains that chord: an
+**informed estimate** uses 5.30m road headroom from [DMRB CD 127, Table 4.1](https://www.standardsforhighways.co.uk/tses/attachments/10442706-b592-42c8-85f8-2a0c779a8e37)
+plus an estimated 0.70m structural deck depth (a schematic beam depth, not a survey of
+an individual bridge). The extra elevation blends smoothly to zero at both terrain
+landings. Shared endpoints are junctions, not overpasses. This corrects flyovers where
+coarse terrain has no depression beneath the bridge. It does not invent a road-clearance
+hump at canal or railway crossings, or alter curated Thames decks. The bridge ribbon
+is its estimated deck surface; smaller-crossing piers and parapets remain unauthored.
 
 Runtime blocks use 16-bit positions: X/Z at 125mm, vertical at 10mm real in canonical VE5,
-and 16-bit indices. Each block has at most 65,000 vertices. Three bytes per vertex carry
+and 16-bit indices. Each block has at most 65,000 vertices. The reserved header word at byte 24 stores an optional aerial-index count; old blocks with zero remain supported. Three bytes per vertex carry
 ribbon half-width at 250mm, left pavement width at 100mm with the across-road side in its
 high bit, and right pavement width at 100mm. A bridge
 adds a signed 16-bit vertical morph delta. Upward winding is checked for every triangle.
@@ -63,7 +67,14 @@ These are landscape surfaces: the terrain/lift follow Master. Only the bridge's 
 clearance counter-scales with Master. Roads use a diffuse Lambert material with the existing scene lights and shadows. No
 additional lights or emissive materials are used.
 
-Desktop loads combined 8km blocks for every class (subdivided at the vertex cap). Phone
+Desktop loads combined 8km blocks for every class (subdivided at the vertex cap).
+Above 120m displayed height it uses an additional, offline-simplified triangle index
+sharing the exact same vertex attributes. Every road, endpoint and ribbon width stays;
+only interior rail samples are reduced, within the smaller of 2m or a quarter of the
+carriageway width horizontally and 1m vertically (rendering estimates). Bridge triangles
+are never simplified. The full street index returns below 120m. Both indices are disposed
+on toggle/range removal; phone blocks carry only their original full index. This is an
+internal aerial drawing economy; it creates no texture, shader variant or compile. Phone
 uses its separate 8km major-road blocks, plus 2km minor-road blocks whose bounds are within 1.8km of the camera below 120m.
 This guarantees every street within 1km of a walker, with a further 800m buffer. Minor roads
 are disposed beyond the range, rather than just hidden. At altitude only the major roads stay.

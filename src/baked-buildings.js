@@ -1,6 +1,6 @@
 import { isBuildingMaterial, getBuildingMaterial } from './surface-geometry.js';
 import { getReservoirFootDelta } from './terrain.js';
-import { reservoirBuildingBase } from './reservoir-buildings.js';
+import { reservoirBuildingBase, fitReservoirBuildingFootprints } from './reservoir-buildings.js';
 // baked-buildings.js — loads the offline-compiled building payload (UGB1)
 //
 // The counterpart to scripts/bake-surface.mjs. That compiler resolves, offline,
@@ -257,6 +257,7 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
   mesh.name = `baked-buildings-${tileIndex}`;
   mesh.matrixAutoUpdate = false;
   mesh.updateMatrix();
+  fitReservoirBuildingFootprints(mesh);
   return mesh;
 }
 

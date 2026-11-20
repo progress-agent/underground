@@ -28,7 +28,7 @@
 // five-storey slab on a house-sized footprint.
 
 import * as THREE from 'three';
-import { reservoirBuildingBase } from './reservoir-buildings.js';
+import { reservoirBuildingBase, fitReservoirBuildingFootprints, reservoirBaseMaterial } from './reservoir-buildings.js';
 import { injectBuildingWindows } from './night.js';
 import { applyRise } from './opening-rise.js'; // s21:V2
 
@@ -71,9 +71,12 @@ export function setNightBuildings(on, scene) {
   if (on === nightBuildings) return;
   nightBuildings = on;
   const from = on ? buildingMat : nightBuildingMat, to = on ? nightBuildingMat : buildingMat;
-  scene.traverse(o => { if (o.material === from) o.material = to; });
+  scene.traverse(o => {
+    if (o.material === from) o.material = to;
+    else if(o.material?.userData.reservoirBaseSource===from)o.material=reservoirBaseMaterial(to);
+  });
 }
-export function isBuildingMaterial(m) { return m === buildingMat || m === nightBuildingMat; }
+export function isBuildingMaterial(m) { const source=m?.userData.reservoirBaseSource??m;return source === buildingMat || source === nightBuildingMat; }
 export function getDayBuildingMaterial() { return buildingMat; }
 
 /**
@@ -191,6 +194,7 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
   if (idx === 0) { boxGeo.dispose(); return null; } // no placed instances → don't add an empty mesh
   mesh.instanceMatrix.needsUpdate = true;
 
+  fitReservoirBuildingFootprints(mesh);
   return mesh;
 }
 
@@ -201,6 +205,7 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
  */
 export function disposeTileGeometry(mesh) {
   if (!mesh) return;
+  for(const child of mesh.children)if(child.userData.reservoirFoundationWall)child.geometry.dispose();
   mesh.geometry.dispose();
 }
 

@@ -1728,6 +1728,7 @@ function s21TryStartGeologyWork() {
           deepWater=water;scene.add(water.group);water.setSolo(s21SoloValue);
           water.buildingAnchors=anchorReservoirBuildings(water,surfaceGeometryGroup,bakedMeshes,
             mesh=>modeSystem.collision.invalidateBuilding(mesh));
+          applyShadowPolicy(surfaceGeometryGroup); // foundation variants need the matching depth twin immediately
           water.hideLegacy(reservoirsMesh,airportDockGroup);
         },
         onFail:error=>console.warn('Deep water unavailable:',error.message),

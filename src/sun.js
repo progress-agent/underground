@@ -48,6 +48,7 @@ import { wrapHour, nightAmount, mountClock } from './night-clock.js';
 import { applyNightToSunState } from './night.js';
 import { applyRise } from './opening-rise.js'; // s21:V2
 import * as THREE from 'three';
+import { reservoirBaseMaterial } from './reservoir-buildings.js';
 import { getBuildingMaterial, isBuildingMaterial, getBuildingHeightScale } from './surface-geometry.js';
 import { setAirSun, resolveSunDirection, LEGACY_SUN_POSITION } from './environment.js';
 
@@ -400,7 +401,7 @@ export function applyShadowPolicy(root) {
       o.castShadow = cast; o.receiveShadow = receive; changed++;
     }
     const wantsDepth = cast && isBuildingMaterial(o.material);
-    if (wantsDepth && o.customDepthMaterial !== buildingDepthMaterial) o.customDepthMaterial = buildingDepthMaterial;
+    if (wantsDepth) o.customDepthMaterial = o.geometry.attributes.reservoirBase ? reservoirBaseMaterial(buildingDepthMaterial) : buildingDepthMaterial;
   };
   const name = root.name || '';
   if (name === 'surfaceGeometry') {

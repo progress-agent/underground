@@ -2,6 +2,7 @@
 // The real factories own every shader hook and cache key, including night.
 import * as THREE from 'three';
 import {getDayBuildingMaterial, nightBuildingMat} from './surface-geometry.js';
+import {reservoirBaseMaterial} from './reservoir-buildings.js';
 import {buildingDepthMaterial} from './sun.js';
 import {createStationBuildingMeshes} from './station-buildings.js';
 import {createParkLabelMaterial} from './park-labels.js';
@@ -69,7 +70,9 @@ export function createOpeningPrograms({renderer, composer, scene, camera, underg
     // silhouettes are opaque, double-sided Basic materials without a map.
     const traffic=new THREE.MeshStandardMaterial({vertexColors:true});retained.push(traffic);add(traffic,true);
     const distantTraffic=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});retained.push(distantTraffic);add(distantTraffic,true);
-    for (const m of [getDayBuildingMaterial(),nightBuildingMat]) variants(m,true);
+    // Banks attach after landing, but their later day/night swaps must use
+    // programs prepared under the same cover as the ordinary city variants.
+    for (const m of [getDayBuildingMaterial(),nightBuildingMat,reservoirBaseMaterial(getDayBuildingMaterial()),reservoirBaseMaterial(nightBuildingMat)]) variants(m,true);
     variants(tubeMaterial);
     const ribbon=createRibbonMaterial(0xffffff);retained.push(ribbon);variants(ribbon);
     for(const m of Object.values(createSeaLifeMaterials())) {retained.push(m);variants(m);variants(m,true);}
@@ -85,6 +88,7 @@ export function createOpeningPrograms({renderer, composer, scene, camera, underg
     const edge = createBeyondEdgeMaterial();retained.push(edge);variants(edge);
     const depthMaterial = new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});retained.push(depthMaterial);
     for (const m of [depthMaterial,buildingDepthMaterial]) {depth(m);depth(m,true);}
+    depth(reservoirBaseMaterial(buildingDepthMaterial),true);
     if(stars?.points) proxies.add(stars.points.clone());
     seeded = true;
   }

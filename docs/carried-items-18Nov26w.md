@@ -50,3 +50,27 @@ function for later arrivals. This also covers live tiles loaded after a flight.
 Tile bounds and any existing collision index are refreshed after an adjustment,
 including retained baked meshes from an early switch between building paths.
 The culling sphere retains the decoder's original box-derived policy.
+
+## Bank-neighbour foundations, fix round 2
+
+A centre anchor alone leaves the corners of a box above or below a slope. Affected
+city tiles now carry four foundation offsets per instance. The bottom wall vertices
+meet the highest actual dry bank or terrain support at their respective footprint
+corners; the roof stays horizontal. The offsets follow landscape Master, while the
+roof retains the existing true-height law. Colour and sun-depth variants use the
+same offsets, including after day/night material switches. Unaffected tiles retain
+their original geometry and programs. The decoder handles later live/baked arrivals,
+and retained city tiles receive the correction when banks attach.
+
+Dry support includes neighbouring banks and excludes submerged basin beds. The
+independent check-2 corner method is retained as a before measurement; a supplementary
+measurement applies the actual foundation vertex offsets and includes all neighbouring
+bank meshes, rather than treating a matrix's centre datum as every wall foot.
+
+Fitting only four corners still leaves a straight wall above a concave slope.
+Small foundation faces continue those walls to dry bank/terrain support, sampled
+at most every 250mm along the wall, with a 4mm physical overlap into the ground
+(rendering choices, not surveyed dimensions). They share one non-emissive city-colour
+material, carry no windows, and follow the landscape so they remain in contact at
+every Master. They are children of their city tile and are disposed with it. Roof
+datums, building heights and footprints are retained.
