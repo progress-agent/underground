@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {installNodeEnv,ROOT} from '../bake-node-env.mjs';
 import {buildNetwork,CLASSES,WIDTHS} from './network.mjs';
 import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
+import {surfaceIndex,overlap,conformRoadTriangle,supportFace,raiseRoadDeck} from './support.mjs';
 import {BNG_REF_E,BNG_REF_N} from '../../src/coordinates.js';
 import * as THREE from 'three';
 installNodeEnv();
@@ -20,17 +21,21 @@ const terrain=await import('../../src/terrain.js');
 const {createBridges}=await import('../../src/bridges.js');
 const thamesData=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/thames.json')));
 initThamesMask(thamesData.points);const m25=await loadM25Data();initM25Boundary(m25.supportPoints??m25.points);
-await terrain.tryCreateTerrainMesh({thamesData});
+const terrainResult=await terrain.tryCreateTerrainMesh({thamesData});
 // C lowers the coarse ground beneath four fine bank meshes. Compile roads
 // against those same dry support triangles, after they exist, before clearance.
 const {createDeepWaterSteps}=await import('../../src/deep-water.js');
 const {inReservoirFootRegion}=await import('../../src/reservoir-feet.js');
-const {anchorReservoirBuildings,reservoirRoadBase}=await import('../../src/reservoir-buildings.js');
+const {anchorReservoirBuildings,reservoirRoadBase,reservoirBuildingBase}=await import('../../src/reservoir-buildings.js');
 const inventory=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/deep-water.json')));
 const steps=createDeepWaterSteps({...inventory,bodies:inventory.bodies.map(b=>({...b,seaLife:false}))},
   terrain.getTerrainMeshSurfaceY,getMapEdgeRing());
 let bankStep;do{bankStep=steps.next();}while(!bankStep.done);
 anchorReservoirBuildings(bankStep.value,null);
+const targets=bankStep.value.bodies.filter(b=>/William Girling|Staines|Bessborough/.test(b.spec.name));
+const supportRegions=targets.map(b=>{const x=b.outer.map(p=>p[0]),z=b.outer.map(p=>p[1]);return[Math.min(...x)-110,Math.min(...z)-110,Math.max(...x)+110,Math.max(...z)+110];});
+const terrainFaces=surfaceIndex([terrainResult.mesh],supportRegions);
+const bankFaces=surfaceIndex(bankStep.value.bodies.filter(b=>b.bankMesh).map(b=>b.bankMesh),supportRegions);
 const g=(x,z)=>reservoirRoadBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
 const network=buildNetwork(ROOT,getMapEdgeRing());
 const overpasses=roadOverpassConstraints(network.roads,g);
@@ -102,26 +107,75 @@ const LIFT=.30; // 6cm real in canonical VE5, plus polygon offset at render. Lan
 function group(key,x,z,size,tier){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,parts:[],pos:[],road:[],rise:[],idx:[],farIdx:[]});return groups.get(key);}
 function flush(c){
   if(!c.idx.length)return;
-  // Weld identical vertices and remove quantisation-degenerate triangles. Side and pavement
-  // metadata are part of the key, so this cannot erase K's carriageway edges or morph seams.
-  const pos=[],road=[],rise=[],idx=[],keys=new Map(),remap=new Map();
-  const vertex=j=>{
-    if(remap.has(j))return remap.get(j);
-    const p=c.pos.slice(j*3,j*3+3),r=c.road.slice(j*3,j*3+3),h=c.rise[j],key=[...p,...r,h].join(',');
-    let at=keys.get(key);if(at===undefined){at=pos.length/3;keys.set(key,at);pos.push(...p);road.push(...r);rise.push(h);}
-    remap.set(j,at);return at;
+  // Exact local overlay, including triangle interiors, at the four repaired feet.
+  // All other faces retain their original quantised vertices and aerial indices.
+  let pos=[],road=[],rise=[],across=[],idx=[],farIdx=[],keys=new Map();
+  const finish=(vertices=pos,metadata=road,morph=rise,ac=across,near=idx,far=farIdx)=>{
+    if(vertices.length/3>65000){
+      const ranges=[0,2].map(axis=>{let lo=Infinity,hi=-Infinity;for(let i=axis;i<vertices.length;i+=3){lo=Math.min(lo,vertices[i]);hi=Math.max(hi,vertices[i]);}return{axis,lo,hi};}).sort((a,b)=>(b.hi-b.lo)-(a.hi-a.lo));
+      const {axis,lo,hi}=ranges[0],mid=(lo+hi)/2;
+      for(const side of [0,1]){const pp=[],rr=[],hh=[],aa=[],nn=[],ff=[],map=new Map();
+        for(const [source,target]of [[near,nn],[far,ff]])for(let i=0;i<source.length;i+=3){const ids=source.slice(i,i+3);if(Number(ids.reduce((s,j)=>s+vertices[j*3+axis],0)/3>=mid)!==side)continue;
+          for(const j of ids){if(!map.has(j)){map.set(j,pp.length/3);pp.push(...vertices.slice(j*3,j*3+3));rr.push(...metadata.slice(j*3,j*3+3));hh.push(morph[j]);aa.push(ac[j]);}target.push(map.get(j));}
+        }
+        if(nn.length||ff.length)finish(pp,rr,hh,aa,nn,ff);
+      }
+      return;
+    }
+    const positions=(vertices.some(v=>!Number.isInteger(v))?Float32Array:Uint16Array).from(vertices);
+    const upward=indices=>{const out=[];for(let i=0;i<indices.length;i+=3){let [a,b,d]=indices.slice(i,i+3);const det=(positions[b*3]-positions[a*3])*(positions[d*3+2]-positions[a*3+2])-(positions[b*3+2]-positions[a*3+2])*(positions[d*3]-positions[a*3]);// Overlay intersections can collapse into sub-millimetre slivers in
+      // Float32 storage. Remove faces below 10 cm² rather than retaining
+      // numerically unstable scraps along a bank's discontinuous boundary.
+      const longest=Math.max(...[[a,b],[b,d],[d,a]].map(([a,b])=>Math.hypot(positions[a*3]-positions[b*3],positions[a*3+2]-positions[b*3+2])));
+      if(Math.abs(det)/128<.001||Math.abs(det)/longest/8<.005)continue;if(det>0)[b,d]=[d,b];out.push(a,b,d);}return out;};
+    near=upward(near);far=upward(far);if(far.length>near.length)throw Error('Aerial support split exceeds full faces: '+c.key);
+    if(near.length||far.length)c.parts.push({pos:positions,road:Uint8Array.from(metadata),
+      rise:morph.some(v=>v!==0)?Int16Array.from(morph):null,
+      across:ac.some((v,i)=>v!==(metadata[i*3+1]>=128?32767:-32767))?Int16Array.from(ac):null,
+      idx:Uint16Array.from(near),farIdx:Uint16Array.from(far)});
   };
-  for(let i=0;i<c.idx.length;i+=3){
-    const ids=c.idx.slice(i,i+3),[a,b,d]=ids;
-    const area=(c.pos[b*3]-c.pos[a*3])*(c.pos[d*3+2]-c.pos[a*3+2])-(c.pos[b*3+2]-c.pos[a*3+2])*(c.pos[d*3]-c.pos[a*3]);
-    if(!area)continue;
-    for(const j of ids)idx.push(vertex(j));
+  const emit=(points,far)=>{
+    const [a,b,d]=points.map(p=>p.pos);
+    if((b[0]-a[0])*(d[2]-a[2])-(b[2]-a[2])*(d[0]-a[0])===0)return;
+    for(const p of points){const key=[...p.pos,...p.road,p.rise,p.across].join(',');let at=keys.get(key);
+      if(at===undefined){at=pos.length/3;keys.set(key,at);pos.push(...p.pos);road.push(...p.road);rise.push(p.rise);across.push(p.across);}
+      (far?farIdx:idx).push(at);
+    }
+  };
+  const vertex=j=>({pos:c.pos.slice(j*3,j*3+3),road:c.road.slice(j*3,j*3+3),rise:c.rise[j],across:c.road[j*3+1]>=128?32767:-32767});
+  for(const [indices,far]of [[c.idx,false],[c.farIdx,true]])for(let i=0;i<indices.length;i+=3){
+    const points=indices.slice(i,i+3).map(vertex);
+    const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.across/32767,p.pos[1]*.05-500-LIFT,p.rise*.05]);
+    const box=[Math.min(...tri.map(p=>p[0])),Math.min(...tri.map(p=>p[1])),Math.max(...tri.map(p=>p[0])),Math.max(...tri.map(p=>p[1]))];
+    if(!supportRegions.some(r=>overlap(r,box))){emit(points,far);continue;}
+    // A bridge keeps its inferred deck chord where it is already above the
+    // bank. Where that chord is buried, the bank becomes its new support.
+    const bridge=points.some(p=>p.rise),deck=bridge?supportFace(tri.map(v=>[v[0],v[1],v[3]])):null;
+    let refined=conformRoadTriangle(tri,terrainFaces(box),bankFaces(box));
+    if(deck)refined=raiseRoadDeck(refined,deck);
+    for(const t of refined){
+      const centre=[t.reduce((s,p)=>s+p[0]/3,0),t.reduce((s,p)=>s+p[1]/3,0)];
+      emit(t.map(v=>{
+        let x=v[0],z=v[1],qx,qz,support;
+        const expected=v[3]-(deck?v[4]:0);
+        // At a discontinuous shore boundary, a Float32 point can select the
+        // neighbouring face. Move only such boundary vertices a few mm into
+        // their own clipped face, then sample the final stored coordinate.
+        for(const inset of [0,.002,.005,.01]){
+          if(inset){const dx=centre[0]-v[0],dz=centre[1]-v[1],d=Math.hypot(dx,dz);x=v[0]+dx/d*Math.min(inset,d/4);z=v[1]+dz/d*Math.min(inset,d/4);}
+          qx=Math.fround((x-c.x)*8);qz=Math.fround((z-c.z)*8);x=c.x+qx/8;z=c.z+qz/8;support=g(x,z);
+          if(Math.abs(support-expected)<.25)break;
+        }
+        // Navigation includes the wet-bed lip at some boundary vertices.
+        // Retain that small lip without spanning a whole underwater basin.
+        const lip=reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??support);
+        if(lip>support&&lip-support<.25)support=lip;
+        const y=deck?Math.max(support,deck.height(x,z)):support;
+        return {pos:[qx,(y+LIFT+500)*20,qz],road:points[0].road,rise:deck?Math.round((y-support)/.05):0,across:Math.round(Math.max(-1,Math.min(1,v[2]))*32767)};
+      }),far);
+    }
   }
-  // A near triangle can quantise to zero area while an aerial triangle still
-  // needs its endpoint. Weld those references too, rather than coercing an
-  // absent map entry to index zero (which creates a spurious long triangle).
-  const farIdx=Uint16Array.from(c.farIdx.map(vertex));
-  if(idx.length)c.parts.push({pos:Uint16Array.from(pos),road:Uint8Array.from(road),rise:rise.some(v=>v!==0)?Int16Array.from(rise):null,idx:Uint16Array.from(idx),farIdx});
+  finish();
   c.pos=[];c.road=[];c.rise=[];c.idx=[];c.farIdx=[];
 }
 function append(c,pts,r,d){
@@ -216,7 +270,8 @@ function append(c,pts,r,d){
   stitch(ls,rs);
   if(c.tier==='desktop'){
     const simplify=rail=>{
-      if(r.bridge||d||rail.length<3)return rail;
+      const xs=pts.map(p=>p[0]),zs=pts.map(p=>p[1]),runBox=[Math.min(...xs),Math.min(...zs),Math.max(...xs),Math.max(...zs)];
+      if(r.bridge||d||rail.length<3||supportRegions.some(r=>overlap(r,runBox)))return rail;
       const tolerance=Math.min(2,r.width/4);
       const at=k=>{const j=rail[k].index;return[c.pos[j*3]/(8*tolerance),c.pos[j*3+2]/(8*tolerance),c.pos[j*3+1]/100];};
       // Aerial-only rendering tolerance: up to 2m (at most a quarter carriageway width)
@@ -279,8 +334,8 @@ for(const r of network.roads){
 }
 const records=[];let totalGPU=0,compressedBytes=0;
 for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){flush(c);for(let j=0;j<c.parts.length;j++){
-  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);
-  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer)]),body=zlib.gzipSync(raw,{level:9});
+  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);head.writeUInt32LE((p.across?1:0)|(p.pos instanceof Float32Array?2:0),28);
+  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer),...(p.across?[Buffer.from(p.across.buffer)]:[])]),body=zlib.gzipSync(raw,{level:9});
   const file=c.key+'-'+j+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
   const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
   let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=(p.pos[i]/100-100)*5;lo=Math.min(lo,y);hi=Math.max(hi,y);}

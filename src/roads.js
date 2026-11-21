@@ -22,12 +22,16 @@ export function createRoadMaterial({ratio={value:1}}={}) {
   const material=new THREE.MeshLambertMaterial({color:0x55504b,
     side:THREE.FrontSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
   material.name='road-surface';
+  // Unrefined ribbons use their original left/right rail. Locally clipped bank
+  // faces carry the interpolated across-road coordinate for the same paving.
+  material.defaultAttributeValues={roadAcross:[2]};
   material.onBeforeCompile=shader=>{
     shader.uniforms.uRoadRatio=ratio;
     shader.uniforms.uNightAmt=nightUniforms.uNightAmt;
     shader.uniforms.uNightGlowGain=nightUniforms.uNightGlowGain;
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
 attribute vec3 roadData;
+attribute float roadAcross;
 #ifdef ROAD_BRIDGE
 attribute float roadRise;
 #endif
@@ -39,7 +43,8 @@ varying vec2 vRoadWorld;`)
 #ifdef ROAD_BRIDGE
 transformed.y += roadRise * (uRoadRatio - 1.0);
 #endif
-vRoad = vec4((step(128.0,roadData.y)*2.0-1.0) * roadData.x / 4.0, roadData.x / 4.0, mod(roadData.y,128.0)/10.0,roadData.z/10.0);
+float across = roadAcross <= 1.0 ? roadAcross : step(128.0,roadData.y)*2.0-1.0;
+vRoad = vec4(across * roadData.x / 4.0, roadData.x / 4.0, mod(roadData.y,128.0)/10.0,roadData.z/10.0);
 vRoadWorld = (modelMatrix * vec4(transformed, 1.0)).xz;`);
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
 varying vec4 vRoad;
@@ -65,7 +70,7 @@ if (uNightAmt > .001) {
 }`);
     material.userData.shader=shader;
   };
-  material.customProgramCacheKey=()=> 'road-surface-v4';
+  material.customProgramCacheKey=()=> 'road-surface-v4-support';
   return material;
 }
 
@@ -73,13 +78,15 @@ export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
   const v=new DataView(buffer);
   if(v.byteLength<32||v.getUint32(0,true)!==0x34524755)throw Error('Invalid UGR4 road block');
   const n=v.getUint32(4,true),ni=v.getUint32(8,true),bridge=!!v.getUint32(20,true),farCount=v.getUint32(24,true);
-  const expected=32+n*(bridge?11:9)+(n%2)+(ni+farCount)*2;
+  const flags=v.getUint32(28,true),support=!!(flags&1),floatPosition=!!(flags&2);
+  const expected=32+n*((floatPosition?15:9)+(bridge?2:0))+(n%2)+(ni+farCount)*2+(support?n*2:0);
   if(!n||n>65000||ni%3||farCount%3||expected!==v.byteLength)throw Error('Invalid UGR4 road buffer lengths');
   const g=new THREE.BufferGeometry();let offset=32;
-  g.setAttribute('position',new THREE.BufferAttribute(new Uint16Array(buffer,offset,n*3),3));offset+=n*6;
+  g.setAttribute('position',new THREE.BufferAttribute(new (floatPosition?Float32Array:Uint16Array)(buffer,offset,n*3),3));offset+=n*(floatPosition?12:6);
   g.setAttribute('roadData',new THREE.BufferAttribute(new Uint8Array(buffer,offset,n*3),3));offset+=n*3+(n%2);
   if(bridge){g.setAttribute('roadRise',new THREE.BufferAttribute(new Int16Array(buffer,offset,n),1));offset+=n*2;}
   g.setIndex(new THREE.BufferAttribute(new Uint16Array(buffer,offset,ni),1));
+  if(support)g.setAttribute('roadAcross',new THREE.BufferAttribute(new Int16Array(buffer,offset+(ni+farCount)*2,n),1,true));
 
   if(record?.bounds) {
     const [x,z,lo,x1,z1,hi]=record.bounds, ox=v.getInt32(12,true),oz=v.getInt32(16,true);

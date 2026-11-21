@@ -57,7 +57,13 @@ hump at canal or railway crossings, or alter curated Thames decks. The bridge ri
 is its estimated deck surface; smaller-crossing piers and parapets remain unauthored.
 
 Runtime blocks use 16-bit positions: X/Z at 125mm, vertical at 10mm real in canonical VE5,
-and 16-bit indices. Each block has at most 65,000 vertices. The reserved header word at byte 24 stores an optional aerial-index count; old blocks with zero remain supported. Three bytes per vertex carry
+and 16-bit indices. Blocks containing the exact bank overlay instead use Float32 positions
+in the same encoded coordinate frame; quantising a clipped boundary to 125mm could cross
+a bank edge with a height discontinuity. Each block has at most 65,000 vertices. The header
+word at byte 24 stores an optional aerial-index count. Byte 28 is a flags word: bit 0 adds
+a normalised Int16 across-road coordinate after both indices; bit 1 selects Float32 positions.
+Zero flags retain the original layout. The optional coordinate preserves paving phase at
+interior clipping vertices. Three bytes per vertex carry
 ribbon half-width at 250mm, left pavement width at 100mm with the across-road side in its
 high bit, and right pavement width at 100mm. A bridge
 adds a signed 16-bit vertical morph delta. Upward winding is checked for every triangle.
@@ -66,6 +72,19 @@ a 60mm real canonical lift plus polygon offset (-4 factor and units) prevents gr
 These are landscape surfaces: the terrain/lift follow Master. Only the bridge's structural
 clearance counter-scales with Master. Roads use a diffuse Lambert material with the existing scene lights and shadows. No
 additional lights or emissive materials are used.
+
+Within 110m bounding regions around the four repaired bank feet, the compiler intersects
+road faces with the actual terrain and all neighbouring dry-bank triangles. The upper
+surface, including crossings between overlapping bank planes, replaces edge-only chords.
+An inferred bridge retains its existing chord where it clears the support and meets the
+bank where it was buried; its remaining physical clearance keeps the Master counter-scale.
+Float32 overlay scraps below 10cm² or thinner than 5mm are removed as a numerical mesh
+cleanup, not as surveyed dimensions. Boundary vertices that round onto the adjoining face
+move 2 to 10mm towards their own face interior before their final support is sampled.
+Each bridge face retains its own underlying support plane when calculating physical rise;
+it does not borrow the higher bank at a shared boundary vertex.
+Small affected road runs keep their full aerial index;
+the rest retain the existing simplification bounds.
 
 Desktop loads combined 8km blocks for every class (subdivided at the vertex cap).
 Above 120m displayed height it uses an additional, offline-simplified triangle index
