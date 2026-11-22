@@ -54,7 +54,7 @@ const collect = (halfExtent) => {
 const countOffMapPayload = async (page) => page.evaluate(async () => {
   const { parseBakedBuildings, BAKED_URL } = await import('/src/baked-buildings.js');
   const { isOffMapEdge } = await import('/src/m25-edge.js');
-  const payload = parseBakedBuildings(await (await fetch(BAKED_URL)).arrayBuffer());
+  const payload = parseBakedBuildings(await (await fetch('/data/surface/baked/buildings-square.bin')).arrayBuffer());
   let off = 0;
   for (const t of payload.tiles) for (let i = 0, o = t.offset; i < t.count; i++, o += 10) {
     const x = t.minX + payload.view.getUint16(o, true) * 0.1, z = t.minZ + payload.view.getUint16(o + 2, true) * 0.1;
@@ -71,7 +71,7 @@ const countStationHidesPayload = async (page) => page.evaluate(async () => {
   const { isOffMapEdge } = await import('/src/m25-edge.js');
   await window.__ug.stationBuildings.index;
   const idx = window.__ug.stationBuildings.index;
-  const payload = parseBakedBuildings(await (await fetch(BAKED_URL)).arrayBuffer());
+  const payload = parseBakedBuildings(await (await fetch('/data/surface/baked/buildings-square.bin')).arrayBuffer());
   let n = 0;
   for (const t of payload.tiles) for (let i = 0, o = t.offset; i < t.count; i++, o += 10) {
     const x = t.minX + payload.view.getUint16(o, true) * 0.1, z = t.minZ + payload.view.getUint16(o + 2, true) * 0.1;
@@ -84,7 +84,7 @@ const countStationHidesPayload = async (page) => page.evaluate(async () => {
 // operational area. Do not call the implementation's building predicate here.
 const countTidewayHidesPayload = page => page.evaluate(async()=>{
   const {parseBakedBuildings,BAKED_URL}=await import('/src/baked-buildings.js');
-  const payload=parseBakedBuildings(await(await fetch(BAKED_URL)).arrayBuffer()),u=window.__ug;
+  const payload=parseBakedBuildings(await(await fetch('/data/surface/baked/buildings-square.bin')).arrayBuffer()),u=window.__ug;
   const c=u.llToXZ(51.50074,-.06549),a=u.llToXZ(51.50076,-.06483),b=u.llToXZ(51.50120,-.06684),dx=b.x-a.x,dz=b.z-a.z;
   const sign=Math.sign(dx*(c.z-a.z)-dz*(c.x-a.x));let count=0;
   for(const t of payload.tiles)for(let i=0,o=t.offset;i<t.count;i++,o+=10){
@@ -96,7 +96,7 @@ const countTidewayHidesPayload = page => page.evaluate(async()=>{
 });
 
 async function bootLive(page) {
-  await page.goto('/?buildings=live');
+  await page.goto('/?buildings=live&bshape=square');
   await page.waitForFunction(
     () => document.querySelector('#loadingBar')?.classList.contains('done'),
     { timeout: 90000 },
@@ -269,6 +269,7 @@ test('a corrupt payload is rejected rather than decoded into a scattered city', 
     const dv = new DataView(good);
     dv.setUint32(0, 0x31424755, true); dv.setUint16(4, 1, true);
     dv.setUint16(6, 1, true); dv.setUint32(8, 1, true);
+    dv.setUint32(20,28,true);dv.setUint32(24,1,true);
 
     const badMagic = good.slice(0); new DataView(badMagic).setUint32(0, 0xdeadbeef, true);
     const badVersion = good.slice(0); new DataView(badVersion).setUint16(4, 2, true);

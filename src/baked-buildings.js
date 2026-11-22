@@ -1,12 +1,13 @@
+import { decodeBuildingArea,decodeBuildingAspect } from './building-record.js';
 import { isBuildingMaterial, getBuildingMaterial } from './surface-geometry.js';
 import { getReservoirFootDelta } from './terrain.js';
 import { reservoirBuildingBase, fitReservoirBuildingFootprints } from './reservoir-buildings.js';
-// baked-buildings.js — loads the offline-compiled building payload (UGB1)
+// baked-buildings.js — loads the offline-compiled building payload (UGB2, with UGB1 comparison compatibility)
 //
 // The counterpart to scripts/bake-surface.mjs. That compiler resolves, offline,
 // every piece of work the live JSON path does on the main thread on each tile
 // arrival — terrain lookup, M25 clip, river exclusion, dedup, degenerate-data
-// guards, landmark suppression — and packs the result into 10-byte records.
+// guards, landmark suppression — and packs the result into 14-byte records.
 // This module decodes them straight into InstancedMesh matrices.
 //
 // WHY IT EXISTS. The live path's per-tile building step is measured at 7-106ms
@@ -47,9 +48,11 @@ import * as THREE from 'three';
 import { bootFetch } from './boot-fetch.js'; // s21:L
 
 const MAGIC = 0x31424755;   // 'UGB1' little-endian
-const REC_BYTES = 10;
+const REC_BYTES = 14;
 const DIR_BYTES = 16;
 const HEADER_BYTES = 12;
+const ROT_COS=Float64Array.from({length:128},(_,i)=>Math.cos(i*Math.PI/256));
+const ROT_SIN=Float64Array.from({length:128},(_,i)=>Math.sin(i*Math.PI/256));
 
 export const BAKED_URL = '/data/surface/baked/buildings.bin';
 // s21:L (profile A + I): the same bytes, gzip-framed at build time (vite.config.js) and served as an
@@ -71,7 +74,9 @@ export const BAKED_Z_URL = '/data/surface/baked/buildings.z.bin';
  * @returns {Promise<{buffer: ArrayBuffer, view: DataView, tiles: Array, buildings: number, version: number, bytes: number}>}
  */
 export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint = null } = {}) {
-  const metadataUrl = new URL('meta.json', new URL(url, globalThis.location?.href || 'http://localhost')).href;
+  const square = globalThis.location?.search && new URLSearchParams(globalThis.location.search).get('bshape') === 'square';
+  if(square && url === BAKED_URL) url = '/data/surface/baked/buildings-square.bin';
+  const metadataUrl = new URL(square ? 'meta-square.json' : 'meta.json', new URL(url, globalThis.location?.href || 'http://localhost')).href;
   // s21:L: the payload, its metadata and (a value or a promise) the airport fingerprint arrive in
   // any order; every check runs after all of them are here, with the same rules and messages.
   const [buffer, metadataResponse, fingerprint] = await Promise.all([
@@ -95,6 +100,7 @@ export async function fetchBakedBuildings(url = BAKED_URL, { airportFingerprint 
     const actual=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
     if(actual!==metadata.payloadSha256) throw new Error('baked payload checksum differs from metadata');
   }
+  payload.identityCentres = metadata.identityCentres || {};
   payload.airportSuppression = metadata.airportSuppression || null;
   payload.reservoirFeetVersion = metadata.terrain?.reservoirFeetVersion ?? 0;
   return payload;
@@ -132,14 +138,14 @@ export function parseBakedBuildings(buffer) {
   const view = new DataView(buffer);
 
   const magic = view.getUint32(0, true);
-  if (magic !== MAGIC) throw new Error(`baked payload: bad magic 0x${magic.toString(16)} (expected UGB1)`);
+  if (magic !== MAGIC && magic !== 0x32424755) throw new Error(`baked payload: bad magic 0x${magic.toString(16)} (expected UGB1/UGB2)`);
   const version = view.getUint16(4, true);
-  if (version !== 1) throw new Error(`baked payload: format version ${version}, this build reads 1`);
+  if ((version !== 1 && version !== 2) || magic !== (version===1?0x31424755:0x32424755)) throw new Error(`baked payload: format version ${version}, this build reads matching UGB1/1 or UGB2/2`);
 
   const tileCount = view.getUint16(6, true);
   const buildings = view.getUint32(8, true);
 
-  const expected = HEADER_BYTES + tileCount * DIR_BYTES + buildings * REC_BYTES;
+  const expected = HEADER_BYTES + tileCount * DIR_BYTES + buildings * (version === 1 ? 10 : REC_BYTES);
   if (buffer.byteLength !== expected) {
     throw new Error(`baked payload: ${buffer.byteLength} bytes, header implies ${expected} (${tileCount} tiles, ${buildings} buildings) — truncated or corrupt`);
   }
@@ -155,7 +161,10 @@ export function parseBakedBuildings(buffer) {
     };
   }
 
-  return { buffer, view, tiles, buildings, version, bytes: buffer.byteLength };
+  let end=HEADER_BYTES+tileCount*DIR_BYTES;
+  for(const t of tiles){if(t.offset!==end)throw new Error('baked payload: non-contiguous tile directory');end+=t.count*(version===1?10:REC_BYTES);}
+  if(end!==buffer.byteLength)throw new Error('baked payload: directory count mismatch');
+  return { buffer, view, tiles, buildings, version, bytes: buffer.byteLength, recordBytes: version === 1 ? 10 : REC_BYTES };
 }
 
 // ─── Build ──────────────────────────────────────────────────────────────────
@@ -201,20 +210,31 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
   let off = t.offset, placed = 0;
-  for (let i = 0; i < t.count; i++, off += REC_BYTES) {
-    const x = t.minX + view.getUint16(off, true) * 0.1;
-    const z = t.minZ + view.getUint16(off + 2, true) * 0.1;
-    const h = view.getUint16(off + 4, true) * 0.1 * VE;
-    const side = view.getUint16(off + 6, true) * 0.1;
-    const y = reservoirBuildingBase(x,z,view.getInt16(off + 8, true) * 0.1 * VE + (payload.reservoirFeetVersion ? 0 : getReservoirFootDelta(x,z)));
+  const anchorCentres = [];
+  for (let i = 0; i < t.count; i++, off += payload.recordBytes || 10) {
+    // Decode scalars directly: allocating a record object for each of 1.27M
+    // instances created garbage-collection pauses during the visible descent.
+    const x=t.minX+view.getUint16(off,true)*.1,z=t.minZ+view.getUint16(off+2,true)*.1;
+    const h=view.getUint16(off+4,true)*.1*VE,legacy=payload.version===1;
+    const area=legacy?0:decodeBuildingArea(view.getUint16(off+6,true));
+    const width=legacy?view.getUint16(off+6,true)*.1:Math.sqrt(area*decodeBuildingAspect(view.getUint16(off+10,true)));
+    const depth=legacy?width:area/width,angle=legacy?0:view.getUint16(off+12,true);
+    const c=(angle&511)?Math.cos(angle*Math.PI/131072):ROT_COS[angle>>>9];
+    const s=(angle&511)?Math.sin(angle*Math.PI/131072):ROT_SIN[angle>>>9];
+    const identity = payload.identityCentres?.[off];
+    const sourceX = identity ? identity[0] : x, sourceZ = identity ? identity[1] : z;
+    const y = reservoirBuildingBase(sourceX,sourceZ,view.getInt16(off+8,true)*.1*VE + (payload.reservoirFeetVersion ? 0 : getReservoirFootDelta(sourceX,sourceZ)));
 
     // Only needed for older, unsuppressed payloads. New compiled payloads
     // already contain the shared source-footprint exclusion.
-    if (suppressBuilding?.({x,z})) continue;
+    if (suppressBuilding?.({x:sourceX,z:sourceZ})) continue;
+    // Sparse source identities also survive payload release for the late bank
+    // anchor. Its centre datum must remain the one used by the live square.
+    if (identity) anchorCentres.push(placed, Math.fround(sourceX), Math.fround(sourceZ));
     const o = placed++ * 16;
-    m[o] = side;
+    m[o] = width*c; m[o+2] = width*s;
     m[o + 5] = h;
-    m[o + 10] = side;
+    m[o+8] = -depth*s; m[o + 10] = depth*c;
     m[o + 12] = x;
     m[o + 13] = y;
     m[o + 14] = z;
@@ -223,7 +243,7 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
     // Track extents as we go. The alternative is InstancedMesh's own lazy
     // computeBoundingSphere(), which walks all 1.2M matrices again on the first
     // frame they are frustum-tested — a hitch outside any budget we set here.
-    const hx = side * 0.5;
+    const hx = Math.sqrt(width*width+depth*depth)*.5;
     if (x - hx < minX) minX = x - hx;
     if (x + hx > maxX) maxX = x + hx;
     if (z - hx < minZ) minZ = z - hx;
@@ -233,6 +253,7 @@ export function buildBakedTile(payload, tileIndex, VE, material, suppressBuildin
   }
 
   mesh.count = placed;
+  if (anchorCentres.length) mesh.userData.reservoirAnchorCentres = new Float32Array(anchorCentres);
   if (!placed) { mesh.dispose(); return null; }
   mesh.instanceMatrix.needsUpdate = true;
 
@@ -269,10 +290,13 @@ export function tileExtents(payload) {
   const { view, tiles } = payload;
   return tiles.map((t) => {
     let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity, off = t.offset;
-    for (let i = 0; i < t.count; i++, off += REC_BYTES) {
+    for (let i = 0; i < t.count; i++, off += payload.recordBytes || 10) {
       const x = t.minX + view.getUint16(off, true) * 0.1;
       const z = t.minZ + view.getUint16(off + 2, true) * 0.1;
-      const hx = view.getUint16(off + 6, true) * 0.05;
+      const legacy=payload.version===1,area=legacy?0:decodeBuildingArea(view.getUint16(off+6,true));
+      const ratio=legacy?1:decodeBuildingAspect(view.getUint16(off+10,true));
+      const side=legacy?view.getUint16(off+6,true)*.1:0;
+      const hx=legacy?side*Math.SQRT1_2:Math.sqrt(area*(ratio+1/ratio))*.5;
       if (x - hx < minX) minX = x - hx;
       if (x + hx > maxX) maxX = x + hx;
       if (z - hx < minZ) minZ = z - hx;
@@ -320,7 +344,7 @@ export function resolveTileOrder(payload, { order = null, origin = null } = {}, 
  * @param {{x:number,z:number}} [opts.origin]  s21:L: build nearest-first from this point (used when no `order`)
  * @returns {{pump: Function, isDone: Function, stats: Function, completeRadius: Function}}
  */
-export function createBakedBuildingBuilder(payload, { VE, material, onMesh, suppressBuilding = null, order = null, origin = null }) {
+export function createBakedBuildingBuilder(payload, { VE, material, onMesh, suppressBuilding = null, order = null, origin = null, releasePayload = false }) {
   let next = 0;
   let placed = 0;
   let meshes = 0;
@@ -352,6 +376,7 @@ export function createBakedBuildingBuilder(payload, { VE, material, onMesh, supp
         built[index] = 1;
         next++;
       }
+      if (next >= payload.tiles.length && releasePayload) { payload.buffer = null; payload.view = null; payload.identityCentres = null; }
       elapsedMs += performance.now() - t0;
       return next >= payload.tiles.length;
     },

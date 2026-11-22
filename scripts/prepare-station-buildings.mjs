@@ -17,6 +17,7 @@
 // --refetch. The baked store (public/data/surface/baked/buildings.bin) is only
 // read, never written.
 
+import { readBuildingRecord } from '../src/building-record.js';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -149,7 +150,10 @@ export async function loadBakedBoxes(points, reach = 700, root = ROOT) {
   const file = path.join(root, 'public/data/surface/baked/buildings.bin');
   const buf = await readFile(file);
   const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  if (v.getUint32(0, true) !== 0x31424755) throw new Error('buildings.bin is not UGB1');
+  const version=v.getUint16(4,true),recordBytes=version===2?14:10;
+  if (![0x31424755,0x32424755].includes(v.getUint32(0,true))) throw new Error('buildings.bin is not UGB1/UGB2');
+  const metadata=JSON.parse(await readFile(path.join(root,'public/data/surface/baked/meta.json'),'utf8'));
+  const square=version===2?await readFile(path.join(root,'public/data/surface/baked/buildings-square.bin')):null;
   const tiles = v.getUint16(6, true);
   const cell = 256, wanted = new Set();
   const nc = Math.ceil(reach / cell);
@@ -159,10 +163,11 @@ export async function loadBakedBoxes(points, reach = 700, root = ROOT) {
   const boxes = [];
   for (let t = 0; t < tiles; t++) {
     const d = 12 + t * 16, minX = v.getInt32(d, true), minZ = v.getInt32(d + 4, true), off = v.getUint32(d + 8, true), cnt = v.getUint32(d + 12, true);
-    for (let k = 0, o = off; k < cnt; k++, o += 10) {
+    for (let k = 0, o = off; k < cnt; k++, o += recordBytes) {
       const x = minX + v.getUint16(o, true) * 0.1, z = minZ + v.getUint16(o + 2, true) * 0.1;
       if (!wanted.has(`${Math.floor(x / cell)},${Math.floor(z / cell)}`)) continue;
-      boxes.push({ x, z, h: v.getUint16(o + 4, true) * 0.1, side: v.getUint16(o + 6, true) * 0.1, baseM: v.getInt16(o + 8, true) * 0.1, hidden: false });
+      const r=readBuildingRecord(v,o,{minX,minZ},version),source=metadata.identityCentres?.[o];
+      boxes.push({ ...r,side:Math.sqrt(r.width*r.depth),sourceX:square?square.readInt32LE(d)+square.readUInt16LE(square.readUInt32LE(d+8)+k*10)*.1:source?.[0]??x,sourceZ:square?square.readInt32LE(d+4)+square.readUInt16LE(square.readUInt32LE(d+8)+k*10+2)*.1:source?.[1]??z,hidden:false });
     }
   }
   let meta = {};
@@ -213,6 +218,8 @@ export function parseOverpass(answer) {
   return { blds, areas, ents };
 }
 
+const planRing = (b,grow=0)=>rectRing({cx:b.x,cz:b.z,w:b.width??b.side,d:b.depth??b.side,yaw:-(b.theta??0)},grow);
+const localPoint=(b,x,z)=>{const c=Math.cos(b.theta??0),s=Math.sin(b.theta??0);return [(x-b.x)*c+(z-b.z)*s,-(x-b.x)*s+(z-b.z)*c];};
 // ── The build ─────────────────────────────────────────────────────────────
 
 /**
@@ -222,7 +229,7 @@ export function parseOverpass(answer) {
  *   lifted clear of the street in front of it and a building is made tall enough to carry one on its high side.
  * @returns {{ json: object, review: object[], counts: object, hidden: number }}
  */
-export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null, groundOf = null, priorHeights = null }) {
+export function compileStationBuildings({ sites, overpass, boxes, bakedSha, overpassSha, dlrTrack, docks = [], inThames = () => false, riseOf = null, groundOf = null, priorHeights = null, suppressionBaseline = {}, pavilionBaseline = {}, appearanceBaseline = {} }) {
   const { blds, areas, ents } = parseOverpass(overpass);
   const R = RULES;
   const siteList = [...sites.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
@@ -234,9 +241,9 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   const inWater = (x, z) => inDock(x, z) || inThames(x, z);
 
   // Baked boxes: spatial grid, drawn squares.
-  const boxGrid = createFootprintGrid(boxes.map(b => ({ ring: boxRing(b.x, b.z, b.side), box: b })), 32);
+  const boxGrid = createFootprintGrid(boxes.map(b => ({ ring: planRing(b), box: b })), 32);
   const boxesInRing = (ring, b = bounds(ring)) => boxGrid.near(b.x0, b.z0, b.x1, b.z1).map(i => i.box)
-    .filter(q => q.x >= b.x0 && q.x <= b.x1 && q.z >= b.z0 && q.z <= b.z1 && pointInRing(q.x, q.z, ring));
+    .filter(q => (q.sourceX??q.x) >= b.x0 && (q.sourceX??q.x) <= b.x1 && (q.sourceZ??q.z) >= b.z0 && (q.sourceZ??q.z) <= b.z1 && pointInRing(q.sourceX??q.x, q.sourceZ??q.z, ring));
 
   // ── Sites to buildings (design section 1) ──
   const siteToks = new Map(siteList.map(s => [s.key, s.toks]));
@@ -371,18 +378,23 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     const ordered = ents.filter(e => Math.hypot(e.p[0] - s.p[0], e.p[1] - s.p[1]) <= R.nameRadiusM)
       .map(e => ({ e, d: Math.hypot(e.p[0] - s.p[0], e.p[1] - s.p[1]), named: contains(e.toks, s.toks) }))
       .sort((a, b) => (grp(a) - grp(b)) || (a.d - b.d) || (a.e.id < b.e.id ? -1 : 1));
-    const [nx, nz] = rule.face, ux = -nz, uz = nx;                 // face normal and the tangent along it
+    let [nx, nz] = rule.face, ux = -nz, uz = nx;                 // face normal and the tangent along it
     let host = null, ax = 0, az = 0;
     for (const { e } of ordered) {
-      const hb = boxes.filter(q => Math.abs(q.x - e.p[0]) <= q.side / 2 && Math.abs(q.z - e.p[1]) <= q.side / 2)
+      const hb = boxes.filter(q => {const [u,v]=localPoint(q,...e.p);return Math.abs(u)<=(q.width??q.side)/2 && Math.abs(v)<=(q.depth??q.side)/2;})
         .sort((p, q) => (q.side - p.side) || (p.x - q.x) || (p.z - q.z))[0];
       if (!hb) continue;
-      const nearest = [[0, -1], [0, 1], [1, 0], [-1, 0]].map(f => ({ f, d: hb.side / 2 - ((e.p[0] - hb.x) * f[0] + (e.p[1] - hb.z) * f[1]) })).sort((p, q) => p.d - q.d)[0];
-      if (nearest.f[0] === nx && nearest.f[1] === nz) { host = hb; [ax, az] = e.p; break; }
+      const [eu,ev]=localPoint(hb,...e.p),c=Math.cos(hb.theta??0),sn=Math.sin(hb.theta??0);
+      const nearest = [[0,-1],[0,1],[1,0],[-1,0]].map(f=>({f,d:(f[0]?(hb.width??hb.side):(hb.depth??hb.side))/2-eu*f[0]-ev*f[1]})).sort((a,b)=>a.d-b.d)[0];
+      const wx=nearest.f[0]*c-nearest.f[1]*sn,wz=nearest.f[0]*sn+nearest.f[1]*c;
+      if(wx*nx+wz*nz>.5){host=hb;[ax,az]=e.p;nx=wx;nz=wz;ux=-nz;uz=nx;break;}
     }
     if (!host) throw new Error(`box-entrance site ${siteKey}: no entrance node lies in a baked box with ${rule.face} as its nearest face (the data changed: a person must look)`);
-    const mid = [host.x + nx * host.side / 2, host.z + nz * host.side / 2];
-    const alongMax = host.side / 2 - BE.endClearM - BE.w / 2;
+    const c=Math.cos(host.theta??0),sn=Math.sin(host.theta??0);
+    const normalHalf=(Math.abs(nx*c+nz*sn)>.5?(host.width??host.side):(host.depth??host.side))/2;
+    const tangentHalf=(Math.abs(ux*c+uz*sn)>.5?(host.width??host.side):(host.depth??host.side))/2;
+    const mid = [host.x+nx*normalHalf,host.z+nz*normalHalf];
+    const alongMax = tangentHalf - BE.endClearM - BE.w / 2;
     const along0 = Math.max(-alongMax, Math.min(alongMax, (ax - mid[0]) * ux + (az - mid[1]) * uz));
     const blockAt = (along) => {
       const c = [mid[0] + ux * along + nx * (BE.faceGapM + BE.d / 2), mid[1] + uz * along + nz * (BE.faceGapM + BE.d / 2)];
@@ -416,7 +428,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     const bc = centroid(blk.ring);
     if (Math.hypot(host.x - bc[0], host.z - bc[1]) < BE.hostFarM) throw new Error(`box-entrance site ${siteKey}: the host centre is within ${BE.hostFarM} m of the block (it would be hidden)`);
     const rec = { key: `be-${siteKey}`, kind: 'box-entrance', outline: blk.ring, sites: [s], flags: new Set(), areaOnly: false, ring: blk.ring, bounds: bounds(blk.ring),
-      host: { x: r2(host.x), z: r2(host.z), side: r2(host.side), h: r2(host.h), baseM: r2(host.baseM), face: [nx, nz] }, hostBox: host, boxEntrance: { mid, ux, uz, nx, nz, along, slid } };
+      host: { x: r2(host.x), z: r2(host.z), side: r2(host.side), width:host.width??host.side,depth:host.depth??host.side,theta:host.theta??0,tangentHalf, h: r2(host.h), baseM: r2(host.baseM), face: [nx, nz] }, hostBox: host, boxEntrance: { mid, ux, uz, nx, nz, along, slid } };
     if (slid) rec.flags.add('entrance-slid');
     buildingsById.set(rec.key, rec);
     boxEntranceRecs.push(rec);
@@ -487,12 +499,29 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       // walker can reach it), then the fewest overlapped boxes.
       if (!t.wet && !t.out && !t.hit && t.deckOk && (!fallback || t.untaken < fallback.t.untaken || (t.untaken === fallback.t.untaken && t.overlap < fallback.t.overlap))) fallback = { cand, t };
     }
+    // A box representation change must not discard a still-clear live place.
+    // If that place is blocked, try the same 10/20 m search around it before
+    // accepting a different mapped entrance, which can be over 100 m away.
+    const prior=appearanceBaseline[`p-${s.key}`]?.pavilion;
+    if(prior){
+      const current=chosen?.cand??fallback?.cand??candidates[0];
+      const same=r2(current.cx)===prior.cx&&r2(current.cz)===prior.cz&&current.w===prior.w&&current.d===prior.d&&r4(current.yaw)===prior.yaw;
+      if(!same)for(const cand of [prior,...around(prior.cx,prior.cz,[prior.yaw]).slice(1).map(c=>({...c,w:prior.w,d:prior.d}))]){
+        const t=placeOk(cand,others,{dlr:viaduct});
+        if(t.clear){chosen={cand,t};break;}
+      }
+    }
+    const pinned=pavilionBaseline[`p-${s.key}`];
+    if(pinned)chosen={cand:pinned,t:placeOk(pinned,others,{dlr:viaduct})};
     const flags = [];
+    if(pinned&&!chosen.t.clear)flags.push('overlap');
     if (!chosen) {
       chosen = fallback ?? { cand: candidates[0], t: placeOk(candidates[0], others, { dlr: viaduct }) };
       flags.push('overlap');
     }
-    const cand = chosen.cand;
+    // Changing the map representation must not change suppression identities.
+    // Source-centre suppression stays on the production footprint when drawn pavilions move.
+    const cand = pavilionBaseline[`p-${s.key}`] ?? chosen.cand;
     const rec = { key: `p-${s.key}`, kind, pavilion: { cx: r2(cand.cx), cz: r2(cand.cz), w: cand.w, d: cand.d, yaw: r4(cand.yaw) },
       outline: null, sites: [s], flags: new Set(flags), areaOnly, anchor: [candidates[0].cx, candidates[0].cz], height: pav.h, heightSource: 'pavilion' };
     if (substituted.has(s.key)) rec.flags.add(`substituted:${substituted.get(s.key)}`);
@@ -510,19 +539,20 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   // ── Hide the boxes whose centre is inside a footprint ──
   let hiddenCount = 0;
   for (const rec of buildingsById.values()) {
-    rec.hides = boxesInRing(rec.ring ?? rec.outline);
+    rec.suppressionOutline=suppressionBaseline[rec.key];
+    rec.hides = boxesInRing(rec.suppressionOutline ?? rec.ring ?? rec.outline);
     for (const b of rec.hides) if (!b.hidden) { b.hidden = true; hiddenCount++; }
   }
 
   // ── Fronts, roundels and the exit (design sections 3 and 6) ──
   const footGrid = createFootprintGrid(footprints, 32);
   const remainingBoxes = boxes.filter(b => !b.hidden);
-  const remGrid = createFootprintGrid(remainingBoxes.map(b => ({ ring: boxRing(b.x, b.z, b.side), box: b })), 32);
+  const remGrid = createFootprintGrid(remainingBoxes.map(b => ({ ring: planRing(b), box: b })), 32);
   const clearPoint = (x, z, grow = R.boxClearM) => {
     if (inWater(x, z)) return false;
     for (const q of remGrid.near(x - 1, z - 1, x + 1, z + 1)) {
-      const h = q.box.side / 2 + grow;
-      if (Math.abs(q.box.x - x) <= h && Math.abs(q.box.z - z) <= h) return false;
+      const [u,v]=localPoint(q.box,x,z);
+      if (Math.abs(u)<=(q.box.width??q.box.side)/2+grow && Math.abs(v)<=(q.box.depth??q.box.side)/2+grow) return false;
     }
     for (const f of footGrid.near(x - 1, z - 1, x + 1, z + 1)) if (pointInRing(x, z, f.ring)) return false;
     return true;
@@ -636,7 +666,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       if (need > h + 1e-9) { h = Math.min(R.heightMax, need); if (!src.endsWith('+rise')) src += '+rise'; }
       if (R.roundel.designMaster * rec.latticeRise + RK.riseStreetM > R.heightMax + 1e-9) rec.flags.add('street-near-roof');
     }
-    rec.height = r2(h);
+    rec.height = r2(Math.max(h,priorHeights?.[rec.key]??0));
     rec.heightSource = src;
   }
   // (Pavilions stay 16 x 12 x 7: a pavilion the street is near the roof of is flagged, not grown.)
@@ -729,7 +759,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
         g = groundIn(a0, D * widthPerD);
         D = Math.min(RK.wallMaxD, RK.wallFrac * (hs.h - RK.designMaster * g), hs.h - RK.clearM - 3 * g);
         const W = D * widthPerD;
-        if (D < RK.minRingD || Math.abs(a0) + W / 2 > hs.side / 2 - 1) continue;
+        if (D < RK.minRingD || Math.abs(a0) + W / 2 > (hs.tangentHalf??hs.side/2) - 1) continue;
         roundels.push({ on: 'wall', host: true, x: r2(be.mid[0] + be.ux * a0 + be.nx * RK.proud), z: r2(be.mid[1] + be.uz * a0 + be.nz * RK.proud),
           yM: r2(RK.designMaster * g + RK.clearM + D / 2), gM: r2(g), D: r2(D), nx: r4(be.nx), nz: r4(be.nz), ring: rings[0] });
       }
@@ -767,9 +797,10 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       const a = yaw + (deg * Math.PI) / 180, dx = -Math.sin(a), dz = -Math.cos(a);
       for (const q of near) {
         if (q.box.h < FAN.fanMinH) continue;
-        const h = q.box.side / 2, lo = [q.box.x - h, q.box.z - h], hi = [q.box.x + h, q.box.z + h];
+        const [rx,rz]=localPoint(q.box,x,z),c=Math.cos(q.box.theta??0),sn=Math.sin(q.box.theta??0),rdx=dx*c+dz*sn,rdz=-dx*sn+dz*c;
+        const lo=[-(q.box.width??q.box.side)/2,-(q.box.depth??q.box.side)/2],hi=[-lo[0],-lo[1]];
         let t0 = 0, t1 = L, ok = true;
-        for (const [o, d, l, u] of [[x, dx, lo[0], hi[0]], [z, dz, lo[1], hi[1]]]) {
+        for (const [o, d, l, u] of [[rx, rdx, lo[0], hi[0]], [rz, rdz, lo[1], hi[1]]]) {
           if (Math.abs(d) < 1e-9) { if (o < l || o > u) ok = false; }
           else { let ta = (l - o) / d, tb = (u - o) / d; if (ta > tb) [ta, tb] = [tb, ta]; t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); }
         }
@@ -929,13 +960,21 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     // (A baked box stands at the ground under its centre: on a slope it floats over the street on its low side. The runtime closes the gap with a skirt;
     // the walker's collision is the baked box alone, so it can pass under where the gap is more than his height.)
     let low = Infinity;
-    if (groundOf) for (let f = 0; f < 4; f++) for (let t = -h.side / 2; t <= h.side / 2 + 1e-9; t += 3) {
-      const x = f < 2 ? h.x + t : h.x + (f === 2 ? -1 : 1) * (h.side / 2 + 0.5), z = f < 2 ? h.z + (f === 0 ? -1 : 1) * (h.side / 2 + 0.5) : h.z + t;
-      const y = groundOf(x, z); if (Number.isFinite(y) && y < low) low = y;
+    const hostRing=planRing(h);
+    if(groundOf)for(let f=0;f<4;f++){
+      const a=hostRing[f],b=hostRing[(f+1)%4],L=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      for(let k=0;k<=Math.ceil(L/3);k++){const t=k/Math.ceil(L/3),y=groundOf(a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t);if(Number.isFinite(y))low=Math.min(low,y);}
     }
     const floatTxt = Number.isFinite(low) ? `; the street under its faces falls to ${r2(low)} m, ${r2(Math.max(0, h.baseM - low))} m under its base (a skirt closes the gap)` : '';
     note(rec.sites[0], 'box-entrance host', null, { building: rec.key, detail: `host box centre (${h.x}, ${h.z}), side ${h.side} m, ${h.h} m tall, base ${h.baseM} m; it stays an ordinary map box (not hidden)${floatTxt}` });
     note(rec.sites[0], 'box-entrance block', null, { building: rec.key, detail: `${R.boxEntrance.w} x ${R.boxEntrance.d} m against the host's ${h.face[1] < 0 ? 'north' : 'other'} face, ${rec.height} m tall, ${rec.roundels.filter(q => q.on === 'wall').length} wall roundels, exit (${rec.exit.x}, ${rec.exit.z})` });
+  }
+  // Preserve appearance wherever the station footprint is unchanged. Pavilions
+  // moved to clear a newly rotated map box must rebuild their own wall marks.
+  for(const rec of buildingsById.values()){
+    const old=appearanceBaseline[rec.key];
+    const same=old&&JSON.stringify(old.pavilion??old.outline)===JSON.stringify(rec.pavilion??rec.outline?.map(p=>[r2(p[0]),r2(p[1])]));
+    if(same&&!rec.host)for(const key of ['height','heightSource','riseM','label','roundels'])rec[key]=old[key];
   }
   const heightChanges = [];
   if (priorHeights) for (const rec of buildingsById.values()) {
@@ -948,6 +987,7 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
     const o = { key: rec.key, title: rec.title, names: rec.names, nets: rec.nets, kind: rec.kind, areaOnly: !!rec.areaOnly };
     if (rec.outline) o.outline = rec.outline.map(p => [r2(p[0]), r2(p[1])]); else o.pavilion = rec.pavilion;
     if (rec.host) o.host = rec.host;
+    if(rec.suppressionOutline)o.suppressionOutline=rec.suppressionOutline;
     o.height = rec.height; o.heightSource = rec.heightSource; o.riseM = rec.riseM;
     o.label = rec.label; o.exit = rec.exit; o.roundels = rec.roundels; o.flags = [...rec.flags].sort();
     if (rec.osm) o.source = { osm: rec.osm.id, name: rec.osm.name || undefined, areaM2: Math.round(rec.osm.area) };
@@ -1062,7 +1102,11 @@ async function main() {
   const { boxes, payloadSha256 } = await loadBakedBoxes([...sites.values()].map(s => s.p));
   const { riseOf, groundOf } = await terrainRise();
   const priorHeights = await readFile(PRIOR_HEIGHTS, 'utf8').then(JSON.parse).catch(() => null);
-  const res = compileStationBuildings({ sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf, groundOf, priorHeights });
+  const suppressionBaseline=JSON.parse(await readFile(path.join(ROOT,'scripts/buildings/station-suppression.json'),'utf8'));
+  const pavilionBaseline=JSON.parse(await readFile(path.join(ROOT,'scripts/buildings/station-pavilions.json'),'utf8'));
+  const squareStations=JSON.parse(await readFile(path.join(ROOT,'public/data/surface/baked/station-buildings-square.json'),'utf8'));
+  const appearanceBaseline=Object.fromEntries(squareStations.buildings.map(b=>[b.key,b]));
+  const res = compileStationBuildings({ appearanceBaseline, pavilionBaseline, suppressionBaseline, sites, overpass, boxes, bakedSha: payloadSha256, overpassSha, dlrTrack, docks, inThames: isInThames, riseOf, groundOf, priorHeights });
   await writeFile(out, JSON.stringify(res.json) + '\n');
   if (reviewPath) await writeFile(reviewPath, reviewMarkdown(res.review, res.counts, res.json));
   console.log('sites', res.counts.sites, JSON.stringify(res.counts));

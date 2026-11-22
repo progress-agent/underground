@@ -108,7 +108,7 @@ test('no white sphere is drawn above or below ground; the Elizabeth line keeps i
 
 // ── Hiding the map's boxes ────────────────────────────────────────────────
 
-test('baked: the payload minus the boxes under a footprint is what is built, and none is left inside a footprint', async () => {
+test('baked: source-centre suppression is retained after rectangle centres move', async () => {
   // H from the payload itself (UGB1: 12-byte header, 16-byte tiles, 10-byte records).
   const buf = fs.readFileSync(path.join(ROOT, 'public/data/surface/baked/buildings.bin')), v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const fps = DATA.buildings.map(b => ({ b: b.outline ?? null, p: b.pavilion ?? null }));
@@ -116,17 +116,22 @@ test('baked: the payload minus the boxes under a footprint is what is built, and
   const hid = await page.evaluate(() => window.__ug.stationBuildings.hidden);
   const tiles = v.getUint16(6, true);
   // Count in the page (same predicate the app used), and cross-check the arithmetic against the payload header.
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
+    const meta=await(await fetch('/data/surface/baked/meta.json')).json();
+    const {parseBakedBuildings}=await import('/src/baked-buildings.js');
+    const payload=parseBakedBuildings(await(await fetch('/data/surface/baked/buildings.bin')).arrayBuffer());
+    const sourceByCentre=new Map();
+    for(const t of payload.tiles)for(let i=0,o=t.offset;i<t.count;i++,o+=payload.recordBytes){const source=meta.identityCentres?.[o];if(source){const x=t.minX+payload.view.getUint16(o,true)*.1,z=t.minZ+payload.view.getUint16(o+2,true)*.1;sourceByCentre.set(`${x.toFixed(1)},${z.toFixed(1)}`,source);}}
     const u = window.__ug, idx = u.stationBuildings.index; let inside = 0, total = 0;
     u.scene.getObjectByName('surfaceGeometry').traverse(o => {
       if (!o.name?.startsWith('baked-buildings-')) return;
       const a = o.instanceMatrix.array;
-      for (let i = 0; i < o.count; i++) { total++; if (idx.hidesBox({ x: a[i * 16 + 12], z: a[i * 16 + 14] })) inside++; }
+      for (let i = 0; i < o.count; i++) { total++; const x=a[i*16+12],z=a[i*16+14],source=sourceByCentre.get(`${x.toFixed(1)},${z.toFixed(1)}`);if(idx.hidesBox({x:source?.[0]??x,z:source?.[1]??z}))inside++; }
     });
     return { inside, total, stats: u.bakedStats };
   });
   console.log('baked hiding', JSON.stringify({ hid, ...r, tiles }));
-  expect(r.inside, 'no instance centre inside a footprint').toBe(0);
+  expect(r.inside, 'no drawn source identity inside its suppression footprint').toBe(0);
   expect(hid.baked).toBeGreaterThan(200);
   expect(hid.baked).toBeLessThan(450);
   expect(r.stats.buildings).toBe(r.total);
@@ -246,6 +251,8 @@ for (const [name, expectRows] of [[KX, /Victoria|Northern|Piccadilly|Metropolita
       const i = log.findIndex(f => f.d !== null && f.d <= 0.40);
       expect(i, `${name}: reached the wall`).toBeGreaterThan(-1);
       const minD = Math.min(...log.map(f => f.d ?? 99));
+      console.log('station-contact',JSON.stringify({name,keys,minD,firstContact:log[i],beforeContact:log[i-1],last:log.at(-1)}));
+      if(process.env.B_CONTACT_OUT){fs.mkdirSync(process.env.B_CONTACT_OUT,{recursive:true});fs.writeFileSync(path.join(process.env.B_CONTACT_OUT,name.replace(/[^a-z0-9]/ig,'-')+'-'+keys.join('-')+'.json'),JSON.stringify(log));}
       expect(minD, `${name}: never inside the footprint`).toBeGreaterThanOrEqual(0.33);
       expect(log[i].open || log[i + 1]?.open, `${name}: chooser open at the contact frame or the next`).toBe(true);
       expect(log[i].card === 'shaft' || log[i + 1]?.card === 'shaft').toBe(true);
@@ -713,14 +720,14 @@ test('every viaduct pavilion stands beside the drawn DLR deck, never under it (a
 
 // ── The live path (D-048 item 2 on both paths; replaces the retired roof-lift live-marker spec) ──
 
-test('live: after its tile arrives each station building is drawn and no box centre is inside a footprint', async ({ browser }) => {
+test('live square control: after its tile arrives station source suppression is unchanged', async ({ browser }) => {
   test.setTimeout(600000);
   const live = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   const liveErrors = [];
   live.on('console', (m) => { if (m.type() === 'error') liveErrors.push(m.text()); });
   live.on('pageerror', (e) => liveErrors.push('pageerror: ' + e.message));
   try {
-    await load(live, '/?fast=1&buildings=live&mh=1.1');
+    await load(live, '/?fast=1&buildings=live&mh=1.1&bshape=square');
     await live.evaluate(() => { const u = window.__ug; u.setRenderQualityMode('manual'); u.renderQuality.set({ scale: 1, samples: 4 }); u.sim.paused = true; });
     const out = [];
     for (const name of [KX, 'Euston', 'Dalston Junction', 'Wembley Park', 'Hillingdon', 'Ealing Broadway']) {

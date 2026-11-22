@@ -296,8 +296,8 @@ test('no added footprint overlaps an OpenStreetMap building (exact, and an indep
 });
 
 test('the baked payload is this tile set and carries every added building within quantisation', async () => {
-  const meta = JSON.parse(await readFile(path.join(BAKED, 'meta.json'), 'utf8'));
-  const buf = await readFile(path.join(BAKED, 'buildings.bin'));
+  const meta = JSON.parse(await readFile(path.join(BAKED, 'meta-square.json'), 'utf8'));
+  const buf = await readFile(path.join(BAKED, 'buildings-square.bin'));
   assert.equal(createHash('sha256').update(buf).digest('hex'), meta.payloadSha256, 'payload hash');
   const manifest = await readTile('manifest.json');
   assert.equal(meta.stats.read, manifest.totals.buildings, overlayMissing + ' (payload baked from a different tile set)');

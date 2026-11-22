@@ -1,0 +1,208 @@
+{
+  "networkCommit": "82d491b28c4cbe1214925c15e0ab98439e38caef",
+  "networkSha256": "5a8a077cfd3c2d9ce3ecf099875a21cc4c8e620ced991b9c81eab23190aecacc",
+  "method": "Globally deduplicated bake population; full-footprint query; outward deviation only; uncapped arrays (no uint8 ring counts). Intrusion = positive-area intersection with the actual corrected carriageway quads eroded inward 1 m on every edge, or the finite drawn rail-bed rectangles eroded 1 m. Segment end caps are finite, not rounded capsules. Bridges/tunnels excluded. Service includes unclassified/other. Rail is the drawn non-tunnel Overground and tube-surface beds, 9 m half-width, as in the research. Road-aligned is fitted at nearest bearing, the long side put on that bearing, then area-preserving.",
+  "railKm": 404.7012936577339,
+  "segments": 876844,
+  "stats": {
+    "duplicates": 38558,
+    "largeFootprints": 1467,
+    "ringsOver255": 5,
+    "outlineVertices": 7865989,
+    "irregular": 44993,
+    "onRoadOrRail": 3982
+  },
+  "chosen": "oriented",
+  "city": {
+    "buildings": 1274389,
+    "counts": {
+      "square": {
+        "roads": 37915,
+        "service": 57269,
+        "rail": 2285,
+        "roadsOrRail": 39930,
+        "all": 92510,
+        "percent": {
+          "roads": 2.975151229334214,
+          "service": 4.4938397930302285,
+          "rail": 0.17930161041879678,
+          "roadsOrRail": 3.133266216202431,
+          "all": 7.259164980237588
+        }
+      },
+      "oriented": {
+        "roads": 7026,
+        "service": 19825,
+        "rail": 1830,
+        "roadsOrRail": 8795,
+        "all": 27870,
+        "percent": {
+          "roads": 0.5513230261717575,
+          "service": 1.5556474514453593,
+          "rail": 0.14359822628726393,
+          "roadsOrRail": 0.6901346449161128,
+          "all": 2.186930364276528
+        }
+      },
+      "roadAligned": {
+        "roads": 4957,
+        "service": 48017,
+        "rail": 1437,
+        "roadsOrRail": 6317,
+        "all": 53398,
+        "percent": {
+          "roads": 0.3889707145934248,
+          "service": 3.7678448260303568,
+          "rail": 0.11275991867475314,
+          "roadsOrRail": 0.49568852210745695,
+          "all": 4.190086386495803
+        }
+      },
+      "outline": {
+        "roads": 4363,
+        "service": 11765,
+        "rail": 1837,
+        "roadsOrRail": 6170,
+        "all": 17764,
+        "percent": {
+          "roads": 0.34236014278214894,
+          "service": 0.9231875039724918,
+          "rail": 0.14414750912005675,
+          "roadsOrRail": 0.4841535826188079,
+          "all": 1.3939228916759325
+        }
+      },
+      "drawnOriented": {
+        "roads": 7034,
+        "service": 19833,
+        "rail": 1831,
+        "roadsOrRail": 8804,
+        "all": 27883,
+        "percent": {
+          "roads": 0.5519507779806637,
+          "service": 1.5562752032542653,
+          "rail": 0.1436766952633772,
+          "roadsOrRail": 0.6908408657011321,
+          "all": 2.187950460966
+        }
+      },
+      "roadFrameFit": {
+        "roads": 4572,
+        "service": 24681,
+        "rail": 1514,
+        "roadsOrRail": 6023,
+        "all": 30126,
+        "percent": {
+          "roads": 0.3587601587898201,
+          "service": 1.936692799451345,
+          "rail": 0.1188020298354741,
+          "roadsOrRail": 0.47261864313015883,
+          "all": 2.36395637438804
+        }
+      }
+    },
+    "iou": {
+      "square": 0.6022691924546499,
+      "oriented": 0.8608228752653488,
+      "roadAligned": 0.5677061978059622,
+      "drawnOriented": 0.8603775220231773,
+      "roadFrameFit": 0.8313718751548097
+    }
+  },
+  "cityBox": {
+    "buildings": 2872,
+    "counts": {
+      "square": {
+        "roads": 369,
+        "service": 861,
+        "rail": 30,
+        "roadsOrRail": 393,
+        "all": 1087,
+        "percent": {
+          "roads": 12.848189415041784,
+          "service": 29.979108635097496,
+          "rail": 1.0445682451253482,
+          "roadsOrRail": 13.68384401114206,
+          "all": 37.84818941504178
+        }
+      },
+      "oriented": {
+        "roads": 144,
+        "service": 476,
+        "rail": 36,
+        "roadsOrRail": 180,
+        "all": 589,
+        "percent": {
+          "roads": 5.013927576601671,
+          "service": 16.573816155988858,
+          "rail": 1.2534818941504178,
+          "roadsOrRail": 6.267409470752089,
+          "all": 20.508356545961004
+        }
+      },
+      "roadAligned": {
+        "roads": 83,
+        "service": 739,
+        "rail": 23,
+        "roadsOrRail": 101,
+        "all": 796,
+        "percent": {
+          "roads": 2.8899721448467965,
+          "service": 25.731197771587745,
+          "rail": 0.8008356545961003,
+          "roadsOrRail": 3.5167130919220058,
+          "all": 27.715877437325904
+        }
+      },
+      "outline": {
+        "roads": 46,
+        "service": 332,
+        "rail": 33,
+        "roadsOrRail": 78,
+        "all": 393,
+        "percent": {
+          "roads": 1.6016713091922006,
+          "service": 11.559888579387186,
+          "rail": 1.149025069637883,
+          "roadsOrRail": 2.715877437325905,
+          "all": 13.68384401114206
+        }
+      },
+      "drawnOriented": {
+        "roads": 144,
+        "service": 475,
+        "rail": 36,
+        "roadsOrRail": 180,
+        "all": 588,
+        "percent": {
+          "roads": 5.013927576601671,
+          "service": 16.53899721448468,
+          "rail": 1.2534818941504178,
+          "roadsOrRail": 6.267409470752089,
+          "all": 20.473537604456823
+        }
+      },
+      "roadFrameFit": {
+        "roads": 77,
+        "service": 586,
+        "rail": 21,
+        "roadsOrRail": 96,
+        "all": 647,
+        "percent": {
+          "roads": 2.681058495821727,
+          "service": 20.403899721448468,
+          "rail": 0.7311977715877437,
+          "roadsOrRail": 3.3426183844011144,
+          "all": 22.527855153203344
+        }
+      }
+    },
+    "iou": {
+      "square": 0.5929620115153559,
+      "oriented": 0.7992261087226985,
+      "roadAligned": 0.6091086577522252,
+      "drawnOriented": 0.7989360397804558,
+      "roadFrameFit": 0.7625980595036238
+    }
+  }
+}

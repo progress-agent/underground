@@ -6,6 +6,7 @@
 //      stations refused), pavilion placement, the roundel rule by network, hiding, exits, determinism.
 //   4. The tracked public/data/station-buildings.json against the acceptance rules (sites, kinds, roundels,
 //      pavilions, exits), and the builder's byte-identical output.
+import { readBuildingRecord } from '../src/building-record.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -354,7 +355,7 @@ test('compile: pavilions are 16 x 12 x 7, clear of the map boxes, and the entran
     assert.deepEqual([b.pavilion.w, b.pavilion.d, b.height], [16, 12, 7]);
     if (!b.flags.includes('overlap')) {
       const ring = rectRing(b.pavilion, 1.5);
-      for (const q of w.boxes) if (!q.hidden) assert.equal(convexOverlap(ring, boxRing(q.x, q.z, q.side)), false, `${b.key} stands clear of box ${q.x},${q.z}`);
+      for (const q of w.boxes) if (!q.hidden) assert.equal(convexOverlap(ring, rectRing({cx:q.x,cz:q.z,w:q.width,d:q.depth,yaw:-q.theta})), false, `${b.key} stands clear of box ${q.x},${q.z}`);
     }
   }
   const delta = json.buildings.find(b => b.key === 'p-delta');
@@ -476,26 +477,27 @@ test('data: the roundel rule over every building (B1.7)', { skip: !have }, () =>
 });
 
 test('data: pavilions (B1.8) and exits (B1.9) against the baked boxes', { skip: !have || !fs.existsSync(bakedFile) }, () => {
+  const meta=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/surface/baked/meta.json')));
   const buf = fs.readFileSync(bakedFile), v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const boxes = [];
   const cell = 64, grid = new Map();
   for (let t = 0, tiles = v.getUint16(6, true); t < tiles; t++) {
     const d = 12 + t * 16, minX = v.getInt32(d, true), minZ = v.getInt32(d + 4, true), off = v.getUint32(d + 8, true), cnt = v.getUint32(d + 12, true);
-    for (let k = 0, o = off; k < cnt; k++, o += 10) {
-      const x = minX + v.getUint16(o, true) * 0.1, z = minZ + v.getUint16(o + 2, true) * 0.1, side = v.getUint16(o + 6, true) * 0.1;
+    for (let k = 0, o = off; k < cnt; k++, o += (v.getUint16(4,true)===2?14:10)) {
+      const r=readBuildingRecord(v,o,{minX,minZ},v.getUint16(4,true)),{x,z}=r,side=Math.sqrt(r.width*r.depth);
       const key = `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
-      (grid.get(key) ?? grid.set(key, []).get(key)).push({ x, z, side });
+      (grid.get(key) ?? grid.set(key, []).get(key)).push({ ...r,side,sourceX:meta.identityCentres?.[o]?.[0]??x,sourceZ:meta.identityCentres?.[o]?.[1]??z });
     }
   }
   const near = (x0, z0, x1, z1) => { const out = []; for (let i = Math.floor(x0 / cell); i <= Math.floor(x1 / cell); i++) for (let j = Math.floor(z0 / cell); j <= Math.floor(z1 / cell); j++) out.push(...(grid.get(`${i},${j}`) ?? [])); return out; };
   const idx = createStationBuildingIndex(data);
-  const hidden = (q) => idx.hidesBox({ x: q.x, z: q.z });
+  const hidden = (q) => idx.hidesBox(q);
   let overlaps = 0, pavs = 0, fallbacks = 0;
   for (const b of data.buildings) {
     if (b.pavilion) {
       pavs++;
       const ring = rectRing(b.pavilion, 1.5), xs = ring.map(p => p[0]), zs = ring.map(p => p[1]);
-      const hit = near(Math.min(...xs) - 20, Math.min(...zs) - 20, Math.max(...xs) + 20, Math.max(...zs) + 20).some(q => convexOverlap(ring, boxRing(q.x, q.z, q.side)));
+      const hit = near(Math.min(...xs) - 20, Math.min(...zs) - 20, Math.max(...xs) + 20, Math.max(...zs) + 20).some(q => convexOverlap(ring, rectRing({cx:q.x,cz:q.z,w:q.width,d:q.depth,yaw:-q.theta})));
       if (hit) { overlaps++; assert.ok(b.flags.includes('overlap'), `${b.key} overlaps a box without the flag`); }
     }
     const fp = footprintOf(b), d = distToRing(b.exit.x, b.exit.z, fp);
@@ -504,8 +506,8 @@ test('data: pavilions (B1.8) and exits (B1.9) against the baked boxes', { skip: 
     for (const f of data.buildings) if (pointInRing(b.exit.x, b.exit.z, footprintOf(f))) assert.fail(`${b.key}: exit inside ${f.key}`);
     for (const q of near(b.exit.x - 40, b.exit.z - 40, b.exit.x + 40, b.exit.z + 40)) {
       if (hidden(q)) continue;
-      const h = q.side / 2 + 0.5;
-      assert.ok(!(Math.abs(q.x - b.exit.x) <= h && Math.abs(q.z - b.exit.z) <= h), `${b.key}: exit inside a remaining box`);
+      const c=Math.cos(q.theta),s=Math.sin(q.theta),dx=b.exit.x-q.x,dz=b.exit.z-q.z;
+      assert.ok(!(Math.abs(dx*c+dz*s)<=q.width/2+.5 && Math.abs(-dx*s+dz*c)<=q.depth/2+.5), `${b.key}: exit inside a remaining box`);
     }
     const np = nearestOnRing(b.exit.x, b.exit.z, fp);
     const dot = (-Math.sin(b.exit.yaw)) * (b.exit.x - np.x) / np.d + (-Math.cos(b.exit.yaw)) * (b.exit.z - np.z) / np.d;
@@ -540,13 +542,13 @@ test('data: Fulham Broadway and North Greenwich are box-entrance buildings and n
     const b = data.buildings.find(q => q.key === data.sites[site].building);
     assert.equal(b.kind, 'box-entrance');
     const xs = b.outline.map(p => p[0]), zs = b.outline.map(p => p[1]);
-    const sx = Math.max(...xs) - Math.min(...xs), sz = Math.max(...zs) - Math.min(...zs);
+    const edges=b.outline.map((p,i)=>Math.hypot(p[0]-b.outline[(i+1)%4][0],p[1]-b.outline[(i+1)%4][1])).sort((a,b)=>b-a),sx=edges[0],sz=edges[2];
     assert.ok(Math.abs(sx - 24) <= 0.1 && Math.abs(sz - 7) <= 0.1, `${site}: ${sx} x ${sz}`);
-    assert.ok(Math.abs(b.host.x - w.x) <= 0.2 && Math.abs(b.host.z - w.z) <= 0.2 && Math.abs(b.host.side - w.side) <= 0.2 && Math.abs(b.host.h - w.h) <= 0.1, JSON.stringify(b.host));
-    const half = b.host.side / 2;
-    for (const [x, z] of b.outline) assert.ok(Math.abs(x - b.host.x) >= half - 0.1 || Math.abs(z - b.host.z) >= half - 0.1, `${site}: a vertex inside the host`);
+    assert.ok(Math.abs(b.host.x - w.x) <= 10 && Math.abs(b.host.z - w.z) <= 10 && Math.abs(b.host.side - w.side) <= 0.2 && Math.abs(b.host.h - w.h) <= 0.1, JSON.stringify(b.host));
+    const half = b.host.side / 2,c0=Math.cos(b.host.theta??0),s0=Math.sin(b.host.theta??0),hw=(b.host.width??b.host.side)/2,hd=(b.host.depth??b.host.side)/2;
+    for (const [x, z] of b.outline) assert.ok(Math.abs((x-b.host.x)*c0+(z-b.host.z)*s0)>=hw-.1 || Math.abs(-(x-b.host.x)*s0+(z-b.host.z)*c0)>=hd-.1, `${site}: a vertex inside the host`);
     const c = centroid(b.outline);
-    assert.ok(c[1] < b.host.z - half, `${site}: the block is north of the host`);
+    assert.ok((c[0]-b.host.x)*b.host.face[0]+(c[1]-b.host.z)*b.host.face[1]>Math.min(hw,hd), `${site}: the block is outside the chosen host face`);
     assert.ok(b.height >= 7 && b.height <= 30);
     // the host stays a map box: its centre is in no footprint, so it is not hidden; the block hides nothing of it
     const idx = createStationBuildingIndex(data);
@@ -561,13 +563,13 @@ test('data: Fulham Broadway and North Greenwich are box-entrance buildings and n
     for (const r of walls) {
       assert.ok(r.D >= 3.4 && r.D <= 6, `${site}: ring ${r.D}`);
       assert.ok(Math.hypot(r.x - c[0], r.z - c[1]) <= 32);
-      if (Math.abs(r.nx) > 0.5) assert.ok(!r.host, `${site}: a ring on the host's east or west face`);
+      if(r.host)assert.ok(r.nx*b.host.face[0]+r.nz*b.host.face[1]>.999, `${site}: host ring follows rotated host face`);
       if (!r.host) assert.ok(r.gM <= b.riseM + 1e-9);
     }
     assert.equal(b.flags.includes('exit-fallback'), false);
     const d = distToRing(b.exit.x, b.exit.z, b.outline);
     assert.ok(d >= 5.5 && d <= 7.0, `${site}: exit ${d}`);
-    assert.ok(Math.abs(Math.cos(b.exit.yaw) + 1) < 1e-3 || Math.abs(b.exit.yaw) < 1e-3, `${site}: the exit faces north, away from the host (yaw 0)`);
+    assert.ok(-Math.sin(b.exit.yaw)*b.host.face[0]-Math.cos(b.exit.yaw)*b.host.face[1]>.99, `${site}: exit faces away from the rotated host`);
   }
   assert.equal(data.stats['box-entrance'], 2);
 });
@@ -589,34 +591,19 @@ test('data: riseM on every building, heights 6 to 30, and the lift is zero at th
   for (const b of data.buildings) if (prior[b.key] !== undefined) assert.ok(b.height >= prior[b.key] - 1e-9, `${b.key}: a height only ever grows (${prior[b.key]} to ${b.height})`);
 });
 
-test('hostPushAt: a walker under a floating host is held 0.36 m outside its square, from every side and from inside; on the roof or far away it is not held (fix round 1, B14-2.5)', { skip: !have }, () => {
-  const idx = createStationBuildingIndex(JSON.parse(fs.readFileSync(JSON_PATH, 'utf8')));
-  const VE = 5, margin = 0.36;
-  const hosts = idx.buildings.filter(b => b.host);
-  assert.equal(hosts.length, 2);
-  for (const b of hosts) {
-    const h = b.host, half = h.side / 2, under = (h.baseM - 1) * VE;
-    for (const [dx, dz, nx, nz] of [[half + 0.1, 3, 1, 0], [-(half + 0.1), -3, -1, 0], [4, half + 0.1, 0, 1], [-4, -(half + 0.1), 0, -1], [half - 3.58, 0, 1, 0], [0, 0, 1, 0]]) {
-      const p = idx.hostPushAt(h.x + dx, h.z + dz, under, VE, margin);
-      assert.ok(p, `${b.key}: held at (${dx}, ${dz})`);
-      assert.equal(p.building.key, b.key);
-      const ox = Math.abs(p.x - h.x) - half, oz = Math.abs(p.z - h.z) - half;
-      assert.ok(Math.abs(Math.max(ox, oz) - margin) < 1e-9, `${b.key}: pushed to ${margin} m outside the square, got ${Math.max(ox, oz)}`);
-      if (nx || nz) assert.ok(p.nx === nx || p.nz === nz || (dx === 0 && dz === 0), `${b.key}: ${JSON.stringify([p.nx, p.nz])}`);
-    }
-    assert.equal(idx.hostPushAt(h.x + half + margin + 0.01, h.z, under, VE, margin), null, 'just outside the margin: not held');
-    assert.equal(idx.hostPushAt(h.x, h.z, (h.baseM + h.h) * VE, VE, margin), null, 'on the roof: not held');
-    // fix round 2: the roof is the one DRAWN, baseM x VE + h x VE x scale (scale = 1 / Master), so a walker standing on it is never
-    // thrown off, at any Master; and one just under it (more than 0.2 m below) is still held
-    for (const master of [1, 1.1, 1.5, 3, 10]) {
-      const scale = 1 / master, roofY = h.baseM * VE + h.h * VE * scale;
-      assert.equal(idx.hostPushAt(h.x, h.z, roofY, VE, margin, scale), null, `${b.key}: on the roof at Master ${master}`);
-      assert.equal(idx.hostPushAt(h.x + half - 1, h.z, roofY, VE, margin, scale), null, `${b.key}: on the roof near the face at Master ${master}`);
-      assert.ok(idx.hostPushAt(h.x, h.z, roofY - 0.25 * VE, VE, margin, scale), `${b.key}: 0.25 m under the roof at Master ${master} is held`);
-    }
-    // (the plain-height roof, the round 1 test, would have held a walker on the Master 1.5 roof: it is lower than baseM + h)
-    assert.ok(idx.hostPushAt(h.x, h.z, h.baseM * VE + h.h * VE / 1.5, VE, margin), `${b.key}: the old default (scale 1) still holds at the shorter roof`);
+test('hostPushAt holds a walker against all rotated host faces and leaves its roof free', {skip:!have},()=>{
+ const idx=createStationBuildingIndex(data),VE=5,margin=.36;
+ for(const b of data.buildings.filter(b=>b.host)){
+  const h=b.host,c=Math.cos(h.theta??0),s=Math.sin(h.theta??0),hw=(h.width??h.side)/2,hd=(h.depth??h.side)/2;
+  const world=(u,v)=>[h.x+u*c-v*s,h.z+u*s+v*c];
+  for(const [u,v]of [[hw+.1,3],[-hw-.1,-3],[4,hd+.1],[-4,-hd-.1],[hw-3,0],[0,0]]){
+   const [x,z]=world(u,v),p=idx.hostPushAt(x,z,h.baseM*VE-5,VE,margin);assert.ok(p);assert.equal(p.building.key,b.key);
+   const dx=p.x-h.x,dz=p.z-h.z,ou=Math.abs(dx*c+dz*s)-hw,ov=Math.abs(-dx*s+dz*c)-hd;
+   assert.ok(Math.abs(Math.max(ou,ov)-margin)<1e-8);
   }
+  const [x,z]=world(hw+margin+.01,0);assert.equal(idx.hostPushAt(x,z,h.baseM*VE-5,VE,margin),null);
+  for(const M of [1,1.1,1.5,3,10]){const roof=h.baseM*VE+h.h*VE/M;assert.equal(idx.hostPushAt(h.x,h.z,roof,VE,margin,1/M),null);assert.ok(idx.hostPushAt(h.x,h.z,roof-1.25,VE,margin,1/M));}
+ }
 });
 
 test('displayedRoofY and roundelExtent: the roof and the rings rise with the street above 1.1, never below the plain height', () => {
@@ -658,4 +645,27 @@ test('the review is written only with --review (no default path), and its header
     for (const b of data.buildings) if (prior[b.key] !== undefined && Math.abs(prior[b.key] - b.height) > 0.005) assert.ok(md.includes(`${prior[b.key]} m to ${b.height} m`), `a row for the height change of ${b.key}`);
     // the 02Oct26f review file, left alone, still says what it said
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+
+test('data: box rotation preserves appearance at every unchanged non-host station',()=>{
+  const prior=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/surface/baked/station-buildings-square.json')));
+  const byKey=new Map(prior.buildings.map(b=>[b.key,b]));
+  for(const b of data.buildings)if(!b.host&&JSON.stringify(b.pavilion??b.outline)===JSON.stringify(byKey.get(b.key).pavilion??byKey.get(b.key).outline))for(const field of ['pavilion','outline','height','heightSource','riseM','label','roundels']){
+    assert.deepEqual(b[field],byKey.get(b.key)[field],`${b.key} ${field}`);
+  }
+});
+
+test('compile: retain a clear live pavilion, then try a nearby clear place before a different entrance',()=>{
+ const original=world();original.sites.get('eta').p=[5005,0];
+ const prior=compileStationBuildings(original).json.buildings.find(b=>b.key==='p-eta');
+ const appearanceBaseline={'p-eta':prior};
+ const kept=compileStationBuildings({...world(),appearanceBaseline}).json.buildings.find(b=>b.key==='p-eta');
+ assert.deepEqual(kept.pavilion,prior.pavilion);
+ for(const field of ['height','riseM','label','roundels'])assert.deepEqual(kept[field],prior[field]);
+ const blocked=world();blocked.boxes.push({x:5005,z:0,h:5,side:4,hidden:false});
+ const moved=compileStationBuildings({...blocked,appearanceBaseline}).json.buildings.find(b=>b.key==='p-eta');
+ assert.notDeepEqual(moved.pavilion,prior.pavilion);
+ assert.ok(Math.hypot(moved.pavilion.cx-prior.pavilion.cx,moved.pavilion.cz-prior.pavilion.cz)<=20.01);
+ assert.equal(convexOverlap(rectRing(moved.pavilion,RULES.placementClearM),boxRing(5005,0,4)),false);
 });

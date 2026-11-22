@@ -67,7 +67,8 @@ export function createStationBuildingIndex(json) {
   // A flat cell table for the hot path (every map box asks once as its tile builds).
   const cell = 32, cells = new Map();
   const ck = (i, j) => (i + 8192) * 16384 + (j + 8192);
-  for (const it of items) {
+  for (const original of items) {
+    const ring=original.building.suppressionOutline??original.ring,it={...original,ring,bounds:bounds(ring)};
     for (let i = Math.floor(it.bounds.x0 / cell); i <= Math.floor(it.bounds.x1 / cell); i++) {
       for (let j = Math.floor(it.bounds.z0 / cell); j <= Math.floor(it.bounds.z1 / cell); j++) {
         const k = ck(i, j); let a = cells.get(k); if (!a) cells.set(k, a = []); a.push(it);
@@ -78,7 +79,7 @@ export function createStationBuildingIndex(json) {
   for (const b of json.buildings) for (const n of b.names) if (!byName.has(n)) byName.set(n, b);
 
   function hidesBox(b) {
-    const x = b.x ?? b.cx, z = b.z ?? b.cz;
+    const x = b.sourceX ?? b.x ?? b.cx, z = b.sourceZ ?? b.z ?? b.cz;
     const a = cells.get(ck(Math.floor(x / cell), Math.floor(z / cell)));
     if (!a) return false;
     for (const it of a) {
@@ -130,13 +131,12 @@ export function createStationBuildingIndex(json) {
    */
   function hostPushAt(x, z, y, VE = 5, margin = 0.36, scale = 1) {
     for (const b of hosted) {
-      const h = b.host, half = h.side / 2;
+      const h = b.host, half = (h.width ?? h.side) / 2, halfZ=(h.depth ?? h.side)/2,c=Math.cos(h.theta??0),s=Math.sin(h.theta??0);
       if (y >= h.baseM * VE + h.h * VE * scale - 0.2 * VE) continue;   // up on the roof (jetpack): not held
-      const dx = x - h.x, dz = z - h.z, ox = Math.abs(dx) - half, oz = Math.abs(dz) - half;
+      const rx=x-h.x,rz=z-h.z,dx=rx*c+rz*s,dz=-rx*s+rz*c,ox=Math.abs(dx)-half,oz=Math.abs(dz)-halfZ;
       if (Math.max(ox, oz) >= margin) continue;
-      if (ox >= oz) { const s = dx < 0 ? -1 : 1; return { building: b, x: h.x + s * (half + margin), z, nx: s, nz: 0 }; }
-      const s = dz < 0 ? -1 : 1;
-      return { building: b, x, z: h.z + s * (half + margin), nx: 0, nz: s };
+      if (ox >= oz) { const sign=dx<0?-1:1,u=sign*(half+margin); return {building:b,x:h.x+u*c-dz*s,z:h.z+u*s+dz*c,nx:sign*c,nz:sign*s}; }
+      const sign=dz<0?-1:1,v=sign*(halfZ+margin);return {building:b,x:h.x+dx*c-v*s,z:h.z+dx*s+v*c,nx:-sign*s,nz:sign*c};
     }
     return null;
   }
@@ -169,10 +169,10 @@ export function networksLine(building) {
 // Everything is in canonical world space (the space the hover raycaster works in; see vertical-scale.js).
 
 const _boxBounds = new WeakMap();
-/** The plan bounds { x0, x1, z0, z1 } of an InstancedMesh of axis-aligned boxes, cached per instance count. */
+/** Exact plan bounds of yaw-rotated boxes, cached per count and matrix upload version. */
 export function prepareBoxMeshBounds(mesh) {
-  const n = mesh.count, c = _boxBounds.get(mesh);
-  if (c && c.n === n) return c;
+  const n = mesh.count, version=mesh.instanceMatrix.version, c = _boxBounds.get(mesh);
+  if (c && c.n === n && c.version===version) return c;
   const a = mesh.instanceMatrix.array;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   let y0 = Infinity, y1 = -Infinity, height = 0;
@@ -180,14 +180,14 @@ export function prepareBoxMeshBounds(mesh) {
   let chunk;
   for (let i = 0, o = 12; i < n; i++, o += 16) {
     if(i%64===0){chunk={x0:Infinity,x1:-Infinity,z0:Infinity,z1:-Infinity,y0:Infinity,y1:-Infinity,height:0};chunks.push(chunk);}
-    const h = Math.max(Math.abs(a[o - 12]), Math.abs(a[o - 2])) / 2, x = a[o], z = a[o + 2];
+    const hx=(Math.abs(a[o-12])+Math.abs(a[o-4]))/2,hz=(Math.abs(a[o-10])+Math.abs(a[o-2]))/2, x = a[o], z = a[o + 2];
     y0 = Math.min(y0,a[o+1]); y1 = Math.max(y1,a[o+1]); height = Math.max(height,Math.abs(a[o-7]));
-    chunk.x0=Math.min(chunk.x0,x-h);chunk.x1=Math.max(chunk.x1,x+h);
-    chunk.z0=Math.min(chunk.z0,z-h);chunk.z1=Math.max(chunk.z1,z+h);
+    chunk.x0=Math.min(chunk.x0,x-hx);chunk.x1=Math.max(chunk.x1,x+hx);
+    chunk.z0=Math.min(chunk.z0,z-hz);chunk.z1=Math.max(chunk.z1,z+hz);
     chunk.y0=Math.min(chunk.y0,a[o+1]);chunk.y1=Math.max(chunk.y1,a[o+1]);chunk.height=Math.max(chunk.height,Math.abs(a[o-7]));
-    if (x - h < x0) x0 = x - h; if (x + h > x1) x1 = x + h; if (z - h < z0) z0 = z - h; if (z + h > z1) z1 = z + h;
+    if (x-hx < x0) x0 = x-hx; if (x+hx > x1) x1 = x+hx; if (z-hz < z0) z0 = z-hz; if (z+hz > z1) z1 = z+hz;
   }
-  const b = { n, x0, x1, z0, z1, y0, y1, height, chunks };
+  const b = { n, version, x0, x1, z0, z1, y0, y1, height, chunks };
   _boxBounds.set(mesh, b);
   return b;
 }
@@ -226,19 +226,23 @@ export function rayBlockedByBoxes(meshes, ox, oy, oz, dx, dy, dz, tMax, scale = 
       if(!interval)continue;
       const last=Math.min(first+64,mesh.count);
       for (let i = first, o = first*16; i < last; i++, o += 16) {
-      const hx = Math.abs(a[o]) / 2, hz = Math.abs(a[o + 10]) / 2, x = a[o + 12], y = a[o + 13], z = a[o + 14];
+      const w=Math.sqrt(a[o]*a[o]+a[o+2]*a[o+2]),d=Math.sqrt(a[o+8]*a[o+8]+a[o+10]*a[o+10]);
+      const hx=w/2,hz=d/2,c=a[o]/w,s=a[o+2]/w,y=a[o+13];
+      const rx=(ox-a[o+12])*c+(oz-a[o+14])*s,rz=-(ox-a[o+12])*s+(oz-a[o+14])*c;
+      const rdx=dx*c+dz*s,rdz=-dx*s+dz*c;
+      const x=0,z=0;
       // Keep the slab arithmetic and inclusive edges, without allocating
       // up to three interval arrays for every candidate building.
       let lo = interval[0], hi = interval[1], t0, t1;
-      if (Math.abs(dx) < 1e-12) { if (ox < x - hx || ox > x + hx) continue; }
+      if (Math.abs(rdx) < 1e-12) { if (rx < x - hx || rx > x + hx) continue; }
       else {
-        t0 = (x - hx - ox) / dx; t1 = (x + hx - ox) / dx;
+        t0 = (x - hx - rx) / rdx; t1 = (x + hx - rx) / rdx;
         if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
         lo = Math.max(t0, lo); hi = Math.min(t1, hi); if (lo > hi) continue;
       }
-      if (Math.abs(dz) < 1e-12) { if (oz < z - hz || oz > z + hz) continue; }
+      if (Math.abs(rdz) < 1e-12) { if (rz < z - hz || rz > z + hz) continue; }
       else {
-        t0 = (z - hz - oz) / dz; t1 = (z + hz - oz) / dz;
+        t0 = (z - hz - rz) / rdz; t1 = (z + hz - rz) / rdz;
         if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
         lo = Math.max(t0, lo); hi = Math.min(t1, hi); if (lo > hi) continue;
       }
@@ -275,6 +279,7 @@ const state = { index: null, meshes: null, ready: false, hidden: { live: 0, bake
 
 /** Fetch and index the data once. Resolves to the index; rejects (and clears) on failure so a retry is possible. */
 export function loadStationBuildings(url = STATION_BUILDINGS_URL) {
+  if(url===STATION_BUILDINGS_URL&&new URLSearchParams(globalThis.location?.search||'').get('bshape')==='square')url='/data/surface/baked/station-buildings-square.json';
   if (_loadPromise) return _loadPromise;
   _loadPromise = bootFetch(url).then(async (res) => { // s21:L
     if (!res.ok) throw new Error(`${url}: ${res.status}`);
@@ -603,9 +608,9 @@ varying vec2 vRQ; varying float vRRing; varying vec4 vRRect; varying vec2 vRSize
   const skirtP = [], skirtN = [];
   for (const b of buildings) {
     if (!b.host) continue;
-    const h = b.host, half = h.side / 2, top = h.baseM * VE, sx = [-1, 1, 1, -1], sz = [-1, -1, 1, 1];
+    const h = b.host, half = (h.width??h.side) / 2, halfZ=(h.depth??h.side)/2,c=Math.cos(h.theta??0),s=Math.sin(h.theta??0), top = h.baseM * VE, sx = [-1, 1, 1, -1], sz = [-1, -1, 1, 1];
     for (let f = 0; f < 4; f++) {
-      const ax = h.x + sx[f] * half, az = h.z + sz[f] * half, bx = h.x + sx[(f + 1) % 4] * half, bz = h.z + sz[(f + 1) % 4] * half;
+      const ax=h.x+sx[f]*half*c-sz[f]*halfZ*s,az=h.z+sx[f]*half*s+sz[f]*halfZ*c,bx=h.x+sx[(f+1)%4]*half*c-sz[(f+1)%4]*halfZ*s,bz=h.z+sx[(f+1)%4]*half*s+sz[(f+1)%4]*halfZ*c;
       const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / SKIRT_STEP_M)), nx = (bz - az) / L, nz = -(bx - ax) / L;   // outward (the ring runs clockwise in x, z)
       const pt = (t) => { const x = ax + (bx - ax) * t, z = az + (bz - az) * t, g = getStructuralY?.(x, z); return { x, z, y: Number.isFinite(g) ? g - 0.3 * VE : top }; };
       let prev = pt(0);
