@@ -185,7 +185,8 @@ test.describe('first person against a wall', () => {
     const c = { ...CONTACTS[2], id: 'C3-pull' };
     await press(c, 'third');
     const probe = PROBE.replace('const cam = u.camera;', 'const cam = u.camera; const rig = ped.onFoot.rig;').replace('card: ped', 'rigDist: rig.distance, suggested: rig.suggestedNear, card: ped');
-    const rows = await h.sample(3.0, probe, [{ t: 0, down: ['w'] }]);
+    // Hold this positive near-wall pose; the following two cases cover motion away and back.
+    const rows = await h.sample(3.0, probe, []);
     await h.releaseKeys();
     const close = rows.filter((r) => r.dmin < 1.5);
     console.log(`[near third] ${rows.length} frames, ${rows.filter((r) => r.rigDist <= 2.5).length} pulled in, ${close.length} with a wall within 1.5 m of the camera, worst margin ${Math.min(...rows.map((r) => r.margin)).toFixed(3)} m, least near ${Math.min(...rows.map((r) => r.near)).toFixed(3)}`);

@@ -108,15 +108,20 @@ test.describe('the host plinth', () => {
       await h.ev((M) => { const el = document.getElementById('masterHeight'); el.value = String(M); el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); window.__ugSun?.setTime?.(0.5, { persist: false }); }, master);
       await h.ev(() => window.__ug.setRenderQualityMode('manual'));
       await h.activatePedestrian();
-      await h.ev(([x, z, yaw]) => {
-        const u=window.__ug, host=u.stationBuildings.index.buildings.find(b=>b.key==='be-north-greenwich').host;
-        // Preserve the west-face stand-off, fractional position along that face,
-        // and axial/oblique angle from the original square fixture.
-        const half=host.side/2, lx=-(host.width??host.side)/2+(x-host.x+half);
-        const lz=(z-host.z)/half*((host.depth??host.side)/2), theta=host.theta??0;
-        const wx=host.x+lx*Math.cos(theta)-lz*Math.sin(theta), wz=host.z+lx*Math.sin(theta)+lz*Math.cos(theta);
-        const p=u.modes.registry.get('pedestrian'); p.setView('first'); p.place(wx,wz,{yaw:yaw-theta});
-      }, [x, z, yaw]);
+      await h.ev(([x,z,yaw,name])=>{
+        const u=window.__ug;
+        if(name==='oblique'){
+          const h=u.stationBuildings.index.buildings.find(b=>b.key==='be-north-greenwich').host,theta=h.theta??0;
+          // The old oblique point now lies inside the host. Use the exposed
+          // south-west face, retaining its stand-off, along-face fraction and
+          // 0.5 rad oblique angle. The original axial street pose stays fixed.
+          const lx=(z-h.z)/(h.side/2)*((h.width??h.side)/2);
+          const lz=(h.depth??h.side)/2+(-x+h.x-h.side/2);
+          x=h.x+lx*Math.cos(theta)-lz*Math.sin(theta);
+          z=h.z+lx*Math.sin(theta)+lz*Math.cos(theta);yaw=-theta+.5;
+        }
+        const p=u.modes.registry.get('pedestrian');p.setView('first');p.place(x,z,{yaw});
+      },[x,z,yaw,name]);
       await h.wait(1500);
       const r = await h.ev(() => {
         const u = window.__ug, rend = u.composer.renderer, gl = rend.getContext(), cv = rend.domElement, sk = u.scene.getObjectByName('station-host-skirts');
