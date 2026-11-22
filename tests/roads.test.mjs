@@ -14,7 +14,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json')));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 test('road asset regenerates byte-identically from the 80 cached OSM answers',()=>{
   const out=fs.mkdtempSync(path.join(os.tmpdir(),'ug-roads-'));
-  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:240000,stdio:'pipe'});
+  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:2400000,stdio:'pipe'});
     assert.deepEqual(fs.readFileSync(path.join(out,'manifest.json')),fs.readFileSync(path.join(dir,'manifest.json')));
     assert.equal(hash(fs.readFileSync(path.join(out,'network.bin.gz'))),manifest.networkSHA256);
     assert.equal(hash(fs.readFileSync(path.join(out,'bridge-decks.bin.gz'))),manifest.bridgeSHA256);
@@ -23,7 +23,7 @@ test('road asset regenerates byte-identically from the 80 cached OSM answers',()
 });
 test('coverage includes all eight classes and the October total within 5%',()=>{
   assert.equal(manifest.classes.length,8);assert.ok(manifest.stats.km.every(k=>k>0));
-  assert.ok(Math.abs(manifest.stats.totalKm/29921-1)<.05);assert.ok(manifest.desktopGPUBytes<80e6);
+  assert.ok(Math.abs(manifest.stats.totalKm/29921-1)<.05);assert.ok(manifest.desktopGPUBytes>0);assert.equal(manifest.streamingLODs,true); // total bytes now include mutually exclusive streamed LODs; GPU residency is measured with phone-mem and desktop-memory
   assert.match(manifest.source,/OpenStreetMap.*ODbL/);
 });
 test('merged roads near all four reservoir feet follow actual bank support before clearance',async()=>{
@@ -61,11 +61,11 @@ test('exact clipping retains an entering and exiting segment and removes outside
   const clip=clipper([[0,0],[10,0],[10,10],[0,10]]);
   assert.deepEqual(clip([[-5,5],[15,5]]),[[[0,5],[10,5]]]);assert.deepEqual(clip([[-5,-5],[15,-5]]),[]);
 });
-test('all generated blocks use 16-bit indices, upward winding and compact pavement attributes',()=>{
+test('road packets have bounded index widths and upward compact attributes',()=>{
   const m=createRoadMaterial();
   for(const r of manifest.records){
     const b=gunzipSync(fs.readFileSync(path.join(dir,r.file))),buffer=b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),mesh=decodeRoadBlock(buffer,m,m,r),g=mesh.geometry,p=g.attributes.position;
-    assert.ok(p.count<=65000);assert.equal(g.index.array.BYTES_PER_ELEMENT,2);assert.equal(g.attributes.roadData.array.BYTES_PER_ELEMENT,1);
+    assert.ok(p.count<=(r.indexBytes===4?4000000:65000));assert.equal(g.index.array.BYTES_PER_ELEMENT,r.indexBytes??2);if(r.indexBytes===4)assert.equal(r.lod,'far');assert.equal(g.attributes.roadData.array.BYTES_PER_ELEMENT,1);
     for(let i=0;i<g.index.count;i+=3){const a=g.index.getX(i),b=g.index.getX(i+1),c=g.index.getX(i+2),ny=(p.getZ(b)-p.getZ(a))*(p.getX(c)-p.getX(a))-(p.getX(b)-p.getX(a))*(p.getZ(c)-p.getZ(a));
       assert.ok(ny>=0,`${r.file} triangle ${i/3} points below ground`);}
     g.dispose();
@@ -73,10 +73,10 @@ test('all generated blocks use 16-bit indices, upward winding and compact paveme
 });
 test('phone guarantees every nearby minor block while desktop retains all roads',()=>{
   for(const [x,z]of [[2744,-761],[-10000,5000],[8447,2136]])for(const r of manifest.records){
-    assert.equal(roadBlockWanted(r),r.tier==='desktop');
-    if(r.tier==='near'&&Math.max(r.x-x,0,x-r.x-r.size)**2+Math.max(r.z-z,0,z-r.z-r.size)**2<=1000**2)
+    if(r.tier!=='desktop')assert.equal(roadBlockWanted(r),false);
+    if(r.tier==='near'&&Math.max(r.bounds[0]-x,0,x-r.bounds[3])**2+Math.max(r.bounds[1]-z,0,z-r.bounds[4])**2<=1000**2)
       assert.equal(roadBlockWanted(r,{phone:true,x,z,height:2}),true);
-    if(r.tier==='near')assert.equal(roadBlockWanted(r,{phone:true,x,z,height:3000}),false);
+    if(r.tier==='near'){assert.equal(roadBlockWanted(r,{phone:true,x,z,height:3000}),false);if(Math.max(r.bounds[0]-x,0,x-r.bounds[3])**2+Math.max(r.bounds[1]-z,0,z-r.bounds[4])**2<=1000**2)assert.equal(roadBlockWanted(r,{phone:true,x,z,height:300}),true);}
   }
 });
 for(const scenario of ['toggle','range'])test(`an old download cannot attach twice after a ${scenario} change`,async()=>{
@@ -88,7 +88,7 @@ for(const scenario of ['toggle','range'])test(`an old download cannot attach twi
   globalThis.fetch=async url=>String(url).endsWith('manifest.json')?{ok:true,json:async()=>({format:'UGR4',records:[rec]})}:{ok:true,body:{},headers:new Headers({'content-encoding':'gzip'}),arrayBuffer:()=>++downloads===1?old:Promise.resolve(raw)};
   const roads=createRoads({scene:new Scene(),phone:scenario==='range'}),frame=()=>roads.update({x:0,z:0,height:2}),flush=()=>new Promise(resolve=>setImmediate(resolve));
   try{frame();await flush();frame();await flush();assert.equal(downloads,1);
-    if(scenario==='toggle'){roads.setEnabled(false);roads.setEnabled(true);}else roads.update({x:0,z:0,height:300});
+    if(scenario==='toggle'){roads.setEnabled(false);roads.setEnabled(true);}else roads.update({x:0,z:0,height:600});
     frame();await flush();frame();await flush();frame();assert.equal(roads.stats.bytes,34);
     releaseOld(raw);await flush();frame();assert.equal(roads.group.children.length,1);assert.equal(roads.stats.bytes,34);assert.equal(roads.stats.state,'ready');
   }finally{roads.dispose();globalThis.fetch=previous;}

@@ -15,11 +15,17 @@ export function metres(value) {
   const n = +m[1] * (m[2] === 'ft' || m[2] === "'" ? .3048 : 1);
   return n > 0 && n < 100 ? n : null;
 }
-export function dimensions(tags, cls) {
-  const width = metres(tags['width:carriageway']) ?? metres(tags.width) ?? WIDTHS[cls];
+// 3.2m per lane is the sprint acceptance spec’s informed urban-lane estimate,
+// D-062, not a survey of each carriageway.
+export const LANE_WIDTH_M = 3.2;
+export const isOneWay = tags => ['yes','1','true','-1'].includes(String(tags.oneway)) || tags.junction === 'roundabout';
+export function dimensions(tags, cls, {legacy=false}={}) {
+  const lanes = /^\d+(?:\.\d+)?$/.test(String(tags.lanes)) ? +tags.lanes : 0;
+  const width = metres(tags['width:carriageway']) ?? metres(tags.width)
+    ?? (lanes > 0 && lanes < 20 ? lanes * LANE_WIDTH_M : WIDTHS[cls] * (isOneWay(tags) ? .5 : 1));
   // DfT Inclusive Mobility's 2m preferred unobstructed width, used as an informed estimate,
   // not a survey. 'separate' still has a pavement: separately mapped footways are excluded.
-  const defaults = cls >= 2 && cls <= 5;
+  const defaults = (cls >= 2 && cls <= 5) || (!legacy && cls === 1 && isOneWay(tags));
   const side = which => {
     const flag = tags[`sidewalk:${which}`] ?? tags['sidewalk:both'] ?? tags.sidewalk;
     const no = ['no','none',which === 'left' ? 'right' : 'left'].includes(flag);
@@ -77,7 +83,7 @@ export function simplify(p,tol=1) {
     if(at>=0){keep[at]=1;stack.push([a,at],[at,b]);}}
   return p.filter((_,i)=>keep[i]);
 }
-export function buildNetwork(root,ring) {
+export function buildNetwork(root,ring,{legacy=false}={}) {
   const ways=new Map(),cache=path.join(root,'scripts/.cache/roads-overpass');
   const files=fs.readdirSync(cache).filter(f=>/^blk_.*\.json\.gz$/.test(f)).sort();
   if(files.length!==80)throw new Error(`Expected October's 80 cached OSM blocks, got ${files.length}`);
@@ -92,8 +98,55 @@ export function buildNetwork(root,ring) {
       const tunnel=!!t.tunnel&&t.tunnel!=='no'&&t.tunnel!=='building_passage';
       if(tunnel)tunnelKm+=length/1000;else km[cls]+=length/1000;
       if(t.width)widthTags++;
-      roads.push({id:w.id,name:t.name??null,cls,...dimensions(t,cls),bridge:!!t.bridge&&t.bridge!=='no',tunnel,layer:Math.max(-10,Math.min(10,parseInt(t.layer)||0)),p:simplify(run).map(p=>p.map(v=>Math.round(v*100)/100))});
+      roads.push({id:w.id,name:t.name??null,ref:t.ref??null,oneway:isOneWay(t),direction:t.oneway==='-1'?-1:1,roundabout:t.junction==='roundabout',widthSource:metres(t['width:carriageway'])??metres(t.width)?'width':+t.lanes>0?'lanes':isOneWay(t)?'oneway-class':'class',cls,...(legacy?{...dimensions(t,cls,{legacy:true}),width:metres(t['width:carriageway'])??metres(t.width)??WIDTHS[cls]}:dimensions(t,cls)),bridge:!!t.bridge&&t.bridge!=='no',tunnel,layer:Math.max(-10,Math.min(10,parseInt(t.layer)||0)),p:simplify(run).map(p=>p.map(v=>Math.round(v*100)/100))});
     }
   }
-  return {roads,stats:{blocks:files.length,uniqueWays:ways.size,km:km.map(v=>+v.toFixed(3)),totalKm:+km.reduce((a,b)=>a+b,0).toFixed(3),tunnelKm:+tunnelKm.toFixed(3),widthTags}};
+  return {roads,stats:{...(legacy?{}:pairCarriageways(roads)),blocks:files.length,uniqueWays:ways.size,km:km.map(v=>+v.toFixed(3)),totalKm:+km.reduce((a,b)=>a+b,0).toFixed(3),tunnelKm:+tunnelKm.toFixed(3),widthTags}};
+}
+
+// Match opposing, parallel one-way carriageways at their segment midpoints. Require
+// a shared road name/ref, same layer and a 3..40m separation. Roundabouts are not pairs.
+// With no credible pair retain both pavements; count those ways rather than guessing.
+export function pairCarriageways(roads) {
+  const cells=new Map(), cell=80, segments=[];
+  for(const r of roads)if(r.oneway&&!r.roundabout&&!r.tunnel)for(let i=1;i<r.p.length;i++){
+    const a=r.p[i-1],b=r.p[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]);if(L<1)continue;
+    const s={r,a,b,L,dx:(b[0]-a[0])/L,dz:(b[1]-a[1])/L};segments.push(s);
+    for(let x=Math.floor(Math.min(a[0],b[0])/cell);x<=Math.floor(Math.max(a[0],b[0])/cell);x++)
+      for(let z=Math.floor(Math.min(a[1],b[1])/cell);z<=Math.floor(Math.max(a[1],b[1])/cell);z++){
+        const key=x+','+z;if(!cells.has(key))cells.set(key,[]);cells.get(key).push(s);
+      }
+  }
+  const votes=new Map();
+  for(const s of segments){const x=(s.a[0]+s.b[0])/2,z=(s.a[1]+s.b[1])/2;let best=null,distance=40;
+    for(let ix=Math.floor((x-40)/cell);ix<=Math.floor((x+40)/cell);ix++)for(let iz=Math.floor((z-40)/cell);iz<=Math.floor((z+40)/cell);iz++)for(const t of cells.get(ix+','+iz)??[]){
+      if(t.r.id===s.r.id||t.r.cls!==s.r.cls||t.r.layer!==s.r.layer||t.r.bridge!==s.r.bridge)continue;
+      if(!(s.r.name&&s.r.name===t.r.name)&&!(s.r.ref&&s.r.ref===t.r.ref))continue;
+      if((s.dx*t.dx+s.dz*t.dz)*s.r.direction*t.r.direction>-.9)continue;
+      const u=((x-t.a[0])*t.dx+(z-t.a[1])*t.dz)/t.L;if(u<0||u>1)continue;
+      const qx=t.a[0]+u*t.L*t.dx,qz=t.a[1]+u*t.L*t.dz,d=Math.hypot(qx-x,qz-z);
+      if(d<3||d>=distance)continue;distance=d;best={side:(qx-x)*(-s.dz)+(qz-z)*s.dx>0?'right':'left',id:t.r.id};
+    }
+    if(best){if(!votes.has(s.r))votes.set(s.r,{left:0,right:0,ids:new Set()});const v=votes.get(s.r);v[best.side]+=s.L;v.ids.add(best.id);}
+  }
+  const paired=new Set(),unpaired=new Set();
+  for(const r of roads)if(r.oneway&&!r.tunnel){const v=votes.get(r);
+    if(v){r[v.right>v.left?'right':'left']=0;r.pairedWith=[...v.ids].sort((a,b)=>a-b);paired.add(r.id);}
+    else unpaired.add(r.id);
+  }
+  return {pairedOneWayWays:paired.size,unpairedOneWayWays:unpaired.size};
+}
+
+// The committed UGN1 file already contains corrected widths and paired-pavement
+// decisions. No OSM fetch or terrain boot is needed to consume it in another lane.
+export function readRoadNetwork(file) {
+  const b=zlib.gunzipSync(fs.readFileSync(file));
+  if(b.toString('ascii',0,4)!=='UGN1')throw Error('Invalid UGN1 network');
+  const n=b.readUInt32LE(4),roads=[];let at=8;
+  for(let i=0;i<n;i++){
+    const id=b.readUInt32LE(at),flags=b[at+4],cls=flags&7,layer=b.readInt8(at+5),width=b.readUInt16LE(at+6)/100,left=b.readUInt16LE(at+8)/100,right=b.readUInt16LE(at+10)/100,count=b.readUInt32LE(at+12);at+=16;
+    const p=[];for(let j=0;j<count;j++){p.push([b.readInt32LE(at)/100,b.readInt32LE(at+4)/100]);at+=8;}
+    roads.push({id,cls,layer,width,left,right,bridge:!!(flags&16),tunnel:!!(flags&32),p});
+  }
+  if(at!==b.length)throw Error('UGN1 trailing/short data');return roads;
 }

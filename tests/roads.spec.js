@@ -10,8 +10,11 @@ test.beforeAll(async({browser})=>{
 });
 test.afterAll(async()=>page?.close());
 test('all desktop blocks load, obey the vertex cap, carry pavement coordinates and compile without errors',async()=>{
-  const s=await page.evaluate(()=>{const r=window.__ug.roads;return{...r.stats,meshes:r.group.children.length,max:Math.max(...r.group.children.map(m=>m.geometry.attributes.position.count)),front:r.material.side,emissive:r.material.emissive.getHex()};});
-  expect(s.errors).toEqual([]);expect(errors).toEqual([]);expect(s.meshes).toBeGreaterThan(50);expect(s.max).toBeLessThanOrEqual(65000);expect(s.bytes).toBeLessThan(80e6);expect(s.front).toBe(0);expect(s.emissive).toBe(0);
+  const s=await page.evaluate(()=>{const r=window.__ug.roads;return{...r.stats,meshes:r.group.children.length,layouts:r.group.children.map(m=>({name:m.name,vertices:m.geometry.attributes.position.count,indexBytes:m.geometry.index.array.BYTES_PER_ELEMENT})),front:r.material.side,emissive:r.material.emissive.getHex()};});
+  expect(s.errors).toEqual([]);expect(errors).toEqual([]);expect(s.meshes).toBeGreaterThan(0);expect(s.meshes).toBe(await page.evaluate(()=>window.__ug.roads.coverage().wanted.length));for(const m of s.layouts){expect([2,4]).toContain(m.indexBytes);if(m.indexBytes===4){expect(m.name).toContain('-far-');expect(m.vertices).toBeLessThanOrEqual(4000000);}else expect(m.vertices).toBeLessThanOrEqual(65000);}
+  // Live holds66.11829MB of road buffers. The lane's actual desktop GPU ceiling
+  // is live+40MB; canonical GPU allocation measurements remain the budget gate.
+  expect(s.bytes).toBeLessThan(106e6);expect(s.front).toBe(0);expect(s.emissive).toBe(0);
 });
 test('every road is hidden from a camera below Bank and restored above it',async()=>{
   await page.evaluate(()=>{const u=window.__ug;u.camera.position.set(2744,u.getTerrainMeshSurfaceY({x:2744,z:-761})-48*5,-761);u.controls.target.set(2744,500,-762);u.controls.update();});

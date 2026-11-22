@@ -6,6 +6,12 @@ import zlib from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {installNodeEnv,ROOT} from '../bake-node-env.mjs';
 import {buildNetwork,CLASSES,WIDTHS} from './network.mjs';
+import {roadMetadata,roadDimensions} from './metadata.mjs';
+import {repairRoadClearance} from './clearance.mjs';
+import {compactRoadPart} from './compact.mjs';
+import {carriagewayIndex,trimRibbon,roadTriangleTiles,split,cut,area,bounds} from './polygons.mjs';
+import {mergeRoadParts,localiseRoadParts} from './pack.mjs';
+import {packRoadCoordinate,unpackRoadCoordinate} from './coordinate.mjs';
 import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
 import {surfaceIndex,overlap,conformRoadTriangle,supportFace,raiseRoadDeck} from './support.mjs';
 import {BNG_REF_E,BNG_REF_N} from '../../src/coordinates.js';
@@ -37,7 +43,25 @@ const supportRegions=targets.map(b=>{const x=b.outer.map(p=>p[0]),z=b.outer.map(
 const terrainFaces=surfaceIndex([terrainResult.mesh],supportRegions);
 const bankFaces=surfaceIndex(bankStep.value.bodies.filter(b=>b.bankMesh).map(b=>b.bankMesh),supportRegions);
 const g=(x,z)=>reservoirRoadBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
-const network=buildNetwork(ROOT,getMapEdgeRing());
+const finalSupport=(x,z)=>{const base=g(x,z),lip=reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??base);return lip>base&&lip-base<.25?lip:base;};
+if(process.argv.includes('--repair-existing')){
+  const file=path.join(out,'manifest.json'),meta=JSON.parse(fs.readFileSync(file)),shared=new Map();
+  for(const r of meta.records)if(r.pair){if(!shared.has(r.pair))shared.set(r.pair,r.bounds);else r.bounds=shared.get(r.pair);}
+  let repaired=0,files=0,maxRaise=0;meta.compressedGeometryBytes=0;
+  for(const r of meta.records){const target=path.join(out,r.file),raw=zlib.gunzipSync(fs.readFileSync(target));
+    const result=repairRoadClearance(raw,{inRegion:inReservoirFootRegion,support:finalSupport});
+    if(result.repaired){const body=zlib.gzipSync(raw,{level:9});fs.writeFileSync(target,body);r.sha256=createHash('sha256').update(body).digest('hex');files++;repaired+=result.repaired;maxRaise=Math.max(maxRaise,result.maxRaise);
+      const n=raw.readUInt32LE(4),floating=!!(raw.readUInt32LE(28)&2),stride=floating?12:6;
+      for(let i=0;i<n;i++){const y=(floating?raw.readFloatLE(32+i*stride+4):raw.readUInt16LE(32+i*stride+2))*.05-500;r.bounds[5]=Math.max(r.bounds[5],y);}
+    }
+    meta.compressedGeometryBytes+=fs.statSync(target).size;
+  }
+  fs.writeFileSync(file,JSON.stringify(meta));console.log(JSON.stringify({files,repaired,maxRaise}));process.exit(0);
+}
+const legacy=process.argv.includes('--legacy');
+const audit=process.argv.includes('--audit')?{pavementArea:0,overlapArea:0,triangles:0,lods:{},farTopologySubstitutions:0}:null;
+const network=buildNetwork(ROOT,getMapEdgeRing(),{legacy});
+const junctionIndex=carriagewayIndex(network.roads);
 const overpasses=roadOverpassConstraints(network.roads,g);
 const bridgeData=JSON.parse(fs.readFileSync(path.join(ROOT,'public/data/bridges.json'))).bridges;
 const bridgeRoadWidths={};
@@ -59,10 +83,10 @@ for(const b of bridgeData.filter(b=>b.kind.includes('road'))) {
   }
   const width=Math.ceil(half*20)/10;if(width>b.deckWidthM+.01)bridgeRoadWidths[b.curatedSlug]=width;
 }
-const legacy=await createBridges({getTerrainMeshSurfaceY:terrain.getTerrainMeshSurfaceY,heightScale:1});
+const legacyBridges=await createBridges({getTerrainMeshSurfaceY:terrain.getTerrainMeshSurfaceY,heightScale:1});
 const bridges=await createBridges({getTerrainMeshSurfaceY:terrain.getTerrainMeshSurfaceY,heightScale:1,roadWidths:bridgeRoadWidths});
 const bridgeMorphs=[],bridgeChunks=[];let bridgeOffset=0;
-const oldMorphs=legacy.userData.roadMorphSources();
+const oldMorphs=legacyBridges.userData.roadMorphSources();
 for(const m of bridges.userData.roadMorphSources())if(bridgeRoadWidths[m.rec.data.curatedSlug]) {
   const old=oldMorphs.find(o=>o.mesh.name===m.mesh.name);
   const a=old?.mesh.geometry.index.array,b=m.mesh.geometry.index.array;
@@ -102,11 +126,11 @@ const netParts=[];
 for(const r of network.roads){const b=Buffer.alloc(16+r.p.length*8);b.writeUInt32LE(r.id,0);b[4]=r.cls|(r.bridge?16:0)|(r.tunnel?32:0);b.writeInt8(r.layer,5);b.writeUInt16LE(Math.round(r.width*100),6);b.writeUInt16LE(Math.round(r.left*100),8);b.writeUInt16LE(Math.round(r.right*100),10);b.writeUInt32LE(r.p.length,12);r.p.forEach((p,i)=>{b.writeInt32LE(Math.round(p[0]*100),16+i*8);b.writeInt32LE(Math.round(p[1]*100),20+i*8);});netParts.push(b);}
 const netHead=Buffer.alloc(8);netHead.write('UGN1');netHead.writeUInt32LE(network.roads.length,4);
 const networkBytes=zlib.gzipSync(Buffer.concat([netHead,...netParts]),{level:9});fs.writeFileSync(path.join(out,'network.bin.gz'),networkBytes);
-const groups=new Map();
+const groups=new Map(),spills=new Map();
 const LIFT=.30; // 6cm real in canonical VE5, plus polygon offset at render. Landscape follows Master.
-function group(key,x,z,size,tier){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,parts:[],pos:[],road:[],rise:[],idx:[],farIdx:[]});return groups.get(key);}
-function flush(c){
-  if(!c.idx.length)return;
+function group(key,x,z,size,tier,lod){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,lod,parts:[],pos:[],road:[],rise:[],idx:[],farIdx:[],owner:[]});return groups.get(key);}
+function flush(c,extra=[]){
+  if(!c.idx.length&&!extra.length)return;
   // Exact local overlay, including triangle interiors, at the four repaired feet.
   // All other faces retain their original quantised vertices and aerial indices.
   let pos=[],road=[],rise=[],across=[],idx=[],farIdx=[],keys=new Map();
@@ -128,13 +152,24 @@ function flush(c){
       // numerically unstable scraps along a bank's discontinuous boundary.
       const longest=Math.max(...[[a,b],[b,d],[d,a]].map(([a,b])=>Math.hypot(positions[a*3]-positions[b*3],positions[a*3+2]-positions[b*3+2])));
       if(Math.abs(det)/128<.001||Math.abs(det)/longest/8<.005)continue;if(det>0)[b,d]=[d,b];out.push(a,b,d);}return out;};
-    near=upward(near);far=upward(far);if(far.length>near.length)throw Error('Aerial support split exceeds full faces: '+c.key);
+    near=upward(near);far=upward(far);if(far.length>near.length){if(audit)audit.farTopologySubstitutions++;far=near;} // clipped slivers may cost more than the full topology locally
     if(near.length||far.length)c.parts.push({pos:positions,road:Uint8Array.from(metadata),
       rise:morph.some(v=>v!==0)?Int16Array.from(morph):null,
-      across:ac.some((v,i)=>v!==(metadata[i*3+1]>=128?32767:-32767))?Int16Array.from(ac):null,
+      across:legacy?(ac.some((v,i)=>v!==(metadata[i*3+1]>=128?32767:-32767))?Int16Array.from(ac):null):Uint16Array.from(ac),
       idx:Uint16Array.from(near),farIdx:Uint16Array.from(far)});
   };
-  const emit=(points,far)=>{
+  const emitRaw=(points,far)=>{
+    if(audit&&c.tier==='desktop'){
+      const lod=c.lod??(far?'far':'near'),bucket=audit.lods[lod]??(audit.lods[lod]={pavementArea:0,overlapArea:0,triangles:0});
+      const r=points[0].owner,half=roadDimensions(points[0].road).half;
+      const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,(legacy?p.across/32767:unpackRoadCoordinate(p.across).across)*half]);
+      const {left,right}=roadDimensions(points[0].road);
+      const bands=[...(left?[split(tri,p=>-half+left-p[2])[0]]:[]),...(right?[split(tri,p=>p[2]-half+right)[0]]:[])].filter(p=>p.length);
+      const faces=junctionIndex(bounds(tri)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge);
+      for(const band of bands){const total=area(band);let remaining=[band];for(const f of faces)remaining=remaining.flatMap(p=>cut(p,f.polygon).outside);
+        const overlap=Math.max(0,total-remaining.reduce((s,p)=>s+area(p),0));audit.pavementArea+=total;audit.overlapArea+=overlap;bucket.pavementArea+=total;bucket.overlapArea+=overlap;}
+      audit.triangles++;bucket.triangles++;
+    }
     const [a,b,d]=points.map(p=>p.pos);
     if((b[0]-a[0])*(d[2]-a[2])-(b[2]-a[2])*(d[0]-a[0])===0)return;
     for(const p of points){const key=[...p.pos,...p.road,p.rise,p.across].join(',');let at=keys.get(key);
@@ -142,10 +177,27 @@ function flush(c){
       (far?farIdx:idx).push(at);
     }
   };
-  const vertex=j=>({pos:c.pos.slice(j*3,j*3+3),road:c.road.slice(j*3,j*3+3),rise:c.rise[j],across:c.road[j*3+1]>=128?32767:-32767});
+  const emit=(points,far)=>{
+    if(legacy){emitRaw(points.map(p=>({...p,across:p.railAcross})),far);return;}
+    const r=points[0].owner;
+    const half=(r.width+r.left+r.right)/2;
+    const precise=points.some(p=>p.pos.some(v=>!Number.isInteger(v)));
+    const quantize=v=>precise?Math.fround(v):Math.round(v);
+    const triangle=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.railAcross/32767*half,p.pos[1],p.rise]);
+    const tiles=c.lod==='near'?roadTriangleTiles(triangle,c.size):[{x:c.x+64,z:c.z+64,polygon:triangle}];
+    for(const tile of tiles){const key=c.tier+'-near-'+tile.x+'-'+tile.z,target=c.lod==='near'?group(key,tile.x,tile.z,c.size,c.tier,c.lod):c;
+      const cell=tile.polygon;
+      for(let k=1;k<cell.length-1;k++)for(const {polygon,junction}of trimRibbon([cell[0],cell[k],cell[k+1]],r,junctionIndex))for(let i=1;i<polygon.length-1;i++){
+        const output=[polygon[0],polygon[i],polygon[i+1]].map(p=>({owner:r,pos:[quantize((p[0]-target.x)*8),quantize(p[3]),quantize((p[1]-target.z)*8)],
+          road:[points[0].road[0],(points[0].road[1]&64)+(junction?0:points[0].road[1]&63),(points[0].road[2]&64)+(junction?128:points[0].road[2]&63)],rise:Math.round(p[4]),across:packRoadCoordinate(p[2]/half,p[5])}));
+        if(target===c)emitRaw(output,far);else{if(!spills.has(key))spills.set(key,[]);spills.get(key).push(output);}
+      }
+    }
+  };
+  const vertex=j=>({owner:c.owner[j],pos:c.pos.slice(j*3,j*3+3),road:c.road.slice(j*3,j*3+3),rise:c.rise[j],railAcross:c.road[j*3+1]>=128?32767:-32767});
   for(const [indices,far]of [[c.idx,false],[c.farIdx,true]])for(let i=0;i<indices.length;i+=3){
     const points=indices.slice(i,i+3).map(vertex);
-    const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.across/32767,p.pos[1]*.05-500-LIFT,p.rise*.05]);
+    const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.railAcross/32767,p.pos[1]*.05-500-LIFT,p.rise*.05]);
     const box=[Math.min(...tri.map(p=>p[0])),Math.min(...tri.map(p=>p[1])),Math.max(...tri.map(p=>p[0])),Math.max(...tri.map(p=>p[1]))];
     if(!supportRegions.some(r=>overlap(r,box))){emit(points,far);continue;}
     // A bridge keeps its inferred deck chord where it is already above the
@@ -171,12 +223,13 @@ function flush(c){
         const lip=reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??support);
         if(lip>support&&lip-support<.25)support=lip;
         const y=deck?Math.max(support,deck.height(x,z)):support;
-        return {pos:[qx,(y+LIFT+500)*20,qz],road:points[0].road,rise:deck?Math.round((y-support)/.05):0,across:Math.round(Math.max(-1,Math.min(1,v[2]))*32767)};
+        return {owner:points[0].owner,pos:[qx,(y+LIFT+500)*20,qz],road:points[0].road,rise:deck?Math.round((y-support)/.05):0,railAcross:Math.round(Math.max(-1,Math.min(1,v[2]))*32767)};
       }),far);
     }
   }
+  for(const points of extra)emitRaw(points,false);
   finish();
-  c.pos=[];c.road=[];c.rise=[];c.idx=[];c.farIdx=[];
+  c.pos=[];c.road=[];c.rise=[];c.idx=[];c.farIdx=[];c.owner=[];
 }
 function append(c,pts,r,d){
   const half=(r.width+r.left+r.right)/2; // bands live in the same ribbon, outside the tagged carriageway
@@ -236,9 +289,10 @@ function append(c,pts,r,d){
       y+=LIFT;
       const qy=Math.round((y/5+100)*100);
       if([qx,qy,qz].some(v=>v<0||v>65535||!Number.isFinite(v)))throw Error('Road position overflow '+JSON.stringify({road:r.id,block:c.key,qx,qy,qz}));
+      c.owner.push(r);
       c.pos.push(qx,qy,qz);
       c.rise.push(Math.round(rise/.05));
-      c.road.push(Math.min(255,Math.round(half*4)),Math.round(r.left*10)+(side>0?128:0),Math.round(r.right*10));
+      c.road.push(...(legacy?[Math.min(255,Math.round(half*4)),Math.round(r.left*10)+(side>0?128:0),Math.round(r.right*10)]:roadMetadata(half,r.left,r.right,side)));
     }
   }
   // Each rail is simplified independently in quantised X/Z, height and Master delta.
@@ -256,8 +310,8 @@ function append(c,pts,r,d){
     return Array.from(keep,(v,i)=>v?i:-1).filter(i=>i>=0);
   };
   const left=keepRail(0),right=keepRail(1);
-  c.pos.length=base*3;c.road.length=base*3;c.rise.length=base;
-  const write=(kept,side)=>kept.map(t=>{const j=t*2+side,index=c.pos.length/3;c.pos.push(...rawPos.slice(j*3,j*3+3));c.road.push(...rawRoad.slice(j*3,j*3+3));c.rise.push(rawRise[j]);return{t,index};});
+  c.pos.length=base*3;c.road.length=base*3;c.rise.length=base;c.owner.length=base;
+  const write=(kept,side)=>kept.map(t=>{const j=t*2+side,index=c.pos.length/3;c.owner.push(r);c.pos.push(...rawPos.slice(j*3,j*3+3));c.road.push(...rawRoad.slice(j*3,j*3+3));c.rise.push(rawRise[j]);return{t,index};});
   const ls=write(left,0),rs=write(right,1);
   const triangle=(a,b,d)=>{const ids=[a,b,d],[p,q,r]=ids.map(i=>[c.pos[i*3],c.pos[i*3+2]]);if((q[1]-p[1])*(r[0]-p[0])-(q[0]-p[0])*(r[1]-p[1])<0)[ids[1],ids[2]]=[ids[2],ids[1]];c.idx.push(...ids);};
   const stitch=(left,right)=>{
@@ -267,15 +321,17 @@ function append(c,pts,r,d){
       else{triangle(left[li].index,right[ri].index,right[ri+1].index);ri++;}
     }
   };
+  const firstIndex=c.idx.length;
   stitch(ls,rs);
-  if(c.tier==='desktop'){
+  if(legacy?c.tier==='desktop':c.lod==='far'){
     const simplify=rail=>{
       const xs=pts.map(p=>p[0]),zs=pts.map(p=>p[1]),runBox=[Math.min(...xs),Math.min(...zs),Math.max(...xs),Math.max(...zs)];
       if(r.bridge||d||rail.length<3||supportRegions.some(r=>overlap(r,runBox)))return rail;
       const tolerance=Math.min(2,r.width/4);
-      const at=k=>{const j=rail[k].index;return[c.pos[j*3]/(8*tolerance),c.pos[j*3+2]/(8*tolerance),c.pos[j*3+1]/100];};
+      const at=k=>{const j=rail[k].index;return[c.pos[j*3]/(8*tolerance),c.pos[j*3+2]/(8*tolerance),c.pos[j*3+1]/(legacy?100:3)];};
       // Aerial-only rendering tolerance: up to 2m (at most a quarter carriageway width)
-      // horizontally / 1m real vertically. Every road, width and endpoint is retained.
+      // horizontally; 30mm real vertically (legacy baseline: 1m). Every
+      // road, width and endpoint is retained.
       const keep=new Set([0,rail.length-1]),stack=[[0,rail.length-1]];
       while(stack.length){const[a,b]=stack.pop();if(b-a<2)continue;const p=at(a),q=at(b),d=q.map((v,k)=>v-p[k]),l=d.reduce((s,v)=>s+v*v,0);let max=1,which=-1;
         for(let i=a+1;i<b;i++){const v=at(i),t=l?Math.max(0,Math.min(1,v.reduce((s,v,k)=>s+(v-p[k])*d[k],0)/l)):0,err=v.reduce((s,v,k)=>s+(v-p[k]-t*d[k])**2,0);if(err>max){max=err;which=i;}}
@@ -283,7 +339,7 @@ function append(c,pts,r,d){
       }
       return rail.filter((_,i)=>keep.has(i));
     };
-    const near=c.idx;c.idx=c.farIdx;stitch(simplify(ls),simplify(rs));c.farIdx=c.idx;c.idx=near;
+    const near=c.idx;c.idx=legacy?c.farIdx:near.slice(0,firstIndex);stitch(simplify(ls),simplify(rs));if(legacy){c.farIdx=c.idx;c.idx=near;}
   }
 }
 for(const r of network.roads){
@@ -307,10 +363,9 @@ for(const r of network.roads){
     for(let j=0;j<n;j++)samples.push([a[0]+(b[0]-a[0])*j/n,a[1]+(b[1]-a[1])*j/n,(cumulative[i-1]+len*j/n)/L]);
   }
   samples.push([...p.at(-1),1]);
-  // Extend square end caps beneath intersecting ways. Collinear end surfaces share identical
-  // height sampling, winding and depth bias, so overlaps cannot flicker between different colours.
-  if(!r.bridge){const e=(r.width+r.left+r.right)/2;for(const[i,j,sgn]of [[0,1,-1],[samples.length-1,samples.length-2,-1]]){const a=samples[i],b=samples[j],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz)||1;a[0]+=sgn*dx/l*e;a[1]+=sgn*dz/l*e;}}
-  for(const [size,tier] of [[8000,'desktop'],...(r.cls<=4?[[8000,'major']]:[[2000,'near']])]){
+  // Butt caps meet at the mapped junction. --legacy is solely the R1 baseline instrument.
+  if(legacy&&!r.bridge){const e=(r.width+r.left+r.right)/2;for(const[i,j]of [[0,1],[samples.length-1,samples.length-2]]){const a=samples[i],b=samples[j],dx=b[0]-a[0],dz=b[1]-a[1],l=Math.hypot(dx,dz)||1;a[0]-=dx/l*e;a[1]-=dz/l*e;}}
+  for(const [size,tier,lod] of (legacy?[[8000,'desktop'],...(r.cls<=4?[[8000,'major']]:[[2000,'near']])]:[[2000,'desktop','near'],[8000,'desktop','far'],...(r.cls<=4?[[2000,'major','near'],[8000,'major','far']]:[[2000,'near','near']])])){
     let run=[],last=null;
     for(let i=1;i<samples.length;i++) {
       const a=samples[i-1],b=samples[i],cuts=[0,1];
@@ -323,26 +378,46 @@ for(const r of network.roads){
         const lo=cuts[j-1],hi=cuts[j];if(hi-lo<1e-9)continue;
         const p=a.map((v,k)=>v+(b[k]-v)*lo),q=a.map((v,k)=>v+(b[k]-v)*hi);
         const x=Math.floor((p[0]+q[0])/2/size)*size,z=Math.floor((p[1]+q[1])/2/size)*size;
-        const key=tier+'-'+x+'-'+z;
+        const key=tier+(lod?'-'+lod:'')+'-'+x+'-'+z;
         if(last&&key!==last.key){append(last,run,r,d);run=[];}
-        last=group(key,x,z,size,tier);
+        last=group(key,x,z,size,tier,lod);
         if(!run.length)run.push(p);run.push(q);
       }
     }
     if(last&&run.length>1)append(last,run,r,d);
   }
 }
+// Finish every source before serialising: a later source may contribute a
+// clipped pavement overhang to an earlier cell. Spill triangles are already
+// fitted, clipped and encoded in their destination's coordinate frame.
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key)))flush(c);
+for(const [key,triangles]of spills)flush(groups.get(key),triangles);
+spills.clear();
 const records=[];let totalGPU=0,compressedBytes=0;
-for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){flush(c);for(let j=0;j<c.parts.length;j++){
-  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);head.writeUInt32LE((p.across?1:0)|(p.pos instanceof Float32Array?2:0),28);
-  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer),...(p.across?[Buffer.from(p.across.buffer)]:[])]),body=zlib.gzipSync(raw,{level:9});
-  const file=c.key+'-'+j+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
-  const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
-  let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=(p.pos[i]/100-100)*5;lo=Math.min(lo,y);hi=Math.max(hi,y);}
-  records.push({file,tier:c.tier,x:c.x+64,z:c.z+64,size:c.size,vertices:n,indices:p.idx.length,bytes:gpu,sha256:createHash('sha256').update(body).digest('hex'),bounds:[c.x,c.z,lo,c.x+c.size+128,c.z+c.size+128,hi]});
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){if(c.lod){const parts=c.parts.map(p=>compactRoadPart(p,p.idx));c.parts=c.lod==='near'?mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:false}):localiseRoadParts(mergeRoadParts(parts),4000,{deduplicate:true,mergeMorph:true,index16:true});}for(let j=0;j<c.parts.length;j++){
+  const original=c.parts[j],pair=c.key+'-'+j;
+  const selectBounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
+  for(let i=0;i<original.pos.length;i+=3){const x=c.x+original.pos[i]/8,z=c.z+original.pos[i+2]/8,y=original.pos[i+1]*.05-500;
+    selectBounds[0]=Math.min(selectBounds[0],x);selectBounds[1]=Math.min(selectBounds[1],z);selectBounds[2]=Math.min(selectBounds[2],y);
+    selectBounds[3]=Math.max(selectBounds[3],x);selectBounds[4]=Math.max(selectBounds[4],z);selectBounds[5]=Math.max(selectBounds[5],y);
+  }
+  const variants=legacy?[{part:original,lod:null}]:[{part:c.lod==='far'?original:compactRoadPart(original,original.idx),lod:c.lod}];
+  for(const {part:p,lod} of variants){
+    const n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);head.writeUInt32LE((p.across?1:0)|(p.pos instanceof Float32Array?2:0)|(legacy?0:4)|(p.idx.BYTES_PER_ELEMENT===4?8:0),28);
+    const pad=p.idx.BYTES_PER_ELEMENT===4?(4-(32+p.pos.byteLength+p.road.byteLength+(p.rise?p.rise.byteLength:0))%4)%4:n%2;
+    const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(pad),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer),...(p.across?[Buffer.from(p.across.buffer)]:[])]);
+    if(!legacy)repairRoadClearance(raw,{inRegion:inReservoirFootRegion,support:finalSupport});
+    if(!legacy){const floating=p.pos instanceof Float32Array,stride=floating?12:6;for(let i=0;i<n;i++){const y=(floating?raw.readFloatLE(32+i*stride+4):raw.readUInt16LE(32+i*stride+2))*.05-500;selectBounds[5]=Math.max(selectBounds[5],y);}}
+    const body=zlib.gzipSync(raw,{level:9});
+    const file=pair+(lod?'-'+lod:'')+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
+    const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
+    let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=legacy?(p.pos[i]/100-100)*5:p.pos[i]*.05-500;lo=Math.min(lo,y);hi=Math.max(hi,y);}
+    records.push({file,tier:c.tier,...(lod?{lod,tileLOD:true,indexBytes:p.idx.BYTES_PER_ELEMENT}:{}),x:c.x+64,z:c.z+64,size:c.size,vertices:n,indices:p.idx.length,bytes:gpu,sha256:createHash('sha256').update(body).digest('hex'),bounds:legacy?[c.x,c.z,lo,c.x+c.size+128,c.z+c.size+128,hi]:selectBounds});
+  }
 }}
-const meta={format:'UGR4',source:'© OpenStreetMap contributors, ODbL 1.0',licence:'https://www.openstreetmap.org/copyright',classes:CLASSES,classWidthsM:WIDTHS,stats:network.stats,networkSHA256:createHash('sha256').update(networkBytes).digest('hex'),desktopGPUBytes:totalGPU,compressedGeometryBytes:compressedBytes,bridgeRoadWidths,bridgeMorphs,bridgeBytes:bridgeOffset,bridgeSHA256:createHash('sha256').update(bridgeBytes).digest('hex'),records};
+const meta={format:'UGR4',...(!legacy?{streamingLODs:true,tileLODs:true}:{}),source:'© OpenStreetMap contributors, ODbL 1.0',licence:'https://www.openstreetmap.org/copyright',classes:CLASSES,classWidthsM:WIDTHS,stats:network.stats,networkSHA256:createHash('sha256').update(networkBytes).digest('hex'),desktopGPUBytes:totalGPU,compressedGeometryBytes:compressedBytes,bridgeRoadWidths,bridgeMorphs,bridgeBytes:bridgeOffset,bridgeSHA256:createHash('sha256').update(bridgeBytes).digest('hex'),records};
 const keep=new Set(['manifest.json','network.bin.gz','bridge-decks.bin.gz',...records.map(r=>r.file)]);
 for(const file of fs.readdirSync(out))if((file.endsWith('.bin.gz')||file==='manifest.json')&&!keep.has(file))fs.unlinkSync(path.join(out,file));
 fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(meta));
+if(audit){for(const v of Object.values(audit.lods))v.percent=100*v.overlapArea/v.pavementArea;audit.percent=100*audit.overlapArea/audit.pavementArea;fs.writeFileSync(path.join(out,'junction-audit.json'),JSON.stringify(audit,null,2));}
 console.log(JSON.stringify({...network.stats,files:records.length,desktopGPUBytes:totalGPU,compressedGeometryBytes:compressedBytes}));

@@ -1,0 +1,162 @@
+// Shared offline geometry for roads, building clearance and the independent R1 measure.
+// Data © OpenStreetMap contributors, ODbL 1.0. Coordinates are canonical X/Z metres.
+export const signedArea = p => p.reduce((s,a,i)=>{const b=p[(i+1)%p.length];return s+a[0]*b[1]-b[0]*a[1];},0)/2;
+export const area = p => Math.abs(signedArea(p));
+export const bounds = p => [Math.min(...p.map(v=>v[0])),Math.min(...p.map(v=>v[1])),Math.max(...p.map(v=>v[0])),Math.max(...p.map(v=>v[1]))];
+export const overlaps=(a,b)=>a[0]<=b[2]&&a[2]>=b[0]&&a[1]<=b[3]&&a[3]>=b[1];
+export function split(poly, distance) {
+  const eps=1e-8,ds=poly.map(distance);
+  if(Math.min(...ds)>=-eps)return [poly,[]];if(Math.max(...ds)<=eps)return [[],poly];
+  const yes=[],no=[];let a=poly.at(-1),da=distance(a);
+  for(const b of poly){const db=distance(b);
+    if((da>eps&&db<-eps)||(da<-eps&&db>eps)){const t=da/(da-db),p=a.map((v,k)=>v+(b[k]-v)*t);yes.push(p);no.push(p);}
+    if(db>=-eps)yes.push(b);if(db<=eps)no.push(b);a=b;da=db;
+  }
+  return [yes,no].map(p=>p.length>=3&&area(p)>1e-7?p:[]);
+}
+export function cut(poly, clip) {
+  let inside=poly;const outside=[];
+  for(let i=0;i<clip.length&&inside.length;i++){
+    const a=clip[i],b=clip[(i+1)%clip.length];
+    const [yes,no]=split(inside,p=>(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]));
+    if(no.length)outside.push(no);inside=yes;
+  }
+  return inside.length?{inside,outside}:{inside:[],outside:[poly]};
+}
+export function carriagewayPolygons(r) {
+  const rails=r.p.map((p,i)=>{
+    const a=r.p[Math.max(0,i-1)],b=r.p[Math.min(r.p.length-1,i+1)],L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;
+    return [-1,1].map(side=>[p[0]-(b[1]-a[1])/L*side*r.width/2,p[1]+(b[0]-a[0])/L*side*r.width/2]);
+  });
+  return rails.slice(1).flatMap((b,i)=>{const a=rails[i],p=[a[0],b[0],b[1],a[1]];
+    if(area(p)<1e-7)return [];return [signedArea(p)<0?p.reverse():p];});
+}
+export function carriagewayIndex(roads,cell=80) {
+  const buckets=new Map();let count=0;
+  for(const r of roads)if(!r.tunnel)for(const polygon of carriagewayPolygons(r)){
+    const box=bounds(polygon),f={r,polygon,box};count++;
+    for(let x=Math.floor(box[0]/cell);x<=Math.floor(box[2]/cell);x++)for(let z=Math.floor(box[1]/cell);z<=Math.floor(box[3]/cell);z++){
+      const k=x+','+z;if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push(f);
+    }
+  }
+  const query=box=>{const found=new Set();for(let x=Math.floor(box[0]/cell);x<=Math.floor(box[2]/cell);x++)for(let z=Math.floor(box[1]/cell);z<=Math.floor(box[3]/cell);z++)for(const f of buckets.get(x+','+z)??[])if(overlaps(box,f.box))found.add(f);return [...found];};
+  query.count=count;return query;
+}
+// Across coordinate is element 2 in metres. Height and morph values after it are
+// interpolated by every cut. This preserves the existing bank/bridge support law.
+export function trimJunction(triangle,r,index) {
+  const candidates=index(bounds(triangle)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge&&cut(triangle,f.polygon).inside.length);
+  if(!candidates.length)return [{polygon:triangle,junction:false}];
+  const half=(r.width+r.left+r.right)/2,left=-half+r.left,right=half-r.right;
+  const [pavementL,rest]=split(triangle,p=>left-p[2]);
+  const [pavementR,carriageway]=rest.length?split(rest,p=>p[2]-right):[[],[]];
+  const result=[];
+  // Cut only pavement from the shared intersection. The intersecting road's
+  // own carriageway supplies its asphalt, without redundant overlay faces.
+  for(const band of [pavementL,pavementR])if(band.length){let pieces=[band];
+    for(const f of candidates)pieces=pieces.flatMap(p=>cut(p,f.polygon).outside);
+    result.push(...pieces.map(polygon=>({polygon,junction:false})));
+  }
+  if(carriageway.length){
+    // Markings need the outside of each junction, not internal boundaries
+    // between consecutive quads of the same intersecting road. Merge touching
+    // intersection boxes and use their convex hull. This is conservative for
+    // paint only; pavement clipping above remains the exact carriageway union.
+    const clusters=[];
+    for(const f of candidates){const p=cut(carriageway,f.polygon).inside;if(!p.length)continue;
+      let points=p,box=bounds(p);
+      for(let i=clusters.length-1;i>=0;i--){const c=clusters[i];if(overlaps([box[0]-.05,box[1]-.05,box[2]+.05,box[3]+.05],c.box)){
+        points=[...points,...c.points];box=bounds(points);clusters.splice(i,1);
+      }}
+      clusters.push({points,box});
+    }
+    let pieces=[carriageway];
+    for(const c of clusters){const polygon=convexHull(c.points);if(polygon.length<3)continue;const next=[];
+      for(const p of pieces){const {inside,outside}=cut(p,polygon);next.push(...outside);if(inside.length)result.push({polygon:inside,junction:true});}pieces=next;
+    }
+    result.push(...pieces.map(polygon=>({polygon,junction:false})));
+  }
+  return result;
+}
+
+// Remove only the parts of a pavement that occupy another carriageway. Keep
+// the remaining ribbon whole, rather than tessellating its asphalt for paint.
+// The extra coordinate is a conservative signed paint field. A selected
+// outside plane is negative everywhere inside its convex carriageway; the
+// minimum of those planes is concave, so interpolation cannot paint a junction.
+export function trimRibbon(triangle,r,index) {
+  const half=(r.width+r.left+r.right)/2,left=-half+r.left,right=half-r.right;
+  const [a,b,c]=triangle,dx=b[0]-a[0],dz=b[1]-a[1],ex=c[0]-a[0],ez=c[1]-a[1],det=dx*ez-dz*ex;
+  if(Math.abs(det)<1e-12)return [];
+  const nx=((b[2]-a[2])*ez-(c[2]-a[2])*dz)/det,nz=(dx*(c[2]-a[2])-ex*(b[2]-a[2]))/det;
+  const across=p=>a[2]+nx*(p[0]-a[0])+nz*(p[1]-a[1]);
+  const candidates=index(bounds(triangle)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge&&cut(triangle,f.polygon).inside.length);
+  const cw=split(split(triangle,p=>p[2]-left)[0],p=>right-p[2])[0];
+  const norm=Math.hypot(nx,nz)||1,tangent=[-nz/norm,nx/norm],along=p=>p[0]*tangent[0]+p[1]*tangent[1];
+  const planeSets=[],ranges=[];
+  for(const f of candidates){const intersection=cw.length?cut(cw,f.polygon).inside:[];if(!intersection.length)continue;
+    const values=intersection.map(along);ranges.push([Math.min(...values),Math.max(...values)]);
+    planeSets.push(f.polygon.map((p,i)=>{const q=f.polygon[(i+1)%f.polygon.length],x=q[0]-p[0],z=q[1]-p[1],l=Math.hypot(x,z)||1;return v=>(z*(v[0]-p[0])-x*(v[1]-p[1]))/l;}));
+  }
+  const merged=[];for(const range of ranges.sort((a,b)=>a[0]-b[0])){const last=merged.at(-1);if(last&&range[0]<=last[1]+.05)last[1]=Math.max(last[1],range[1]);else merged.push([...range]);}
+  // One cross-road partition per junction lets the two approaches choose
+  // their own outside plane without tessellating the whole junction hull.
+  let bases=[triangle];for(const [lo,hi]of merged){const mid=(lo+hi)/2;bases=bases.flatMap(poly=>split(poly,p=>along(p)-mid).filter(p=>p.length));}
+  const result=[];
+  for(const base of bases){
+    const centre=[base.reduce((s,p)=>s+p[0]/base.length,0),base.reduce((s,p)=>s+p[1]/base.length,0)];
+    const planes=planeSets.map(edges=>edges.reduce((best,f)=>f(centre)>best(centre)?f:best));
+    const distance=p=>planes.length?Math.min(...planes.map(f=>f(p))):327;
+    const scale=Math.min(1,28/Math.max(1,...base.map(p=>Math.abs(distance(p)))));
+    // 15cm covers the 125mm X/Z grid. Bias by a full encoded unit before
+    // flooring to six bits, so quantisation cannot extend paint into a junction.
+    let pieces=[base.map(p=>[...p,distance(p)*scale-.15*scale-1.01])];
+    for(const f of candidates)for(const [width,sign]of [[r.left,-1],[r.right,1]])if(width){
+      const clip=split(f.polygon,p=>sign<0?left+.125-across(p):across(p)-right+.125)[0];
+      if(clip.length)pieces=pieces.flatMap(p=>cut(p,clip).outside);
+    }
+    result.push(...pieces);
+  }
+  return result.map(polygon=>({polygon,junction:false}));
+}
+
+// Partition the full ribbon footprint, including its overhang into a cell whose
+// centreline never enters it. Each point keeps all affine payload coordinates.
+export function roadTriangleTiles(triangle,size=2000){
+  const box=bounds(triangle),result=[];
+  for(let x=Math.floor(box[0]/size)*size;x<=box[2];x+=size)for(let z=Math.floor(box[1]/size)*size;z<=box[3];z+=size){
+    let polygon=triangle;for(const edge of [p=>p[0]-x,p=>x+size-p[0],p=>p[1]-z,p=>z+size-p[1]])if(polygon.length)polygon=split(polygon,edge)[0];
+    if(polygon.length)result.push({x,z,polygon});
+  }
+  return result;
+}
+
+
+// Exact plan-view pavement polygons for consumers (no terrain/height dependency).
+// At junctions the shared intersection is asphalt, so only outside pieces can
+// contain a pavement. Vertices retain across-road metres for verification.
+export function pavementPolygons(r,index) {
+  if(r.tunnel||(!r.left&&!r.right))return [];
+  const half=(r.width+r.left+r.right)/2,offset=(r.right-r.left)/2;
+  const rails=r.p.map((p,i)=>{const a=r.p[Math.max(0,i-1)],b=r.p[Math.min(r.p.length-1,i+1)],L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;
+    return [-1,1].map(side=>[p[0]-(b[1]-a[1])/L*(side*half+offset),p[1]+(b[0]-a[0])/L*(side*half+offset),side*half]);
+  });
+  const result=[];
+  for(let i=1;i<rails.length;i++)for(const t of [[rails[i-1][0],rails[i][0],rails[i][1]],[rails[i-1][0],rails[i][1],rails[i-1][1]]])
+    for(const {polygon,junction} of trimJunction(t,r,index))if(!junction){
+      if(r.left){const band=split(polygon,p=>-half+r.left-p[2])[0];if(band.length)result.push(band);}
+      if(r.right){const band=split(polygon,p=>p[2]-half+r.right)[0];if(band.length)result.push(band);}
+    }
+  return result;
+}
+
+// All input vertices came from one affine road triangle, so selecting hull
+// points preserves height/across/morph interpolation exactly.
+export function convexHull(points) {
+  const sorted=[...points].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  const p=sorted.filter((a,i)=>!i||Math.hypot(a[0]-sorted[i-1][0],a[1]-sorted[i-1][1])>1e-8);
+  if(p.length<3)return p;
+  const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const half=pts=>{const out=[];for(const v of pts){while(out.length>1&&cross(out.at(-2),out.at(-1),v)<=1e-9)out.pop();out.push(v);}return out;};
+  return [...half(p).slice(0,-1),...half([...p].reverse()).slice(0,-1)];
+}

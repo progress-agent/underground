@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Scene} from 'three';
+import {Scene,ShaderLib} from 'three';
 import {groundCueStrength,groundCueWeight} from '../src/ground-cue.js';
 import {createRoads} from '../src/roads.js';
 
@@ -28,4 +28,15 @@ test('road cue height follows Master and tuning never replaces either material',
   assert.deepEqual(materials.map(m=>m.customProgramCacheKey()),keys);
   for(const m of materials)assert.equal(m.emissive.getHex(),0);
   }finally{r.dispose()}
+});
+test('both road materials install the cue after the base pavement colour',()=>{
+  const roads=createRoads({scene:new Scene(),isOpen:()=>false});
+  try{for(const material of [roads.material,roads.bridgeMaterial]){
+    const shader={vertexShader:ShaderLib.lambert.vertexShader,fragmentShader:ShaderLib.lambert.fragmentShader,uniforms:{}};
+    material.onBeforeCompile(shader,null);
+    assert.ok(shader.fragmentShader.includes('float gcJoints = gcJoint('));
+    assert.ok(shader.fragmentShader.indexOf('diffuseColor.rgb=lkCol;')<shader.fragmentShader.indexOf('float gcJoints ='));
+    assert.ok(shader.vertexShader.includes('vGroundLocal = vRoadWorld - uGroundOrigin;'));
+    assert.equal(shader.uniforms.uGroundCue,roads.material.userData.shader.uniforms.uGroundCue);
+  }}finally{roads.dispose();}
 });
