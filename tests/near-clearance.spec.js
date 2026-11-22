@@ -125,7 +125,7 @@ test.describe('first person against a wall', () => {
           choices.push({...p,d:Math.hypot(p.x-c.x,p.z-c.z)});
         }
       }
-      choices.sort((a,b)=>a.d-b.d);if(!choices.length)throw Error('no drawn terrace wall near original contact');const p=choices[0];return pull?{x:p.x-1.5*Math.sin(p.yaw),z:p.z-1.5*Math.cos(p.yaw),yaw:p.yaw+Math.PI}:p;
+      choices.sort((a,b)=>a.d-b.d);if(!choices.length)throw Error('no drawn terrace wall near original contact');const p=choices[0];return pull?{x:p.x-(2-(c.pullGap??.5))*Math.sin(p.yaw),z:p.z-(2-(c.pullGap??.5))*Math.cos(p.yaw),yaw:p.yaw+Math.PI}:p;
     },c);
     await h.ev(([x,z,yaw,view])=>{const p=window.__ug.modes.registry.get('pedestrian');p.place(x,z,{yaw});p.setView(view);},[pose.x,pose.z,pose.yaw,view]);
     await h.wait(900);
@@ -182,11 +182,10 @@ test.describe('first person against a wall', () => {
   test('third person beside a facade (pulled in or not) never has a larger near than the rig asks, and its corners stay clear', async () => {
     // Put the wall behind the camera as it walks away. A north-facing
     // contact no longer implies a narrow alley after rectangles rotate.
-    const c = { ...CONTACTS[2], id: 'C3-pull' };
+    const c = { ...CONTACTS[2], id: 'C3-pull', pullGap: 1.5 };
     await press(c, 'third');
     const probe = PROBE.replace('const cam = u.camera;', 'const cam = u.camera; const rig = ped.onFoot.rig;').replace('card: ped', 'rigDist: rig.distance, suggested: rig.suggestedNear, card: ped');
-    // Hold this positive near-wall pose; the following two cases cover motion away and back.
-    const rows = await h.sample(3.0, probe, []);
+    const rows = await h.sample(3.0, probe, [{ t: 0, down: ['w'] }]);
     await h.releaseKeys();
     const close = rows.filter((r) => r.dmin < 1.5);
     console.log(`[near third] ${rows.length} frames, ${rows.filter((r) => r.rigDist <= 2.5).length} pulled in, ${close.length} with a wall within 1.5 m of the camera, worst margin ${Math.min(...rows.map((r) => r.margin)).toFixed(3)} m, least near ${Math.min(...rows.map((r) => r.near)).toFixed(3)}`);
