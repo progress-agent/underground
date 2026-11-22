@@ -19,8 +19,7 @@ ribbons, and its byte-identical regeneration test.
 
 Widths take `width:carriageway` or `width`, else lanes times 3.2m, else class
 width halved for one-way ways. The lane figure is the sprint's informed estimate
-(D-062), representing an urban traffic lane between constrained 3m and typical
-3.65m conventions. Existing pavement-width tagging and the 2m class estimate
+(D-062), chosen by the sprint acceptance spec to represent a typical urban traffic lane, not a survey. Existing pavement-width tagging and the 2m class estimate
 are retained. Opposing parallel one-way segments with the same name/ref,
 class, layer and bridge status are paired within 3 to 40m. Length-weighted
 midpoint votes select the side towards the other carriageway; that pavement

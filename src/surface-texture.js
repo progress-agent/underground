@@ -20,6 +20,7 @@
 //   This means the texture and vM25Uv use the same orientation — no flip needed.
 
 import * as THREE from 'three';
+import {roadRasterWeight} from './road-style.js';
 import { isInThames } from './thames-mask.js';
 import { getTerrainBounds } from './terrain.js';
 import parkBoundaryRepairs from './park-boundary-repairs.json' with { type: 'json' };
@@ -362,7 +363,7 @@ const SURFACE_FRAG = /* glsl */ `
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.18, 0.35, 0.15), park * 0.7);
 
       // Roads: dark asphalt (road overwrites park where both present)
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.15, 0.14, 0.13), road * 0.8);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.15, 0.14, 0.13), road * 0.8 * roadRasterWeight);
     }
   }
 `;
@@ -407,6 +408,7 @@ export function applySurfaceTexture(material, tex, bounds) {
       value: new THREE.Vector2(bounds.maxU, bounds.maxV),
     };
     shader.uniforms.surfaceEnabled = surfaceEnabledUniform;
+    shader.uniforms.roadRasterWeight = roadRasterWeight;
 
     // ── Fragment shader: uniform declarations ──
     // The M25 mask has already injected `uniform sampler2D m25Mask;` and
@@ -419,7 +421,8 @@ export function applySurfaceTexture(material, tex, bounds) {
 uniform sampler2D surfaceTex;
 uniform vec2 surfaceBoundsMin;
 uniform vec2 surfaceBoundsMax;
-uniform float surfaceEnabled;`
+uniform float surfaceEnabled;
+uniform float roadRasterWeight;`
       );
     } else {
       // Fallback: M25 mask not applied — inject everything ourselves.
@@ -430,6 +433,7 @@ uniform float surfaceEnabled;`
 uniform vec2 surfaceBoundsMin;
 uniform vec2 surfaceBoundsMax;
 uniform float surfaceEnabled;
+uniform float roadRasterWeight;
 varying vec2 vM25Uv;
 void main() {`
       );

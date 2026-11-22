@@ -15,6 +15,8 @@ test('width precedence: explicit metres, lanes at estimated 3.2m, one-way half, 
     assert.equal(dimensions({},cls).width,WIDTHS[cls]);
   }
   assert.equal(dimensions({lanes:'bad'},2).width,9);
+  assert.deepEqual(dimensions({oneway:'yes'},1),{width:5,left:2,right:2});
+  assert.deepEqual(dimensions({oneway:'yes',sidewalk:'no'},1),{width:5,left:0,right:0});
 });
 test('five real dual carriageways follow source widths and suppress the inner pavement',()=>{
   const net=buildNetwork(root,[[-80000,-80000],[80000,-80000],[80000,80000],[-80000,80000]]);
@@ -43,7 +45,7 @@ test('junction clipping removes pavement across a T and marks the carriageway ov
     }
     if(p.junction)junction+=area(p.polygon);
   }
-  assert.ok(Math.abs(pavement-136)<1e-6);assert.ok(Math.abs(junction-60)<1e-6);
+  assert.ok(Math.abs(pavement-136)<1e-6);assert.ok(Math.abs(junction-36)<1e-6);
 });
 test('a disjoint convex clip preserves the original face rather than fragmenting it on infinite edge lines',()=>{
   const triangle=[[0,0],[10,0],[0,10]],clip=[[9,9],[11,9],[11,11],[9,11]];

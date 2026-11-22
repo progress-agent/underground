@@ -470,10 +470,20 @@
             <input id="victoriaShafts" type="checkbox" checked />
             <span>Shafts</span>
           </label>
-          <label style="display:flex; gap:6px; align-items:center; user-select:none;">
-            <input id="roadsVisible" type="checkbox" checked />
-            <span>Roads</span>
-          </label>
+          <span style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <label style="display:flex; gap:6px; align-items:center; user-select:none;">
+              <input id="roadsVisible" type="checkbox" checked />
+              <span>Roads</span>
+            </label>
+            <!-- Road control follows the existing UnderGround HUD tokens, WD113-ed3c40d7. -->
+            <label style="display:flex; gap:6px; align-items:center;">
+              <span>Road look</span>
+              <select id="roadLook" aria-label="Road look" style="font:inherit; padding:2px 8px; color:inherit; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.18); border-radius:6px;">
+                <option value="2">Plain</option>
+                <option value="3">Painted lines</option>
+              </select>
+            </label>
+          </span>
         </p>
 
         <p class="small" style="margin-top:8px;">

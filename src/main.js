@@ -1404,7 +1404,7 @@ const lateLayers = createLateLayers({
 });
 openingHooks.register({ lateLayers });
 // s25:R: data and buffers start only after landing; the off path allocates no road buffers.
-const roads = createRoads({ scene, phone: TOUCH_UI, groundCue: getUrlStringParam('groundcue'), getRatio: getBuildingHeightScale, getBridges: () => bridgesGroup,
+const roads = createRoads({ scene, phone: TOUCH_UI, groundCue: getUrlStringParam('groundcue'), look: getUrlStringParam('roadlook'), getCamera: () => camera, getRatio: getBuildingHeightScale, getBridges: () => bridgesGroup,
   compile: object => { const target = renderer.getRenderTarget(); renderer.setRenderTarget(composer.readBuffer);
     try { return renderer.compileAsync(object, camera, scene); } finally { renderer.setRenderTarget(target); } },
   isOpen: () => ['done','bypassed'].includes(intro.getPhase()) });
@@ -1412,6 +1412,11 @@ roads.setEnabled(getUrlStringParam('roads') !== '0');
 const roadsToggle = document.getElementById('roadsVisible');
 if (roadsToggle) { roadsToggle.checked = roads.enabled;
   roadsToggle.addEventListener('change', () => roads.setEnabled(roadsToggle.checked)); }
+// s26:R: a uniform-only look switch, beside the existing Roads toggle.
+const roadLookControl = document.getElementById('roadLook');
+if (roadLookControl) { roadLookControl.value = String(roads.look);
+  roadLookControl.addEventListener('change', () => roads.setLook(roadLookControl.value)); }
+
 
 // settled() and ug:late-layers-done wait for all eight; a layer whose parent step or data failed is skipped, so they never hang.
 lateLayers.expect(LATE_LAYER_ORDER);

@@ -22,14 +22,14 @@ The generator clips individual segments against the actual map edge, then simpli
 
 Carriageway default widths are the October proof's **estimates**, in metres: motorway 12,
 trunk 10, primary 9, secondary 8, tertiary 7, residential 6, service 3.5, other 4.5. Tagged
-`width:carriageway` or `width` overrides them, including explicit feet. These values describe
+`width:carriageway` or `width` overrides them, including explicit feet. Without a tagged width, `lanes` takes the sprint’s labelled 3.2m urban-lane estimate (D-062); otherwise a one-way way takes half its class width. These values describe
 individual OSM carriageways, not both sides of an independently mapped divided road.
 [OSM width semantics](https://wiki.openstreetmap.org/wiki/Key:width).
 
 Pavements use OSM `sidewalk`, `sidewalk:both`, `sidewalk:left`, `sidewalk:right` and their width
 tags. `separate` means that the pavement exists, although separately mapped footways are not
 drawn by this layer. Without a tag, primary through residential gets a 2m band on each side;
-motorways, trunk roads, service and other classes get none. The 2m width is an **informed
+motorways, two-way trunk roads, service and other classes get none. Untagged one-way trunk roads receive the same 2m estimate. Opposing parallel one-way carriageways are paired by shared name/ref, class, layer and bridge status within 3 to 40m; the pavement towards the paired carriageway is removed. Explicit no-pavement tags remain authoritative, and unpaired ways retain their tagged/class bands. The manifest reports both counts. The 2m width is an **informed
 estimate**, based on the Department for Transport's preferred unobstructed pedestrian width,
 not a claim that every London street meets that guidance:
 [Inclusive Mobility, section 4.2](https://www.gov.uk/government/publications/inclusive-mobility-making-transport-accessible-for-passengers-and-pedestrians).
@@ -39,8 +39,8 @@ Some legacy Thames decks are narrower than the mapped carriageways. An **informe
 widens the road-bearing deck to the envelope of its parallel OSM carriageways, their class/tag
 widths and pavement bands, plus a 250mm edge allowance. The road compiler uses that same deck
 geometry, so a rail never falls off a narrow authored deck into the river. The generated
-`bridge-decks.bin.gz` stores immutable VE5 positions and terrain feet for 16 mesh parts,
-217,856 bytes decoded. After landing the runtime prepares one part per frame, preserving the
+`bridge-decks.bin.gz` stores immutable VE5 positions and terrain feet for 20 mesh parts,
+262,144 bytes decoded on this network. After landing the runtime prepares one part per frame, preserving the
 original mesh and material identities. Roads off, below ground and submerged restore the
 original deck geometry; the roads-off opening and day look remain identical to live.
 
@@ -64,8 +64,13 @@ word at byte 24 stores an optional aerial-index count. Byte 28 is a flags word: 
 a normalised Int16 across-road coordinate after both indices; bit 1 selects Float32 positions.
 Zero flags retain the original layout. The optional coordinate preserves paving phase at
 interior clipping vertices. Three bytes per vertex carry
-ribbon half-width at 250mm, left pavement width at 100mm with the across-road side in its
-high bit, and right pavement width at 100mm. A bridge
+ribbon half-width and two pavement widths. The half-width base byte carries quarters
+of a metre; bit 6 in each pavement byte carries its two fractional bits, giving
+1/16m half-width precision without another attribute. Pavement widths use the lower
+six bits at 100mm. Bit 7 of the left byte is the rail side; bit 7 of the right byte
+suppresses markings in a junction. Old UGR4 has zero fractional bits and remains
+decodable. A 3.2m carriageway is therefore represented to within 62.5mm, rather than
+rounding its semantic width to 3.0m. A bridge
 adds a signed 16-bit vertical morph delta. Upward winding is checked for every triangle.
 Sampling splits both road rails at the terrain grid edges and triangle diagonals before quantisation; each rail then removes redundant samples within 250mm horizontal and 30mm real vertical deviation, including its Master morph delta;
 a 60mm real canonical lift plus polygon offset (-4 factor and units) prevents ground fighting.
@@ -86,20 +91,50 @@ it does not borrow the higher bank at a shared boundary vertex.
 Small affected road runs keep their full aerial index;
 the rest retain the existing simplification bounds.
 
-Desktop loads combined 8km blocks for every class (subdivided at the vertex cap).
-Above 120m displayed height it uses an additional, offline-simplified triangle index
-sharing the exact same vertex attributes. Every road, endpoint and ribbon width stays;
-only interior rail samples are reduced, within the smaller of 2m or a quarter of the
-carriageway width horizontally and 1m vertically (rendering estimates). Bridge triangles
-are never simplified. The full street index returns below 120m. Both indices are disposed
-on toggle/range removal; phone blocks carry only their original full index. This is an
-internal aerial drawing economy; it creates no texture, shader variant or compile. Phone
-uses its separate 8km major-road blocks, plus 2km minor-road blocks whose bounds are within 1.8km of the camera below 120m.
-This guarantees every street within 1km of a walker, with a further 800m buffer. Minor roads
-are disposed beyond the range, rather than just hidden. At altitude only the major roads stay.
-The fetch and gzip decode start after landing; one already built block is attached per frame.
-The HUD Roads toggle and `?roads=0` stop loading and dispose the buffers. Roads are hidden
-for the existing below-surface and submerged predicates and are FrontSide only as a second guard.
+Junctions have butt caps at their mapped nodes. After terrain/bank fitting, the
+compiler clips each pavement band against other same-layer carriageways. Shared
+carriageway regions carry a marking-suppression bit. Touching carriageway quads
+are grouped into conservative convex marking regions, removing internal seams
+between quads without letting paint cross a junction. Pavement clipping still
+uses the actual carriageway polygons. `scripts/roads/measure-junctions.mjs` reruns
+both the byte-identical legacy bake and the corrected bake, measuring stored
+pavement triangles against the union of other same-layer carriageways.
+
+Each spatial part has separate, compact near and far files with just the vertices
+its own index references. The `lod` and `pair` fields identify mutually exclusive
+files. The manifest’s `desktopGPUBytes` is the sum of all asset variants, not
+runtime residency. The runtime keeps every detailed desktop part within 1.8km
+below 120m and uses aerial parts elsewhere. The phone keeps detailed major roads
+and minor-road blocks within 1.8km through 350m, with compact major roads elsewhere.
+This exceeds the 1km walker guarantee. All nearby detail survives a turn; distant
+parts preload a camera cone expanded by the 0.85 projection factor and 250m bounds
+margin. Parts outside that cone are disposed. These are rendering distances, not
+claims about the mapped streets. LOD replacements attach before their predecessor
+is disposed, so loading a new level does not create a blank road.
+
+Aerial simplification retains every road, endpoint and width, reducing only
+interior rail samples within the smaller of 2m or a quarter carriageway width
+horizontally and 1m vertically (rendering estimates). Bridges and repaired bank
+regions retain their full topology. Index/position compaction is offline; the
+browser creates typed-array views and attaches one part per frame after landing.
+The Roads toggle and `?roads=0` stop loading and dispose the buffers. Roads retain
+the existing below-surface/submerged predicates and FrontSide back-face guard.
+
+Look 2 is the default: darker asphalt, lighter pavement and the existing near-ground
+kerb/slab cue. Look 3 adds centre and edge lines and faint asphalt mottle through
+the same two materials and uniform, without extra draw calls or a switch-time
+compile. `?roadlook=2|3` and the HUD select both paths. The 100mm line widths follow
+[Traffic Signs Manual chapter 5 (2018), figures 2-1 and 2-6](https://assets.publishing.service.gov.uk/media/5c4ace6ded915d38a0611abc/traffic-signs-manual-chapter-05.pdf).
+The continuous centre line is illustrative, not a surveyed traffic-control plan.
+The 0.3m edge inset is an informed rendering estimate: the existing 0.125m kerb
+and 0.045m shadow cue plus 0.13m breathing room. The 1.7m mottle scale and 4% colour
+variation are visual settings from the prototype, not surveyed asphalt properties.
+Strips preserve average coverage as they become sub-pixel; mottle resolves to its
+mean before it aliases. Neither treatment is emissive.
+
+The old raster-road term is uniform-disabled once ribbons are visible, without
+rebaking the ground atlas. The opening retains the original raster until landing
+and road attachment. Roads off restores the exact original raster contribution.
 
 Lane K's hook is `createRoadMaterial()` in `src/roads.js`. Chain its `onBeforeCompile` and
 `customProgramCacheKey`, on **both** `roads.material` and `roads.bridgeMaterial`; no clone is

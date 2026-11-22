@@ -47,16 +47,35 @@ export function carriagewayIndex(roads,cell=80) {
 export function trimJunction(triangle,r,index) {
   const candidates=index(bounds(triangle)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge&&cut(triangle,f.polygon).inside.length);
   if(!candidates.length)return [{polygon:triangle,junction:false}];
-  // Split only on the neighbouring carriageway boundary. Inside it, the
-  // WHOLE intersection is asphalt (zero pavement widths), so an own-band
-  // split is unnecessary. This avoids multiplying every junction by three
-  // extra band pieces and preserves much more of the original topology.
-  let pieces=[triangle];const result=[];
-  for(const f of candidates){const next=[];for(const p of pieces){
-    const {inside,outside}=cut(p,f.polygon);next.push(...outside);
-    if(inside.length)result.push({polygon:inside,junction:true});
-  }pieces=next;}
-  result.push(...pieces.map(polygon=>({polygon,junction:false})));
+  const half=(r.width+r.left+r.right)/2,left=-half+r.left,right=half-r.right;
+  const [pavementL,rest]=split(triangle,p=>left-p[2]);
+  const [pavementR,carriageway]=rest.length?split(rest,p=>p[2]-right):[[],[]];
+  const result=[];
+  // Cut only pavement from the shared intersection. The intersecting road's
+  // own carriageway supplies its asphalt, without redundant overlay faces.
+  for(const band of [pavementL,pavementR])if(band.length){let pieces=[band];
+    for(const f of candidates)pieces=pieces.flatMap(p=>cut(p,f.polygon).outside);
+    result.push(...pieces.map(polygon=>({polygon,junction:false})));
+  }
+  if(carriageway.length){
+    // Markings need the outside of each junction, not internal boundaries
+    // between consecutive quads of the same intersecting road. Merge touching
+    // intersection boxes and use their convex hull. This is conservative for
+    // paint only; pavement clipping above remains the exact carriageway union.
+    const clusters=[];
+    for(const f of candidates){const p=cut(carriageway,f.polygon).inside;if(!p.length)continue;
+      let points=p,box=bounds(p);
+      for(let i=clusters.length-1;i>=0;i--){const c=clusters[i];if(overlaps([box[0]-.05,box[1]-.05,box[2]+.05,box[3]+.05],c.box)){
+        points=[...points,...c.points];box=bounds(points);clusters.splice(i,1);
+      }}
+      clusters.push({points,box});
+    }
+    let pieces=[carriageway];
+    for(const c of clusters){const polygon=convexHull(c.points);if(polygon.length<3)continue;const next=[];
+      for(const p of pieces){const {inside,outside}=cut(p,polygon);next.push(...outside);if(inside.length)result.push({polygon:inside,junction:true});}pieces=next;
+    }
+    result.push(...pieces.map(polygon=>({polygon,junction:false})));
+  }
   return result;
 }
 
@@ -76,4 +95,15 @@ export function pavementPolygons(r,index) {
       if(r.right){const band=split(polygon,p=>p[2]-half+r.right)[0];if(band.length)result.push(band);}
     }
   return result;
+}
+
+// All input vertices came from one affine road triangle, so selecting hull
+// points preserves height/across/morph interpolation exactly.
+export function convexHull(points) {
+  const sorted=[...points].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  const p=sorted.filter((a,i)=>!i||Math.hypot(a[0]-sorted[i-1][0],a[1]-sorted[i-1][1])>1e-8);
+  if(p.length<3)return p;
+  const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const half=pts=>{const out=[];for(const v of pts){while(out.length>1&&cross(out.at(-2),out.at(-1),v)<=1e-9)out.pop();out.push(v);}return out;};
+  return [...half(p).slice(0,-1),...half([...p].reverse()).slice(0,-1)];
 }

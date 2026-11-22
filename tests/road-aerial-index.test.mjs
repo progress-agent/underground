@@ -4,24 +4,21 @@ import fs from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import {decodeRoadBlock,createRoadMaterial} from '../src/roads.js';
 
-test('aerial road indices share the original vertices, retain upward triangles and never index outside a block',()=>{
-  const dir=new URL('../public/data/roads/',import.meta.url),manifest=JSON.parse(fs.readFileSync(new URL('manifest.json',dir))),material=createRoadMaterial();
-  let nearCount=0,farCount=0;
-  try{for(const r of manifest.records){
-    const raw=gunzipSync(fs.readFileSync(new URL(r.file,dir))),mesh=decodeRoadBlock(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength),material,material,r);
-    const near=mesh.userData.roadNearGeometry,far=mesh.userData.roadFarGeometry;
-    if(r.tier!=='desktop'){assert.equal(far,undefined);near.dispose();continue;}
-    assert.ok(far);assert.equal(far.attributes.position,near.attributes.position);assert.equal(far.attributes.roadData,near.attributes.roadData);
-    assert.ok(far.index.count<=near.index.count);
-    const p=near.attributes.position;
-    for(let i=0;i<far.index.count;i+=3){
-      const ids=[far.index.getX(i),far.index.getX(i+1),far.index.getX(i+2)];
-      assert.ok(ids.every(j=>j<p.count),r.file);
-      const[a,b,c]=ids,ny=(p.getZ(b)-p.getZ(a))*(p.getX(c)-p.getX(a))-(p.getX(b)-p.getX(a))*(p.getZ(c)-p.getZ(a));
-      assert.ok(ny>=0,r.file);
-    }
-    nearCount+=near.index.count;farCount+=far.index.count;near.dispose();far.dispose();
+test('separately streamable road LODs retain upward triangles, valid indices and only referenced vertices',()=>{
+ const dir=new URL('../public/data/roads/',import.meta.url),manifest=JSON.parse(fs.readFileSync(new URL('manifest.json',dir))),material=createRoadMaterial(),pairs=new Map();
+ let nearCount=0,farCount=0;
+ try{for(const r of manifest.records){
+  const raw=gunzipSync(fs.readFileSync(new URL(r.file,dir))),mesh=decodeRoadBlock(raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength),material,material,r),g=mesh.geometry,p=g.attributes.position;
+  assert.equal(mesh.userData.roadFarGeometry,undefined,'one file owns one LOD, no retained full-size unused vertex buffer');
+  assert.equal(new Set(g.index.array).size,p.count,`${r.file}: unused vertex`);
+  for(let i=0;i<g.index.count;i+=3){const ids=[g.index.getX(i),g.index.getX(i+1),g.index.getX(i+2)];assert.ok(ids.every(j=>j<p.count),r.file);
+   const[a,b,c]=ids,ny=(p.getZ(b)-p.getZ(a))*(p.getX(c)-p.getX(a))-(p.getX(b)-p.getX(a))*(p.getZ(c)-p.getZ(a));assert.ok(ny>=0,r.file);
   }
-  assert.ok(farCount<nearCount,'the additional index must actually reduce drawing');
-  }finally{material.dispose();}
+  if(r.pair){if(!pairs.has(r.pair))pairs.set(r.pair,{});pairs.get(r.pair)[r.lod]=g.index.count;}
+  if(r.tier==='desktop'){if(r.lod==='near')nearCount+=g.index.count;else farCount+=g.index.count;}
+  g.dispose();
+ }
+ for(const [pair,lods]of pairs){assert.ok(lods.near>0&&lods.far>0,pair);assert.ok(lods.far<=lods.near,pair);}
+ assert.ok(pairs.size>0);assert.ok(farCount<nearCount,'the aerial LOD must actually reduce drawing');
+ }finally{material.dispose();}
 });

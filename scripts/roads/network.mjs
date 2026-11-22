@@ -15,17 +15,17 @@ export function metres(value) {
   const n = +m[1] * (m[2] === 'ft' || m[2] === "'" ? .3048 : 1);
   return n > 0 && n < 100 ? n : null;
 }
-// 3.2m per lane is an informed estimate, D-062: a typical urban traffic lane,
-// between the 3m constrained and 3.65m general-purpose UK lane conventions.
+// 3.2m per lane is the sprint acceptance spec’s informed urban-lane estimate,
+// D-062, not a survey of each carriageway.
 export const LANE_WIDTH_M = 3.2;
 export const isOneWay = tags => ['yes','1','true','-1'].includes(String(tags.oneway)) || tags.junction === 'roundabout';
-export function dimensions(tags, cls) {
+export function dimensions(tags, cls, {legacy=false}={}) {
   const lanes = /^\d+(?:\.\d+)?$/.test(String(tags.lanes)) ? +tags.lanes : 0;
   const width = metres(tags['width:carriageway']) ?? metres(tags.width)
     ?? (lanes > 0 && lanes < 20 ? lanes * LANE_WIDTH_M : WIDTHS[cls] * (isOneWay(tags) ? .5 : 1));
   // DfT Inclusive Mobility's 2m preferred unobstructed width, used as an informed estimate,
   // not a survey. 'separate' still has a pavement: separately mapped footways are excluded.
-  const defaults = cls >= 2 && cls <= 5;
+  const defaults = (cls >= 2 && cls <= 5) || (!legacy && cls === 1 && isOneWay(tags));
   const side = which => {
     const flag = tags[`sidewalk:${which}`] ?? tags['sidewalk:both'] ?? tags.sidewalk;
     const no = ['no','none',which === 'left' ? 'right' : 'left'].includes(flag);
@@ -98,7 +98,7 @@ export function buildNetwork(root,ring,{legacy=false}={}) {
       const tunnel=!!t.tunnel&&t.tunnel!=='no'&&t.tunnel!=='building_passage';
       if(tunnel)tunnelKm+=length/1000;else km[cls]+=length/1000;
       if(t.width)widthTags++;
-      roads.push({id:w.id,name:t.name??null,ref:t.ref??null,oneway:isOneWay(t),direction:t.oneway==='-1'?-1:1,roundabout:t.junction==='roundabout',widthSource:metres(t['width:carriageway'])??metres(t.width)?'width':+t.lanes>0?'lanes':isOneWay(t)?'oneway-class':'class',cls,...(legacy?{...dimensions(t,cls),width:metres(t['width:carriageway'])??metres(t.width)??WIDTHS[cls]}:dimensions(t,cls)),bridge:!!t.bridge&&t.bridge!=='no',tunnel,layer:Math.max(-10,Math.min(10,parseInt(t.layer)||0)),p:simplify(run).map(p=>p.map(v=>Math.round(v*100)/100))});
+      roads.push({id:w.id,name:t.name??null,ref:t.ref??null,oneway:isOneWay(t),direction:t.oneway==='-1'?-1:1,roundabout:t.junction==='roundabout',widthSource:metres(t['width:carriageway'])??metres(t.width)?'width':+t.lanes>0?'lanes':isOneWay(t)?'oneway-class':'class',cls,...(legacy?{...dimensions(t,cls,{legacy:true}),width:metres(t['width:carriageway'])??metres(t.width)??WIDTHS[cls]}:dimensions(t,cls)),bridge:!!t.bridge&&t.bridge!=='no',tunnel,layer:Math.max(-10,Math.min(10,parseInt(t.layer)||0)),p:simplify(run).map(p=>p.map(v=>Math.round(v*100)/100))});
     }
   }
   return {roads,stats:{...(legacy?{}:pairCarriageways(roads)),blocks:files.length,uniqueWays:ways.size,km:km.map(v=>+v.toFixed(3)),totalKm:+km.reduce((a,b)=>a+b,0).toFixed(3),tunnelKm:+tunnelKm.toFixed(3),widthTags}};

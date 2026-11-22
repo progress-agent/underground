@@ -6,6 +6,9 @@ import zlib from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {installNodeEnv,ROOT} from '../bake-node-env.mjs';
 import {buildNetwork,CLASSES,WIDTHS} from './network.mjs';
+import {roadMetadata,roadDimensions} from './metadata.mjs';
+import {repairRoadClearance} from './clearance.mjs';
+import {compactRoadPart} from './compact.mjs';
 import {carriagewayIndex,trimJunction,split,cut,area,bounds} from './polygons.mjs';
 import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
 import {surfaceIndex,overlap,conformRoadTriangle,supportFace,raiseRoadDeck} from './support.mjs';
@@ -38,6 +41,21 @@ const supportRegions=targets.map(b=>{const x=b.outer.map(p=>p[0]),z=b.outer.map(
 const terrainFaces=surfaceIndex([terrainResult.mesh],supportRegions);
 const bankFaces=surfaceIndex(bankStep.value.bodies.filter(b=>b.bankMesh).map(b=>b.bankMesh),supportRegions);
 const g=(x,z)=>reservoirRoadBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??0);
+const finalSupport=(x,z)=>{const base=g(x,z),lip=reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??base);return lip>base&&lip-base<.25?lip:base;};
+if(process.argv.includes('--repair-existing')){
+  const file=path.join(out,'manifest.json'),meta=JSON.parse(fs.readFileSync(file)),shared=new Map();
+  for(const r of meta.records)if(r.pair){if(!shared.has(r.pair))shared.set(r.pair,r.bounds);else r.bounds=shared.get(r.pair);}
+  let repaired=0,files=0,maxRaise=0;meta.compressedGeometryBytes=0;
+  for(const r of meta.records){const target=path.join(out,r.file),raw=zlib.gunzipSync(fs.readFileSync(target));
+    const result=repairRoadClearance(raw,{inRegion:inReservoirFootRegion,support:finalSupport});
+    if(result.repaired){const body=zlib.gzipSync(raw,{level:9});fs.writeFileSync(target,body);r.sha256=createHash('sha256').update(body).digest('hex');files++;repaired+=result.repaired;maxRaise=Math.max(maxRaise,result.maxRaise);
+      const n=raw.readUInt32LE(4),floating=!!(raw.readUInt32LE(28)&2),stride=floating?12:6;
+      for(let i=0;i<n;i++){const y=(floating?raw.readFloatLE(32+i*stride+4):raw.readUInt16LE(32+i*stride+2))*.05-500;r.bounds[5]=Math.max(r.bounds[5],y);}
+    }
+    meta.compressedGeometryBytes+=fs.statSync(target).size;
+  }
+  fs.writeFileSync(file,JSON.stringify(meta));console.log(JSON.stringify({files,repaired,maxRaise}));process.exit(0);
+}
 const legacy=process.argv.includes('--legacy');
 const audit=process.argv.includes('--audit')?{pavementArea:0,overlapArea:0,triangles:0}:null;
 const network=buildNetwork(ROOT,getMapEdgeRing(),{legacy});
@@ -140,9 +158,9 @@ function flush(c){
   };
   const emitRaw=(points,far)=>{
     if(audit&&c.tier==='desktop'&&!far){
-      const r=points[0].owner,half=points[0].road[0]/4;
+      const r=points[0].owner,half=roadDimensions(points[0].road).half;
       const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.across/32767*half]);
-      const left=points[0].road[1]%128/10,right=points[0].road[2]%128/10;
+      const {left,right}=roadDimensions(points[0].road);
       const bands=[...(left?[split(tri,p=>-half+left-p[2])[0]]:[]),...(right?[split(tri,p=>p[2]-half+right)[0]]:[])].filter(p=>p.length);
       const faces=junctionIndex(bounds(tri)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge);
       for(const band of bands){const total=area(band);let remaining=[band];for(const f of faces)remaining=remaining.flatMap(p=>cut(p,f.polygon).outside);
@@ -166,7 +184,7 @@ function flush(c){
     for(const {polygon,junction} of trimJunction(triangle,r,junctionIndex))for(let i=1;i<polygon.length-1;i++){
       emitRaw([polygon[0],polygon[i],polygon[i+1]].map(p=>({
         owner:r,pos:[quantize((p[0]-c.x)*8),quantize(p[3]),quantize((p[1]-c.z)*8)],
-        road:[points[0].road[0],junction?0:points[0].road[1]%128,junction?128:points[0].road[2]%128],
+        road:[points[0].road[0],(points[0].road[1]&64)+(junction?0:points[0].road[1]&63),(points[0].road[2]&64)+(junction?128:points[0].road[2]&63)],
         rise:Math.round(p[4]),across:Math.round(Math.max(-1,Math.min(1,p[2]/half))*32767),
       })),far);
     }
@@ -268,7 +286,7 @@ function append(c,pts,r,d){
       c.owner.push(r);
       c.pos.push(qx,qy,qz);
       c.rise.push(Math.round(rise/.05));
-      c.road.push(Math.min(255,Math.round(half*4)),Math.round(r.left*10)+(side>0?128:0),Math.round(r.right*10));
+      c.road.push(...(legacy?[Math.min(255,Math.round(half*4)),Math.round(r.left*10)+(side>0?128:0),Math.round(r.right*10)]:roadMetadata(half,r.left,r.right,side)));
     }
   }
   // Each rail is simplified independently in quantised X/Z, height and Master delta.
@@ -298,7 +316,7 @@ function append(c,pts,r,d){
     }
   };
   stitch(ls,rs);
-  if(c.tier==='desktop'){
+  if(c.tier==='desktop'||(!legacy&&c.tier==='major')){
     const simplify=rail=>{
       const xs=pts.map(p=>p[0]),zs=pts.map(p=>p[1]),runBox=[Math.min(...xs),Math.min(...zs),Math.max(...xs),Math.max(...zs)];
       if(r.bridge||d||rail.length<3||supportRegions.some(r=>overlap(r,runBox)))return rail;
@@ -363,14 +381,28 @@ for(const r of network.roads){
 }
 const records=[];let totalGPU=0,compressedBytes=0;
 for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){flush(c);for(let j=0;j<c.parts.length;j++){
-  const p=c.parts[j],n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);head.writeUInt32LE((p.across?1:0)|(p.pos instanceof Float32Array?2:0),28);
-  const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer),...(p.across?[Buffer.from(p.across.buffer)]:[])]),body=zlib.gzipSync(raw,{level:9});
-  const file=c.key+'-'+j+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
-  const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
-  let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=(p.pos[i]/100-100)*5;lo=Math.min(lo,y);hi=Math.max(hi,y);}
-  records.push({file,tier:c.tier,x:c.x+64,z:c.z+64,size:c.size,vertices:n,indices:p.idx.length,bytes:gpu,sha256:createHash('sha256').update(body).digest('hex'),bounds:[c.x,c.z,lo,c.x+c.size+128,c.z+c.size+128,hi]});
+  const original=c.parts[j],pair=c.key+'-'+j;
+  const selectBounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
+  for(let i=0;i<original.pos.length;i+=3){const x=c.x+original.pos[i]/8,z=c.z+original.pos[i+2]/8,y=original.pos[i+1]*.05-500;
+    selectBounds[0]=Math.min(selectBounds[0],x);selectBounds[1]=Math.min(selectBounds[1],z);selectBounds[2]=Math.min(selectBounds[2],y);
+    selectBounds[3]=Math.max(selectBounds[3],x);selectBounds[4]=Math.max(selectBounds[4],z);selectBounds[5]=Math.max(selectBounds[5],y);
+  }
+  const variants=legacy?[{part:original,lod:null}]:original.farIdx.length
+    ?[{part:compactRoadPart(original,original.idx),lod:'near'},{part:compactRoadPart(original,original.farIdx),lod:'far'}]
+    :[{part:compactRoadPart(original,original.idx),lod:null}];
+  for(const {part:p,lod} of variants){
+    const n=p.pos.length/3,head=Buffer.alloc(32);head.write('UGR4');head.writeUInt32LE(n,4);head.writeUInt32LE(p.idx.length,8);head.writeInt32LE(c.x,12);head.writeInt32LE(c.z,16);head.writeUInt32LE(p.rise?1:0,20);head.writeUInt32LE(p.farIdx.length,24);head.writeUInt32LE((p.across?1:0)|(p.pos instanceof Float32Array?2:0),28);
+    const raw=Buffer.concat([head,Buffer.from(p.pos.buffer),Buffer.from(p.road.buffer),Buffer.alloc(n%2),...(p.rise?[Buffer.from(p.rise.buffer)]:[]),Buffer.from(p.idx.buffer),Buffer.from(p.farIdx.buffer),...(p.across?[Buffer.from(p.across.buffer)]:[])]);
+    if(!legacy)repairRoadClearance(raw,{inRegion:inReservoirFootRegion,support:finalSupport});
+    if(!legacy){const floating=p.pos instanceof Float32Array,stride=floating?12:6;for(let i=0;i<n;i++){const y=(floating?raw.readFloatLE(32+i*stride+4):raw.readUInt16LE(32+i*stride+2))*.05-500;selectBounds[5]=Math.max(selectBounds[5],y);}}
+    const body=zlib.gzipSync(raw,{level:9});
+    const file=pair+(lod?'-'+lod:'')+'.bin.gz';fs.writeFileSync(path.join(out,file),body);
+    const gpu=raw.length-32;if(c.tier==='desktop')totalGPU+=gpu;compressedBytes+=body.length;
+    let lo=Infinity,hi=-Infinity;for(let i=1;i<p.pos.length;i+=3){const y=legacy?(p.pos[i]/100-100)*5:p.pos[i]*.05-500;lo=Math.min(lo,y);hi=Math.max(hi,y);}
+    records.push({file,tier:c.tier,...(lod?{lod,pair}:{}),x:c.x+64,z:c.z+64,size:c.size,vertices:n,indices:p.idx.length,bytes:gpu,sha256:createHash('sha256').update(body).digest('hex'),bounds:legacy?[c.x,c.z,lo,c.x+c.size+128,c.z+c.size+128,hi]:selectBounds});
+  }
 }}
-const meta={format:'UGR4',source:'© OpenStreetMap contributors, ODbL 1.0',licence:'https://www.openstreetmap.org/copyright',classes:CLASSES,classWidthsM:WIDTHS,stats:network.stats,networkSHA256:createHash('sha256').update(networkBytes).digest('hex'),desktopGPUBytes:totalGPU,compressedGeometryBytes:compressedBytes,bridgeRoadWidths,bridgeMorphs,bridgeBytes:bridgeOffset,bridgeSHA256:createHash('sha256').update(bridgeBytes).digest('hex'),records};
+const meta={format:'UGR4',...(!legacy?{streamingLODs:true}:{}),source:'© OpenStreetMap contributors, ODbL 1.0',licence:'https://www.openstreetmap.org/copyright',classes:CLASSES,classWidthsM:WIDTHS,stats:network.stats,networkSHA256:createHash('sha256').update(networkBytes).digest('hex'),desktopGPUBytes:totalGPU,compressedGeometryBytes:compressedBytes,bridgeRoadWidths,bridgeMorphs,bridgeBytes:bridgeOffset,bridgeSHA256:createHash('sha256').update(bridgeBytes).digest('hex'),records};
 const keep=new Set(['manifest.json','network.bin.gz','bridge-decks.bin.gz',...records.map(r=>r.file)]);
 for(const file of fs.readdirSync(out))if((file.endsWith('.bin.gz')||file==='manifest.json')&&!keep.has(file))fs.unlinkSync(path.join(out,file));
 fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(meta));

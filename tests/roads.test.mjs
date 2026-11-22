@@ -23,7 +23,7 @@ test('road asset regenerates byte-identically from the 80 cached OSM answers',()
 });
 test('coverage includes all eight classes and the October total within 5%',()=>{
   assert.equal(manifest.classes.length,8);assert.ok(manifest.stats.km.every(k=>k>0));
-  assert.ok(Math.abs(manifest.stats.totalKm/29921-1)<.05);assert.ok(manifest.desktopGPUBytes<80e6);
+  assert.ok(Math.abs(manifest.stats.totalKm/29921-1)<.05);assert.ok(manifest.desktopGPUBytes>0);assert.equal(manifest.streamingLODs,true); // total bytes now include mutually exclusive streamed LODs; GPU residency is measured with phone-mem and desktop-memory
   assert.match(manifest.source,/OpenStreetMap.*ODbL/);
 });
 test('merged roads near all four reservoir feet follow actual bank support before clearance',async()=>{
@@ -73,10 +73,10 @@ test('all generated blocks use 16-bit indices, upward winding and compact paveme
 });
 test('phone guarantees every nearby minor block while desktop retains all roads',()=>{
   for(const [x,z]of [[2744,-761],[-10000,5000],[8447,2136]])for(const r of manifest.records){
-    assert.equal(roadBlockWanted(r),r.tier==='desktop');
-    if(r.tier==='near'&&Math.max(r.x-x,0,x-r.x-r.size)**2+Math.max(r.z-z,0,z-r.z-r.size)**2<=1000**2)
+    if(r.tier!=='desktop')assert.equal(roadBlockWanted(r),false);
+    if(r.tier==='near'&&Math.max(r.bounds[0]-x,0,x-r.bounds[3])**2+Math.max(r.bounds[1]-z,0,z-r.bounds[4])**2<=1000**2)
       assert.equal(roadBlockWanted(r,{phone:true,x,z,height:2}),true);
-    if(r.tier==='near')assert.equal(roadBlockWanted(r,{phone:true,x,z,height:3000}),false);
+    if(r.tier==='near'){assert.equal(roadBlockWanted(r,{phone:true,x,z,height:3000}),false);if(Math.max(r.bounds[0]-x,0,x-r.bounds[3])**2+Math.max(r.bounds[1]-z,0,z-r.bounds[4])**2<=1000**2)assert.equal(roadBlockWanted(r,{phone:true,x,z,height:300}),true);}
   }
 });
 for(const scenario of ['toggle','range'])test(`an old download cannot attach twice after a ${scenario} change`,async()=>{
@@ -88,7 +88,7 @@ for(const scenario of ['toggle','range'])test(`an old download cannot attach twi
   globalThis.fetch=async url=>String(url).endsWith('manifest.json')?{ok:true,json:async()=>({format:'UGR4',records:[rec]})}:{ok:true,body:{},headers:new Headers({'content-encoding':'gzip'}),arrayBuffer:()=>++downloads===1?old:Promise.resolve(raw)};
   const roads=createRoads({scene:new Scene(),phone:scenario==='range'}),frame=()=>roads.update({x:0,z:0,height:2}),flush=()=>new Promise(resolve=>setImmediate(resolve));
   try{frame();await flush();frame();await flush();assert.equal(downloads,1);
-    if(scenario==='toggle'){roads.setEnabled(false);roads.setEnabled(true);}else roads.update({x:0,z:0,height:300});
+    if(scenario==='toggle'){roads.setEnabled(false);roads.setEnabled(true);}else roads.update({x:0,z:0,height:600});
     frame();await flush();frame();await flush();frame();assert.equal(roads.stats.bytes,34);
     releaseOld(raw);await flush();frame();assert.equal(roads.group.children.length,1);assert.equal(roads.stats.bytes,34);assert.equal(roads.stats.state,'ready');
   }finally{roads.dispose();globalThis.fetch=previous;}
