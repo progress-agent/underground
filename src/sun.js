@@ -378,7 +378,7 @@ buildingDepthMaterial.customProgramCacheKey = () => 'building-depth-height-scale
 
 // ── Shadow participation policy ─────────────────────────────────────────────
 
-const CAST_AND_RECEIVE_GROUPS = new Set(['landmarks', 'bridges', 'station-buildings']);
+const CAST_AND_RECEIVE_GROUPS = new Set(['landmarks', 'bridges', 'station-buildings', 'outline-buildings']);
 const RECEIVE_GROUPS = new Set(['overground', 'm25Motorway', 'airports']);
 // ── s14:P ── the player (src/player/): the figure takes building shadows and casts none into the sun's map (its own
 // shadow is a planar projection, figure-shadow.js: the 2048-texel map is about 1.5 m a texel). Without this line
@@ -402,6 +402,7 @@ export function applyShadowPolicy(root) {
     }
     const wantsDepth = cast && isBuildingMaterial(o.material);
     if (wantsDepth) o.customDepthMaterial = o.geometry.attributes.reservoirBase ? reservoirBaseMaterial(buildingDepthMaterial) : buildingDepthMaterial;
+    if(o.userData.outlineDepth)o.customDepthMaterial=o.userData.outlineDepth;
   };
   const name = root.name || '';
   if (name === 'surfaceGeometry') {
@@ -412,6 +413,8 @@ export function applyShadowPolicy(root) {
       const building = n.startsWith('buildings-') || n.startsWith('baked-buildings-');
       set(o, building, building);
     }
+  } else if (name === 'outline-buildings') {
+    root.traverse(o=>set(o,true,true));
   } else if (name === 'terrainMesh') {
     set(root, false, true);
   } else if (CAST_AND_RECEIVE_GROUPS.has(name)) {

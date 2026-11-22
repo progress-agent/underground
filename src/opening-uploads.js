@@ -111,5 +111,9 @@ export function createOpeningUploads({renderer, camera, renderTarget = null, mat
       stats.finishedAt=performance.now();stop();
     }
   }
-  return {prime,frame,stop,stats};
+  // Optional late residents use the same matching tiny target after landing.
+  // This makes their real buffers resident even outside the camera frustum,
+  // without restarting the opening queue or changing its statistics.
+  function upload(object,scene,selectedMaterial=object.material) { lights(scene);render(object,selectedMaterial); }
+  return {prime,frame,stop,stats,upload};
 }

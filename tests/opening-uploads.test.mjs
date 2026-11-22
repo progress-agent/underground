@@ -86,3 +86,12 @@ test('one primitive and one geometry instance are prepared without mutating the 
   assert.throws(()=>uploads.frame(scene,Infinity,true),/warm draw failed/);
   assert.deepEqual(geometry.drawRange,{start:3,count:6});assert.equal(geometry.instanceCount,200);assert.equal(bound,city);
 });
+
+test('a late resident uploads after the opening queue stops, with state restored',()=>{
+ const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(),geometry=new THREE.BoxGeometry();
+ const day=new THREE.MeshStandardMaterial(),depth=new THREE.MeshDepthMaterial(),mesh=new THREE.Mesh(geometry,day);let target=null,draws=0;
+ const renderer={shadowMap:{autoUpdate:true,needsUpdate:true},getRenderTarget:()=>target,setRenderTarget:t=>{target=t;},render:s=>{assert.equal(s,scene);assert.equal(s.children[0].frustumCulled,false);assert.equal(geometry.drawRange.count,3);draws++;}};
+ const u=createOpeningUploads({renderer,camera});u.stop();u.upload(mesh,scene,depth);
+ assert.equal(draws,1);assert.equal(target,null);assert.equal(geometry.drawRange.count,Infinity);assert.equal(mesh.material,day);assert.equal(scene.children.length,0);
+ assert.equal(u.stats.uploaded,0);assert.equal(u.stats.remaining,0);
+});
