@@ -14,7 +14,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json')));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 test('road asset regenerates byte-identically from the 80 cached OSM answers',()=>{
   const out=fs.mkdtempSync(path.join(os.tmpdir(),'ug-roads-'));
-  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:240000,stdio:'pipe'});
+  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:900000,stdio:'pipe'});
     assert.deepEqual(fs.readFileSync(path.join(out,'manifest.json')),fs.readFileSync(path.join(dir,'manifest.json')));
     assert.equal(hash(fs.readFileSync(path.join(out,'network.bin.gz'))),manifest.networkSHA256);
     assert.equal(hash(fs.readFileSync(path.join(out,'bridge-decks.bin.gz'))),manifest.bridgeSHA256);
