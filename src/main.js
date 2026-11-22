@@ -13,6 +13,10 @@ import { createAirports, createAirportsSteps, isAirportBuilding, getAirportHover
 import { createAirportDockWater, installAirportDockTerrainMask, getAirportDockSurfaceY, getAirportDockInfo } from './airport-docks.js';
 import { airportSuppressionSignature } from './airport-suppression.js';
 import { createDlrProfile } from './dlr-profile.js';
+import { createPhoneViewport } from './phone-viewport.js';
+import { createPhoneLandmarkBatches } from './phone-landmark-batches.js';
+import { createPhoneCityBatches } from './phone-city-batches.js';
+import { createFrameTimeReadout } from './frame-time-readout.js';
 import { createMotorway, createMotorwaySteps, MOTORWAY_REPLACED_BRIDGES } from './m25-motorway.js';
 // ── s21:L ──
 import { createLateLayers, LATE_LAYER_ORDER } from './late-layers.js';
@@ -467,7 +471,13 @@ let syncRenderQualityUi = () => {};
 const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
   renderQuality.set(quality);
   syncRenderQualityUi();
-}, tuning: isTouchDevice() ? { targetMs: 1000 / 30 } : {} });
+}, tuning: isTouchDevice() ? { targetMs: 1000 / 30, slowFrameRatio: 1, maxDescentRungs: 1 } : {} });
+
+const frameTimeReadout = new URLSearchParams(location.search).get('fps') === '1'
+  ? createFrameTimeReadout({ getRung: () => adaptiveQuality.get().level }) : null;
+const phoneViewport = isTouchDevice() ? createPhoneViewport(renderer.domElement) : null;
+const phoneCityBatches = isTouchDevice() ? createPhoneCityBatches() : null;
+const phoneLandmarkBatches = isTouchDevice() ? createPhoneLandmarkBatches() : null;
 
 // ── s24:R ──
 // Render economies (sprint 24Sep26h, D-038): savings that leave the picture
@@ -1814,7 +1824,7 @@ function s21TryStartGeologyWork() {
         lateLayers.define('motorway', {
           name: 'm25Motorway',
           steps: () => { s21MotorwayScale = getBuildingHeightScale(); return createMotorwaySteps({ getSurfaceY: getStructuralSurfaceY,
-            VE: VERTICAL_EXAGGERATION, heightScale: s21MotorwayScale, initialUpdate: false }); },
+            VE: VERTICAL_EXAGGERATION, heightScale: s21MotorwayScale, initialUpdate: false, spatialChunks: TOUCH_UI, ...(phoneViewport ? { viewportHeightPx: () => phoneViewport.state.nativeHeight } : {}) }); },
           prepare: (group) => { const now = getBuildingHeightScale(); if (now !== s21MotorwayScale) group.userData.setHeightScale(now); applyShadowPolicy(group); },
           stagger: (group) => group.userData.pickables, // the six static meshes (10+ MB of buffers): shown one a frame
           attach: (group) => { motorwayGroup = group; scene.add(group); syncMotorwayBridges(); },
@@ -4940,7 +4950,7 @@ function tick(frameTime) {
 
   // ── s24:R ── canvas size read once per frame, before any label writes
   const _s24LabelViewport = economies.on('labelViewport')
-    ? (_s24Viewport.w = renderer.domElement.clientWidth, _s24Viewport.h = renderer.domElement.clientHeight, _s24Viewport)
+    ? (_s24Viewport.w = phoneViewport ? phoneViewport.state.w : renderer.domElement.clientWidth, _s24Viewport.h = phoneViewport ? phoneViewport.state.h : renderer.domElement.clientHeight, _s24Viewport)
     : null;
   // ── /s24:R ──
   // ── s14:B ── (the walker's hold runs inside the Pedestrian's update, ctx.s14iHold, before the rig places the camera; see s14:I)
@@ -5060,7 +5070,14 @@ function tick(frameTime) {
     setLegibilityCssHeight(null);
   } else {
   // ── /s21:L ──
+  phoneCityBatches?.prepare(bakedMeshes, bakedBuilder?.isDone() && !intro.isRunning());
+  phoneLandmarkBatches?.prepare(landmarkGroup,bakedBuilder?.isDone() && !intro.isRunning(),getBuildingHeightScale());
+  phoneCityBatches?.begin(!intro.isRunning(),camera,sunSystem.status.active);
+  phoneLandmarkBatches?.begin(!intro.isRunning());
+  try {
   lakeInteriorMask.render(() => undergroundCull.render(economies.on('underAbove') ? s02CullMode : false, () => (s21V2Mask ? s21V2Mask.render(() => composer.render(dt)) : composer.render(dt)))); // s21:V2 (the mask) s02:T: 'full' exactly when _aboveGroundView, else 'lines' or null
+  } finally { phoneCityBatches?.end(); phoneLandmarkBatches?.end(); }
+  frameTimeReadout?.update(frameTime);
   // ── s16:R ──
   setLegibilityCssHeight(null);
   // ── /s16:R ──
@@ -5425,6 +5442,7 @@ if (import.meta.env.DEV) {
     get airportDockGroup() { return airportDockGroup; },
     get airportDockInitError() { return airportDockInitError; },
     getAirportDockInfo, getAirportDockSurfaceY,
+    phoneCityBatches, phoneLandmarkBatches,
     get motorwayGroup() { return motorwayGroup; },
     get motorwayInitError() { return motorwayInitError; },
     // ── sprint:F ──
