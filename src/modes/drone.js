@@ -80,6 +80,7 @@ export function createDroneMode(ctx) {
   }
   /** Whether a canonical point is inside a building's box (footprint and height). */
   function insideBox(collision, p) {
+    if (typeof collision.containsBuildingAt === 'function') return collision.containsBuildingAt(p.x, p.y, p.z);
     for (const b of collision.buildingsNear(p.x, p.z, 0.5)) {
       if (p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ && p.y > b.baseY && p.y < b.roofY) return true;
     }

@@ -80,15 +80,18 @@ export function wallDistance(collision, x, z, feetY, height, radius) {
 }
 
 /**
- * The distance from (x, z) to the nearest face of a station's host box (`hosts`: [{ x, z, side }], the squares of
+ * The distance from (x, z) to the nearest face of a station's host rectangle (`hosts`: [{ x, z, width, depth, theta }], from
  * station-buildings.js), or null beyond PROBE_REACH_M. A raised host (Fulham Broadway's stands 2.85 m above its north face)
  * is not in the collision's band at eye height, because the walker passes under it, and its plinth wall is drawn there:
- * moveAndSlide cannot see it, the square can.
+ * moveAndSlide cannot see it, the rectangle can.
  */
 export function hostDistance(hosts, x, z) {
   let least = null;
   for (const h of hosts || []) {
-    const half = h.side / 2, ox = Math.abs(x - h.x) - half, oz = Math.abs(z - h.z) - half;
+    const c = Math.cos(h.theta ?? 0), s = Math.sin(h.theta ?? 0);
+    const dx = x - h.x, dz = z - h.z;
+    const ox = Math.abs(dx * c + dz * s) - (h.width ?? h.side) / 2;
+    const oz = Math.abs(-dx * s + dz * c) - (h.depth ?? h.side) / 2;
     const d = ox <= 0 && oz <= 0 ? 0 : Math.hypot(Math.max(ox, 0), Math.max(oz, 0));
     if (d <= PROBE_REACH_M && (least === null || d < least)) least = d;
   }

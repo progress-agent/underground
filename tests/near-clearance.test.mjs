@@ -139,3 +139,16 @@ test('the camera floor only matters within about 18 cm of a wall: beyond that th
     assert.ok(n * cf < Math.max(w - 0.05, 0) + NEAR_FLOOR_CAMERA * cf + 1e-9, `wall ${w}`);
   }
 });
+
+
+test('raised host clearance follows a rotated thin rectangle and rejects its former square fringe', () => {
+  const theta = Math.PI / 6;
+  const hosts = [{ x: 100, z: 200, side: Math.sqrt(160), width: 40, depth: 4, theta }];
+  const at = (u, v) => [100 + u * Math.cos(theta) - v * Math.sin(theta), 200 + u * Math.sin(theta) + v * Math.cos(theta)];
+  const face = at(20.4, 0), corner = at(20.3, 2.4);
+  assert.ok(Math.abs(hostDistance(hosts, ...face) - .4) < 1e-9, 'forty centimetres from the actual long-axis end');
+  assert.ok(Math.abs(hostDistance(hosts, ...corner) - .5) < 1e-9, 'three-four-five corner clearance');
+  assert.equal(hostDistance(hosts, 100, 206), null, 'air in the old square is over 3 m from the thin wall');
+  const probe = createClearanceProbe({ collision: boxCollision([]), VE: 5 });
+  assert.ok(Math.abs(probe.measure(face[0], 0, face[1], { feetY: 0, height: 9, radius: .33, hosts }) - .4) < 1e-9);
+});

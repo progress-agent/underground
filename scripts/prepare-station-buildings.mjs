@@ -791,12 +791,16 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
   };
   // ── Integration 02Oct26f: is the fan ahead of an exit clear of boxes and station footprints (the audit's check 4)? ──
   const FAN = R.exitFan;
-  const fanClear = (x, z, yaw) => {
+  const fanClear = (x, z, yaw, atEyeHeight = false) => {
+    const ground = atEyeHeight && groundOf ? groundOf(x,z) : null;
+    const eye = Number.isFinite(ground) ? ground + FAN.fanMinH : null;
     const L = FAN.fanM, near = remGrid.near(x - L - 1, z - L - 1, x + L + 1, z + L + 1), feet = footGrid.near(x - L - 1, z - L - 1, x + L + 1, z + L + 1);
     for (let deg = -FAN.fanDeg; deg <= FAN.fanDeg; deg += FAN.stepDeg) {
       const a = yaw + (deg * Math.PI) / 180, dx = -Math.sin(a), dz = -Math.cos(a);
       for (const q of near) {
-        if (q.box.h < FAN.fanMinH) continue;
+        if (eye !== null) {
+          if (q.box.baseM > eye || q.box.baseM + q.box.h / RK.designMaster < eye) continue;
+        } else if (q.box.h < FAN.fanMinH) continue;
         const [rx,rz]=localPoint(q.box,x,z),c=Math.cos(q.box.theta??0),sn=Math.sin(q.box.theta??0),rdx=dx*c+dz*sn,rdz=-dx*sn+dz*c;
         const lo=[-(q.box.width??q.box.side)/2,-(q.box.depth??q.box.side)/2],hi=[-lo[0],-lo[1]];
         let t0 = 0, t1 = L, ok = true;
@@ -926,6 +930,21 @@ export function compileStationBuildings({ sites, overpass, boxes, bakedSha, over
       const nx = np.d > 0 ? (sp[0] - np.x) / np.d : 0, nz = np.d > 0 ? (sp[1] - np.z) / np.d : 1;
       exit = { x: np.x + nx * R.exitOutM, z: np.z + nz * R.exitOutM, yaw: yawFacing(nx, nz) };
       rec.flags.add('exit-fallback');
+    }
+    exit = {x:r2(exit.x),z:r2(exit.z),yaw:r4(exit.yaw)};
+    // Preserve the chosen point and placement. If the actual eye-height fan
+    // is blocked after rotation, look along the street within the existing
+    // outward-facing half-plane, preferring the smallest heading change.
+    if (groundOf && !fanClear(exit.x,exit.z,exit.yaw,true)) {
+      const np=nearestFoot(exit.x,exit.z,rec),ox=exit.x-np.x,oz=exit.z-np.z;
+      let clearYaw=null;
+      search: for(let deg=FAN.stepDeg;deg<90;deg+=FAN.stepDeg)for(const sign of [1,-1]){
+        const yaw=r4(exit.yaw+sign*deg*Math.PI/180);
+        if(-Math.sin(yaw)*ox-Math.cos(yaw)*oz<.01*np.d)continue;
+        if(fanClear(exit.x,exit.z,yaw,true)){clearYaw=yaw;break search;}
+      }
+      if(clearYaw!==null){exit.yaw=clearYaw;rec.flags.delete('exit-fan-blocked');}
+      else rec.flags.add('exit-fan-blocked');
     }
     rec.exit = { x: r2(exit.x), z: r2(exit.z), yaw: r4(exit.yaw) };
     if (rec.kind === 'box-entrance' && (rec.flags.has('exit-fallback') || rec.flags.has('exit-street'))) throw new Error(`${rec.key}: its exit is a fallback (${[...rec.flags]}); look at the site`);

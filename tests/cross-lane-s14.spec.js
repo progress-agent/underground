@@ -499,8 +499,10 @@ test('6 Drone and Balloon: the third-person Drone stops at Fulham Broadway\'s bo
   expect(fb).not.toBeNull();
   const flyAtBox = await ev(async (b) => {
     const u = window.__ug, d = u.modes.registry.get('drone');
-    const y=(b.baseY+b.roofY)/2,dist=b.width/2+10;
-    d.place({x:b.cx-b.ux*dist,y,z:b.cz-b.uz*dist,yaw:Math.atan2(-b.ux,-b.uz),pitch:0});
+    // Keep the original west-to-east approach; measure its distance to the
+    // actual rectangle rather than treating the broad bound as a wall.
+    const y=(b.baseY+b.roofY)/2;
+    d.place({x:b.minX-10,y,z:b.cz,yaw:-Math.PI/2,pitch:0});
     for (let i = 0; i < 40; i++) await new Promise((r) => requestAnimationFrame(r));
     const third = d.isThirdPerson();
     u.fpsControls.keys.add('w');
@@ -509,7 +511,7 @@ test('6 Drone and Balloon: the third-person Drone stops at Fulham Broadway\'s bo
       u.modes.update(1 / 60);
       const p = d.debug().pos;
       const dx=p.x-b.cx,dz=p.z-b.cz,lx=dx*b.ux+dz*b.uz,lz=-dx*b.uz+dz*b.ux;
-      minGap=Math.min(minGap,-b.width/2-lx);
+      minGap=Math.min(minGap,Math.hypot(Math.max(Math.abs(lx)-b.width/2,0),Math.max(Math.abs(lz)-b.depth/2,0)));
       if(Math.abs(lx)<b.width/2&&Math.abs(lz)<b.depth/2&&p.y>b.baseY&&p.y<b.roofY)inside=true;
     }
     u.fpsControls.keys.delete('w');

@@ -10,8 +10,16 @@ export function installDrawnBuildingFrames() {
       if (!keyed.has(k)) keyed.set(k, []);
       keyed.get(k).push(b);
     }
+    // Candidate centres identify the few tiles worth reading. Baked instance
+    // bounds are already in this same canonical frame; missing bounds fall back
+    // to the full scan, so the reference never drops an unmatched candidate.
+    if(!out.length)return out;
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    for(const b of out){const x=(b.minX+b.maxX)/2,z=(b.minZ+b.maxZ)/2;minX=Math.min(minX,x);maxX=Math.max(maxX,x);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);}
     window.__ug.scene.traverse(mesh => {
       if (!mesh.isInstancedMesh || !/^(baked-)?buildings-/.test(mesh.name)) return;
+      const bounds=mesh.boundingBox;
+      if(bounds&&(bounds.max.x<minX-.02||bounds.min.x>maxX+.02||bounds.max.z<minZ-.02||bounds.min.z>maxZ+.02))return;
       const m = mesh.instanceMatrix.array;
       for (let i = 0; i < mesh.count; i++) {
         const o = i * 16, x = m[o + 12], z = m[o + 14];

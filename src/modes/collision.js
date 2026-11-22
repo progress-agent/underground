@@ -15,6 +15,7 @@
 //
 //   collision.sync()                           pick up added / removed tile meshes (cheap; call per frame)
 //   collision.buildingsNear(x, z, r, out?)     boxes whose footprint lies within r: [{minX,maxX,minZ,maxZ,baseY,roofY}]
+//   collision.containsBuildingAt(x, y, z)     actual rectangle and height, excluding broad-bound air
 //   collision.roofHeightAt(x, z)               highest roof Y of a building covering (x, z), or null
 //   collision.groundHeightAt(x, z)             terrain Y, or null
 //   collision.standHeightAt(x, z, feetY?)      what a body can stand on: the highest roof at or
@@ -241,6 +242,15 @@ export function createCollisionService({
     return best;
   }
 
+  /** Narrow-phase containment for readers whose broad bounds include air beside rotated walls. */
+  function containsBuildingAt(x, y, z) {
+    let inside = false;
+    forEachBuilding(x, x, z, z, (minX, maxX, minZ, maxZ, baseY, roofY, a, o) => {
+      if (y > baseY && y < roofY && covers(a, o, x, z)) { inside = true; return true; }
+    });
+    return inside;
+  }
+
   function groundHeightAt(x, z) {
     const y = getGroundY(x, z);
     return Number.isFinite(y) ? y : null;
@@ -457,6 +467,7 @@ export function createCollisionService({
     invalidateBuilding,
     buildingsNear,
     roofHeightAt,
+    containsBuildingAt,
     groundHeightAt,
     standHeightAt,
     waterAt,

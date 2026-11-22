@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { parseBakedBuildings,buildBakedTile,createBakedBuildingBuilder } from '../src/baked-buildings.js';
 import { encodeBuildingArea,encodeBuildingAspect } from '../src/building-record.js';
 import { createCollisionService } from '../src/modes/collision.js';
+import { createDroneMode } from '../src/modes/drone.js';
 import { rayBlockedByBoxes } from '../src/station-buildings.js';
 import { injectBuildingWindows } from '../src/night.js';
 import { anchorReservoirBuildings } from '../src/reservoir-buildings.js';
@@ -101,4 +102,36 @@ test('late reservoir anchoring retains the live source datum after rectangle shi
    assert.ok(Math.abs(a[13]+offsets[k++]*a[5]-groundAt(px))<1e-4,'feet still sample the rotated drawn walls');
   }
  }finally{anchorReservoirBuildings({bodies:[]},null);mesh.geometry.dispose();mesh.material.dispose();mesh.dispose();}
+});
+
+
+test('Drone safety guard flies through broad-bound air before bouncing at the rotated wall', () => {
+  const theta = .67, c = Math.cos(theta), s = Math.sin(theta), w = 24, d = 4;
+  const geo = new THREE.BoxGeometry(1, 1, 1); geo.translate(0, .5, 0);
+  const mesh = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial(), 1);
+  const a = mesh.instanceMatrix.array;
+  a[0] = w * c; a[2] = w * s; a[5] = 50; a[8] = -d * s; a[10] = d * c; a[15] = 1;
+  mesh.computeBoundingBox();
+  const collision = createCollisionService({ getBuildingMeshes: () => [mesh], getGroundY: () => -1000 });
+  collision.sync();
+  const broadWest = mesh.boundingBox.min.x;
+  assert.equal(collision.buildingsNear(broadWest + .1, 0, 0).length, 1, 'broad bound contains the flight path');
+  assert.equal(collision.containsBuildingAt(broadWest + .1, 25, 0), false, 'that broad fringe is air');
+  assert.equal(collision.containsBuildingAt(0, 25, 0), true, 'the actual footprint remains solid');
+  assert.equal(collision.containsBuildingAt(0, 60, 0), false, 'space above the roof remains air');
+  const camera = new THREE.PerspectiveCamera(55, 1.6, 1, 50000);
+  camera.position.set(broadWest - 3, 25, 0);
+  const ctx = { THREE, VE: 5, camera, collision, keys: new Set(['w']) };
+  const mode = createDroneMode(ctx); mode.activate(ctx);
+  mode.place({ x: broadWest - 3, y: 25, z: 0, yaw: -Math.PI / 2, pitch: 0 });
+  let hit = false, furthest = -Infinity;
+  for (let i = 0; i < 240; i++) {
+    mode.update(1 / 60, ctx); const row = mode.debug();
+    furthest = Math.max(furthest, row.pos.x);
+    assert.equal(collision.containsBuildingAt(row.pos.x, row.pos.y, row.pos.z), false, 'never inside the actual building');
+    if (row.hits > 0) { hit = true; break; }
+  }
+  assert.ok(furthest > broadWest + 1, 'flies past the former invisible broad-bound wall');
+  assert.equal(hit, true, 'reaches and bounces at the real wall');
+  mode.deactivate(ctx);
 });

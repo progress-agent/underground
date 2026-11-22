@@ -71,8 +71,9 @@ test.describe('the host plinth', () => {
               for (const k of quads) {
                 const dx = k.x1 - k.x0, dz = k.z1 - k.z0, l2 = dx * dx + dz * dz;
                 if (l2 < 1e-12) continue;
-                const s = ((x - k.x0) * dx + (z - k.z0) * dz) / l2;
-                if (s < -1e-6 || s > 1 + 1e-6) continue;
+                // Test the closest point on the finite stored Float32 edge.
+                // The existing 1 mm distance bound also covers rounded corners.
+                const s = Math.max(0, Math.min(1, ((x-k.x0)*dx+(z-k.z0)*dz)/l2));
                 if (Math.hypot(x - (k.x0 + dx * s), z - (k.z0 + dz * s)) > 1e-3) continue;
                 q = { bottom: k.y0 + (k.y1 - k.y0) * s, top: k.top }; break;
               }
