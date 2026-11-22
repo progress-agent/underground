@@ -125,7 +125,7 @@ export function createCollisionService({
       minX = bb.min.x; maxX = bb.max.x; minZ = bb.min.z; maxZ = bb.max.z;
     } else {
       for (let i = 0; i < count; i++) {
-        const o = i * 16, h = m[o] * 0.5;
+        const o = i * 16, h = Math.hypot(m[o],m[o+2],m[o+8],m[o+10]) * 0.5;
         minX = Math.min(minX, m[o + 12] - h); maxX = Math.max(maxX, m[o + 12] + h);
         minZ = Math.min(minZ, m[o + 14] - h); maxZ = Math.max(maxZ, m[o + 14] + h);
       }
@@ -137,9 +137,9 @@ export function createCollisionService({
     const m = e.mesh.instanceMatrix.array, n = e.count;
     const boxes = new Float32Array(n * 6);
     for (let i = 0; i < n; i++) {
-      const o = i * 16, b = i * 6, h = Math.abs(m[o]) * 0.5;
+      const o = i * 16, b = i * 6, h = (Math.abs(m[o])+Math.abs(m[o+8]))*.5, hz=(Math.abs(m[o+2])+Math.abs(m[o+10]))*.5;
       boxes[b] = m[o + 12] - h; boxes[b + 1] = m[o + 12] + h;
-      boxes[b + 2] = m[o + 14] - h; boxes[b + 3] = m[o + 14] + h;
+      boxes[b + 2] = m[o + 14] - hz; boxes[b + 3] = m[o + 14] + hz;
       boxes[b + 4] = m[o + 13]; boxes[b + 5] = m[o + 5];
     }
     const cols = Math.max(1, Math.ceil((e.maxX - e.minX) / cellSize) + 1);
@@ -212,7 +212,7 @@ export function createCollisionService({
             const b = i * 6;
             if (g.boxes[b + 1] < x0 || g.boxes[b] > x1 || g.boxes[b + 3] < z0 || g.boxes[b + 2] > z1) continue;
             if (fn(g.boxes[b], g.boxes[b + 1], g.boxes[b + 2], g.boxes[b + 3],
-              g.boxes[b + 4], g.boxes[b + 4] + g.boxes[b + 5] * scale)) return;
+              g.boxes[b + 4], g.boxes[b + 4] + g.boxes[b + 5] * scale, e.mesh.instanceMatrix.array, i*16)) return;
           }
         }
       }
@@ -227,9 +227,15 @@ export function createCollisionService({
     return out;
   }
 
+  function covers(a,o,x,z) {
+    const dx=x-a[o+12],dz=z-a[o+14],w=Math.hypot(a[o],a[o+2]),d=Math.hypot(a[o+8],a[o+10]);
+    return Math.abs(dx*a[o]/w+dz*a[o+2]/w)<=w/2+1e-6 && Math.abs(dx*a[o+8]/d+dz*a[o+10]/d)<=d/2+1e-6;
+  }
+
   function roofHeightAt(x, z) {
     let best = null;
-    forEachBuilding(x, x, z, z, (minX, maxX, minZ, maxZ, baseY, roofY) => {
+    forEachBuilding(x, x, z, z, (minX, maxX, minZ, maxZ, baseY, roofY,a,o) => {
+      if (!covers(a,o,x,z)) return;
       if (best === null || roofY > best) best = roofY;
     });
     return best;
@@ -245,8 +251,9 @@ export function createCollisionService({
     // ── s14:S ── a map box that stands across the deck or ramp the body is on is not a roof to it
     solidWorld.update();
     const onSlab = solidWorld.corridorsAt(x, z, feetY, step, corridor).length > 0;
-    forEachBuilding(x, x, z, z, (minX, maxX, minZ, maxZ, baseY, roofY) => {
-      if (onSlab && solidWorld.boxTouches(corridor, minX, maxX, minZ, maxZ)) return;
+    forEachBuilding(x, x, z, z, (minX, maxX, minZ, maxZ, baseY, roofY,a,o) => {
+      if (!covers(a,o,x,z)) return;
+      if (onSlab && solidWorld.boxTouches(corridor, minX, maxX, minZ, maxZ, a, o)) return;
       if (roofY <= feetY + step && (best === null || roofY > best)) best = roofY;
     });
     const solid = solidWorld.standOn(x, z, feetY, step);
@@ -271,18 +278,28 @@ export function createCollisionService({
     if (len === 0) return res;
     // Gather candidates once over the swept, radius-expanded AABB.
     const pad = radius + EPS;
-    const sx0 = Math.min(x, x + dx) - pad, sx1 = Math.max(x, x + dx) + pad;
-    const sz0 = Math.min(z, z + dz) - pad, sz1 = Math.max(z, z + dz) + pad;
+    // Sliding on a rotated wall can leave the straight move's axis-aligned
+    // swept rectangle. Every valid slide still travels at most the requested
+    // distance, so query its full reach (plus substep epsilon), once.
+    const reach=len+pad+.1;
+    const sx0=x-reach,sx1=x+reach,sz0=z-reach,sz1=z+reach;
     // ── s14:S ── the corridor carve (map boxes across a deck or ramp are not solid to a body on it),
     // then the new solids: oriented blocked rectangles and station prisms.
     solidWorld.update();
     const onSlab = solidWorld.corridorsAt(x, z, feet, step, corridor).length > 0;
     // ── /s14:S ──
-    const cand = [];
+    const cand = [], oriented = [];
     forEachBuilding(sx0, sx1, sz0, sz1,
-      (minX, maxX, minZ, maxZ, baseY, roofY) => {
+      (minX, maxX, minZ, maxZ, baseY, roofY,a,o) => {
         if (head <= baseY || feet >= roofY - step) return; // passes over / under
-        if (onSlab && solidWorld.boxTouches(corridor, minX, maxX, minZ, maxZ)) return; // s14:S
+        if (onSlab && solidWorld.boxTouches(corridor, minX, maxX, minZ, maxZ, a, o)) return; // s14:S
+        if(a[o+2] || a[o+8] || a[o]!==a[o+10]) {
+          const w=Math.hypot(a[o],a[o+2]),d=Math.hypot(a[o+8],a[o+10]),ux=a[o]/w,uz=a[o+2]/w;
+          const px=(x-a[o+12])*ux+(z-a[o+14])*uz,pz=-(x-a[o+12])*uz+(z-a[o+14])*ux;
+          if(Math.abs(px)<w/2+radius && Math.abs(pz)<d/2+radius)return;
+          oriented.push(a[o+12],a[o+14],ux,uz,-w/2-radius,w/2+radius,-d/2-radius,d/2+radius);
+          return;
+        }
         const ex0 = minX - radius, ex1 = maxX + radius, ez0 = minZ - radius, ez1 = maxZ + radius;
         // Already inside at the start: never trap the body.
         if (x > ex0 && x < ex1 && z > ez0 && z < ez1) return;
@@ -290,6 +307,7 @@ export function createCollisionService({
       });
     // ── s14:S ──
     const sol = solidWorld.gatherFor(sx0, sx1, sz0, sz1, x, z, radius, feet, head, step);
+    for(let i=0;i<oriented.length;i++) sol.rects.push(oriented[i]);
     const hasSolids = sol.rects.length > 0 || sol.prisms.length > 0;
     // ── /s14:S ──
     if (!cand.length && !hasSolids) { res.x = x + dx; res.z = z + dz; return res; }
@@ -331,6 +349,14 @@ export function createCollisionService({
               && !(px > cand[k] && px < cand[k + 1] && pz > cand[k + 2] && pz < cand[k + 3])) { x = px; z = pz; break; }
           }
         }
+        // A later rotated wall can push the result back into an earlier one
+        // where OSM building parts overlap. Keep the previous valid substep
+        // rather than leaving the body inside that union of footprints.
+        for(let k=0;k<oriented.length;k+=8){
+          const ox=x-oriented[k],oz=z-oriented[k+1],ux=oriented[k+2],uz=oriented[k+3];
+          const u=ox*ux+oz*uz,v=-ox*uz+oz*ux;
+          if(u>oriented[k+4]+EPS*.1&&u<oriented[k+5]-EPS*.1&&v>oriented[k+6]+EPS*.1&&v<oriented[k+7]-EPS*.1){x=px;z=pz;res.hit=true;break;}
+        }
       }
       // ── /s14:S ──
     }
@@ -371,7 +397,14 @@ export function createCollisionService({
     // the boxes
     forEachBuilding(Math.min(from.x, to.x) - pad, Math.max(from.x, to.x) + pad,
       Math.min(from.z, to.z) - pad, Math.max(from.z, to.z) + pad,
-      (minX, maxX, minZ, maxZ, baseY, roofY) => {
+      (minX, maxX, minZ, maxZ, baseY, roofY,a,o) => {
+        if(a[o+2] || a[o+8]) {
+          const w=Math.hypot(a[o],a[o+2]),d=Math.hypot(a[o+8],a[o+10]),ux=a[o]/w,uz=a[o+2]/w;
+          const fx=from.x-a[o+12],fz=from.z-a[o+14];
+          const e=segmentBoxEntry(fx*ux+fz*uz,from.y,-fx*uz+fz*ux,dx*ux+dz*uz,dy,-dx*uz+dz*ux,
+            -w/2-pad,w/2+pad,baseY-padY,roofY+padY,-d/2-pad,d/2+pad);
+          if(e<t){t=e;what='box';} return;
+        }
         const e = segmentBoxEntry(from.x, from.y, from.z, dx, dy, dz,
           minX - pad, maxX + pad, baseY - padY, roofY + padY, minZ - pad, maxZ + pad);
         if (e < t) { t = e; what = 'box'; }

@@ -563,11 +563,18 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
   }
 
   /** Does the box [minX,maxX]x[minZ,maxZ] touch any ribbon in the list? */
-  function boxTouches(list, minX, maxX, minZ, maxZ) {
+  function boxTouches(list, minX, maxX, minZ, maxZ, matrix = null, offset = 0) {
+    let footprint=null;
+    if(matrix && (matrix[offset+2] || matrix[offset+8])){
+      const w=Math.sqrt(matrix[offset]*matrix[offset]+matrix[offset+2]*matrix[offset+2]);
+      const d=Math.sqrt(matrix[offset+8]*matrix[offset+8]+matrix[offset+10]*matrix[offset+10]);
+      footprint={ox:matrix[offset+12],oz:matrix[offset+14],ux:matrix[offset]/w,uz:matrix[offset+2]/w,nx:matrix[offset+8]/d,nz:matrix[offset+10]/d,uF:-w/2,uL:w/2,v0:-d/2,v1:d/2};
+    }
     const hx = (maxX - minX) / 2, hz = (maxZ - minZ) / 2, cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
     for (let i = 0; i < list.length; i++) {
       const r = list[i];
       if (maxX < r.minX || minX > r.maxX || maxZ < r.minZ || minZ > r.maxZ) continue;
+      if(footprint){if(orientedOverlap(footprint,r))return true;continue;}
       const cu = (cx - r.ox) * r.ux + (cz - r.oz) * r.uz, cv = (cx - r.ox) * r.nx + (cz - r.oz) * r.nz;
       const eu = hx * Math.abs(r.ux) + hz * Math.abs(r.uz), ev = hx * Math.abs(r.nx) + hz * Math.abs(r.nz);
       if (cu + eu >= r.uF && cu - eu <= r.uL && cv + ev >= r.v0 && cv - ev <= r.v1) return true;

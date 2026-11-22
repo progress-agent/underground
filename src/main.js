@@ -2362,6 +2362,7 @@ async function activateBakedBuildings() {
     bakedBuilder = createBakedBuildingBuilder(bakedPayload, {
       VE: VERTICAL_EXAGGERATION,
       material: getBuildingMaterial(),
+      releasePayload: true, // s26:B: matrices own the geometry after upload; release the decode buffer
       suppressBuilding: withStationHides(withOffMapSuppression(!airportInitError && !bakedPayload.airportSuppression ? isAirportBuilding : null), 'baked'), // sprint:B s02:B s21:L
       ...(openingHooks.buildOrder || {}), // s21:L (hook 1 for lane V): { order } or { origin }; null keeps index order
       onMesh: (mesh) => {
@@ -4613,7 +4614,8 @@ function s14bHoldWalker() {
   const hit = idx.contactAt(x, z, 1);
   if (hit && hit.d < S14B_HOLD_M) { x = hit.x + hit.nx * S14B_HOLD_M; z = hit.z + hit.nz * S14B_HOLD_M; }
   body.x = x; body.z = z;
-  if (hp.nx !== 0) body.vx = 0; else body.vz = 0;
+  const normalSpeed=body.vx*hp.nx+body.vz*hp.nz;
+  body.vx-=normalSpeed*hp.nx;body.vz-=normalSpeed*hp.nz;
   camera.position.x = x; camera.position.z = z;
   camera.updateMatrixWorld(true);
 }

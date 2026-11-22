@@ -32,3 +32,44 @@ test('box occlusion agrees with Three rays, including parallel axes and origins 
     assert.equal(rayBlockedByBoxes(meshes,...ray.origin.toArray(),...ray.direction.toArray(),distance,scale),expected,`ray ${i}`);
   }
 });
+
+test('twenty screen rays agree with Three mesh hits on five rotated buildings',()=>{
+  const geo=new THREE.BoxGeometry(1,1,1);geo.translate(0,.5,0);
+  const mesh=new THREE.InstancedMesh(geo,new THREE.MeshBasicMaterial(),5),m=new THREE.Matrix4();
+  for(let i=0;i<5;i++){
+    m.compose(new THREE.Vector3((i-2)*27,0,0),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),-(.17+i*.27)),new THREE.Vector3(19,23+i*3,11));
+    mesh.setMatrixAt(i,m);
+  }
+  mesh.computeBoundingSphere();mesh.computeBoundingBox();mesh.updateMatrixWorld(true);prepareBoxMeshBounds(mesh);
+  const camera=new THREE.PerspectiveCamera(55,1.6,.1,1000);camera.position.set(0,65,130);camera.lookAt(0,12,0);camera.updateMatrixWorld(true);
+  const caster=new THREE.Raycaster(),target=new THREE.Vector3(),screen=new THREE.Vector3();let hits=0;
+  for(let i=0;i<5;i++)for(const [dx,dy]of [[0,10],[-5,15],[5,20],[0,45]]){
+    target.set((i-2)*27+dx,dy,0);screen.copy(target).project(camera);caster.setFromCamera(new THREE.Vector2(screen.x,screen.y),camera);
+    const distance=300,expected=caster.intersectObject(mesh,false).some(h=>h.distance<=distance-.75);if(expected)hits++;
+    assert.equal(rayBlockedByBoxes([mesh],...caster.ray.origin.toArray(),...caster.ray.direction.toArray(),distance,1),expected,`screen ray ${i}, ${dx}, ${dy}`);
+  }
+  assert.ok(hits>=10,'the screen sample includes actual building pixels');
+});
+
+test('ray bounds follow a matrix upload after a reservoir changes the base',()=>{
+ const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1).translate(0,.5,0),new THREE.MeshBasicMaterial(),1),m=new THREE.Matrix4();
+ m.compose(new THREE.Vector3(),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),-.67),new THREE.Vector3(8,20,4));mesh.setMatrixAt(0,m);
+ const before=prepareBoxMeshBounds(mesh);
+ assert.equal(rayBlockedByBoxes([mesh],0,110,20,0,0,-1,50),false);
+ m.setPosition(0,100,0);mesh.setMatrixAt(0,m);mesh.instanceMatrix.needsUpdate=true;
+ const after=prepareBoxMeshBounds(mesh);assert.notEqual(after,before);assert.equal(after.y0,100);
+ assert.equal(rayBlockedByBoxes([mesh],0,110,20,0,0,-1,50),true);
+});
+
+test('rotated chunk bounds equal independent Three-transformed corner extrema',()=>{
+ const array=new Float32Array(5*16),points=[];
+ for(let i=0;i<5;i++){
+  const m=new THREE.Matrix4().compose(new THREE.Vector3(i*30,0,i*7),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),-(.17+i*.27)),new THREE.Vector3(7,20,19));m.toArray(array,i*16);
+  const actual=new THREE.Matrix4().fromArray(array,i*16);
+  for(const x of [-.5,.5])for(const z of [-.5,.5])points.push(new THREE.Vector3(x,0,z).applyMatrix4(actual));
+ }
+ const b=prepareBoxMeshBounds({count:5,instanceMatrix:{array}});
+ for(const [key,axis,fn]of [['x0','x',Math.min],['x1','x',Math.max],['z0','z',Math.min],['z1','z',Math.max]]){
+  const expected=fn(...points.map(p=>p[axis]));assert.ok(Math.abs(b[key]-expected)<1e-9,key);assert.ok(Math.abs(b.chunks[0][key]-expected)<1e-9,'chunk '+key);
+ }
+});

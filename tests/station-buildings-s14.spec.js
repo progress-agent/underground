@@ -71,7 +71,7 @@ async function installPixelHelpers(p) {
       u.scene.getObjectByName('surfaceGeometry').traverse(o => {
         if (!o.name?.startsWith('baked-buildings-')) return;
         const a = o.instanceMatrix.array;
-        for (let i = 0; i < o.count; i++) if (Math.abs(a[i * 16 + 12] - x) <= 0.5 && Math.abs(a[i * 16 + 14] - z) <= 0.5 && Math.abs(Math.abs(a[i * 16]) - side) <= 0.2) found = { o, i };
+        for (let i = 0; i < o.count; i++) if (Math.abs(a[i * 16 + 12] - x) <= 0.5 && Math.abs(a[i * 16 + 14] - z) <= 0.5 && Math.abs(Math.sqrt(Math.hypot(a[i*16],a[i*16+2])*Math.hypot(a[i*16+8],a[i*16+10])) - side) <= 0.2) found = { o, i };
       });
       return found;
     };
@@ -206,12 +206,12 @@ async function enterWalk() {
   await page.keyboard.press('2');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
 }
-/** Place the walker at (x, z) facing `yaw`; if it lands more than 2.5 m over the ground, move 2 m further along `yaw` (up to 10 m). */
+/** Place the walker at (x, z) facing `yaw`; if it lands more than 2.5 m over the ground, move 2 m further away from the host (up to 20 m). */
 const placeAt = (x, z, yaw) => page.evaluate(async ([x, z, yaw]) => {
   const u = window.__ug, m = u.modes.registry.get('pedestrian'), col = u.modes.collision;
   let moved = 0;
-  for (; moved <= 10; moved += 2) {
-    m.place(x - Math.sin(yaw) * moved, z - Math.cos(yaw) * moved, { yaw, pitch: 0 });
+  for (; moved <= 20; moved += 2) {
+    m.place(x + Math.sin(yaw) * moved, z + Math.cos(yaw) * moved, { yaw, pitch: 0 });
     await new Promise(r => requestAnimationFrame(r));
     const d = m.debug();
     if (d.y - col.groundHeightAt(d.x, d.z) <= 2.5) break;
@@ -236,10 +236,47 @@ const pushIn = (frames = 240, keys = ['w']) => page.evaluate(async ([frames, key
 }, [frames, keys]);
 
 test('B14-2.5 touching the box elsewhere does not open the card, and never gets within 0.30 m of the host', async () => {
-  const starts = [
-    ['fulham-broadway', -4520.3, 3036.7, Math.PI], ['fulham-broadway', -4502.7, 3100.0, Math.PI / 2],
-    ['north-greenwich', 9116.1, 504.2, Math.PI], ['north-greenwich', 9087.2, 570.0, -Math.PI / 2],
-  ];
+  // Choose two non-entrance faces with a clear approach. Rotation can put a
+  // neighbour across the old centre-line start; that tests the neighbour,
+  // rather than the host hold this fixture is intended to exercise.
+  const starts = await page.evaluate(hosts=>{
+    const u=window.__ug,out=[],boxes=[];
+    u.scene.getObjectByName('surfaceGeometry').traverse(o=>{
+      if(!o.name?.startsWith('baked-buildings-'))return;
+      const a=o.instanceMatrix.array;
+      for(let i=0;i<o.count;i++){
+        const k=i*16,x=a[k+12],z=a[k+14];
+        if(!Object.values(hosts).some(h=>Math.hypot(x-h.x,z-h.z)<200))continue;
+        const w=Math.hypot(a[k],a[k+2]),d=Math.hypot(a[k+8],a[k+10]);
+        boxes.push({x,z,w,d,c:a[k]/w,s:a[k+2]/w,base:a[k+13],top:a[k+13]+a[k+5]*u.getBuildingHeightScale()});
+      }
+    });
+    for(const[site,h]of Object.entries(hosts)){
+      const[nx,nz]=h.face,tx=-nz,tz=nx,half=h.tangentHalf??h.side/2;
+      const normalHalf=(h.width??h.side)*(h.depth??h.side)/(4*half);
+      for(const sign of [-1,1]){
+        let start=null;
+        for(const f of [0,.25,-.25,.5,-.5,.75,-.75]){
+          const x=h.x+tx*sign*(half+4)+nx*f*normalHalf,z=h.z+tz*sign*(half+4)+nz*f*normalHalf;
+          let clear=true;
+          for(let distance=0;distance<=5;distance+=.5){
+            const px=x-tx*sign*distance,pz=z-tz*sign*distance,g=u.getStructuralSurfaceY({x:px,z:pz});
+            if(!Number.isFinite(g)||u.stationBuildings.contactAt(px,pz,1)
+              ||distance===0&&u.modes.collision.standHeightAt(px,pz,Infinity,0)-g>2.5){clear=false;break;}
+            if(boxes.some(b=>{
+              if(Math.hypot(b.x-h.x,b.z-h.z)<.1)return false;
+              const dx=px-b.x,dz=pz-b.z;
+              return b.base<g+9&&b.top>g+2&&Math.abs(dx*b.c+dz*b.s)<b.w/2+.5&&Math.abs(-dx*b.s+dz*b.c)<b.d/2+.5;
+            })){clear=false;break;}
+          }
+          if(clear){start=[site,x,z,Math.atan2(tx*sign,tz*sign)];break;}
+        }
+        if(!start)throw Error(site+': no clear side-face approach');
+        out.push(start);
+      }
+    }
+    return out;
+  },Object.fromEntries(Object.keys(SITES).map(site=>[site,BLOCK(site).host])));
   const out = [];
   for (const [site, x, z, yaw] of starts) {
     await enterWalk();
@@ -255,7 +292,7 @@ test('B14-2.5 touching the box elsewhere does not open the card, and never gets 
     }, [host, x, z, yaw]);
     const log = await pushIn(240);        // 4 s at 60 frames a second
     // distance outside the host square (Chebyshev-like: the walker's centre against the axis-aligned square)
-    const dist = (f) => Math.max(Math.abs(f.x - host.x) - half, Math.abs(f.z - host.z) - half);
+    const dist=f=>{const c=Math.cos(host.theta??0),s=Math.sin(host.theta??0),dx=f.x-host.x,dz=f.z-host.z;return Math.max(Math.abs(dx*c+dz*s)-(host.width??host.side)/2,Math.abs(-dx*s+dz*c)-(host.depth??host.side)/2);};
     const minOutside = Math.min(...log.map(dist));
     out.push({ site, x, z, placed, floatM, anyCard: log.some(f => f.open || f.card), endOutside: dist(log.at(-1)), minOutside });
     await page.keyboard.press('Escape');
@@ -474,8 +511,8 @@ const onPage = (p) => ({
     const r = await p.evaluate(async ([x, z, yaw]) => {
       const u = window.__ug, m = u.modes.registry.get('pedestrian'), col = u.modes.collision;
       let moved = 0;
-      for (; moved <= 10; moved += 2) {
-        m.place(x - Math.sin(yaw) * moved, z - Math.cos(yaw) * moved, { yaw, pitch: 0 });
+      for (; moved <= 20; moved += 2) {
+        m.place(x + Math.sin(yaw) * moved, z + Math.cos(yaw) * moved, { yaw, pitch: 0 });
         await new Promise(res => requestAnimationFrame(res));
         const d = m.debug(); if (d.y - col.groundHeightAt(d.x, d.z) <= 2.5) break;
       }

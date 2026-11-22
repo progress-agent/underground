@@ -1,3 +1,5 @@
+import { inReservoirFootRegion } from './reservoir-feet.js';
+import { buildingShape } from '../scripts/buildings/shape.mjs';
 // surface-geometry.js — 3D buildings (per-tile InstancedMesh)
 //
 // Creates one InstancedMesh of boxes per loaded tile. Tiles are loaded
@@ -167,7 +169,9 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
 
   const dummy = new THREE.Object3D();
   let idx = 0;
+  const anchorCentres = [];
 
+  const square=new URLSearchParams(globalThis.location?.search||'').get('bshape')==='square';
   for (const b of unique) {
     const baseY = reservoirBuildingBase(b.cx,b.cz,getTerrainMeshSurfaceY({ x: b.cx, z: b.cz }));
     if (baseY === null || baseY === undefined || Number.isNaN(baseY)) continue;
@@ -182,14 +186,18 @@ export function createTileBuildings(buildings, getTerrainMeshSurfaceY, VE, isDup
     const side = Math.max(Math.sqrt(b.area), 0.1);
     const h = Math.max(b.height, 0.5) * VE;
 
-    dummy.position.set(b.cx, baseY, b.cz); // base-pivoted geometry
-    dummy.scale.set(side, h, side);
+    const r=!square&&b.footprint?.length>=3&&b.area>0?buildingShape(b):null;
+    dummy.position.set(r?.cx??b.cx, baseY, r?.cz??b.cz); // source terrain datum, base pivot
+    dummy.rotation.y=-(r?.theta??0);
+    dummy.scale.set(r?.w??side, h, r?.h??side);
     dummy.updateMatrix();
     mesh.setMatrixAt(idx, dummy.matrix);
+    if (r && inReservoirFootRegion(b.cx,b.cz)) anchorCentres.push(idx,Math.fround(b.cx),Math.fround(b.cz));
 
     idx++;
   }
 
+  if (anchorCentres.length) mesh.userData.reservoirAnchorCentres = new Float32Array(anchorCentres);
   mesh.count = idx; // trim to actual placed instances
   if (idx === 0) { boxGeo.dispose(); return null; } // no placed instances → don't add an empty mesh
   mesh.instanceMatrix.needsUpdate = true;

@@ -20,17 +20,17 @@ function fitFoundationWalls(mesh,corrections,terrainAt){
   const a=mesh.instanceMatrix.array,p=[],corners=[[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]];
   let min=mesh.boundingBox.min.y;
   for(const {i,offsets}of corrections){
-    const j=i*16,x=a[j+12],z=a[j+14],base=a[j+13],h=a[j+5],side=a[j];
+    const j=i*16,x=a[j+12],z=a[j+14],base=a[j+13],h=a[j+5],side=Math.hypot(a[j],a[j+2],a[j+8],a[j+10]);
     if(Math.max(...offsets.map(v=>Math.abs(v*h)))<=.25)continue;
     const nearby=activeWater.bodies.filter(b=>!b.bounds||x+side/2>=b.bounds.minX&&x-side/2<=b.bounds.maxX&&z+side/2>=b.bounds.minZ&&z-side/2<=b.bounds.maxZ);
     const point=(edge,t)=>{
       const v=corners[edge],w=corners[(edge+1)%4],lx=v[0]+(w[0]-v[0])*t,lz=v[1]+(w[1]-v[1])*t,tx=lx+.5,tz=lz+.5;
       const top=base+((offsets[0]*(1-tx)+offsets[1]*tx)*(1-tz)+(offsets[2]*(1-tx)+offsets[3]*tx)*tz)*h;
-      const px=x+lx*side,pz=z+lz*side,support=drySupport(px,pz,terrainAt,base,nearby);
+      const px=x+lx*a[j]+lz*a[j+8],pz=z+lx*a[j+2]+lz*a[j+10],support=drySupport(px,pz,terrainAt,base,nearby);
       return{top:[px,top,pz],bottom:[px,Math.min(top,support-.02),pz],gap:top-support};
     };
     for(let edge=0;edge<4;edge++){
-      const n=Math.max(1,Math.ceil(side/.25));let left=point(edge,0);
+      const n=Math.max(1,Math.ceil((edge%2?Math.hypot(a[j+8],a[j+10]):Math.hypot(a[j],a[j+2]))/.25));let left=point(edge,0);
       for(let k=1;k<=n;k++){
         const right=point(edge,k/n);
         if(Math.max(left.gap,right.gap)>.01){
@@ -86,7 +86,7 @@ export function fitReservoirBuildingFootprints(mesh,terrainAt=getTerrainMeshSurf
     if(!banks.some(b=>x>=b.bounds.minX-100&&x<=b.bounds.maxX+100&&z>=b.bounds.minZ-100&&z<=b.bounds.maxZ+100))continue;
     const offsets=[];
     for(const sz of [-1,1])for(const sx of [-1,1]){
-      const px=x+sx*a[j]/2,pz=z+sz*a[j+10]/2;
+      const px=x+(sx*a[j]+sz*a[j+8])/2,pz=z+(sx*a[j+2]+sz*a[j+10])/2;
       // Only dry bank triangles support these walls. groundAt also returns
       // underwater beds, which can be higher than terrain at an overlapping
       // basin boundary and are not the visible dry support.
@@ -145,9 +145,13 @@ export function anchorReservoirBuildings(water,group,retained=[],invalidate=()=>
     if(!mesh.isInstancedMesh||!/^(baked-)?buildings-/.test(mesh.name))return;
     const box=mesh.boundingBox;
     if(box&&!banks.some(b=>box.max.x>=b.bounds.minX-100&&box.min.x<=b.bounds.maxX+100&&box.max.z>=b.bounds.minZ-100&&box.min.z<=b.bounds.maxZ+100))return;
-    const a=mesh.instanceMatrix.array;let touched=false;
+    const a=mesh.instanceMatrix.array,anchors=mesh.userData.reservoirAnchorCentres;let touched=false,anchorOffset=0;
     for(let i=0;i<mesh.count;i++) {
-      const j=i*16,x=a[j+12],z=a[j+14],before=a[j+13],after=reservoirBuildingBase(x,z,before);
+      const j=i*16,x=a[j+12],z=a[j+14];
+      const original=anchors?.[anchorOffset]===i;
+      const sourceX=original?anchors[anchorOffset+1]:x,sourceZ=original?anchors[anchorOffset+2]:z;
+      if(original)anchorOffset+=3;
+      const before=a[j+13],after=reservoirBuildingBase(sourceX,sourceZ,before);
       if(after-before>.01) {a[j+13]=after;touched=true;changed.push({x,z,before,after});}
     }
     if(touched){
