@@ -112,8 +112,12 @@ The shared `trimJunction` and pavement-polygon helper remains available for
 building clearance against the exact source polygons. The drawn bake uses
 `trimRibbon`; `scripts/roads/measure-junctions.mjs` measures the actual stored,
 decoded pavement bands, separately for near and aerial geometry and combined,
-against the union of other same-layer carriageways. Its legacy mode reproduces
-live's compressed files before measuring the same statistic.
+against the union of other same-layer carriageways. The companion
+`measure-stored-bands.mjs` reads the final asset after numerical sliver cleanup.
+Dividing the pre-cleanup overlap by that final pavement area gives a conservative
+upper bound: cleanup only removes faces. The audit records any topology
+substitution that would invalidate that argument. Legacy mode reproduces live's
+compressed files before measuring the same statistic.
 
 Detail uses 2km tiles, clipped exactly at the tile edges. Compatible distant
 geometry is packed into 8km files with 32-bit indices, keeping bank Float32

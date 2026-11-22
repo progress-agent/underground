@@ -59,7 +59,7 @@ if(process.argv.includes('--repair-existing')){
   fs.writeFileSync(file,JSON.stringify(meta));console.log(JSON.stringify({files,repaired,maxRaise}));process.exit(0);
 }
 const legacy=process.argv.includes('--legacy');
-const audit=process.argv.includes('--audit')?{pavementArea:0,overlapArea:0,triangles:0,lods:{}}:null;
+const audit=process.argv.includes('--audit')?{pavementArea:0,overlapArea:0,triangles:0,lods:{},farTopologySubstitutions:0}:null;
 const network=buildNetwork(ROOT,getMapEdgeRing(),{legacy});
 const junctionIndex=carriagewayIndex(network.roads);
 const overpasses=roadOverpassConstraints(network.roads,g);
@@ -152,7 +152,7 @@ function flush(c){
       // numerically unstable scraps along a bank's discontinuous boundary.
       const longest=Math.max(...[[a,b],[b,d],[d,a]].map(([a,b])=>Math.hypot(positions[a*3]-positions[b*3],positions[a*3+2]-positions[b*3+2])));
       if(Math.abs(det)/128<.001||Math.abs(det)/longest/8<.005)continue;if(det>0)[b,d]=[d,b];out.push(a,b,d);}return out;};
-    near=upward(near);far=upward(far);if(far.length>near.length)far=near; // clipped slivers may cost more than the full topology locally
+    near=upward(near);far=upward(far);if(far.length>near.length){if(audit)audit.farTopologySubstitutions++;far=near;} // clipped slivers may cost more than the full topology locally
     if(near.length||far.length)c.parts.push({pos:positions,road:Uint8Array.from(metadata),
       rise:morph.some(v=>v!==0)?Int16Array.from(morph):null,
       across:legacy?(ac.some((v,i)=>v!==(metadata[i*3+1]>=128?32767:-32767))?Int16Array.from(ac):null):Uint16Array.from(ac),
