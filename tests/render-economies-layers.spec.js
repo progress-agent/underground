@@ -317,6 +317,9 @@ test.describe('in the running app', () => {
   });
 
   test('shadow map: rendered once while still, re-rendered when the camera or sun moves', async () => {
+    // Measure a static scene after the newly streamed road geometry has arrived.
+    await page.evaluate(()=>{const u=window.__ug;u.camera.position.set(2952.9,337.8,-732.9);u.controls.target.set(1910.1,196.2,-783.7);u.controls.update();});
+    await page.waitForFunction(()=>window.__ug.lateLayers.settled()&&(!window.__ug.roads.enabled||['ready','idle'].includes(window.__ug.roads.stats.state)),null,{timeout:180000});
     const r = await page.evaluate(async () => {
       const u = window.__ug, sun = window.__ugSun, cache = u.shadowCache.stats;
       sun.setShadowsEnabled(true, { persist: false });

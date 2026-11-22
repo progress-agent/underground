@@ -6,6 +6,7 @@
 // One page boots once and the tests share it (serial), as the other Pedestrian specs do. Poses are fixed places
 // in the real baked city, placed with ped.place(x, z, { yaw }); yaw 0 faces north (-Z).
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 
 const POSES = {
   KX: [164.9, -2507.9, 0],              // open ground south of King's Cross
@@ -507,25 +508,13 @@ test.describe('the figure in the street', () => {
 
   test('line of sight: in a narrow street the camera is pulled in and never inside or behind a facade', async () => {
     await pplace('ALLEY');
+    await pg.evaluate(installDrawnBuildingFrames);
+    await pev(()=>{const c=window.__ug.modes.collision;c.sync();window.__losFrames=window.__drawnBuildingFrames(c.buildingsNear(2870,-719.6,400));});
     const probe = () => pev(() => {
       const u = window.__ug, T = window.__ugTHREE, ratio = u.masterHeight.ratio, c = u.modes.collision, cp = u.camera.position;
       const nk = new T.Vector3(); u.player.figure.boneWorldPosition('neck_01', nk);
-      const inside = c.buildingsNear(cp.x, cp.z, 2).some((b) => cp.x >= b.minX && cp.x <= b.maxX && cp.z >= b.minZ && cp.z <= b.maxZ && cp.y >= b.baseY && cp.y <= b.roofY);
-      const half = Math.hypot(cp.x - nk.x, cp.z - nk.z) / 2 + 2;
-      const d = [nk.x - cp.x, nk.y - cp.y, nk.z - cp.z], f = [cp.x, cp.y, cp.z];
-      let crosses = false;
-      for (const b of c.buildingsNear((cp.x + nk.x) / 2, (cp.z + nk.z) / 2, half)) {
-        const lo = [b.minX, b.baseY, b.minZ], hi = [b.maxX, b.roofY, b.maxZ];
-        let t0 = 0, t1 = 1, ok = true;
-        for (let a = 0; a < 3; a++) {
-          if (Math.abs(d[a]) < 1e-12) { if (f[a] < lo[a] || f[a] > hi[a]) ok = false; continue; }
-          let s = (lo[a] - f[a]) / d[a], e = (hi[a] - f[a]) / d[a];
-          if (s > e) [s, e] = [e, s];
-          t0 = Math.max(t0, s); t1 = Math.min(t1, e);
-          if (t0 > t1) ok = false;
-        }
-        if (ok) crosses = true;
-      }
+      const inside=window.__losFrames.some(b=>window.__drawnBoxContains(b,cp,true));
+      const crosses=window.__losFrames.some(b=>window.__drawnBoxSegment(b,cp,nk,true));
       return { inside, crosses, dist: new T.Vector3(cp.x, cp.y * ratio, cp.z).distanceTo(new T.Vector3(nk.x, nk.y * ratio, nk.z)) };
     });
     const first = await probe();

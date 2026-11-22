@@ -16,6 +16,7 @@
 // before of T/near-before-after.md).
 import { test, expect } from '@playwright/test';
 import { api } from './player-vehicles-helpers.mjs';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 
 // serial on the lane; against the live build (UG_NEAR_BASE) every contact is reported, so a failure does not skip the rest
 test.describe.configure({ mode: process.env.UG_NEAR_BASE ? 'default' : 'serial' });
@@ -100,7 +101,33 @@ test.describe('first person against a wall', () => {
 
   async function press(c, view) {
     await h.releaseKeys();
-    await h.ev(([x, z, yaw, view]) => { const p = window.__ug.modes.registry.get('pedestrian'); p.place(x, z, { yaw }); p.setView(view); }, [c.x, c.z, c.yaw, view]);
+    await page.evaluate(installDrawnBuildingFrames);
+    const pose=await h.ev(c=>{
+      if(!['C2','C3','C5','C3-pull'].includes(c.id))return c;
+      const pull=c.id==='C3-pull';if(pull)c={...c,x:2870,z:-719.6,yaw:Math.PI};
+      const u=window.__ug;
+      const face=(b,nx,nz,tangent,tangentHalf,half)=>{
+        const projection=(c.x-b.cx)*tangent[0]+(c.z-b.cz)*tangent[1],t=Math.max(-tangentHalf+2,Math.min(tangentHalf-2,projection));
+        return{x:b.cx+tangent[0]*t+nx*(half+2),z:b.cz+tangent[1]*t+nz*(half+2),yaw:Math.atan2(nx,nz)};
+      };
+      if(c.id==='C2'||c.id==='C5'){
+        const h=u.stationBuildings.index.buildingForSite(c.id==='C2'?'fulham-broadway':'north-greenwich').host,cos=Math.cos(h.theta??0),sin=Math.sin(h.theta??0);
+        return face({cx:h.x,cz:h.z},sin,-cos,[cos,sin],(h.width??h.side)/2,(h.depth??h.side)/2);
+      }
+      // The terrace contact follows the nearest actual north-facing wall in
+      // the same small neighbourhood, rather than a former square's face.
+      const col=u.modes.collision;col.sync();const boxes=window.__drawnBuildingFrames(col.buildingsNear(c.x,c.z,50)),choices=[];
+      for(const b of boxes){
+        const candidates=[[b.ux,b.uz,[-b.uz,b.ux],b.depth/2,b.width/2],[-b.ux,-b.uz,[-b.uz,b.ux],b.depth/2,b.width/2],[-b.uz,b.ux,[b.ux,b.uz],b.width/2,b.depth/2],[b.uz,-b.ux,[b.ux,b.uz],b.width/2,b.depth/2]];
+        for(const [nx,nz,tangent,ht,hn]of candidates){if(nx*Math.sin(c.yaw)+nz*Math.cos(c.yaw)<.5||ht<=2)continue;
+          const p=face(b,nx,nz,tangent,ht,hn),g=col.groundHeightAt(p.x,p.z);if(g===null||g+8.5>=b.roofY||g+8.5<b.baseY)continue;
+          if(boxes.some(o=>{if(o===b||o.roofY<=g+.2||o.baseY>=g+8.5)return false;const dx=p.x-o.cx,dz=p.z-o.cz;return Math.abs(dx*o.ux+dz*o.uz)<o.width/2+.4&&Math.abs(-dx*o.uz+dz*o.ux)<o.depth/2+.4;}))continue;
+          choices.push({...p,d:Math.hypot(p.x-c.x,p.z-c.z)});
+        }
+      }
+      choices.sort((a,b)=>a.d-b.d);if(!choices.length)throw Error('no drawn terrace wall near original contact');const p=choices[0];return pull?{x:p.x-1.5*Math.sin(p.yaw),z:p.z-1.5*Math.cos(p.yaw),yaw:p.yaw+Math.PI}:p;
+    },c);
+    await h.ev(([x,z,yaw,view])=>{const p=window.__ug.modes.registry.get('pedestrian');p.place(x,z,{yaw});p.setView(view);},[pose.x,pose.z,pose.yaw,view]);
     await h.wait(900);
     await h.ev((view) => { window.__nc = null; if (window.__nc) window.__nc.kind = view; }, view);
   }

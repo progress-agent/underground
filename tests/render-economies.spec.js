@@ -31,6 +31,9 @@ const VIEWS = {
   m25Edge: { p: [4910.7, 634.3, -18445.1], t: [6239.5, 102.8, -20483.9] },
   heathrow: { p: [-19493.3, 1606.7, 4622.3], t: [-22570.2, 120, 4688.2] },
 };
+// shadowSnap is the accepted default look; its bounded pixel movement is
+// checked separately by render-economies-s16.spec.js. Keep it on while testing
+// the remaining economies for invisibility, as with trainBatch/underAbove.
 const MAX_PCT = 0.002, MAX_LEVEL = 8;
 
 test.describe.configure({ mode: 'serial' });
@@ -77,7 +80,7 @@ for (const [name, pose] of Object.entries(VIEWS)) {
       await new Promise(res => setTimeout(res, 100));
       const r = u.composer.renderer, gl = r.getContext(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
       const grab = on => {
-        u.economies.setAll(on); u.economies.set('trainBatch', true); u.economies.set('underAbove', true); // own specs: render-merges, underground-cull
+        u.economies.setAll(on); u.economies.set('trainBatch', true); u.economies.set('underAbove', true); u.economies.set('shadowSnap', true); // own specs: render-merges, underground-cull
         window.__step(4); // M25 traffic recomputes every third tick
         u.composer.render(0);
         r.setRenderTarget(null);
@@ -132,7 +135,7 @@ for (const [name, pose, yaws] of [['m25Edge', VIEWS.m25Edge, [8, 20, 40]], ['riv
         u.controls.target.copy(u.camera.position).add(d); u.controls.update();
       };
       const grab = (on, yaw) => {
-        u.economies.setAll(on); u.economies.set('trainBatch', true); u.economies.set('underAbove', true); // own specs: render-merges, underground-cull
+        u.economies.setAll(on); u.economies.set('trainBatch', true); u.economies.set('underAbove', true); u.economies.set('shadowSnap', true); // own specs: render-merges, underground-cull
         place(0);
         window.__step(4); while (tl.frame % 3) window.__step(1); // an update tick just ran at yaw 0
         place(yaw);

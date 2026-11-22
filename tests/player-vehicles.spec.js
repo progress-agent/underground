@@ -7,6 +7,7 @@
 // One page boots once and the tests share it (serial). Timing is on the mode clock; keys through the keyboard or
 // fpsControls.keys. Units: display metres = canonical Y x masterHeight.ratio; physics metres = canonical Y / 5.
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 import { POSES, api } from './player-vehicles-helpers.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -61,22 +62,13 @@ const rigDistance = (id) => h.ev((id) => window.__ug.modes.registry.get(id).debu
 
 /** The box helpers the line-of-sight checks share: inside a box, and a segment through one (canonical coordinates). */
 const LOS_SRC = `
-const c = u.modes.collision; c.sync();
-const inside = (p, r) => { for (const b of c.buildingsNear(p.x, p.z, r)) if (p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ && p.y > b.baseY && p.y < b.roofY) return true; return false; };
-const segHits = (a, b) => {
-  const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2, rad = Math.hypot(a.x - b.x, a.z - b.z) / 2 + 2;
-  for (const bx of c.buildingsNear(mx, mz, rad)) {
-    let t0 = 0, t1 = 1; const d = [b.x - a.x, b.y - a.y, b.z - a.z], lo = [bx.minX, bx.baseY, bx.minZ], hi = [bx.maxX, bx.roofY, bx.maxZ], p = [a.x, a.y, a.z];
-    let hit = true;
-    for (let k = 0; k < 3 && hit; k++) {
-      if (Math.abs(d[k]) < 1e-12) { if (p[k] < lo[k] || p[k] > hi[k]) hit = false; continue; }
-      let ta = (lo[k] - p[k]) / d[k], tb = (hi[k] - p[k]) / d[k]; if (ta > tb) [ta, tb] = [tb, ta];
-      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 >= t1) hit = false;
-    }
-    if (hit) return true;
-  }
-  return false;
-};`;
+const c=u.modes.collision;
+const inside=p=>window.__losFrames.some(b=>window.__drawnBoxContains(b,p));
+const segHits=(a,b)=>window.__losFrames.some(box=>window.__drawnBoxSegment(box,a,b));`;
+async function prepareLosFrames(){
+ await page.evaluate(installDrawnBuildingFrames);
+ await h.ev(()=>{const c=window.__ug.modes.collision;c.sync();window.__losFrames=window.__drawnBuildingFrames(c.buildingsNear(2870,-719.6,400));});
+}
 const losProbe = (subject) => `${LOS_SRC}
 const cam = u.camera.position, ratio_ = u.masterHeight.ratio;
 const subj = ${subject};
@@ -427,6 +419,7 @@ test.describe('the Drone and the Balloon from outside', () => {
     await h.place('ALLEY');
     await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
     await h.wait(400);
+    await prepareLosFrames();
     const probe = losProbe(`(() => { const v = new T.Vector3(); u.player.figure.boneWorldPosition('neck_01', v); return { x: v.x, y: v.y, z: v.z }; })()`);
     const all = [];
     for (let k = 0; k < 3; k++) {
@@ -441,6 +434,7 @@ test.describe('the Drone and the Balloon from outside', () => {
 
   test('los 2: the Drone in a narrow street, orbited and flown at a facade, never has the camera inside or behind a box', async () => {
     await toDrone(POSES.ALLEY[0], POSES.ALLEY[1], 25, POSES.ALLEY[2]);
+    await prepareLosFrames();
     const probe = losProbe(`(() => { const d = u.modes.registry.get('drone').debug().pos; return { x: d.x, y: d.y, z: d.z }; })()`);
     const run = h.sample(5, probe, [{ t: 3, down: ['w'] }]);
     for (let i = 0; i < 24; i++) await h.drag(50, 0, 2);
@@ -463,6 +457,7 @@ test.describe('the Drone and the Balloon from outside', () => {
       u.modes.registry.get('balloon').place({ x, y: top + 20 * 5 + 7.5, z, dT: 60, vy: 0 });
     }, [POSES.ALLEY[0], POSES.ALLEY[1]]);
     await h.wait(1500);
+    await prepareLosFrames();
     const probe = losProbe(`(() => { const b = u.modes.registry.get('balloon').debug().pos; return { x: b.x, y: b.y - 7.5 + 1.3 * 5, z: b.z }; })()`);
     const run = h.sample(6, probe);
     for (let i = 0; i < 26; i++) await h.drag(50, 0, 2);

@@ -6,6 +6,7 @@
 // requestAnimationFrame; keys are injected through fpsControls.keys so a press lands at an exact simulated time.
 // Poses are fixed places in the real baked city (yaw 0 faces north, -Z).
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 import { POSES, api } from './player-vehicles-helpers.mjs';
 import { installLib } from './s14-helpers.js';
 import { PEDESTRIAN_TUNABLES, BODY } from '../src/modes/pedestrian-body.js';
@@ -222,40 +223,27 @@ test.describe('the skateboard', () => {
   test('handling 7: a facade stops the board; it stays on and never gets inside the box', async () => {
     // A pose 12 to 20 m from an ordinary box face along a clear, flat, dry line with no station building near: found by a
     // slab test over the collision boxes (BANK's "face" to the north is a building raised 6 m on a deck the walker passes under).
+    await page.evaluate(installDrawnBuildingFrames);
     const pose = await h.ev(() => {
       const u = window.__ug, c = u.modes.collision, sb = u.modes.ctx.stationBuildings?.();
       c.sync();
       const R = 0.35, collidable = (b, y) => b.baseY < y + 1.85 * 5 && b.roofY > y + 3 * 5;
-      for (let r = 0; r <= 240; r += 10) {
-        for (let k = 0; k < Math.max(1, Math.round(r / 10) * 4); k++) {
-          const a0 = (k / Math.max(1, Math.round(r / 10) * 4)) * Math.PI * 2;
-          const x = 2743.9 + Math.cos(a0) * r, z = -760.9 + Math.sin(a0) * r;
-          const y = c.standHeightAt(x, z, Infinity, 0);
-          if (!Number.isFinite(y) || c.waterAt(x, z)) continue;
-          for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-            const dx = -Math.sin(yaw), dz = -Math.cos(yaw);
-            let best = Infinity;
-            for (const b of c.buildingsNear(x + dx * 12, z + dz * 12, 16)) {
-              if (!collidable(b, y)) continue;
-              let t0 = 0, t1 = 40;
-              for (const [p, d, lo, hi] of [[x, dx, b.minX - R, b.maxX + R], [z, dz, b.minZ - R, b.maxZ + R]]) {
-                if (Math.abs(d) < 1e-9) { if (p < lo || p > hi) { t0 = 1e9; break; } continue; }
-                let ta = (lo - p) / d, tb = (hi - p) / d; if (ta > tb) [ta, tb] = [tb, ta];
-                t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
-              }
-              if (t0 < t1) best = Math.min(best, t0);
-            }
-            if (!(best >= 12 && best <= 20)) continue;
-            // flat and clear to the face, and no station building within 45 m of the line
-            let ok = true;
-            for (let t = 0; t <= best; t += 1) {
-              const px = x + dx * t, pz = z + dz * t, py = c.standHeightAt(px, pz, y + 1, 0);
-              if (!Number.isFinite(py) || Math.abs(py - y) > 0.4 * 5 || c.waterAt(px, pz)) { ok = false; break; }
-              if (sb?.contactAt(px, pz, 45)) { ok = false; break; }
-            }
-            if (ok) return { x, z, yaw, face: best };
-          }
-        }
+      const pool=window.__drawnBuildingFrames(c.buildingsNear(2743.9,-760.9,300));
+      const hit=(b,x,z,dx,dz)=>{
+        const px=(x-b.cx)*b.ux+(z-b.cz)*b.uz,pz=-(x-b.cx)*b.uz+(z-b.cz)*b.ux,vx=dx*b.ux+dz*b.uz,vz=-dx*b.uz+dz*b.ux;
+        let t0=0,t1=40;for(const[p,d,lo,hi]of[[px,vx,-b.width/2-R,b.width/2+R],[pz,vz,-b.depth/2-R,b.depth/2+R]]){
+          if(Math.abs(d)<1e-9){if(p<lo||p>hi)return Infinity;continue;}let a=(lo-p)/d,v=(hi-p)/d;if(a>v)[a,v]=[v,a];t0=Math.max(t0,a);t1=Math.min(t1,v);
+        }return t0<t1?t0:Infinity;
+      };
+      for(const target of pool)for(const[nx,nz,half]of[[target.ux,target.uz,target.width/2],[-target.ux,-target.uz,target.width/2],[-target.uz,target.ux,target.depth/2],[target.uz,-target.ux,target.depth/2]])for(const distance of[13,16,19]){
+        const x=target.cx+nx*(half+distance),z=target.cz+nz*(half+distance),dx=-nx,dz=-nz,y=c.standHeightAt(x,z,Infinity,0);
+        if(Math.hypot(x-2743.9,z+760.9)>240||!Number.isFinite(y)||c.waterAt(x,z))continue;
+        let best=Infinity,first=null;
+        for(const b of pool){if(!collidable(b,y))continue;const t=hit(b,x,z,dx,dz);if(t<best){best=t;first=b;}}
+        if(first!==target||!(best>=12&&best<=20))continue;
+        let ok=true;for(let t=0;t<=best;t+=1){const px=x+dx*t,pz=z+dz*t,py=c.standHeightAt(px,pz,y+1,0);
+          if(!Number.isFinite(py)||Math.abs(py-y)>.4*5||c.waterAt(px,pz)||sb?.contactAt(px,pz,45)){ok=false;break;}}
+        if(ok){window.__boardTestFrames=pool;return{x,z,yaw:Math.atan2(nx,nz),face:best};}
       }
       return null;
     });
@@ -264,7 +252,7 @@ test.describe('the skateboard', () => {
     await h.place('BANK', { x: pose.x, z: pose.z, yaw: pose.yaw });
     await h.ev(() => window.__ug.modes.registry.get('pedestrian').setBoard(true));
     await h.wait(400);
-    const probe = `${SPEED_PROBE.replace('return {', 'const c = u.modes.collision; let inside = Infinity; for (const bx of c.buildingsNear(b.x, b.z, 3)) { if (!(bx.baseY < b.y + 1.85 * 5 && bx.roofY > b.y + 3 * 5)) continue; const dx = Math.min(b.x - bx.minX, bx.maxX - b.x), dz = Math.min(b.z - bx.minZ, bx.maxZ - b.z); if (dx > 0 && dz > 0) inside = Math.min(inside, dx, dz); } return { inside, card: ped.debug().card?.kind ?? null,')}`;
+    const probe = `${SPEED_PROBE.replace('return {', 'const c = u.modes.collision; let inside = Infinity; for (const bx of window.__boardTestFrames) { if (!(bx.baseY < b.y + 1.85 * 5 && bx.roofY > b.y + 3 * 5)) continue; const px=b.x-bx.cx,pz=b.z-bx.cz,dx=bx.width/2-Math.abs(px*bx.ux+pz*bx.uz),dz=bx.depth/2-Math.abs(-px*bx.uz+pz*bx.ux); if(dx>0&&dz>0)inside=Math.min(inside,dx,dz); } return { inside, card: ped.debug().card?.kind ?? null,')}`;
     const s = await h.sample(4, probe, [{ t: 0, down: ['w'] }]);
     await h.releaseKeys();
     const fall = s.findIndex((r, i) => i > 0 && r.speed < s[i - 1].speed - 3);

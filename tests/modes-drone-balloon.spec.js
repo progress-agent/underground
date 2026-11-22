@@ -17,6 +17,7 @@
 // assertion's physics needs; maxFrames is only a hang guard.
 
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 
 // Sprint 14Oct26w, D-053 item 3: the Drone and the Balloon now open in third person (the Drone at once, the Balloon once
 // the figure has arrived), seen from over the shoulder. This spec pins the FIRST-PERSON flight models (the camera, the
@@ -144,20 +145,23 @@ test.describe('Drone and Balloon modes', () => {
     await page.keyboard.press('3');
     await page.evaluate(() => window.__ug.modes.registry.get('drone').setView('first')); // D-053 item 3
     await frames(page, 2);
+    await page.evaluate(installDrawnBuildingFrames);
     const setup = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision, p = ug.camera.position;
       c.sync();
-      const near = c.buildingsNear(p.x, p.z, 2000).filter(b => b.maxX - b.minX > 12 && b.roofY - b.baseY > 40);
-      for (const b of near) {
-        const cz = (b.minZ + b.maxZ) / 2, x0 = b.minX - 25;
-        const y = b.baseY + (b.roofY - b.baseY) * 0.5;
-        // Clear air on the approach: nothing between the start and the facade.
-        const between = c.buildingsNear(x0, cz, 24).filter(o => o !== b && o.roofY > y && o.baseY < y
-          && o.maxX < b.minX && o.maxX > x0 - 3 && o.minZ < cz + 3 && o.maxZ > cz - 3);
-        if (between.length) continue;
-        if ((c.groundHeightAt(x0, cz) ?? Infinity) > y - 20) continue;
-        ug.modes.registry.get('drone').place({ x: x0, y, z: cz, yaw: -Math.PI / 2, pitch: 0 }); // facing east
-        return { found: true, facade: b.minX };
+      const near=window.__drawnBuildingFrames(c.buildingsNear(p.x,p.z,2000));
+      for(const b of near){
+        if(b.width<=12||b.roofY-b.baseY<=40)continue;
+        const y=(b.baseY+b.roofY)/2,reach=b.width/2+25,x0=b.cx-b.ux*reach,z0=b.cz-b.uz*reach;
+        let clear=true;
+        for(let d=0;d<=22&&clear;d+=2){const x=x0+b.ux*d,z=z0+b.uz*d;
+          if((c.groundHeightAt(x,z)??Infinity)>y-20){clear=false;break;}
+          for(const o of near){if(o===b||o.roofY<=y||o.baseY>=y)continue;
+            const dx=x-o.cx,dz=z-o.cz;if(Math.abs(dx*o.ux+dz*o.uz)<o.width/2+1.5&&Math.abs(-dx*o.uz+dz*o.ux)<o.depth/2+1.5){clear=false;break;}}
+        }
+        if(!clear)continue;
+        ug.modes.registry.get('drone').place({x:x0,y,z:z0,yaw:Math.atan2(-b.ux,-b.uz),pitch:0});
+        return {found:true,facade:-b.width/2,cx:b.cx,cz:b.cz,ux:b.ux,uz:b.uz};
       }
       return { found: false };
     });
@@ -165,18 +169,18 @@ test.describe('Drone and Balloon modes', () => {
     await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
     // Sample every frame for 4 s of simulated time (the 25 m approach takes
     // about 1.6 s at defaults), whatever the frame rate.
-    const { maxX, reversed, hits } = await page.evaluate(async () => {
+    const { maxX, reversed, hits } = await page.evaluate(async setup => {
       const ug = window.__ug, ctx = ug.modes.ctx, m = ug.modes.registry.get('drone'), t0 = ctx.time;
       let maxX = -Infinity, reversed = false, hits = 0;
       for (let i = 0; i < 3000 && ctx.time - t0 < 4; i++) {
         await new Promise(r => requestAnimationFrame(r));
         const d = m.debug();
-        maxX = Math.max(maxX, d.pos.x);
-        if (d.hits > 0 && d.vel.x < 0) reversed = true;
+        maxX=Math.max(maxX,(d.pos.x-setup.cx)*setup.ux+(d.pos.z-setup.cz)*setup.uz);
+        if (d.hits>0&&d.vel.x*setup.ux+d.vel.z*setup.uz<0) reversed = true;
         hits = d.hits;
       }
       return { maxX, reversed, hits };
-    });
+    },setup);
     await page.evaluate(() => window.__ug.fpsControls.keys.delete('w'));
     expect(hits).toBeGreaterThan(0);
     expect(reversed).toBe(true);

@@ -34,6 +34,7 @@
 // that name (after Lanes O and T): otherwise the row is recorded inactive with its reason.
 
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -99,6 +100,7 @@ test.beforeAll(async ({ browser }) => {
       && window.__ug.modes.ctx.tubeRoutes?.size > 11 && window.__ug.surfaceRail
       && window.__ug.overground?.userData?.stationsAttached;
   }, null, { timeout: 180000 });
+  await page.evaluate(installDrawnBuildingFrames);
   await page.keyboard.press('2');
   await page.waitForFunction(() => window.__ug.modes.registry.get('pedestrian').debug().phase === 'body', null, { timeout: 30000 });
   fs.mkdirSync(SHOTS, { recursive: true });
@@ -115,7 +117,10 @@ const ANALYSE = ({ x, y, z, yaw, station, buildingFootprints }) => {
   out.ground = { pass: g !== null && Math.abs(y - g) <= 0.5 * VE && (roof === null || roof <= g + 0.5 * VE) && !water,
     feetOverGroundM: g === null ? null : (y - g) / VE, roofOverGroundM: roof === null ? null : (roof - g) / VE, water: !!water };
   // 2 box: inside no collision box; in assert mode inside no station-building footprint either.
-  const inside = col.buildingsNear(x, z, 0).filter(b => x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ);
+  // Broad collision bounds include air beside rotated rectangles. Derive the reference
+  // footprints from drawn instance matrices, without importing collision's narrow phase.
+  const frames=window.__drawnBuildingFrames(col.buildingsNear(x,z,40));
+  const inside=frames.filter(b=>{const dx=x-b.cx,dz=z-b.cz;return Math.abs(dx*b.ux+dz*b.uz)<b.width/2&&Math.abs(-dx*b.uz+dz*b.ux)<b.depth/2;});
   const inFoot = (buildingFootprints || []).filter(poly => {
     let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
       const [xi, zi] = poly[i], [xj, zj] = poly[j];
@@ -129,7 +134,12 @@ const ANALYSE = ({ x, y, z, yaw, station, buildingFootprints }) => {
   // 4 fan: nothing solid within 10 m in +-25 degrees ahead at eye height.
   const things = [];
   const L = 40;
-  for (const b of col.buildingsNear(x, z, L)) if (b.baseY <= eyeY && eyeY <= b.roofY) things.push({ kind: 'box', box: b });
+  for (const b of frames) if(b.baseY<=eyeY&&eyeY<=b.roofY){
+    const poly=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([i,j])=>[b.cx+i*b.width/2*b.ux-j*b.depth/2*b.uz,b.cz+i*b.width/2*b.uz+j*b.depth/2*b.ux]);
+    // A ray beginning inside remains a collision, just as for the original slab.
+    if(inside.includes(b))things.push({kind:'box',box:{minX:x-1,maxX:x+1,minZ:z-1,maxZ:z+1}});
+    else things.push({kind:'box',poly});
+  }
   u.scene.traverse(o => {
     if (o.userData?.kind === 'station-markers' && o.isInstancedMesh) {
       o.geometry.computeBoundingSphere();

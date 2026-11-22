@@ -12,6 +12,7 @@
 // through page.keyboard so the mode's own edge latch is exercised.
 
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 
 const VE = 5;
 
@@ -114,49 +115,57 @@ test.describe('Pedestrian mode', () => {
   test('a pedestrian cannot walk through a real building; it slides along the facade', async ({ page }) => {
     await boot(page);
     await enter(page);
+    await page.evaluate(installDrawnBuildingFrames);
     const setup = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision, m = ug.modes.registry.get('pedestrian');
       c.sync();
       const p = ug.camera.position;
-      const near = c.buildingsNear(p.x, p.z, 2000).filter(b => b.maxX - b.minX > 10 && b.roofY - b.baseY > 20);
-      for (const b of near) {
-        const cz = (b.minZ + b.maxZ) / 2, sx = b.minX - 8;
-        if (c.waterAt(sx, cz)) continue;
-        const ground = c.groundHeightAt(sx, cz);
-        if (ground === null || c.standHeightAt(sx, cz, Infinity, 0) !== ground) continue; // start on open ground
-        // The first thing east of the start must be this facade.
-        const probe = c.moveAndSlide({ x: sx, y: ground, z: cz }, { x: 12, y: 0, z: 0 }, { radius: 0.35, height: 9.25, step: 2 });
-        if (!probe.hit || Math.abs(probe.x - (b.minX - 0.35)) > 0.01) continue;
-        m.place(sx, cz, { yaw: -Math.PI / 2 }); // face +X
-        return { found: true, facade: b.minX, cz, ground };
+      const near=window.__drawnBuildingFrames(c.buildingsNear(p.x,p.z,2000));
+      for(const b of near){
+        // The former square-width condition implied a long sliding face too.
+        if(b.width<=10||b.depth<=10||b.roofY-b.baseY<=20)continue;
+        const sx=b.cx-b.ux*(b.width/2+8),sz=b.cz-b.uz*(b.width/2+8),vx=-b.uz,vz=b.ux;
+        if(c.waterAt(sx,sz))continue;const ground=c.groundHeightAt(sx,sz);
+        if(ground===null||c.standHeightAt(sx,sz,Infinity,0)!==ground)continue;
+        let clear=true;
+        for(let t=0;t<=3&&clear;t+=.5){const x=b.cx-b.ux*(b.width/2+.36)+vx*t,z=b.cz-b.uz*(b.width/2+.36)+vz*t;
+          for(const o of near){if(o===b||o.roofY<=ground||o.baseY>=ground+9.25)continue;const dx=x-o.cx,dz=z-o.cz;
+            if(Math.abs(dx*o.ux+dz*o.uz)<o.width/2+.35&&Math.abs(-dx*o.uz+dz*o.ux)<o.depth/2+.35){clear=false;break;}}
+        }
+        if(!clear)continue;
+        const probe=c.moveAndSlide({x:sx,y:ground,z:sz},{x:12*b.ux,y:0,z:12*b.uz},{radius:.35,height:9.25,step:2});
+        const along=(probe.x-b.cx)*b.ux+(probe.z-b.cz)*b.uz;
+        if(!probe.hit||Math.abs(along-(-b.width/2-.35))>.01)continue;
+        m.place(sx,sz,{yaw:Math.atan2(-b.ux,-b.uz)});
+        return{found:true,facade:-b.width/2,cx:b.cx,cz:b.cz,ux:b.ux,uz:b.uz,vx,vz,ground};
       }
       return { found: false, candidates: near.length };
     });
     expect(setup.found).toBe(true);
     await page.evaluate(() => window.__ug.fpsControls.keys.add('w'));
-    await page.waitForFunction((facade) => {
+    await page.waitForFunction(setup=>{
       const d = window.__ug.modes.registry.get('pedestrian').debug();
-      return d.x > facade - 0.5 && Math.abs(d.vx) < 1e-6;
-    }, setup.facade, { timeout: 20000 });
+      return(d.x-setup.cx)*setup.ux+(d.z-setup.cz)*setup.uz>setup.facade-.5&&Math.abs(d.vx*setup.ux+d.vz*setup.uz)<1e-6;
+    },setup,{timeout:20000});
     await frames(page, 10);
     let d = await dbg(page);
-    expect(d.x).toBeLessThanOrEqual(setup.facade - 0.34);
-    expect(d.x).toBeGreaterThan(setup.facade - 0.5);
+    expect((d.x-setup.cx)*setup.ux+(d.z-setup.cz)*setup.uz).toBeLessThanOrEqual(setup.facade-.34);
+    expect((d.x-setup.cx)*setup.ux+(d.z-setup.cz)*setup.uz).toBeGreaterThan(setup.facade-.5);
     expect(d.state).toBe('ground');
     // W+D into the facade: slides along it (Z changes), never enters.
-    const z0 = d.z;
+    const z0=d.x*setup.vx+d.z*setup.vz;
     await page.evaluate(() => window.__ug.fpsControls.keys.add('d'));
     // Every frame of the slide stays outside the facade.
-    const slide = await page.evaluate(async ([facade, z0]) => {
+    const slide = await page.evaluate(async ([setup,z0])=>{
       const m = window.__ug.modes.registry.get('pedestrian');
       let maxX = -Infinity, d = m.debug();
-      for (let i = 0; i < 600 && Math.abs(d.z - z0) < 2; i++) {
+      for (let i = 0; i < 600 && Math.abs(d.x*setup.vx+d.z*setup.vz-z0) < 2; i++) {
         await new Promise(r => requestAnimationFrame(r));
         d = m.debug();
-        maxX = Math.max(maxX, d.x);
+        maxX=Math.max(maxX,(d.x-setup.cx)*setup.ux+(d.z-setup.cz)*setup.uz);
       }
-      return { dz: Math.abs(d.z - z0), maxX };
-    }, [setup.facade, z0]);
+      return { dz: Math.abs(d.x*setup.vx+d.z*setup.vz-z0), maxX };
+    },[setup,z0]);
     await page.evaluate(() => { window.__ug.fpsControls.keys.delete('w'); window.__ug.fpsControls.keys.delete('d'); });
     expect(slide.dz).toBeGreaterThanOrEqual(2);
     expect(slide.maxX).toBeLessThanOrEqual(setup.facade - 0.34);

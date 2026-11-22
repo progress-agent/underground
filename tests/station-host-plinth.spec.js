@@ -53,16 +53,17 @@ test.describe('the host plinth', () => {
         const hosts = u.stationBuildings.index.buildings.filter((b) => b.host);
         const rows = [];
         for (const b of hosts) {
-          const h = b.host, half = h.side / 2, base = h.baseM * 5;
+          const h=b.host,hw=(h.width??h.side)/2,hd=(h.depth??h.side)/2,base=h.baseM*5,cos=Math.cos(h.theta??0),sin=Math.sin(h.theta??0);
+          const world=(x,z)=>[h.x+x*cos-z*sin,h.z+x*sin+z*cos];
           // the four faces: [from corner, to corner, outward normal]
           const faces = [[[-1, -1], [1, -1], [0, -1]], [[1, -1], [1, 1], [1, 0]], [[1, 1], [-1, 1], [0, 1]], [[-1, 1], [-1, -1], [-1, 0]]];
           let checked = 0, worstBottom = -Infinity, worstTop = 0, missing = 0, below = 0;
           for (const [a, c, n] of faces) {
-            const ax = h.x + a[0] * half, az = h.z + a[1] * half, cx = h.x + c[0] * half, cz = h.z + c[1] * half;
+            const [ax,az]=world(a[0]*hw,a[1]*hd),[cx,cz]=world(c[0]*hw,c[1]*hd),nx=n[0]*cos-n[1]*sin,nz=n[0]*sin+n[1]*cos;
             const L = Math.hypot(cx - ax, cz - az);
             for (let d = 0; d <= L + 1e-9; d += 0.5) {
               const t = d / L, x = ax + (cx - ax) * t, z = az + (cz - az) * t;
-              const street = getY(x + n[0] * 0.5, z + n[1] * 0.5);
+              const street = getY(x + nx * 0.5, z + nz * 0.5);
               if (!(street < base)) continue;
               below++;
               // the quad of this face holding (x, z)

@@ -8,6 +8,7 @@
 // deterministic injection controls-week1.spec.js uses.
 
 import { test, expect } from '@playwright/test';
+import { installDrawnBuildingFrames } from './helpers/drawn-building-frames.js';
 
 async function boot(page, url = '/?skip=1') {
   await page.goto(url);
@@ -222,20 +223,21 @@ test.describe('Conveyance modes', () => {
       const b = window.__ug.bakedStats;
       return !!b && b.tilesTotal > 0 && b.tilesBuilt === b.tilesTotal;
     }, null, { timeout: 90000 });
+    await page.evaluate(installDrawnBuildingFrames);
     const r = await page.evaluate(() => {
       const ug = window.__ug, c = ug.modes.collision;
       c.sync();
       // Find a free-standing building near the camera, at least 8m across.
       const p = ug.camera.position;
-      const near = c.buildingsNear(p.x, p.z, 1500).filter(b => b.maxX - b.minX > 8 && b.roofY - b.baseY > 10);
+      const near=window.__drawnBuildingFrames(c.buildingsNear(p.x,p.z,1500)).filter(b=>b.width>8&&b.roofY-b.baseY>10);
       for (const b of near) {
-        const cz = (b.minZ + b.maxZ) / 2, start = { x: b.minX - 6, y: b.baseY, z: cz };
+        const start={x:b.cx-b.ux*(b.width/2+6),y:b.baseY,z:b.cz-b.uz*(b.width/2+6)};
         const ground = c.groundHeightAt(start.x, start.z);
         if (ground === null) continue;
         start.y = Math.max(ground, b.baseY);
-        const res = c.moveAndSlide(start, { x: 12, y: 0, z: 0 }, { radius: 0.4, height: 9, step: 2 });
+        const res = c.moveAndSlide(start, { x:12*b.ux,y:0,z:12*b.uz }, { radius: 0.4, height: 9, step: 2 });
         if (!res.hit) continue; // something else in the way or a neighbour first; try another
-        return { found: true, stopX: res.x, facade: b.minX, roof: c.roofHeightAt((b.minX + b.maxX) / 2, cz),
+        return { found:true,stopX:(res.x-b.cx)*b.ux+(res.z-b.cz)*b.uz,facade:-b.width/2,roof:c.roofHeightAt(b.cx,b.cz),
           roofY: b.roofY, stats: c.stats() };
       }
       return { found: false, candidates: near.length };

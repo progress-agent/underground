@@ -481,14 +481,26 @@ test('6 Drone and Balloon: the third-person Drone stops at Fulham Broadway\'s bo
     const boxes = c.buildingsNear(-4555.31, 3085.84, 80);
     boxes.sort((a, b) => (b.maxX - b.minX) * (b.maxZ - b.minZ) - (a.maxX - a.minX) * (a.maxZ - a.minZ));
     const b = boxes[0];
-    return b ? { minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ, baseY: b.baseY, roofY: b.roofY } : null;
+    if(!b)return null;
+    // The broad-phase AABB is not the rotated wall. Recover the actual drawn
+    // instance's basis and dimensions, retaining the same selected building.
+    const u=window.__ug,cx=(b.minX+b.maxX)/2,cz=(b.minZ+b.maxZ)/2;let shape=null;
+    u.scene.traverse(mesh=>{if(!mesh.isInstancedMesh||!/^baked-buildings-/.test(mesh.name))return;
+      const m=mesh.instanceMatrix.array;for(let i=0;i<mesh.count;i++){const o=i*16;
+        if(Math.abs(m[o+12]-cx)>.01||Math.abs(m[o+14]-cz)>.01||Math.abs(m[o+13]-b.baseY)>.01)continue;
+        const hx=(Math.abs(m[o])+Math.abs(m[o+8]))/2,hz=(Math.abs(m[o+2])+Math.abs(m[o+10]))/2;
+        if(Math.abs(2*hx-(b.maxX-b.minX))>.01||Math.abs(2*hz-(b.maxZ-b.minZ))>.01)continue;
+        const width=Math.hypot(m[o],m[o+2]),depth=Math.hypot(m[o+8],m[o+10]);
+        shape={...b,cx:m[o+12],cz:m[o+14],width,depth,ux:m[o]/width,uz:m[o+2]/width};
+      }
+    });
+    if(!shape)throw Error('selected host has no matching drawn instance');return shape;
   });
   expect(fb).not.toBeNull();
   const flyAtBox = await ev(async (b) => {
     const u = window.__ug, d = u.modes.registry.get('drone');
-    const cz = (b.minZ + b.maxZ) / 2, y = (b.baseY + b.roofY) / 2;
-    const sx = b.minX - 10;                                            // west of the box, flying east (+X)
-    d.place({ x: sx, y, z: cz, yaw: -Math.PI / 2, pitch: 0 });
+    const y=(b.baseY+b.roofY)/2,dist=b.width/2+10;
+    d.place({x:b.cx-b.ux*dist,y,z:b.cz-b.uz*dist,yaw:Math.atan2(-b.ux,-b.uz),pitch:0});
     for (let i = 0; i < 40; i++) await new Promise((r) => requestAnimationFrame(r));
     const third = d.isThirdPerson();
     u.fpsControls.keys.add('w');
@@ -496,9 +508,9 @@ test('6 Drone and Balloon: the third-person Drone stops at Fulham Broadway\'s bo
     for (let i = 0; i < 300; i++) {
       u.modes.update(1 / 60);
       const p = d.debug().pos;
-      const gap = b.minX - p.x;
-      minGap = Math.min(minGap, gap);
-      if (p.x > b.minX && p.x < b.maxX && p.z > b.minZ && p.z < b.maxZ && p.y > b.baseY && p.y < b.roofY) inside = true;
+      const dx=p.x-b.cx,dz=p.z-b.cz,lx=dx*b.ux+dz*b.uz,lz=-dx*b.uz+dz*b.ux;
+      minGap=Math.min(minGap,-b.width/2-lx);
+      if(Math.abs(lx)<b.width/2&&Math.abs(lz)<b.depth/2&&p.y>b.baseY&&p.y<b.roofY)inside=true;
     }
     u.fpsControls.keys.delete('w');
     return { third, minGap, inside, hits: d.debug().hits };

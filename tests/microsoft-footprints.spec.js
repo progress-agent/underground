@@ -6,8 +6,9 @@
 // counts, payload verification) are in tests/microsoft-footprints.test.mjs.
 //
 // Each added record must be an instance at its own centre with its own size:
-// live at the exact source centre, baked within the payload's half-decimetre
-// quantisation. The only records allowed to be absent are those whose dedup
+// live at the true-area rectangle centre, baked within the payload's half-decimetre
+// per-coordinate quantisation. Rectangle orientation is within one degree, area
+// within 1% (sprint 21Nov26s B1); dimension slack covers UGB2 aspect quantisation. The only records allowed to be absent are those whose dedup
 // hash (5 m grid + rounded height, shared by the loader and the bake) repeats
 // an earlier record's; both paths drop those by design.
 import { test, expect } from '@playwright/test';
@@ -29,13 +30,28 @@ const expected = (targets) => (async () => {
     for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++)
       neighbours.add(`tile_${String(c + dc).padStart(2, '0')}_${String(r + dr).padStart(2, '0')}.json`);
   }
+  // Independent rotating-calipers reference from source points, not the app's fitter.
+  const fit=b=>{
+    const pts=[...new Map(b.footprint.map(p=>[p.join(','),p])).values()].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    const cross=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+    const half=points=>{const q=[];for(const p of points){while(q.length>1&&cross(q.at(-2),q.at(-1),p)<=0)q.pop();q.push(p);}return q;};
+    const low=half(pts),high=half([...pts].reverse()),hull=low.slice(0,-1).concat(high.slice(0,-1));let best=null;
+    for(let i=0;i<hull.length;i++){
+      const p=hull[i],q=hull[(i+1)%hull.length],angle=Math.atan2(q[1]-p[1],q[0]-p[0]),c=Math.cos(angle),s=Math.sin(angle);
+      let u0=Infinity,u1=-Infinity,v0=Infinity,v1=-Infinity;
+      for(const [x,z]of hull){const u=x*c+z*s,v=-x*s+z*c;u0=Math.min(u0,u);u1=Math.max(u1,u);v0=Math.min(v0,v);v1=Math.max(v1,v);}
+      const area=(u1-u0)*(v1-v0);if(!best||area<best.area-1e-7)best={area,cx:(u0+u1)/2*c-(v0+v1)/2*s,cz:(u0+u1)/2*s+(v0+v1)/2*c,width:u1-u0,depth:v1-v0,angle};
+    }
+    let area=0;for(let i=0;i<b.footprint.length;i++){const p=b.footprint[i],q=b.footprint[(i+1)%b.footprint.length];area+=p[0]*q[1]-q[0]*p[1];}area=Math.abs(area)/2;
+    const scale=Math.sqrt(area/best.area);return{cx:best.cx,cz:best.cz,width:best.width*scale,depth:best.depth*scale,angle:best.angle,area};
+  };
   const count = new Map(), added = [];
   for (const f of neighbours) {
     const res = await fetch(`/data/surface/tiles/${f}`);
     if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) continue;
     for (const b of (await res.json()).buildings || []) {
       count.set(hash(b), (count.get(hash(b)) || 0) + 1);
-      if (b.source === 'microsoft' && targets.includes(f)) added.push({ cx: b.cx, cz: b.cz, height: b.height, area: b.area, h: hash(b) });
+      if (b.source === 'microsoft' && targets.includes(f)) added.push({ ...fit(b), sourceX:b.cx,sourceZ:b.cz, height:b.height,h:hash(b) });
     }
   }
   return added.map((b) => ({ ...b, mayDrop: count.get(b.h) > 1 }));
@@ -59,7 +75,7 @@ const instances = ([prefix, box]) => {
       const p = i * 16, x = a[p + 12], z = a[p + 14];
       if (x < box.minX || x > box.maxX || z < box.minZ || z > box.maxZ) continue;
       const k = `${Math.round(x)},${Math.round(z)}`;
-      (out.get(k) || out.set(k, []).get(k)).push([x, z, a[p], a[p + 5]]);
+      (out.get(k) || out.set(k, []).get(k)).push([x,z,Math.hypot(a[p],a[p+2]),Math.hypot(a[p+8],a[p+10]),Math.atan2(a[p+2],a[p]),a[p+5]]);
     }
   });
   return [...out.entries()];
@@ -70,11 +86,14 @@ function check(added, inst, VE) {
   let present = 0, dropped = 0;
   const missing = [];
   for (const b of added) {
-    const side = Math.max(Math.sqrt(b.area), 0.1), h = Math.max(b.height, 0.5) * VE;
+    const h=Math.max(b.height,0.5)*VE;
     let hit = false;
     for (let dx = -1; dx <= 1 && !hit; dx++) for (let dz = -1; dz <= 1 && !hit; dz++)
-      for (const [x, z, s, y] of map.get(`${Math.round(b.cx) + dx},${Math.round(b.cz) + dz}`) || [])
-        if (Math.hypot(x - b.cx, z - b.cz) <= TOL && Math.abs(s - side) <= TOL && Math.abs(y - h) <= TOL * VE) { hit = true; break; }
+      for(const [x,z,width,depth,angle,y]of map.get(`${Math.round(b.cx)+dx},${Math.round(b.cz)+dz}`)||[]){
+        const angleError=a=>Math.abs(Math.atan2(Math.sin(2*a),Math.cos(2*a)))/2;
+        const shape=(w,d,a)=>Math.abs(width/w-1)<=.0031&&Math.abs(depth/d-1)<=.0031&&angleError(angle-a)<=Math.PI/180;
+        if(Math.abs(x-b.cx)<=TOL&&Math.abs(z-b.cz)<=TOL&&Math.abs(width*depth/b.area-1)<=.01&&Math.abs(y-h)<=TOL*VE&&(shape(b.width,b.depth,b.angle)||shape(b.depth,b.width,b.angle+Math.PI/2))){hit=true;break;}
+      }
     if (hit) present++;
     else if (b.mayDrop) dropped++;
     else missing.push(b);
