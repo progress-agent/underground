@@ -1,0 +1,54 @@
+{
+  "source": "D-068 phone slow-frame regression model; deterministic distributions reproduce research means below the 38 ms shadows line with p95 above it. Synthetic, not measured intervals.",
+  "tuning": {
+    "targetMs": 33.333333333333336,
+    "slowFrameRatio": 1,
+    "maxDescentRungs": 1
+  },
+  "cases": {
+    "intoTown": [
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      26,
+      44,
+      44
+    ],
+    "outOfTown": [
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      18,
+      29,
+      29
+    ]
+  }
+}

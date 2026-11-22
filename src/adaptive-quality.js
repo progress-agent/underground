@@ -91,6 +91,9 @@ export const FIRST_UNSHADOWED = QUALITY_LEVELS.findIndex(q => !q.shadows);
 
 export const ADAPTIVE_TUNING = {
   targetMs: 1000 / 60,
+  slowFrameRatio: 0, // phone opt-in: p95 / ratio joins the existing mean controller
+  slowFrameWindowMs: 2000,
+  maxDescentRungs: 0, // phone: judge each rung with the existing benefit check; 0 keeps the work criterion
   overBudget: 1.10,     // drop when the mean interval exceeds 1.10 x target (~54.5 fps)
   shadowsOverBudget: 1.14, // but leave the shadows-on rung only above 19ms (~52.6 fps)
   severe: 1.8,          // one window is enough above this (~33 fps)
@@ -119,6 +122,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   let level = 0;
   let windowStart = null, cooldownUntil = 0, samples = [], longFrames = 0;
   let overWindows = 0, stableMs = 0;
+  let slowFrames = [], lastP95 = 0;
   let stable = [];          // recent in-band windows [mean, span], judged together
   let pendingDrop = null;   // { from, exempt }
   let descent = null;       // { level, mean }: where the current descent is anchored
@@ -155,7 +159,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   function reset(now = null) {
     windowStart = now;
     cooldownUntil = now === null ? 0 : now + 1000;
-    samples = []; longFrames = 0; overWindows = 0; stableMs = 0; stable = [];
+    samples = []; slowFrames = []; lastP95 = 0; longFrames = 0; overWindows = 0; stableMs = 0; stable = [];
     pendingDrop = null; pendingProbe = null; lastProbe = null; hold = null; holdStreak = 0; descent = null; atLevel = []; heavy = 0; // s21:T heavy reset here too
     backoff.clear();
   }
@@ -186,7 +190,8 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
       continuing = true;
       const n = atLevel.length;
       const shed = 1 - work(level) / work(descent.level);
-      const atJudge = work(level) <= work(descent.level) * K.judgeWork;
+      const atJudge = work(level) <= work(descent.level) * K.judgeWork
+        || (K.maxDescentRungs > 0 && level - descent.level >= K.maxDescentRungs);
       const inBudget = mean <= overAt(level);
       if (n >= K.judgeWindows && (atJudge || inBudget)) {
         let m = 0; for (let i = n - K.judgeWindows; i < n; i++) m = Math.max(m, atLevel[i]);   // the greater: one quick window is not help
@@ -230,7 +235,8 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
       if (lastProbe && lastProbe.to === level && now - lastProbe.at < K.probeGraceMs) backOff(level, lastProbe.before, now);
       lastProbe = null;
       // Never two rungs at once from full quality: shadows go on their own first.
-      const step = mean > K.targetMs * K.doubleStep && level >= FIRST_UNSHADOWED ? 2 : 1;
+      const desiredStep = mean > K.targetMs * K.doubleStep && level >= FIRST_UNSHADOWED ? 2 : 1;
+      const step = Math.min(desiredStep, K.maxDescentRungs || desiredStep);
       const next = Math.min(MAX, level + step);
       const exempt = next <= FIRST_UNSHADOWED;
       if (!exempt && !descent) descent = { level: Math.max(FIRST_UNSHADOWED, level), mean: Math.min(...atLevel.slice(-K.anchorWindows)) };   // s16:R the best of the recent windows here: a stall cannot inflate the anchor
@@ -286,18 +292,28 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
     if (frameMs > 80 && longFrames < 3) { clearWindow(now); stableMs = 0; stable = []; return; }
     if (now < cooldownUntil) { windowStart = now; return; }
     samples.push(frameMs);
+    if (K.slowFrameRatio) {
+      slowFrames.push([now, frameMs]);
+      while (slowFrames.length && slowFrames[0][0] < now - K.slowFrameWindowMs) slowFrames.shift();
+    }
     const span = now - windowStart;
     if (span < K.windowMs || samples.length < K.minSamples) return;
     let sum = 0; for (const s of samples) sum += s;
     const mean = sum / samples.length;
     clearWindow(now);
-    evaluate(mean, span, now);
+    let pressure = mean;
+    if (K.slowFrameRatio && slowFrames.length >= K.minSamples) {
+      const ordered = slowFrames.map(s => s[1]).sort((a,b) => a-b);
+      lastP95 = ordered[Math.ceil(ordered.length * .95) - 1];
+      pressure = Math.max(mean, lastP95 / K.slowFrameRatio);
+    }
+    evaluate(pressure, span, now);
   }
 
   return {
     update, reset, start,
     get: () => ({ level, ...QUALITY_LEVELS[level] }),
-    state: () => ({ level, windowsAtLevel: atLevel.length, overWindows, stableMs, pendingDrop, pendingProbe, hold, descent, backoff: Object.fromEntries(backoff), history: history.slice() }),
+    state: () => ({ p95: lastP95, level, windowsAtLevel: atLevel.length, overWindows, stableMs, pendingDrop, pendingProbe, hold, descent, backoff: Object.fromEntries(backoff), history: history.slice() }),
     tuning: K,
   };
 }

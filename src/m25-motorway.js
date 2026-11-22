@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {buildMotorwayStaticChunks, updateMotorwayChunkBoundsSteps, createMotorwayRangeCull, packMotorwayNormalsSteps} from './motorway-static-batches.js';
 import { computeVertexNormalsSteps, computeBoundingSphereSteps } from './sliced-geometry.js'; // s21:L
 import source from './m25-motorway-data.json' with { type: 'json' };
 import { WATER_LIFT } from './render-layers.js';
@@ -52,7 +53,7 @@ export function getMotorwayBoundary(margin=MOTORWAY_TERRAIN_MARGIN_M){
 // milliseconds a frame on it after landing (src/late-layers.js). createMotorway drains it, so the arithmetic and the
 // order of every statement are the original's; only the places the thread may be handed back were added.
 export function createMotorway(options={}){const steps=createMotorwaySteps(options);let r;do{r=steps.next();}while(!r.done);return r.value;}
-export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28,viewportHeightPx=defaultViewportHeight,initialUpdate=true}={}){
+export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpacing=28,viewportHeightPx=defaultViewportHeight,initialUpdate=true,spatialChunks=false}={}){
  if(typeof getSurfaceY!=='function')throw new Error('Motorway requires canonical getSurfaceY');
  const sample=(x,z)=>{const y=getSurfaceY({x,z});if(!Number.isFinite(y))throw new Error(`Missing motorway terrain at ${x},${z}`);return y;};
  const root=new THREE.Group();root.name='m25Motorway';const waterY=2*VE+WATER_LIFT;let scale=heightScale,elapsed=0,frame=0;
@@ -120,9 +121,11 @@ export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpac
  const junctions=new Map();for(const rp of roadPaths.values())for(const s of [rp.samples[0],rp.samples.at(-1)]){const key=`${s.x}:${s.z}`;if(!junctions.has(key))junctions.set(key,[]);junctions.get(key).push({s,ordinary:!rp.road.tunnel&&!rp.road.bridge});}
  let junctionCount=0;for(const entries of junctions.values()){if(++junctionCount%100===0)yield;const ordinary=entries.filter(e=>e.ordinary);if(!ordinary.length)continue;const baseY=Math.max(...entries.map(e=>e.s.baseY),...ordinary.map(e=>e.s.groundY));const top=Math.max(baseY+.8,...entries.map(e=>e.s.baseY+e.s.deltaY));for(const {s}of entries){s.baseY=baseY;s.deltaY=top-baseY;}}
  const finalProfiles=new Map();n=0;for(const rp of roadPaths.values()){for(const s of rp.samples){finalProfiles.set(`${s.road}:${s.x}:${s.z}`,s);if(++n%2500===0)yield;}}n=0;for(const r of routes){for(const s of r.path){const final=finalProfiles.get(`${s.road}:${s.x}:${s.z}`);s.baseY=final.baseY;s.deltaY=final.deltaY;if(++n%2500===0)yield;}}
- const batches=new Map(),staticMeshes=[];const ensure=mat=>{if(!batches.has(mat))batches.set(mat,{positions:[],bases:[]});return batches.get(mat);};
+ // Spatial batches retain each quad exactly, including its original normal/winding.
+ const batches=new Map(),staticMeshes=[];let staticChunk='';
+ const ensure=mat=>{const key=mat+':'+staticChunk;if(!batches.has(key))batches.set(key,{mat,positions:[],bases:[]});return batches.get(key);};
  const vertex=(mat,x,y,z,base)=>{const b=ensure(mat);b.positions.push(x,y,z);b.bases.push(base);};
- const quad=(mat,ps)=>{for(const i of [0,1,2,0,2,3])vertex(mat,...ps[i]);};
+ const quad=(mat,ps)=>{staticChunk=spatialChunks?Math.floor((ps[0][0]+ps[2][0])/2000)+','+Math.floor((ps[0][2]+ps[2][2])/2000):'';for(const i of [0,1,2,0,2,3])vertex(mat,...ps[i]);};
  const v=(s,side,dy=0)=>[s.x-s.dz*side,s.baseY+s.deltaY+dy,s.z+s.dx*side,s.baseY];
  function strip(a,b,l,r,mat,dy=0){quad(mat,[v(a,l,dy),v(b,l,dy),v(b,r,dy),v(a,r,dy)]);}
  function verticalStrip(a,b,side,lo,hi,mat){quad(mat,[v(a,side,lo),v(b,side,lo),v(b,side,hi),v(a,side,hi)]);}
@@ -137,7 +140,12 @@ export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpac
  // QEII towers/cables follow the actual southern carriageway. Existing curated
  // bridge supplied the54m clearance and86m pylon proportions, not surveyed road Z.
  const qe=roadPaths.get(20003982);if(qe){const p=qe.samples;for(const fraction of [.5-225/qe.length,.5+225/qe.length]){const i=Math.floor((p.length-1)*fraction),s=p[i],deck=s.baseY+s.deltaY,top=deck+86*VE;for(const side of [-1,1]){const offset=widthFor(qe.road)/2+1.4;const x=s.x-s.dz*side*offset,z=s.z+s.dx*side*offset;for(const [ax,az,bx,bz]of [[-2.2,-2.2,2.2,-2.2],[2.2,-2.2,2.2,2.2],[2.2,2.2,-2.2,2.2],[-2.2,2.2,-2.2,-2.2]])quad('pylon',[[x+ax,s.groundY,z+az,s.groundY],[x+bx,s.groundY,z+bz,s.groundY],[x+bx,top,z+bz,s.baseY],[x+ax,top,z+az,s.baseY]]);for(let k=1;k<=7;k++)for(const sign of [-1,1]){const j=Math.max(0,Math.min(p.length-1,i+sign*k*4)),q=p[j],qx=q.x-q.dz*side*offset,qz=q.z+q.dx*side*offset;const cy=deck+(86*VE)*(.5+.5*k/7);quad('cable',[[x-.16,cy,z,s.baseY],[x+.16,cy,z,s.baseY],[qx+.16,q.baseY+q.deltaY,qz,q.baseY],[qx-.16,q.baseY+q.deltaY,qz,q.baseY]]);}}}}
- for(const [mat,b]of batches){const g=new THREE.BufferGeometry();{const positionArray=new Float32Array(b.positions.length);for(let i=0;i<positionArray.length;i++){positionArray[i]=b.positions[i];if(i%40000===39999)yield;}g.setAttribute('position',new THREE.BufferAttribute(positionArray,3));const baseArray=new Float32Array(b.bases.length);for(let i=0;i<baseArray.length;i++){baseArray[i]=b.bases[i];if(i%40000===39999)yield;}g.setAttribute('motorwayBase',new THREE.BufferAttribute(baseArray,1));}yield* computeVertexNormalsSteps(g);{const source=g.attributes.position.array,copy=new Float32Array(source.length);for(let i=0;i<source.length;i+=150000){copy.set(source.subarray(i,i+150000),i);yield;}g.userData.original=copy;}const mesh=new THREE.Mesh(g,materials[mat]);mesh.name=`m25-${mat}`;mesh.userData={type:'motorway',name:'M25 / A282 orbital motorway',part:mat};root.add(mesh);staticMeshes.push(mesh);yield;}
+ if(spatialChunks){const chunks=yield* buildMotorwayStaticChunks(batches,materials);for(const m of chunks){root.add(m);staticMeshes.push(m);}}
+ else {
+ for(const [key,b]of batches){const mat=b.mat;const g=new THREE.BufferGeometry();{const positionArray=new Float32Array(b.positions.length);for(let i=0;i<positionArray.length;i++){positionArray[i]=b.positions[i];if(i%40000===39999)yield;}g.setAttribute('position',new THREE.BufferAttribute(positionArray,3));const baseArray=new Float32Array(b.bases.length);for(let i=0;i<baseArray.length;i++){baseArray[i]=b.bases[i];if(i%40000===39999)yield;}g.setAttribute('motorwayBase',new THREE.BufferAttribute(baseArray,1));}yield* computeVertexNormalsSteps(g);{const source=g.attributes.position.array,copy=new Float32Array(source.length);for(let i=0;i<source.length;i+=150000){copy.set(source.subarray(i,i+150000),i);yield;}g.userData.original=copy;}const mesh=new THREE.Mesh(g,materials[mat]);mesh.name=`m25-${mat}${spatialChunks?'-'+key.split(':')[1]:''}`;mesh.userData={type:'motorway',name:'M25 / A282 orbital motorway',part:mat};root.add(mesh);staticMeshes.push(mesh);yield;}
+ }
+ const staticScaleMeshes=spatialChunks?[...new Map(staticMeshes.map(m=>[m.geometry.attributes.position,m])).values()]:staticMeshes;
+ const staticRangeCull=spatialChunks?createMotorwayRangeCull(staticMeshes):null;
  // ── Traffic (sprint 23Sep26w, D-037 Lane B) ─────────────────────────────
  // Stable identities: one per `vehicleSpacing` metres of each direction, the
  // anticlockwise count shared by its two Dartford-bore circuits (unchanged).
@@ -298,6 +306,7 @@ export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpac
  }
  // Before the draw: widen the written set to any chunk that can now show.
  function revalidate(camera=lastCamera){
+  if(staticRangeCull && camera?.matrixWorldInverse && camera?.projectionMatrix){root.updateWorldMatrix(true,false);staticRangeCull(camera,sceneFog(),root.matrixWorld);}
   if(!lastCulled||!cullToFrustum||!camera?.projectionMatrix||!lastCullProjection)return false;
   if(skipHidden&&!shown())return false;
   const fog=prepareCull(camera),view=camera.matrixWorldInverse,viewScale=view.getMaxScaleOnAxis();
@@ -422,7 +431,7 @@ export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpac
   };
   nearMeshes.forEach((m,k)=>finish(m,nearCounts[k]));farMeshes.forEach((m,k)=>finish(m,farCounts[k]));
  }
- root.userData.setHeightScale=value=>{if(!Number.isFinite(value)||value<=0)throw new Error('Motorway height scale must be positive');scale=value;for(const m of staticMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++)p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;p.needsUpdate=true;g.computeVertexNormals();g.computeBoundingSphere();}update(0,lastCamera,true);};
+ root.userData.setHeightScale=value=>{if(!Number.isFinite(value)||value<=0)throw new Error('Motorway height scale must be positive');scale=value;for(const m of staticScaleMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++)p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;p.needsUpdate=true;if(spatialChunks&&g.attributes.normal.normalized)g.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(p.count*3),3));g.computeVertexNormals();g.computeBoundingSphere();}if(spatialChunks){for(const _ of packMotorwayNormalsSteps(staticMeshes)){}for(const _ of updateMotorwayChunkBoundsSteps(staticMeshes)){}}update(0,lastCamera,true);};
  root.userData.update=update;root.userData.trafficLod=trafficStats;
  // ── s24:R ──
  root.userData.setEconomies=({frustumCulling=cullToFrustum,fogCulling=fogCullOn,instanceRanges=uploadRanges,hiddenSkip=skipHidden}={})=>{const changed=frustumCulling!==cullToFrustum||fogCulling!==fogCullOn;cullToFrustum=!!frustumCulling;fogCullOn=!!fogCulling;uploadRanges=!!instanceRanges;skipHidden=!!hiddenSkip;if(changed)lastProjectionKey=null;};
@@ -430,8 +439,9 @@ export function* createMotorwaySteps({getSurfaceY,VE=5,heightScale=1,vehicleSpac
  root.userData.revalidate=revalidate;
  root.userData.setChunkMemory=on=>{chunkMemoryOn=!!on;return chunkMemoryOn;}; // s16:R
  // ── /s24:R ──
- root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return staticMeshes.length+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};// The initial height scale, as setHeightScale applies it, one static mesh at a time (175 ms in one call).
+ root.userData.vehicleAt=id=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?vehicleAt(c,id-c.idOffset,{}):null;};root.userData.pointAt=(routeId,d)=>pointAt(representative.find(r=>r.id===routeId)||representative[0],d,{});root.userData.routes=representative;root.userData.roadPaths=roadPaths;root.userData.getElapsed=()=>elapsed;root.userData.vehicleChainageAt=(id,t)=>{const c=carriers.find(c=>id>=c.idOffset&&id<c.idOffset+c.count);return c?mod(vehicleChainage(c.layout,id-c.idOffset,t),c.route.length):null;};root.userData.carriers=carriers;root.userData.pickables=staticMeshes;root.userData.stats={sourceWays:source.roads.length,circuits:representative.length,vehicles:carriers.reduce((n,c)=>n+c.count,0),get drawCalls(){return (spatialChunks?staticMeshes.reduce((n,m)=>n+Number(m.visible),0):staticMeshes.length)+trafficStats.drawCalls;},allocatedDrawCalls:root.children.length,trafficMetresPerSecond:TRAFFIC_SPEED_MPS,vehicleTypes:VEHICLE_TYPES.map(t=>t.id),vehicleColours:VEHICLE_COLOURS.map(c=>c.id),geometrySampleMetres:12,adaptiveSamples,maximumClearanceAdjustmentY,widthExaggeration:1.18};root.userData.dispose=()=>{root.traverse(m=>{if(m.isMesh)m.geometry.dispose();});for(const m of Object.values(materials))m.dispose();root.removeFromParent();};// The initial height scale, as setHeightScale applies it, one static mesh at a time (175 ms in one call).
  if(!Number.isFinite(heightScale)||heightScale<=0)throw new Error('Motorway height scale must be positive');scale=heightScale;
- for(const m of staticMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++){p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;if(i%60000===59999)yield;}p.needsUpdate=true;yield* computeVertexNormalsSteps(g);yield* computeBoundingSphereSteps(g);yield;}
+ for(const m of staticScaleMeshes){const g=m.geometry,p=g.attributes.position,base=g.attributes.motorwayBase,original=g.userData.original;for(let i=0;i<p.count;i++){p.array[i*3+1]=base.array[i]+(original[i*3+1]-base.array[i])*scale;if(i%60000===59999)yield;}p.needsUpdate=true;yield* computeVertexNormalsSteps(g);yield* computeBoundingSphereSteps(g);yield;}
+ if(spatialChunks){yield* packMotorwayNormalsSteps(staticMeshes);yield* updateMotorwayChunkBoundsSteps(staticMeshes);}
  if(initialUpdate)update(0,lastCamera,true);return root; // s21:L: initialUpdate:false leaves the first fleet pass (13 ms) to the tick, which does it within three frames
 }

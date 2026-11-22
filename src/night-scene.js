@@ -25,6 +25,7 @@ export function updateNightScene({scene,sun,phone=false}) {
   nightUniforms.uNightAmt.value = amount;
   nightUniforms.uNightLit.value = litFraction(sun.hour);
   nightUniforms.uWindowBlend.value = phone ? 2.5 : 1.7;
+  nightUniforms.uNightPhone.value = phone ? 1 : 0;
   const on = amount > 0;
   // Keep the existing chipless names readable over bright night windows.
   if(on !== active && typeof document !== 'undefined') document.body.classList.toggle('ug-night',on);
