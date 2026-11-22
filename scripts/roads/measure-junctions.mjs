@@ -10,9 +10,9 @@ import {execFileSync} from 'node:child_process';
 const root=path.resolve(import.meta.dirname,'../..'),out=process.argv[2];
 if(!out||!path.isAbsolute(out))throw Error('Pass an absolute scratch output directory');
 fs.mkdirSync(out,{recursive:true});
-const results={method:'stored pavement triangle area intersecting union of other same-layer carriageways, desktop full topology; m²'};
+const results={method:'stored pavement triangle area intersecting union of other same-layer carriageways, desktop full and aerial topology, separately and combined; m²'};
 for(const mode of ['legacy','corrected']){
-  const dir=path.join(out,mode);const log=execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',dir,'--audit',...(mode==='legacy'?['--legacy']:[])],{timeout:900000,maxBuffer:5e6});
+  const dir=path.join(out,mode);const log=execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',dir,'--audit',...(mode==='legacy'?['--legacy']:[])],{timeout:2400000,maxBuffer:5e6});
   fs.writeFileSync(path.join(out,mode+'.log'),log);results[mode]=JSON.parse(fs.readFileSync(path.join(dir,'junction-audit.json')));
 }
 results.pass=results.corrected.percent<=.5;

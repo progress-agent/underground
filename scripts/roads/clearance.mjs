@@ -7,7 +7,8 @@ export function repairRoadClearance(raw,{inRegion,support,lift=.30}={}) {
   const ox=v.getInt32(12,true),oz=v.getInt32(16,true),stride=float?12:6;
   const get=(i,k)=>float?v.getFloat32(32+i*stride+k*4,true):v.getUint16(32+i*stride+k*2,true);
   const put=(i,k,value)=>float?v.setFloat32(32+i*stride+k*4,value,true):v.setUint16(32+i*stride+k*2,value,true);
-  const riseAt=32+n*(stride+3)+(n%2);let repaired=0,maxRaise=0;
+  const wide=!!(v.getUint32(28,true)&8),pad=wide?(4-(32+n*(stride+3)+(bridge?n*2:0))%4)%4:n%2;
+  const riseAt=32+n*(stride+3)+pad;let repaired=0,maxRaise=0;
   for(let i=0;i<n;i++){
     const x=ox+get(i,0)/8,z=oz+get(i,2)/8;if(!inRegion(x,z))continue;
     const base=support(x,z),y=get(i,1)*.05-500;if(y>=base+lift-.025)continue;

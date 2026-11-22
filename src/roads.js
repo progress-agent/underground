@@ -10,6 +10,11 @@ import {groundCueStrength,groundCueWeight,installGroundCue} from './ground-cue.j
 
 export function roadBlockWanted(rec,{phone=false,x=0,z=0,height=0,inView=true}={}) {
   if(!inView)return false;
+  if(rec.tileLOD){const dx=Math.max(rec.x-x,0,x-rec.x-rec.size),dz=Math.max(rec.z-z,0,z-rec.z-rec.size),near=dx*dx+dz*dz<=1100*1100;
+    if(rec.tier==='near')return phone&&height<=350&&near;
+    if(rec.tier!==(phone?'major':'desktop'))return false;
+    return rec.lod==='far'||height<(phone?350:120)&&near;
+  }
   const b=rec.bounds??[rec.x,rec.z,0,rec.x+rec.size,rec.z+rec.size,0];
   const dx=Math.max(b[0]-x,0,x-b[3]),dz=Math.max(b[1]-z,0,z-b[4]);
   const nearby=dx*dx+dz*dz<=1800*1800;
@@ -26,7 +31,7 @@ export function roadBlockWanted(rec,{phone=false,x=0,z=0,height=0,inView=true}={
 /** Lane K hook: chain this material's onBeforeCompile and key; vRoadWorld is canonical X/Z in
  * real horizontal metres. vRoad = (signed across-road metres, ribbon half-width, left pavement,
  * right pavement). Across is negative on OSM left. No new meshes/attributes needed by the cue. */
-export function createRoadMaterial({ratio={value:1},look={value:2}}={}) {
+export function createRoadMaterial({ratio={value:1},look={value:2},far={value:0},nearCells={value:new Float32Array(16)},nearCount={value:0}}={}) {
   const material=new THREE.MeshLambertMaterial({color:0x55504b,
     side:THREE.FrontSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
   material.name='road-surface';
@@ -36,6 +41,7 @@ export function createRoadMaterial({ratio={value:1},look={value:2}}={}) {
   material.onBeforeCompile=shader=>{
     shader.uniforms.uRoadRatio=ratio;
     shader.uniforms.uRoadLook=look;
+    shader.uniforms.uRoadFar=far;shader.uniforms.uRoadNearCells=nearCells;shader.uniforms.uRoadNearCount=nearCount;
     shader.uniforms.uNightAmt=nightUniforms.uNightAmt;
     shader.uniforms.uNightGlowGain=nightUniforms.uNightGlowGain;
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
@@ -53,23 +59,28 @@ varying vec2 vRoadWorld;`)
 #ifdef ROAD_BRIDGE
 transformed.y += roadRise * (uRoadRatio - 1.0);
 #endif
-float across = roadAcross <= 1.0 ? roadAcross : step(128.0,roadData.y)*2.0-1.0;
+float across = roadAcross > 2.0 ? mod(roadAcross-4.0,1024.0)*2.0/1019.0-1.0 : (roadAcross <= 1.0 ? roadAcross : step(128.0,roadData.y)*2.0-1.0);
 // Two formerly spare side-byte bits keep half-widths to 1/16m, so a
 // tagged 3.2m carriageway does not round down to 3m. Old UGR4 has zero bits.
 float roadHalf = (roadData.x*4.0 + mod(floor(roadData.y/64.0),2.0) + 2.0*mod(floor(roadData.z/64.0),2.0))/16.0;
 vRoad = vec4(across * roadHalf,roadHalf,mod(roadData.y,64.0)/10.0,mod(roadData.z,64.0)/10.0);
-vRoadMarkings = 1.0-step(128.0,roadData.z);
+vRoadMarkings = roadAcross > 2.0 ? floor((roadAcross-4.0)/1024.0)-32.0 : mix(28.0,-1.0,step(128.0,roadData.z));
 vRoadWorld = (modelMatrix * vec4(transformed, 1.0)).xz;`);
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
 varying vec4 vRoad;
 varying float vRoadMarkings;
 varying vec2 vRoadWorld;
 uniform float uRoadLook;
+uniform float uRoadFar;
+uniform float uRoadNearCells[16];
+uniform int uRoadNearCount;
 uniform float uNightAmt;
 uniform float uNightGlowGain;
 float roadHash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float roadNoise(vec2 p) { vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(roadHash(i),roadHash(i+vec2(1,0)),f.x),mix(roadHash(i+vec2(0,1)),roadHash(i+vec2(1)),f.x),f.y); }`)
       .replace('#include <color_fragment>',`#include <color_fragment>
+// Distant packets yield exactly to complete nearby grid tiles.
+if(uRoadFar>.5){float cell=floor(vRoadWorld.x/2000.)*128.+floor(vRoadWorld.y/2000.);for(int i=0;i<16;i++){if(i>=uRoadNearCount)break;if(abs(cell-uRoadNearCells[i])<.5)discard;}}
 // A band is in the carriageway mesh, with its width carried per road. K adds the fine detail.
 float roadPavement = step(vRoad.x, -vRoad.y + vRoad.z) * step(.01,vRoad.z)
                    + step(vRoad.y - vRoad.w,vRoad.x) * step(.01,vRoad.w);
@@ -86,7 +97,7 @@ if(uRoadLook>2.5) {
   float lkCentre=(1.-smoothstep(lkDraw*.5-lkFw*.5,lkDraw*.5+lkFw*.5,abs(vRoad.x-(vRoad.z-vRoad.w)*.5)))*.10/lkDraw*step(5.,2.*vRoad.y-vRoad.z-vRoad.w);
   float lkEdgeL=(1.-smoothstep(lkDraw*.5-lkFw*.5,lkDraw*.5+lkFw*.5,abs(vRoad.x-(-vRoad.y+vRoad.z+.3))))*.10/lkDraw;
   float lkEdgeR=(1.-smoothstep(lkDraw*.5-lkFw*.5,lkDraw*.5+lkFw*.5,abs(vRoad.x-(vRoad.y-vRoad.w-.3))))*.10/lkDraw;
-  float lkPaint=clamp(lkCentre+.7*(lkEdgeL+lkEdgeR),0.,1.)*step(.99,vRoadMarkings)*(1.-clamp(lkPave,0.,1.));
+  float lkPaint=clamp(lkCentre+.7*(lkEdgeL+lkEdgeR),0.,1.)*smoothstep(0.,max(.75,fwidth(vRoadMarkings)),vRoadMarkings)*(1.-clamp(lkPave,0.,1.));
   lkCol=mix(lkCol,vec3(.55,.55,.52),lkPaint);
   float lkFoot=max(length(dFdx(vRoadWorld)),length(dFdy(vRoadWorld)))/1.7;
   lkCol*=1.+.08*(roadNoise(vRoadWorld/1.7)-.5)*(1.-smoothstep(.25,.75,lkFoot))*(1.-clamp(lkPave,0.,1.));
@@ -105,7 +116,7 @@ if (uNightAmt > .001) {
 }`);
     material.userData.shader=shader;
   };
-  material.customProgramCacheKey=()=> 'road-surface-v6-junction';
+  material.customProgramCacheKey=()=> 'road-surface-v9-packed';
   return material;
 }
 
@@ -113,15 +124,15 @@ export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
   const v=new DataView(buffer);
   if(v.byteLength<32||v.getUint32(0,true)!==0x34524755)throw Error('Invalid UGR4 road block');
   const n=v.getUint32(4,true),ni=v.getUint32(8,true),bridge=!!v.getUint32(20,true),farCount=v.getUint32(24,true);
-  const flags=v.getUint32(28,true),support=!!(flags&1),floatPosition=!!(flags&2);
-  const expected=32+n*((floatPosition?15:9)+(bridge?2:0))+(n%2)+(ni+farCount)*2+(support?n*2:0);
-  if(!n||n>65000||ni%3||farCount%3||expected!==v.byteLength)throw Error('Invalid UGR4 road buffer lengths');
+  const flags=v.getUint32(28,true),support=!!(flags&1),floatPosition=!!(flags&2),packed=!!(flags&4),wide=!!(flags&8),indexBytes=wide?4:2,pad=wide?(4-(32+n*((floatPosition?15:9)+(bridge?2:0)))%4)%4:n%2;
+  const expected=32+n*((floatPosition?15:9)+(bridge?2:0))+pad+(ni+farCount)*indexBytes+(support?n*2:0);
+  if(!n||n>(wide?4000000:65000)||ni%3||farCount%3||expected!==v.byteLength)throw Error('Invalid UGR4 road buffer lengths');
   const g=new THREE.BufferGeometry();let offset=32;
   g.setAttribute('position',new THREE.BufferAttribute(new (floatPosition?Float32Array:Uint16Array)(buffer,offset,n*3),3));offset+=n*(floatPosition?12:6);
-  g.setAttribute('roadData',new THREE.BufferAttribute(new Uint8Array(buffer,offset,n*3),3));offset+=n*3+(n%2);
+  g.setAttribute('roadData',new THREE.BufferAttribute(new Uint8Array(buffer,offset,n*3),3));offset+=n*3+pad;
   if(bridge){g.setAttribute('roadRise',new THREE.BufferAttribute(new Int16Array(buffer,offset,n),1));offset+=n*2;}
-  g.setIndex(new THREE.BufferAttribute(new Uint16Array(buffer,offset,ni),1));
-  if(support)g.setAttribute('roadAcross',new THREE.BufferAttribute(new Int16Array(buffer,offset+(ni+farCount)*2,n),1,true));
+  g.setIndex(new THREE.BufferAttribute(new (wide?Uint32Array:Uint16Array)(buffer,offset,ni),1));
+  if(support)g.setAttribute('roadAcross',new THREE.BufferAttribute(new (packed?Uint16Array:Int16Array)(buffer,offset+(ni+farCount)*indexBytes,n),1,!packed));
 
   if(record?.bounds) {
     const [x,z,lo,x1,z1,hi]=record.bounds, ox=v.getInt32(12,true),oz=v.getInt32(16,true);
@@ -132,7 +143,7 @@ export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
   mesh.userData.roadNearGeometry=g;
   if(farCount){
     const far=new THREE.BufferGeometry();far.attributes={...g.attributes};
-    far.setIndex(new THREE.BufferAttribute(new Uint16Array(buffer,offset+ni*2,farCount),1));
+    far.setIndex(new THREE.BufferAttribute(new (wide?Uint32Array:Uint16Array)(buffer,offset+ni*indexBytes,farCount),1));
     far.boundingBox=g.boundingBox;far.boundingSphere=g.boundingSphere;
     mesh.userData.roadFarGeometry=far;
   }
@@ -144,20 +155,21 @@ export function decodeRoadBlock(buffer,material,bridgeMaterial,record=null) {
 
 export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,getBridges=()=>null,compile=null,onError=console.warn,groundCue=null,look:initialLook=null,getCamera=null}={}) {
   const group=new THREE.Group();group.name='roads';group.matrixAutoUpdate=false;
-  const look={value:roadLook(initialLook)},ratio={value:getRatio()},material=createRoadMaterial({ratio,look}),bridgeMaterial=createRoadMaterial({ratio,look});
+  const look={value:roadLook(initialLook)},ratio={value:getRatio()},nearCells={value:new Float32Array(16)},nearCount={value:0};
+  const material=createRoadMaterial({ratio,look,nearCells,nearCount}),bridgeMaterial=createRoadMaterial({ratio,look,nearCells,nearCount}),farMaterial=createRoadMaterial({ratio,look,nearCells,nearCount,far:{value:1}}),farBridgeMaterial=createRoadMaterial({ratio,look,nearCells,nearCount,far:{value:1}});
   roadRasterWeight.value=1; // preserve the opening until the first ribbon is actually visible
-  bridgeMaterial.defines={ROAD_BRIDGE:1};bridgeMaterial.customProgramCacheKey=()=> 'road-surface-v5-junction-bridge';
+  for(const m of [bridgeMaterial,farBridgeMaterial]){m.defines={ROAD_BRIDGE:1};m.customProgramCacheKey=()=> 'road-surface-v9-packed-bridge';}
   const cue={value:0},cueOrigin={value:new THREE.Vector2()};let cueStrength=groundCueStrength(groundCue);
-  for(const m of [material,bridgeMaterial])installGroundCue(m,cue,cueOrigin);
+  for(const m of [material,bridgeMaterial,farMaterial,farBridgeMaterial])installGroundCue(m,cue,cueOrigin);
   const stats={state:'waiting',loaded:0,pending:0,bytes:0,vertices:0,maxAttachMs:0,maxCompileMs:0,maxWidthMs:0,errors:[],disposed:0,manifest:null};
   let enabled=true,started=false,dead=false,records=[],lastX=Infinity,lastZ=Infinity,lastHeight=Infinity;
   const viewFrustum=new THREE.Frustum(),viewMatrix=new THREE.Matrix4(),viewBox=new THREE.Box3();
   const lastView=new Float64Array(16);lastView.fill(Infinity);
   const rotationEntries=[0,1,2,4,5,6,8,9,10];
-  const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set();
-  let attachPromise=null,compiled=false,widthReady=false,widthJob=null,widthPending=null,loadController=null,generation=0;
+  const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set(),nearWanted=new Map();
+  let nearDirty=true,attachPromise=null,compiled=false,widthReady=false,widthJob=null,widthPending=null,loadController=null,generation=0;
   const report=e=>{stats.errors.push(String(e));onError('Roads unavailable:',e);};
-  const remove=(file,mesh)=>{group.remove(mesh);mesh.userData.roadNearGeometry.dispose();mesh.userData.roadFarGeometry?.dispose();stats.bytes-=mesh.userData.roadBytes;stats.vertices-=mesh.geometry.attributes.position.count;resident.delete(file);stats.disposed++;stats.loaded=resident.size;};
+  const remove=(file,mesh)=>{group.remove(mesh);mesh.userData.roadNearGeometry.dispose();mesh.userData.roadFarGeometry?.dispose();stats.bytes-=mesh.userData.roadBytes;stats.vertices-=mesh.geometry.attributes.position.count;resident.delete(file);nearDirty=true;stats.disposed++;stats.loaded=resident.size;};
   async function bufferFrom(r) {
     if(!r.ok||!r.body)throw Error('Road asset HTTP '+r.status);
     return /gzip/i.test(r.headers.get('content-encoding')??'') ? r.arrayBuffer()
@@ -195,7 +207,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
       viewBox.max.set(x1+margin,hi+100,z1+margin);
       return viewFrustum.intersectsBox(viewBox);
     };
-    wanted.clear();for(const r of records)if(roadBlockWanted(r,{phone,x,z,height,inView:visible(r)}))wanted.add(r.file);
+    wanted.clear();nearWanted.clear();nearDirty=true;for(const r of records)if(roadBlockWanted(r,{phone,x,z,height,inView:visible(r)})){wanted.add(r.file);if(r.tileLOD&&r.lod==='near'){const cell=Math.floor(r.x/2000)*128+Math.floor(r.z/2000);if(!nearWanted.has(cell))nearWanted.set(cell,[]);nearWanted.get(cell).push(r.file);}}
     // Keep the old LOD until its replacement attaches. Swapping is atomic in
     // attachNext, avoiding a blank road while another gzip file is in flight.
     const replacing=new Set(records.filter(r=>wanted.has(r.file)&&r.pair).map(r=>r.pair));
@@ -203,6 +215,12 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     for(const[file,c]of inflight)if(!wanted.has(file)){c.abort();inflight.delete(file);}
     // Nearest blocks first. This only runs on a block/range change, never scans geometry per frame.
     records.sort((a,b)=>Math.hypot(a.x+a.size/2-x,a.z+a.size/2-z)-Math.hypot(b.x+b.size/2-x,b.z+b.size/2-z));
+  }
+  function syncNearTiles(){
+    nearDirty=false;
+    const complete=new Set();for(const [cell,files]of nearWanted)if(files.every(file=>resident.has(file)))complete.add(cell);
+    nearCount.value=complete.size;if(complete.size>16)throw Error('Road detail tile mask overflow');let at=0;for(const cell of complete)nearCells.value[at++]=cell;
+    for(const mesh of resident.values())if(mesh.userData.roadCell!==undefined)mesh.visible=complete.has(mesh.userData.roadCell);
   }
   function fetchMore(){
     if(!enabled||dead||attachPromise)return;
@@ -218,9 +236,9 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     if(attachPromise||!ready.length||!widthReady)return;
     const {rec,buffer}=ready.shift();if(!wanted.has(rec.file))return;
     const t=performance.now();
-    const mesh=decodeRoadBlock(buffer,material,bridgeMaterial,rec);mesh.name='roads:'+rec.file;mesh.userData.roadBytes=rec.bytes;mesh.userData.roadPair=rec.pair;
+    const mesh=decodeRoadBlock(buffer,material,bridgeMaterial,rec);mesh.name='roads:'+rec.file;mesh.userData.roadBytes=rec.bytes;mesh.userData.roadPair=rec.pair;if(rec.tileLOD){if(rec.lod==='far')mesh.material=mesh.material===bridgeMaterial?farBridgeMaterial:farMaterial;else{mesh.userData.roadCell=Math.floor(rec.x/2000)*128+Math.floor(rec.z/2000);mesh.visible=false;}}
     // Both variants are precompiled offscreen after landing, before the first visible road.
-    const attach=()=>{if(dead||!enabled||!wanted.has(rec.file)){mesh.geometry.dispose();return;}if(rec.pair)for(const [file,previous]of resident)if(previous.userData.roadPair===rec.pair)remove(file,previous);group.add(mesh);resident.set(rec.file,mesh);stats.bytes+=rec.bytes;stats.vertices+=rec.vertices;stats.loaded=resident.size;};
+    const attach=()=>{if(dead||!enabled||!wanted.has(rec.file)){mesh.geometry.dispose();return;}if(rec.pair)for(const [file,previous]of resident)if(previous.userData.roadPair===rec.pair)remove(file,previous);group.add(mesh);resident.set(rec.file,mesh);nearDirty=true;stats.bytes+=rec.bytes;stats.vertices+=rec.vertices;stats.loaded=resident.size;};
     if(!group.parent)scene.add(group);
     if(!compiled && compile) {
       const proxies=new THREE.Group();
@@ -246,7 +264,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   return {group,material,bridgeMaterial,stats,
     setLook(value){look.value=roadLook(value);},get look(){return look.value;},
     groundCue:{setStrength(v){cueStrength=groundCueStrength(v);},get strength(){return cueStrength;},get weight(){return cue.value;}},
-    setEnabled(v){enabled=!!v;if(!enabled)roadRasterWeight.value=1;group.visible=enabled&&widthReady;if(!enabled){generation++;loadController?.abort();widthJob=null;widthPending=null;widthReady=false;getBridges()?.userData.clearRoadWidths?.();started=false;records=[];wanted.clear();for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);lastX=Infinity;}},
+    setEnabled(v){enabled=!!v;if(!enabled)roadRasterWeight.value=1;group.visible=enabled&&widthReady;if(!enabled){generation++;loadController?.abort();widthJob=null;widthPending=null;widthReady=false;getBridges()?.userData.clearRoadWidths?.();started=false;records=[];wanted.clear();nearWanted.clear();nearCount.value=0;for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);lastX=Infinity;}},
     get enabled(){return enabled;},
     update({x,z,height=0,belowSurface=false,submerged=false,airborne=false}={}){
       const viewAllowed=enabled&&!belowSurface&&!submerged;group.visible=viewAllowed&&widthReady;ratio.value=getRatio();
@@ -270,7 +288,8 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
       if(Math.hypot(x-lastX,z-lastZ)>100||Math.abs(physicalHeight-lastHeight)>50||(physicalHeight<cutoff)!==(lastHeight<cutoff)||turned) {
         select(x,z,physicalHeight);lastX=x;lastZ=z;lastHeight=physicalHeight;
       }
-      attachNext();fetchMore();
+      attachNext();fetchMore();if(nearDirty)syncNearTiles();
+      roadRasterWeight.value=viewAllowed&&isOpen()&&group.children.some(m=>m.visible)?0:1;
       // Same vertex attributes, fewer triangles only beyond human-scale views.
       // Keep the full index resident and restore it before returning to the street.
       const far=height/ratio.value>=120;
@@ -280,6 +299,6 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
       if(!inflight.size&&!ready.length&&!attachPromise&&resident.size===wanted.size)stats.state=stats.errors.length?'failed':'ready';
     },
     coverage:()=>({wanted:[...wanted],resident:[...resident.keys()]}),
-    dispose(){dead=true;generation++;loadController?.abort();widthPending=null;widthJob=null;getBridges()?.userData.clearRoadWidths?.();for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);material.dispose();bridgeMaterial.dispose();group.removeFromParent();},
+    dispose(){dead=true;generation++;loadController?.abort();widthPending=null;widthJob=null;getBridges()?.userData.clearRoadWidths?.();for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);material.dispose();bridgeMaterial.dispose();farMaterial.dispose();farBridgeMaterial.dispose();group.removeFromParent();},
   };
 }

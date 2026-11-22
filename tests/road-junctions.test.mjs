@@ -23,12 +23,16 @@ test('five real dual carriageways follow source widths and suppress the inner pa
   const source=new Map();for(const f of fs.readdirSync(path.join(root,'scripts/.cache/roads-overpass')).filter(f=>/^blk_.*\.json\.gz$/.test(f)).sort())
     for(const w of JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(root,'scripts/.cache/roads-overpass',f)))).elements)if(w.type==='way'&&!source.has(w.id))source.set(w.id,w);
   for(const name of ['North Circular Road','Great West Road','Eastern Avenue','Western Avenue','Watford Way']){
-    const roads=net.roads.filter(r=>r.name===name&&r.pairedWith);assert.ok(roads.length>0,name);
+    const roads=net.roads.filter(r=>r.name===name&&r.pairedWith);assert.ok(roads.length>0,name);let direct=0;
     for(const r of roads){const tags=source.get(r.id).tags;
       assert.equal(r.width,dimensions(tags,r.cls).width,`${name} ${r.id}`);
+      const width=tags['width:carriageway']??tags.width;
+      if(width!=null&&/^\d+(?:\.\d+)?(?: ?m)?$/.test(width)){assert.ok(Math.abs(r.width-parseFloat(width))<1e-8);direct++;}
+      else if(width==null&&/^\d+$/.test(tags.lanes??'')){assert.ok(Math.abs(r.width-Number(tags.lanes)*3.2)<1e-8);direct++;}
       assert.ok(r.left===0||r.right===0,`inner pavement: ${name} ${r.id}`);
       assert.ok(r.pairedWith.every(id=>source.has(id)));
     }
+    assert.ok(direct>0,`${name}: no independent numeric width/lanes check`);
   }
   assert.ok(net.stats.unpairedOneWayWays>0,'unpaired ways are counted honestly');
 });

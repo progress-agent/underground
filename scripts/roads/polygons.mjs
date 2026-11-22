@@ -79,6 +79,48 @@ export function trimJunction(triangle,r,index) {
   return result;
 }
 
+// Remove only the parts of a pavement that occupy another carriageway. Keep
+// the remaining ribbon whole, rather than tessellating its asphalt for paint.
+// The extra coordinate is a conservative signed paint field. A selected
+// outside plane is negative everywhere inside its convex carriageway; the
+// minimum of those planes is concave, so interpolation cannot paint a junction.
+export function trimRibbon(triangle,r,index) {
+  const half=(r.width+r.left+r.right)/2,left=-half+r.left,right=half-r.right;
+  const [a,b,c]=triangle,dx=b[0]-a[0],dz=b[1]-a[1],ex=c[0]-a[0],ez=c[1]-a[1],det=dx*ez-dz*ex;
+  if(Math.abs(det)<1e-12)return [];
+  const nx=((b[2]-a[2])*ez-(c[2]-a[2])*dz)/det,nz=(dx*(c[2]-a[2])-ex*(b[2]-a[2]))/det;
+  const across=p=>a[2]+nx*(p[0]-a[0])+nz*(p[1]-a[1]);
+  const candidates=index(bounds(triangle)).filter(f=>f.r.id!==r.id&&f.r.layer===r.layer&&f.r.bridge===r.bridge&&cut(triangle,f.polygon).inside.length);
+  const cw=split(split(triangle,p=>p[2]-left)[0],p=>right-p[2])[0];
+  const norm=Math.hypot(nx,nz)||1,tangent=[-nz/norm,nx/norm],along=p=>p[0]*tangent[0]+p[1]*tangent[1];
+  const planeSets=[],ranges=[];
+  for(const f of candidates){const intersection=cw.length?cut(cw,f.polygon).inside:[];if(!intersection.length)continue;
+    const values=intersection.map(along);ranges.push([Math.min(...values),Math.max(...values)]);
+    planeSets.push(f.polygon.map((p,i)=>{const q=f.polygon[(i+1)%f.polygon.length],x=q[0]-p[0],z=q[1]-p[1],l=Math.hypot(x,z)||1;return v=>(z*(v[0]-p[0])-x*(v[1]-p[1]))/l;}));
+  }
+  const merged=[];for(const range of ranges.sort((a,b)=>a[0]-b[0])){const last=merged.at(-1);if(last&&range[0]<=last[1]+.05)last[1]=Math.max(last[1],range[1]);else merged.push([...range]);}
+  // One cross-road partition per junction lets the two approaches choose
+  // their own outside plane without tessellating the whole junction hull.
+  let bases=[triangle];for(const [lo,hi]of merged){const mid=(lo+hi)/2;bases=bases.flatMap(poly=>split(poly,p=>along(p)-mid).filter(p=>p.length));}
+  const result=[];
+  for(const base of bases){
+    const centre=[base.reduce((s,p)=>s+p[0]/base.length,0),base.reduce((s,p)=>s+p[1]/base.length,0)];
+    const planes=planeSets.map(edges=>edges.reduce((best,f)=>f(centre)>best(centre)?f:best));
+    const distance=p=>planes.length?Math.min(...planes.map(f=>f(p))):327;
+    const scale=Math.min(1,28/Math.max(1,...base.map(p=>Math.abs(distance(p)))));
+    // 15cm covers the 125mm X/Z grid. Bias by a full encoded unit before
+    // flooring to six bits, so quantisation cannot extend paint into a junction.
+    let pieces=[base.map(p=>[...p,distance(p)*scale-.15*scale-1.01])];
+    for(const f of candidates)for(const [width,sign]of [[r.left,-1],[r.right,1]])if(width){
+      const clip=split(f.polygon,p=>sign<0?left+.125-across(p):across(p)-right+.125)[0];
+      if(clip.length)pieces=pieces.flatMap(p=>cut(p,clip).outside);
+    }
+    result.push(...pieces);
+  }
+  return result.map(polygon=>({polygon,junction:false}));
+}
+
+
 // Exact plan-view pavement polygons for consumers (no terrain/height dependency).
 // At junctions the shared intersection is asphalt, so only outside pieces can
 // contain a pavement. Vertices retain across-road metres for verification.

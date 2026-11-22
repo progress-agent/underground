@@ -14,7 +14,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,'manifest.json')));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 test('road asset regenerates byte-identically from the 80 cached OSM answers',()=>{
   const out=fs.mkdtempSync(path.join(os.tmpdir(),'ug-roads-'));
-  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:900000,stdio:'pipe'});
+  try{execFileSync(process.execPath,[path.join(root,'scripts/roads/prepare.mjs'),'--out',out],{timeout:2400000,stdio:'pipe'});
     assert.deepEqual(fs.readFileSync(path.join(out,'manifest.json')),fs.readFileSync(path.join(dir,'manifest.json')));
     assert.equal(hash(fs.readFileSync(path.join(out,'network.bin.gz'))),manifest.networkSHA256);
     assert.equal(hash(fs.readFileSync(path.join(out,'bridge-decks.bin.gz'))),manifest.bridgeSHA256);
@@ -61,11 +61,11 @@ test('exact clipping retains an entering and exiting segment and removes outside
   const clip=clipper([[0,0],[10,0],[10,10],[0,10]]);
   assert.deepEqual(clip([[-5,5],[15,5]]),[[[0,5],[10,5]]]);assert.deepEqual(clip([[-5,-5],[15,-5]]),[]);
 });
-test('all generated blocks use 16-bit indices, upward winding and compact pavement attributes',()=>{
+test('near tiles retain 16-bit indices and distant packets use bounded 32-bit indices, with upward compact attributes',()=>{
   const m=createRoadMaterial();
   for(const r of manifest.records){
     const b=gunzipSync(fs.readFileSync(path.join(dir,r.file))),buffer=b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),mesh=decodeRoadBlock(buffer,m,m,r),g=mesh.geometry,p=g.attributes.position;
-    assert.ok(p.count<=65000);assert.equal(g.index.array.BYTES_PER_ELEMENT,2);assert.equal(g.attributes.roadData.array.BYTES_PER_ELEMENT,1);
+    assert.ok(p.count<=(r.indexBytes===4?4000000:65000));assert.equal(g.index.array.BYTES_PER_ELEMENT,r.indexBytes??2);if(r.indexBytes===4)assert.equal(r.lod,'far');assert.equal(g.attributes.roadData.array.BYTES_PER_ELEMENT,1);
     for(let i=0;i<g.index.count;i+=3){const a=g.index.getX(i),b=g.index.getX(i+1),c=g.index.getX(i+2),ny=(p.getZ(b)-p.getZ(a))*(p.getX(c)-p.getX(a))-(p.getX(b)-p.getX(a))*(p.getZ(c)-p.getZ(a));
       assert.ok(ny>=0,`${r.file} triangle ${i/3} points below ground`);}
     g.dispose();

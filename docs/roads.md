@@ -57,13 +57,19 @@ hump at canal or railway crossings, or alter curated Thames decks. The bridge ri
 is its estimated deck surface; smaller-crossing piers and parapets remain unauthored.
 
 Runtime blocks use 16-bit positions: X/Z at 125mm, vertical at 10mm real in canonical VE5,
-and 16-bit indices. Blocks containing the exact bank overlay instead use Float32 positions
+and 16-bit detail indices. Distant packets merge compatible blocks with 32-bit indices. Blocks containing the exact bank overlay instead use Float32 positions
 in the same encoded coordinate frame; quantising a clipped boundary to 125mm could cross
-a bank edge with a height discontinuity. Each block has at most 65,000 vertices. The header
+a bank edge with a height discontinuity. Each detail block has at most 65,000 vertices; distant packets have a decoder bound of four million. The header
 word at byte 24 stores an optional aerial-index count. Byte 28 is a flags word: bit 0 adds
-a normalised Int16 across-road coordinate after both indices; bit 1 selects Float32 positions.
-Zero flags retain the original layout. The optional coordinate preserves paving phase at
-interior clipping vertices. Three bytes per vertex carry
+a two-byte across-road coordinate after both indices; bit 1 selects Float32
+positions; bit 2 packs unsigned across/paint coordinates; bit 3 selects 32-bit
+indices with four-byte index alignment.
+Zero flags retain the original layout. Legacy coordinates use normalised Int16.
+Packed coordinates use 1,020 across-road levels and six signed paint bits in the
+same two bytes, decoded in the vertex shader before interpolation. Across-road
+error is at most one ribbon half-width divided by 1,019. Reserved values 0 to 3
+preserve the legacy/missing-attribute sentinel. The coordinate preserves paving
+phase at interior clipping vertices without another GPU attribute. Three bytes per vertex carry
 ribbon half-width and two pavement widths. The half-width base byte carries quarters
 of a metre; bit 6 in each pavement byte carries its two fractional bits, giving
 1/16m half-width precision without another attribute. Pavement widths use the lower
@@ -91,31 +97,49 @@ it does not borrow the higher bank at a shared boundary vertex.
 Small affected road runs keep their full aerial index;
 the rest retain the existing simplification bounds.
 
-Junctions have butt caps at their mapped nodes. After terrain/bank fitting, the
-compiler clips each pavement band against other same-layer carriageways. Shared
-carriageway regions carry a marking-suppression bit. Touching carriageway quads
-are grouped into conservative convex marking regions, removing internal seams
-between quads without letting paint cross a junction. Pavement clipping still
-uses the actual carriageway polygons. `scripts/roads/measure-junctions.mjs` reruns
-both the byte-identical legacy bake and the corrected bake, measuring stored
-pavement triangles against the union of other same-layer carriageways.
+Junctions have butt caps at their mapped nodes. After terrain/bank fitting,
+the compiler removes only pavement intrusions into other same-layer
+carriageways, retaining the rest as whole affine ribbons. A 125mm clipping
+guard covers stored-position rounding. Look 3 uses a conservative signed paint
+field: each approach chooses an outside plane of every intersecting carriageway,
+then takes their minimum. A single partition through each junction allows both
+approaches to retain paint. Concavity keeps interpolated paint out of those
+carriageways. Field rescaling, downward rounding and a safety bias make the
+six-bit representation conservative. Lines may stop early, especially at skew
+junctions or on long unsplit triangles; this is illustrative road paint.
 
-Each spatial part has separate, compact near and far files with just the vertices
-its own index references. The `lod` and `pair` fields identify mutually exclusive
-files. The manifest’s `desktopGPUBytes` is the sum of all asset variants, not
-runtime residency. The runtime keeps every detailed desktop part within 1.8km
-below 120m and uses aerial parts elsewhere. The phone keeps detailed major roads
-and minor-road blocks within 1.8km through 350m, with compact major roads elsewhere.
-This exceeds the 1km walker guarantee. All nearby detail survives a turn; distant
-parts preload a camera cone expanded by the 0.85 projection factor and 250m bounds
-margin. Parts outside that cone are disposed. These are rendering distances, not
-claims about the mapped streets. LOD replacements attach before their predecessor
-is disposed, so loading a new level does not create a blank road.
+The shared `trimJunction` and pavement-polygon helper remains available for
+building clearance against the exact source polygons. The drawn bake uses
+`trimRibbon`; `scripts/roads/measure-junctions.mjs` measures the actual stored,
+decoded pavement bands, separately for near and aerial geometry and combined,
+against the union of other same-layer carriageways. Its legacy mode reproduces
+live's compressed files before measuring the same statistic.
 
-Aerial simplification retains every road, endpoint and width, reducing only
-interior rail samples within the smaller of 2m or a quarter carriageway width
-horizontally and 1m vertically (rendering estimates). Bridges and repaired bank
-regions retain their full topology. Index/position compaction is offline; the
+Detail uses 2km tiles, clipped exactly at the tile edges. Compatible distant
+geometry is packed into 8km files with 32-bit indices, keeping bank Float32
+positions separate from ordinary 16-bit positions. The runtime retains all
+nearby detail within 1.1km below 120m on desktop and through 350m on the phone.
+Phone detail includes minor streets, exceeding the 1km walker guarantee.
+Distant packets preload the camera cone expanded by the 0.85 projection factor
+and a 250m bounds margin. Parts outside it are disposed. The manifest's
+`desktopGPUBytes` totals asset variants; it is not runtime residency.
+
+A detail tile becomes visible only when all its wanted parts have attached.
+The distant shader yields to those complete cells, using a small shared uniform
+mask. Until then the distant geometry remains visible. Both variants share the
+same two shader programs, including bridge morphs and the ground cue. Plain
+and painted looks use a uniform; changing looks does not load geometry.
+
+Distant packets separate ordinary faces from bridge faces as well as Float32
+from quantised positions. Ordinary roads therefore do not carry an unrelated
+bridge's morph attribute. Packing and compaction happen offline, with no new
+dependency and no browser triangulation.
+
+Aerial simplification retains each road, endpoint and width. Horizontal error
+is bounded by the smaller of 2m or a quarter carriageway width; vertical error
+uses the same 30mm real bound as the near rails, rather than live's 1m aerial
+bound. Bridges and repaired bank regions retain full topology. These are
+rendering tolerances, not surveyed dimensions. Compaction is offline; the
 browser creates typed-array views and attaches one part per frame after landing.
 The Roads toggle and `?roads=0` stop loading and dispose the buffers. Roads retain
 the existing below-surface/submerged predicates and FrontSide back-face guard.
