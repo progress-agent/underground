@@ -61,7 +61,7 @@ test('exact clipping retains an entering and exiting segment and removes outside
   const clip=clipper([[0,0],[10,0],[10,10],[0,10]]);
   assert.deepEqual(clip([[-5,5],[15,5]]),[[[0,5],[10,5]]]);assert.deepEqual(clip([[-5,-5],[15,-5]]),[]);
 });
-test('near tiles retain 16-bit indices and distant packets use bounded 32-bit indices, with upward compact attributes',()=>{
+test('road packets have bounded index widths and upward compact attributes',()=>{
   const m=createRoadMaterial();
   for(const r of manifest.records){
     const b=gunzipSync(fs.readFileSync(path.join(dir,r.file))),buffer=b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),mesh=decodeRoadBlock(buffer,m,m,r),g=mesh.geometry,p=g.attributes.position;

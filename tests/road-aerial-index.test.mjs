@@ -19,7 +19,7 @@ test('separately streamable road LODs retain upward triangles, valid indices and
   g.dispose();
  }
  for(const [pair,lods]of pairs){assert.ok(lods.near>0&&lods.far>0,pair);assert.ok(lods.far<=lods.near,pair);}
- if(manifest.tileLODs){assert.ok(farFiles<nearFiles/4,'distant packets must reduce draw count');assert.ok(farCount/3>manifest.stats.uniqueWays*.9,'city-wide aerial geometry must retain the mapped network, not only the last road in each packet');for(const r of manifest.records)assert.equal(r.size,r.lod==='far'?8000:2000);}
+ if(manifest.tileLODs){assert.ok(farFiles<nearFiles,'spatial distant packets must stay more consolidated than full nearby detail');assert.ok(farCount<nearCount,'distant geometry must actually reduce triangles');assert.ok(farCount/3>manifest.stats.uniqueWays*.9,'city-wide aerial geometry must retain the mapped network, not only the last road in each packet');for(const r of manifest.records)assert.equal(r.size,r.lod==='far'?8000:2000);}
  else{assert.ok(pairs.size>0);assert.ok(farCount<nearCount,'the aerial LOD must actually reduce drawing');}
  }finally{material.dispose();}
 });

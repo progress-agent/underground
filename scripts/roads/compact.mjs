@@ -7,5 +7,5 @@ export function compactRoadPart(part,indices) {
     if(part.rise)rise.push(part.rise[j]);if(part.across)across.push(part.across[j]);
   }idx.push(k);}
   return {pos:part.pos.constructor.from(pos),road:Uint8Array.from(road),rise:part.rise?Int16Array.from(rise):null,
-    across:part.across?part.across.constructor.from(across):null,idx:Uint16Array.from(idx),farIdx:new Uint16Array()};
+    across:part.across?part.across.constructor.from(across):null,idx:(remap.size>65000?Uint32Array:Uint16Array).from(idx),farIdx:new Uint16Array()};
 }

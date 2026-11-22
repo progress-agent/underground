@@ -9,8 +9,8 @@ import {buildNetwork,CLASSES,WIDTHS} from './network.mjs';
 import {roadMetadata,roadDimensions} from './metadata.mjs';
 import {repairRoadClearance} from './clearance.mjs';
 import {compactRoadPart} from './compact.mjs';
-import {carriagewayIndex,trimRibbon,split,cut,area,bounds} from './polygons.mjs';
-import {mergeRoadParts} from './pack.mjs';
+import {carriagewayIndex,trimRibbon,roadTriangleTiles,split,cut,area,bounds} from './polygons.mjs';
+import {mergeRoadParts,localiseRoadParts} from './pack.mjs';
 import {packRoadCoordinate,unpackRoadCoordinate} from './coordinate.mjs';
 import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
 import {surfaceIndex,overlap,conformRoadTriangle,supportFace,raiseRoadDeck} from './support.mjs';
@@ -126,11 +126,11 @@ const netParts=[];
 for(const r of network.roads){const b=Buffer.alloc(16+r.p.length*8);b.writeUInt32LE(r.id,0);b[4]=r.cls|(r.bridge?16:0)|(r.tunnel?32:0);b.writeInt8(r.layer,5);b.writeUInt16LE(Math.round(r.width*100),6);b.writeUInt16LE(Math.round(r.left*100),8);b.writeUInt16LE(Math.round(r.right*100),10);b.writeUInt32LE(r.p.length,12);r.p.forEach((p,i)=>{b.writeInt32LE(Math.round(p[0]*100),16+i*8);b.writeInt32LE(Math.round(p[1]*100),20+i*8);});netParts.push(b);}
 const netHead=Buffer.alloc(8);netHead.write('UGN1');netHead.writeUInt32LE(network.roads.length,4);
 const networkBytes=zlib.gzipSync(Buffer.concat([netHead,...netParts]),{level:9});fs.writeFileSync(path.join(out,'network.bin.gz'),networkBytes);
-const groups=new Map();
+const groups=new Map(),spills=new Map();
 const LIFT=.30; // 6cm real in canonical VE5, plus polygon offset at render. Landscape follows Master.
 function group(key,x,z,size,tier,lod){if(!groups.has(key))groups.set(key,{key,x:x-64,z:z-64,size,tier,lod,parts:[],pos:[],road:[],rise:[],idx:[],farIdx:[],owner:[]});return groups.get(key);}
-function flush(c){
-  if(!c.idx.length)return;
+function flush(c,extra=[]){
+  if(!c.idx.length&&!extra.length)return;
   // Exact local overlay, including triangle interiors, at the four repaired feet.
   // All other faces retain their original quantised vertices and aerial indices.
   let pos=[],road=[],rise=[],across=[],idx=[],farIdx=[],keys=new Map();
@@ -178,25 +178,26 @@ function flush(c){
     }
   };
   const emit=(points,far)=>{
-    if(legacy){emitRaw(points,far);return;}
+    if(legacy){emitRaw(points.map(p=>({...p,across:p.railAcross})),far);return;}
     const r=points[0].owner;
     const half=(r.width+r.left+r.right)/2;
     const precise=points.some(p=>p.pos.some(v=>!Number.isInteger(v)));
     const quantize=v=>precise?Math.fround(v):Math.round(v);
-    const triangle=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,(legacy?p.across/32767:unpackRoadCoordinate(p.across).across)*half,p.pos[1],p.rise]);
-    let cells=[triangle];if(c.lod==='near'){const x=c.x+64,z=c.z+64;for(const edge of [p=>p[0]-x,p=>x+c.size-p[0],p=>p[1]-z,p=>z+c.size-p[1]])cells=cells.map(p=>split(p,edge)[0]).filter(p=>p.length);}
-    for(const cell of cells)for(let k=1;k<cell.length-1;k++)for(const {polygon,junction} of trimRibbon([cell[0],cell[k],cell[k+1]],r,junctionIndex))for(let i=1;i<polygon.length-1;i++){
-      emitRaw([polygon[0],polygon[i],polygon[i+1]].map(p=>({
-        owner:r,pos:[quantize((p[0]-c.x)*8),quantize(p[3]),quantize((p[1]-c.z)*8)],
-        road:[points[0].road[0],(points[0].road[1]&64)+(junction?0:points[0].road[1]&63),(points[0].road[2]&64)+(junction?128:points[0].road[2]&63)],
-        rise:Math.round(p[4]),across:packRoadCoordinate(p[2]/half,p[5]),
-      })),far);
+    const triangle=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.railAcross/32767*half,p.pos[1],p.rise]);
+    const tiles=c.lod==='near'?roadTriangleTiles(triangle,c.size):[{x:c.x+64,z:c.z+64,polygon:triangle}];
+    for(const tile of tiles){const key=c.tier+'-near-'+tile.x+'-'+tile.z,target=c.lod==='near'?group(key,tile.x,tile.z,c.size,c.tier,c.lod):c;
+      const cell=tile.polygon;
+      for(let k=1;k<cell.length-1;k++)for(const {polygon,junction}of trimRibbon([cell[0],cell[k],cell[k+1]],r,junctionIndex))for(let i=1;i<polygon.length-1;i++){
+        const output=[polygon[0],polygon[i],polygon[i+1]].map(p=>({owner:r,pos:[quantize((p[0]-target.x)*8),quantize(p[3]),quantize((p[1]-target.z)*8)],
+          road:[points[0].road[0],(points[0].road[1]&64)+(junction?0:points[0].road[1]&63),(points[0].road[2]&64)+(junction?128:points[0].road[2]&63)],rise:Math.round(p[4]),across:packRoadCoordinate(p[2]/half,p[5])}));
+        if(target===c)emitRaw(output,far);else{if(!spills.has(key))spills.set(key,[]);spills.get(key).push(output);}
+      }
     }
   };
-  const vertex=j=>({owner:c.owner[j],pos:c.pos.slice(j*3,j*3+3),road:c.road.slice(j*3,j*3+3),rise:c.rise[j],across:c.road[j*3+1]>=128?32767:-32767});
+  const vertex=j=>({owner:c.owner[j],pos:c.pos.slice(j*3,j*3+3),road:c.road.slice(j*3,j*3+3),rise:c.rise[j],railAcross:c.road[j*3+1]>=128?32767:-32767});
   for(const [indices,far]of [[c.idx,false],[c.farIdx,true]])for(let i=0;i<indices.length;i+=3){
     const points=indices.slice(i,i+3).map(vertex);
-    const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.across/32767,p.pos[1]*.05-500-LIFT,p.rise*.05]);
+    const tri=points.map(p=>[c.x+p.pos[0]/8,c.z+p.pos[2]/8,p.railAcross/32767,p.pos[1]*.05-500-LIFT,p.rise*.05]);
     const box=[Math.min(...tri.map(p=>p[0])),Math.min(...tri.map(p=>p[1])),Math.max(...tri.map(p=>p[0])),Math.max(...tri.map(p=>p[1]))];
     if(!supportRegions.some(r=>overlap(r,box))){emit(points,far);continue;}
     // A bridge keeps its inferred deck chord where it is already above the
@@ -222,10 +223,11 @@ function flush(c){
         const lip=reservoirBuildingBase(x,z,terrain.getTerrainMeshSurfaceY({x,z})??support);
         if(lip>support&&lip-support<.25)support=lip;
         const y=deck?Math.max(support,deck.height(x,z)):support;
-        return {owner:points[0].owner,pos:[qx,(y+LIFT+500)*20,qz],road:points[0].road,rise:deck?Math.round((y-support)/.05):0,across:Math.round(Math.max(-1,Math.min(1,v[2]))*32767)};
+        return {owner:points[0].owner,pos:[qx,(y+LIFT+500)*20,qz],road:points[0].road,rise:deck?Math.round((y-support)/.05):0,railAcross:Math.round(Math.max(-1,Math.min(1,v[2]))*32767)};
       }),far);
     }
   }
+  for(const points of extra)emitRaw(points,false);
   finish();
   c.pos=[];c.road=[];c.rise=[];c.idx=[];c.farIdx=[];c.owner=[];
 }
@@ -385,8 +387,14 @@ for(const r of network.roads){
     if(last&&run.length>1)append(last,run,r,d);
   }
 }
+// Finish every source before serialising: a later source may contribute a
+// clipped pavement overhang to an earlier cell. Spill triangles are already
+// fitted, clipped and encoded in their destination's coordinate frame.
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key)))flush(c);
+for(const [key,triangles]of spills)flush(groups.get(key),triangles);
+spills.clear();
 const records=[];let totalGPU=0,compressedBytes=0;
-for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){flush(c);if(c.lod==='far')c.parts=mergeRoadParts(c.parts.map(p=>compactRoadPart(p,p.idx)));for(let j=0;j<c.parts.length;j++){
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){if(c.lod){const parts=c.parts.map(p=>compactRoadPart(p,p.idx));c.parts=c.lod==='near'?mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:false}):localiseRoadParts(mergeRoadParts(parts),4000,{deduplicate:true,mergeMorph:true,index16:true});}for(let j=0;j<c.parts.length;j++){
   const original=c.parts[j],pair=c.key+'-'+j;
   const selectBounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
   for(let i=0;i<original.pos.length;i+=3){const x=c.x+original.pos[i]/8,z=c.z+original.pos[i+2]/8,y=original.pos[i+1]*.05-500;

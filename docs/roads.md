@@ -57,9 +57,9 @@ hump at canal or railway crossings, or alter curated Thames decks. The bridge ri
 is its estimated deck surface; smaller-crossing piers and parapets remain unauthored.
 
 Runtime blocks use 16-bit positions: X/Z at 125mm, vertical at 10mm real in canonical VE5,
-and 16-bit detail indices. Distant packets merge compatible blocks with 32-bit indices. Blocks containing the exact bank overlay instead use Float32 positions
+and 16-bit indices in the current nearby and distant packets. Blocks containing the exact bank overlay instead use Float32 positions
 in the same encoded coordinate frame; quantising a clipped boundary to 125mm could cross
-a bank edge with a height discontinuity. Each detail block has at most 65,000 vertices; distant packets have a decoder bound of four million. The header
+a bank edge with a height discontinuity. Each current packet has at most 65,000 vertices. The decoder also retains a bounded 32-bit-index compatibility path. The header
 word at byte 24 stores an optional aerial-index count. Byte 28 is a flags word: bit 0 adds
 a two-byte across-road coordinate after both indices; bit 1 selects Float32
 positions; bit 2 packs unsigned across/paint coordinates; bit 3 selects 32-bit
@@ -119,9 +119,11 @@ upper bound: cleanup only removes faces. The audit records any topology
 substitution that would invalidate that argument. Legacy mode reproduces live's
 compressed files before measuring the same statistic.
 
-Detail uses 2km tiles, clipped exactly at the tile edges. Compatible distant
-geometry is packed into 8km files with 32-bit indices, keeping bank Float32
-positions separate from ordinary 16-bit positions. The runtime retains all
+Detail uses 2km tiles. Every ribbon fragment, including a pavement overhang,
+is assigned to each intersected cell and repacked there. Distant geometry is
+clustered into 4km neighbourhoods, then split spatially at 65,000 vertices for
+16-bit indices and tighter frustum disposal. Positions retain their 8km source
+encoding frame. Bank Float32 positions stay separate from ordinary 16-bit positions. The runtime retains all
 nearby detail within 1.1km below 120m on desktop and through 350m on the phone.
 Phone detail includes minor streets, exceeding the 1km walker guarantee.
 Distant packets preload the camera cone expanded by the 0.85 projection factor
@@ -134,10 +136,11 @@ mask. Until then the distant geometry remains visible. Both variants share the
 same two shader programs, including bridge morphs and the ground cue. Plain
 and painted looks use a uniform; changing looks does not load geometry.
 
-Distant packets separate ordinary faces from bridge faces as well as Float32
-from quantised positions. Ordinary roads therefore do not carry an unrelated
-bridge's morph attribute. Packing and compaction happen offline, with no new
-dependency and no browser triangulation.
+Coincident distant vertices share storage when position, road metadata, paving
+phase and bridge rise agree. Their paint field takes the minimum, which can
+only reduce paint coverage. Geometry and paving phase remain unchanged.
+Spatial subsets with no bridge rise drop that attribute. Packing, deduplication
+and compaction happen offline, with no new dependency or browser triangulation.
 
 Aerial simplification retains each road, endpoint and width. Horizontal error
 is bounded by the smaller of 2m or a quarter carriageway width; vertical error

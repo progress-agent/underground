@@ -120,6 +120,17 @@ export function trimRibbon(triangle,r,index) {
   return result.map(polygon=>({polygon,junction:false}));
 }
 
+// Partition the full ribbon footprint, including its overhang into a cell whose
+// centreline never enters it. Each point keeps all affine payload coordinates.
+export function roadTriangleTiles(triangle,size=2000){
+  const box=bounds(triangle),result=[];
+  for(let x=Math.floor(box[0]/size)*size;x<=box[2];x+=size)for(let z=Math.floor(box[1]/size)*size;z<=box[3];z+=size){
+    let polygon=triangle;for(const edge of [p=>p[0]-x,p=>x+size-p[0],p=>p[1]-z,p=>z+size-p[1]])if(polygon.length)polygon=split(polygon,edge)[0];
+    if(polygon.length)result.push({x,z,polygon});
+  }
+  return result;
+}
+
 
 // Exact plan-view pavement polygons for consumers (no terrain/height dependency).
 // At junctions the shared intersection is asphalt, so only outside pieces can
