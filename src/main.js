@@ -1418,6 +1418,25 @@ if (roadLookControl) { roadLookControl.value = String(roads.look);
   roadLookControl.addEventListener('change', () => roads.setLook(roadLookControl.value)); }
 
 
+// s26:O: the default path has no import, data request, geometry or identity allocation.
+const outlineSet = ['a','b'].includes(getUrlStringParam('outlines')) ? getUrlStringParam('outlines') : null;
+let outlineBuildings = null, outlineStarted = false;
+function updateOutlineTrial() {
+  if (!outlineSet) return;
+  if (!outlineStarted && ['done','bypassed'].includes(intro.getPhase()) && bakedBuilder?.isDone()) {
+    outlineStarted = true;
+    import('./outline-buildings.js').then(({ createOutlineBuildings }) => {
+      outlineBuildings = createOutlineBuildings({set:outlineSet, scene:surfaceGeometryGroup, VE:VERTICAL_EXAGGERATION,
+        getMeshes:()=>bakedMeshes, isReady:()=>lateLayers.settled(),
+        upload:(object,material)=>openingUploads.upload(object,scene,material),
+        invalidate:mesh=>modeSystem?.collision.invalidateBuilding(mesh),
+        compile:object=>{const target=renderer.getRenderTarget();renderer.setRenderTarget(composer.readBuffer);
+          try{return renderer.compileAsync(object,camera,scene);}finally{renderer.setRenderTarget(target);}}});
+    }).catch(e=>console.error('[outlines]',e));
+  }
+  if(outlineBuildings){outlineBuildings.group.visible=buildingsPath==='baked' && !!surfaceGeometryGroup?.visible;outlineBuildings.update();}
+}
+
 // settled() and ug:late-layers-done wait for all eight; a layer whose parent step or data failed is skipped, so they never hang.
 lateLayers.expect(LATE_LAYER_ORDER);
 const s21SkipLayers = (ids) => { for (const id of ids) lateLayers.skip(id); };
@@ -4433,6 +4452,7 @@ function s02bOccluded(ox, oy, oz, dx, dy, dz, t, scale) {
     s02bBoxMeshes.length = 0;
     for (const c of surfaceGeometryGroup.children) if (c.isInstancedMesh && /^(baked-)?buildings-/.test(c.name || '')) s02bBoxMeshes.push(c);
     if (s02bRayBlockedByBoxes(s02bBoxMeshes, ox, oy, oz, dx, dy, dz, t, scale)) return S14B_MAP;
+    if (outlineBuildings?.occludes(ox,oy,oz,dx,dy,dz,t,scale)) return S14B_MAP;
     if (landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
       s02bOccRay.set(s02bOccOrigin.set(ox, oy, oz), s02bOccDir.set(dx, dy, dz));
       s02bOccRay.far = Math.max(0, t - 0.75);
@@ -4584,6 +4604,7 @@ function s14bLabelOccluded(rect, cam, info) {
         s02bBoxMeshes.length = 0;
         for (const g of surfaceGeometryGroup.children) if (g.isInstancedMesh && /^(baked-)?buildings-/.test(g.name || '')) s02bBoxMeshes.push(g);
         hit = s02bRayBlockedByBoxes(s02bBoxMeshes, cx, cy, cz, s14bDir.x, s14bDir.y, s14bDir.z, tMax, scale);   // (rayBlockedByBoxes ignores a box that starts within 0.75 m of the end: the acceptance's own slack)
+        hit ||= outlineBuildings?.occludes(cx,cy,cz,s14bDir.x,s14bDir.y,s14bDir.z,tMax,scale);
         if (hit) why = 'box';
         if (!hit && landmarkGroup?.parent && landmarkGroup.visible && landmarkGroup.userData.pickables?.length) {
           s02bOccRay.set(s02bOccOrigin.set(cx, cy, cz), s02bOccDir.copy(s14bDir));
@@ -4888,6 +4909,7 @@ function tick(frameTime) {
     belowSurface, submerged,
     airborne: modeSystem?.registry.activeId === 'drone' || modeSystem?.registry.activeId === 'balloon' });
   lateLayers.pump(); // the registry's own budget: 4 ms a frame
+  updateOutlineTrial(); // s26:O, selected trials only, after landing
   // ── /s21:L ──
   // ── s24:R ──
   applyLayerEconomies();
@@ -5171,6 +5193,7 @@ modeSystem.ctx.stationBuildings = () => {
 // Walker, the Drone and the Balloon collide with the 41 Thames bridges, the M25's crossings (the motorway while it is
 // drawn, else the registry deck) and the station buildings through the calls they already make (src/modes/solids.js).
 modeSystem.collision.setSolidSources({
+  outlines: () => outlineBuildings,
   tideway: () => tidewayPlatforms,
   bridges: () => bridgesGroup,
   motorway: () => motorwayGroup,
@@ -5438,6 +5461,7 @@ if (import.meta.env.DEV) {
   // ── /sprint:integrate ──
   // ── sprint:C ──
   Object.defineProperty(window.__ug, 'deepWater', { get: () => deepWater, enumerable: true });
+  Object.defineProperty(window.__ug, 'outlines', { get: () => outlineBuildings, enumerable: true });
   Object.defineProperty(window.__ug, 'seaLife', { get: () => seaLife, enumerable: true });
   // ── /sprint:C ──
   // ── s25:W ──

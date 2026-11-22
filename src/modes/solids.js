@@ -153,6 +153,7 @@ function visit(layer, x0, x1, z0, z1, fn) {
     }
   }
 }
+export { visit as visitOutlineSolidLayer };
 
 // ── building the bridge layer ─────────────────────────────────────────────
 
@@ -444,6 +445,8 @@ function localOf(r, x, z) {
 
 function emptyLayer() { return { items: [], grid: null, counts: null }; }
 function layerOf(items) { return { items, grid: buildGrid(items) }; }
+// Built incrementally by the opt-in outline loader, never during movement.
+export const createOutlineSolidLayer = layerOf;
 
 export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = () => null, getHeightScale = () => 1, VE = 5 } = {}) {
   let sources = { bridges: () => null, motorway: () => null, stationBuildings: () => null };
@@ -543,7 +546,10 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     return true;
   }
 
-  const layers = () => [bridgeLayer, motorLayer, stationLayer, tidewayLayer];
+  const layers = () => {
+    const extra=sources.outlines?.();
+    return extra&&shown(extra.group) ? [bridgeLayer,motorLayer,stationLayer,tidewayLayer,...extra.layers] : [bridgeLayer,motorLayer,stationLayer,tidewayLayer];
+  };
 
   /** Ribbons with the corridor flag that cover (x, z) with the body's feet at or above underside - step. */
   function corridorsAt(x, z, feetY, step, out) {
