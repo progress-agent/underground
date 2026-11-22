@@ -180,7 +180,9 @@ test.describe('first person against a wall', () => {
   });
 
   test('third person beside a facade (pulled in or not) never has a larger near than the rig asks, and its corners stay clear', async () => {
-    const c = CONTACTS[2];
+    // Put the wall behind the camera as it walks away. A north-facing
+    // contact no longer implies a narrow alley after rectangles rotate.
+    const c = { ...CONTACTS[2], id: 'C3-pull' };
     await press(c, 'third');
     const probe = PROBE.replace('const cam = u.camera;', 'const cam = u.camera; const rig = ped.onFoot.rig;').replace('card: ped', 'rigDist: rig.distance, suggested: rig.suggestedNear, card: ped');
     const rows = await h.sample(3.0, probe, [{ t: 0, down: ['w'] }]);

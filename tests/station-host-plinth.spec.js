@@ -108,7 +108,15 @@ test.describe('the host plinth', () => {
       await h.ev((M) => { const el = document.getElementById('masterHeight'); el.value = String(M); el.dispatchEvent(new Event('input', { bubbles: true })); window.__ug.structureMorph.flush(); window.__ugSun?.setTime?.(0.5, { persist: false }); }, master);
       await h.ev(() => window.__ug.setRenderQualityMode('manual'));
       await h.activatePedestrian();
-      await h.ev(([x, z, yaw]) => { const p = window.__ug.modes.registry.get('pedestrian'); p.setView('first'); p.place(x, z, { yaw }); }, [x, z, yaw]);
+      await h.ev(([x, z, yaw]) => {
+        const u=window.__ug, host=u.stationBuildings.index.buildings.find(b=>b.key==='be-north-greenwich').host;
+        // Preserve the west-face stand-off, fractional position along that face,
+        // and axial/oblique angle from the original square fixture.
+        const half=host.side/2, lx=-(host.width??host.side)/2+(x-host.x+half);
+        const lz=(z-host.z)/half*((host.depth??host.side)/2), theta=host.theta??0;
+        const wx=host.x+lx*Math.cos(theta)-lz*Math.sin(theta), wz=host.z+lx*Math.sin(theta)+lz*Math.cos(theta);
+        const p=u.modes.registry.get('pedestrian'); p.setView('first'); p.place(wx,wz,{yaw:yaw-theta});
+      }, [x, z, yaw]);
       await h.wait(1500);
       const r = await h.ev(() => {
         const u = window.__ug, rend = u.composer.renderer, gl = rend.getContext(), cv = rend.domElement, sk = u.scene.getObjectByName('station-host-skirts');
