@@ -13,6 +13,7 @@ import { assertBakeOutput,writeLocal } from '../surface-overlay.mjs';
 import { isSuppressed } from '../landmarks.mjs';
 import { createAirportSuppression } from '../../src/airport-suppression.js';
 import * as G from './geom.mjs';
+import { readBuildingRecord } from '../../src/building-record.js';
 import { packSet,roofTriangles } from './pack.mjs';
 import { surfaceCorridorKind } from './select.mjs';
 installNodeEnv();
@@ -45,8 +46,8 @@ const airport=createAirportSuppression(read('src/airport-data.json'));
 // The current bake supplies height/base without a second terrain implementation.
 const baked=fs.readFileSync(path.join(out,'buildings.bin')),bv=new DataView(baked.buffer,baked.byteOffset,baked.byteLength);
 const version=bv.getUint16(4,true),rb=version===1?10:14,bases=new Map();
-for(let t=0;t<bv.getUint16(6,true);t++){const d=12+t*16,off=bv.getUint32(d+8,true),n=bv.getUint32(d+12,true),a=[];
- for(let i=0;i<n;i++){const o=off+i*rb;a.push({height:bv.getUint16(o+4,true)*.1,base:bv.getInt16(o+8,true)*.1});}bases.set(t,a);}
+for(let t=0;t<bv.getUint16(6,true);t++){const d=12+t*16,off=bv.getUint32(d+8,true),n=bv.getUint32(d+12,true),a=[],tile={minX:bv.getInt32(d,true),minZ:bv.getInt32(d+4,true)};
+ for(let i=0;i<n;i++){const o=off+i*rb;const r=readBuildingRecord(bv,o,tile,version);a.push({...r,height:r.h,base:r.baseM});}bases.set(t,a);}
 const placed=new Set(),sets={a:[],b:[]},eligible={a:0,b:0},invalidRoofs={a:[],b:[]},onRoadBreakdown={roads:0,service:0,other:0,rail:0,legacyNarrowUnion:0};let tileIndex=0,population=0,ringsOver255=0;
 for(const tile of read('public/data/surface/tiles/manifest.json').tiles.sort((a,b)=>a.file.localeCompare(b.file))){
  let ordinal=0;
@@ -60,7 +61,8 @@ for(const tile of read('public/data/surface/tiles/manifest.json').tiles.sort((a,
   const ring=G.cleanRing(b.footprint||[]),area=Math.abs(G.signedArea(ring));
   if(ring.length<3||area<.5)continue;if(G.signedArea(ring)<0)ring.reverse();
   const r=G.minRect(G.hull(ring)),scale=Math.sqrt(area/r.area),w=r.w*scale,h=r.h*scale;
-  const rect=G.rectPoly(r.cx,r.cz,w,h,r.theta),ids=candidates([...ring,...rect]);
+  // Select against the exact committed B rectangle, including its quantisation.
+  const rect=G.rectPoly(base.x,base.z,base.width,base.depth,base.theta),ids=candidates([...ring,...rect]);
   const rectHits=intrusionKinds(rect,ids),ringHits=rectHits.size?intrusionKinds(ring,ids):new Set();
   const onRoad=rectHits.size>0&&ringHits.size===0;
   if(onRoad)for(const kind of rectHits)onRoadBreakdown[kind]++;
@@ -72,14 +74,14 @@ for(const tile of read('public/data/surface/tiles/manifest.json').tiles.sort((a,
     if(onRoad)eligible.a++;if(irregular)eligible.b++;
     const roof=roofTriangles(ring);
     if(!roof.valid){const problem={source:[b.cx,b.cz],area:roof.area,roofArea:roof.roof};if(onRoad)invalidRoofs.a.push(problem);if(irregular)invalidRoofs.b.push(problem);continue;}
-    const rec={x:b.cx,z:b.cz,rectX:r.cx,rectZ:r.cz,...base,ring,tile:tileIndex,ordinal:recOrdinal};if(onRoad)sets.a.push(rec);if(irregular)sets.b.push(rec);if(ring.length>255)ringsOver255++;
+    const rec={...base,x:b.cx,z:b.cz,rectX:base.x,rectZ:base.z,ring,tile:tileIndex,ordinal:recOrdinal};if(onRoad)sets.a.push(rec);if(irregular)sets.b.push(rec);if(ring.length>255)ringsOver255++;
   }
  }
  if(ordinal)tileIndex++;
  if(tileIndex%50===0)console.log('tiles',tileIndex,'population',population,'a',sets.a.length,'b',sets.b.length);
 }
 const meta={version:1,source:'© OpenStreetMap contributors, ODbL 1.0; © Microsoft Building Footprints, CDLA Permissive 2.0',sourceUrls:['https://www.openstreetmap.org/copyright','https://github.com/microsoft/GlobalMLBuildingFootprints#license'],networkCommit:args.commit,population,ringsOver255,eligible,invalidRoofs,onRoadBreakdown:{...onRoadBreakdown,union:eligible.a,note:'Group counts are globally-clear eligible buildings cutting each corridor kind; overlaps can count in more than one group. Legacy narrow union ignores service/other for both rectangle and ring.'},corridors:kinds.reduce((a,k)=>(a[k]=(a[k]||0)+1,a),{}),
- method:'O1b minimum-area rectangle, scaled about its centre to true outline area. A: positive-area intersection with all corrected surface carriageway classes (including service/other) or drawn rail polygons eroded 1m, real ring clear of the entire union. Bridges/tunnels/nonzero road layers excluded to avoid projected crossings. B: area/MBR <0.85 and outward-only deviation >3m. Global bake dedup; whole-footprint query; full rings, no simplification.',sets:{}};
+ method:'A uses B committed UGB2 rectangles decoded by building-record.js, including quantisation. B irregularity uses the source minimum-area rectangle scaled to true outline area. A: positive-area intersection with all corrected surface carriageway classes (including service/other) or drawn rail polygons eroded 1m, real ring clear of the entire union. Bridges/tunnels/nonzero road layers excluded to avoid projected crossings. B: area/MBR <0.85 and outward-only deviation >3m. Global bake dedup; whole-footprint query; full rings, no simplification.',sets:{}};
 for(const name of ['a','b']){const raw=packSet(sets[name]),zip=gzipSync(raw,{level:6});await writeLocal(path.join(out,`outlines-${name}.z.bin`),zip,{root:ROOT});
  meta.sets[name]={buildings:sets[name].length,ringVertices:sets[name].reduce((s,b)=>s+b.ring.length,0),rawBytes:raw.length,gzipBytes:zip.length,sha256:createHash('sha256').update(raw).digest('hex')};}
 await writeLocal(path.join(out,'outlines-meta.json'),JSON.stringify(meta,null,2)+'\n',{root:ROOT});console.log(JSON.stringify(meta,null,2));

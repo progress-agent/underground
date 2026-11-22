@@ -32,7 +32,7 @@ corrected surface carriageway class, including service and R's other class
 non-tunnel Overground/Tube rail beds. Road bridges, tunnels and non-zero layers
 are excluded to avoid treating projected vertical crossings as ground intrusions.
 A footprint cuts more than 1 m into a corridor if it intersects the corridor's
-finite polygon eroded inward by 1 m. The minimum-area, true-area rectangle must
+finite polygon eroded inward by 1 m. The committed B UGB2 rectangle, including its centre, area, aspect and angle quantisation, must
 cut it and the original ring must clear the entire relevant corridor union.
 The query covers the whole rectangle and ring. Rail uses the project's derived
 coordinate origin and the renderer's 9 m half-bed width.
@@ -45,13 +45,13 @@ than 1% retains its existing box. This avoids missing or overlapping roofs from
 malformed source polygons; no substitute outline is invented.
 
 The current source population is 1,274,389. Corrected network
-`82d491b28c4cbe1214925c15e0ab98439e38caef` selects 13,870 on-road and
-44,993 irregular buildings. The on-road union includes 3,604 buildings cutting
-ordinary roads, 9,402 service roads, 1,192 other roads and 134 rail beds; these
-group counts overlap. The narrower research denominator would select 3,982,
+`82d491b28c4cbe1214925c15e0ab98439e38caef` selects 13,875 on-road and
+44,993 irregular buildings. The on-road union includes 3,606 buildings cutting
+ordinary roads, 9,415 service roads, 1,186 other roads and 132 rail beds; these
+group counts overlap. The narrower research denominator would select 3,983,
 but excludes service/other roads and does not implement O2's full definition.
-Roof-area validation retains boxes for 37 and 249 malformed source rings,
-so payloads contain 13,833 and 44,744 buildings (0.267% and 0.553% below
+Roof-area validation retains boxes for 38 and 249 malformed source rings,
+so payloads contain 13,837 and 44,744 buildings (0.274% and 0.553% below
 eligible populations). Metadata records every rejected source centre and area,
 the corridor breakdown, full hashes, counts, byte sizes and the network commit.
 Station and map-edge suppression at runtime can further reduce drawn counts,

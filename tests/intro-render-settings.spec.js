@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 for (const query of ['buildings=baked', 'ground=baked', 'buildings=baked&ground=live',
-  'groundcue=0', 'groundcue=.5', 'groundcue=1&buildings=baked']) {
+  'groundcue=0', 'groundcue=.5', 'groundcue=1&buildings=baked',
+  'bshape=square', 'outlines=a', 'fps=1', 'bshape=square&outlines=b&fps=1']) {
   test(`render settings preserve the opening: ${query}`, async ({ page }) => {
     await page.goto(`/?${query}`);
     await page.waitForFunction(() => window.__ug?.intro);
