@@ -101,7 +101,7 @@ varying vec2 vGroundLocal;`)
       .replace('vRoadWorld = (modelMatrix * vec4(transformed, 1.0)).xz;', `vRoadWorld = (modelMatrix * vec4(transformed, 1.0)).xz;
 vGroundLocal = vRoadWorld - uGroundOrigin;`);
     shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\n' + COMMON)
-      .replace('// Lane K colours the pavement bands with the ground cue. The R base is uniform asphalt.', COLOUR);
+      .replace('// Ground cue colour hook.', COLOUR);
   };
   material.customProgramCacheKey = function() { return key.call(this) + '|ground-cue-v1'; };
 }

@@ -91,7 +91,8 @@ if(uRoadLook>2.5) {
   float lkFoot=max(length(dFdx(vRoadWorld)),length(dFdy(vRoadWorld)))/1.7;
   lkCol*=1.+.08*(roadNoise(vRoadWorld/1.7)-.5)*(1.-smoothstep(.25,.75,lkFoot))*(1.-clamp(lkPave,0.,1.));
 }
-diffuseColor.rgb=lkCol;`)
+diffuseColor.rgb=lkCol;
+// Ground cue colour hook.`)
       .replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
 // The same 34m amber pool/noise as night.js. This is incident light reflected by the
 // surface, never emission: the cue and pavements are lit together; emissive stays zero.
@@ -104,7 +105,7 @@ if (uNightAmt > .001) {
 }`);
     material.userData.shader=shader;
   };
-  material.customProgramCacheKey=()=> 'road-surface-v5-junction';
+  material.customProgramCacheKey=()=> 'road-surface-v6-junction';
   return material;
 }
 

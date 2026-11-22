@@ -5,6 +5,7 @@ test('default Plain look switches to Painted lines and back without new road pro
  await page.goto('/?fast=1&buildings=baked');
  await page.waitForFunction(()=>window.__ug?.roads.stats.state==='ready'&&__ug.lateLayers.settled(),null,{timeout:180000});
  await expect(page.locator('#roadLook')).toHaveValue('2');
+ await page.locator('#hudDetails > summary').click();
  const before=await page.evaluate(()=>({look:__ug.roads.look,programs:__ug.composer.renderer.info.programs.length,materials:[__ug.roads.material.uuid,__ug.roads.bridgeMaterial.uuid]}));
  await page.selectOption('#roadLook','3');await page.waitForTimeout(200);
  expect(await page.evaluate(()=>__ug.roads.look)).toBe(3);
