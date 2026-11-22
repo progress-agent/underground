@@ -182,10 +182,12 @@ test.describe('first person against a wall', () => {
   test('third person beside a facade (pulled in or not) never has a larger near than the rig asks, and its corners stay clear', async () => {
     // Put the wall behind the camera as it walks away. A north-facing
     // contact no longer implies a narrow alley after rectangles rotate.
-    const c = { ...CONTACTS[2], id: 'C3-pull', pullGap: 1.5 };
+    const c = { ...CONTACTS[2], id: 'C3-pull', pullGap: 2 };
     await press(c, 'third');
     const probe = PROBE.replace('const cam = u.camera;', 'const cam = u.camera; const rig = ped.onFoot.rig;').replace('card: ped', 'rigDist: rig.distance, suggested: rig.suggestedNear, card: ped');
-    const rows = await h.sample(3.0, probe, [{ t: 0, down: ['w'] }]);
+    // Hold the camera in the pull range, clear of the rig's minimum-distance floor.
+    // The next two cases separately exercise walking away and backing in.
+    const rows = await h.sample(3.0, probe, []);
     await h.releaseKeys();
     const close = rows.filter((r) => r.dmin < 1.5);
     console.log(`[near third] ${rows.length} frames, ${rows.filter((r) => r.rigDist <= 2.5).length} pulled in, ${close.length} with a wall within 1.5 m of the camera, worst margin ${Math.min(...rows.map((r) => r.margin)).toFixed(3)} m, least near ${Math.min(...rows.map((r) => r.near)).toFixed(3)}`);
