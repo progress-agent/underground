@@ -74,9 +74,11 @@ source-centre x/z, height, cumulative wall distance. Two vertices per ring point
 plus a seam pair serve both walls and offline-triangulated roofs. Indices are
 u16. Normals are flat derivatives, avoiding a redundant vertex normal buffer.
 
-The renderer imports after landing and completion of the baked boxes. Each
-chunk is decoded and matched in small planning slices without changing visible
-instances. Its geometry and collision grid are prepared and uploaded before one
+The renderer imports after landing and completion of the baked boxes. Decoding
+yields while reading rings and converting vertex heights; planning yields while
+indexing records and scanning boxes. The loader checks its 2 ms task budget
+between these small batches without changing visible instances. Each chunk's
+geometry and collision grid are prepared and uploaded before one
 atomic commit compacts retained instance runs and publishes the outline mesh
 and collision layer together. No half-compacted instance range is ever drawn.
 Vertices and collision prisms inherit the matched instance's final base and

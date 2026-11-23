@@ -1,5 +1,6 @@
 // Procedural night emission, adapted from the measured October proof. No real lamps.
 import * as THREE from 'three';
+import { isTouchDevice } from './touch-ui.js';
 export const nightUniforms = {
  uNightAmt: {value:0}, uNightLit:{value:0.55}, uNightWinGain:{value:1.0},
  uNightGlowGain:{value:0.3}, uNightSize:{value:new THREE.Vector2(1,1)},
@@ -80,12 +81,11 @@ float ngHash11( float p ) {
  * vertex stage. One term: a window grid on the walls, per-building variety from a
  * hash of the instance translation, emission added to totalEmissiveRadiance.
  */
-export function injectBuildingWindows(shader) {
+export function injectBuildingWindows(shader, {phone=isTouchDevice()}={}) {
   shader.uniforms.uNightAmt = nightUniforms.uNightAmt;
   shader.uniforms.uNightLit = nightUniforms.uNightLit;
   shader.uniforms.uNightWinGain = nightUniforms.uNightWinGain;
   shader.uniforms.uWindowBlend = nightUniforms.uWindowBlend;
-  shader.uniforms.uNightPhone = nightUniforms.uNightPhone;
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', `#include <common>
 varying vec3 vNW;      // wall coordinate across (m), up (local units), wall flag
@@ -113,7 +113,6 @@ uniform float uNightAmt;
 uniform float uNightLit;
 uniform float uNightWinGain;
 uniform float uWindowBlend;
-uniform float uNightPhone;
 uniform float uHeightScale;
 varying vec3 vNW;
 varying vec3 vNB;
@@ -137,7 +136,7 @@ ${HASH_GLSL}`)
 		float nBh = vNB.x;
 		float nBh2 = ngHash11( nBh * 91.7 + 3.1 );
 		float nWh = ngHash12( nId + vec2( nBh * 173.1, vNB.y * 7.7 ) );
-		float nWh2 = uNightPhone > 0.5 ? nWh : ngHash12( nId.yx * 1.37 + vec2( nBh * 59.3, vNB.y * 3.9 ) );
+		float nWh2 = ${phone ? 'nWh' : 'ngHash12( nId.yx * 1.37 + vec2( nBh * 59.3, vNB.y * 3.9 ) )'};
 		// Each building has its own appetite for light; some stand dark.
 		float nFrac = clamp( uNightLit * ( 0.2 + 1.6 * nBh2 ), 0.0, 1.0 ) * step( 0.12, nBh2 );
 		float floorOn = step(0.12, ngHash12(vec2(nId.y, nBh * 91.0)));
@@ -146,7 +145,7 @@ ${HASH_GLSL}`)
 		// Palette without instanceColor: warm tungsten, warm white, a few cool screens.
 		vec3 nCol = mix( vec3( 1.0, 0.62, 0.3 ), vec3( 1.0, 0.84, 0.6 ), step( 0.4, nWh2 ) );
 		nCol = mix( nCol, vec3( 0.62, 0.78, 1.0 ), step( 0.88, nWh2 ) );
-		float nGain = uNightPhone > 0.5 ? 1.0 : 0.55 + 0.9 * ngHash11( nWh * 37.0 + nBh * 11.0 );
+		float nGain = ${phone ? '1.0' : '0.55 + 0.9 * ngHash11( nWh * 37.0 + nBh * 11.0 )'};
 		float nTall = smoothstep( 0.7 * nFloor, 1.1 * nFloor, vNB.z );   // no lit windows on a shed
 		// Away from resolved windows the mean fraction stands in for the pattern.
 		float nMean = mix( nFrac, nOn, nRes );
@@ -161,7 +160,7 @@ ${HASH_GLSL}`)
  * its chain) with the streetlight term. It reads the road bit the ground shader
  * already samples (surfaceTex.b), so no texture and no geometry are added.
  */
-export function installGroundGlow(material, bbox) {
+export function installGroundGlow(material, bbox, {phone=isTouchDevice()}={}) {
   if (!material) return;
   const roadChannel = material.userData.surfaceTex?.format === THREE.RGFormat ? 'r' : 'b';
   nightUniforms.uNightSize.value.set(bbox.maxX - bbox.minX, bbox.maxZ - bbox.minZ);
@@ -172,12 +171,10 @@ export function installGroundGlow(material, bbox) {
     shader.uniforms.uNightAmt = nightUniforms.uNightAmt;
     shader.uniforms.uNightGlowGain = nightUniforms.uNightGlowGain;
     shader.uniforms.uNightSize = nightUniforms.uNightSize;
-    shader.uniforms.uNightPhone = nightUniforms.uNightPhone;
     shader.fragmentShader = shader.fragmentShader
       .replace('void main() {', `uniform float uNightAmt;
 uniform float uNightGlowGain;
 uniform vec2 uNightSize;
-uniform float uNightPhone;
 ${HASH_GLSL}
 float ngNoise( vec2 p ) {
   vec2 i = floor( p ), f = fract( p );
@@ -195,13 +192,13 @@ void main() {`)
 			float nRoad = texture2D( surfaceTex, nSuv ).${roadChannel};
 			// Two cheap taps either side give the lamp light a skirt on the pavement.
 			vec2 nPx = vec2( 2.5 / 4096.0 );
-			float nHalo = uNightPhone > 0.5 ? nRoad : 0.5 * ( texture2D( surfaceTex, nSuv + nPx ).${roadChannel} + texture2D( surfaceTex, nSuv - nPx ).${roadChannel} );
+			float nHalo = ${phone ? 'nRoad' : `0.5 * ( texture2D( surfaceTex, nSuv + nPx ).${roadChannel} + texture2D( surfaceTex, nSuv - nPx ).${roadChannel} )`};
 			vec2 nWp = nSuv * uNightSize;           // metres across the map
 			// Lamp pools: value noise on a ~34 m cell, melting to its mean when the
 			// cells are smaller than a pixel (no shimmer at altitude).
 
 			float nLampRes = 1.0 - smoothstep( 0.35, 0.9, nCellFw );
-			float nLamp = mix( 0.55, 0.12 + 1.6 * smoothstep( 0.45, 0.85, ( uNightPhone > 0.5 ? 1.0 - length( fract( nWp / 34.0 ) - 0.5 ) : ngNoise( nWp / 34.0 ) ) ), nLampRes );
+			float nLamp = mix( 0.55, 0.12 + 1.6 * smoothstep( 0.45, 0.85, ${phone ? '( 1.0 - length( fract( nWp / 34.0 ) - 0.5 ) )' : 'ngNoise( nWp / 34.0 )'} ), nLampRes );
 			float nG = smoothstep( 0.35, 0.95, nRoad ) * nLamp + 0.3 * nHalo * ( 1.0 - nRoad ) * nLamp;
 			vec3 nSodium = vec3( 1.0, 0.6, 0.26 );
 			totalEmissiveRadiance += nSodium * ( nG * uNightGlowGain * uNightAmt );

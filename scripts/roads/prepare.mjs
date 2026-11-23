@@ -11,6 +11,7 @@ import {repairRoadClearance} from './clearance.mjs';
 import {compactRoadPart} from './compact.mjs';
 import {carriagewayIndex,trimRibbon,roadTriangleTiles,split,cut,area,bounds} from './polygons.mjs';
 import {mergeRoadParts,localiseRoadParts} from './pack.mjs';
+import {rebucketFarRoads} from './rebucket.mjs';
 import {packRoadCoordinate,unpackRoadCoordinate} from './coordinate.mjs';
 import {roadOverpassConstraints,overpassDatum} from './overpasses.mjs';
 import {surfaceIndex,overlap,conformRoadTriangle,supportFace,raiseRoadDeck} from './support.mjs';
@@ -393,8 +394,9 @@ for(const r of network.roads){
 for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key)))flush(c);
 for(const [key,triangles]of spills)flush(groups.get(key),triangles);
 spills.clear();
+if(!legacy)rebucketFarRoads(groups);
 const records=[];let totalGPU=0,compressedBytes=0;
-for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){if(c.lod){const parts=c.parts.map(p=>compactRoadPart(p,p.idx));c.parts=c.lod==='near'?mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:false}):localiseRoadParts(mergeRoadParts(parts),4000,{deduplicate:true,mergeMorph:true,index16:true});}for(let j=0;j<c.parts.length;j++){
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){if(c.lod){const parts=c.parts.map(p=>compactRoadPart(p,p.idx));c.parts=c.lod==='near'?mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:false}):localiseRoadParts(c.rebucketed?parts:mergeRoadParts(parts),c.rebucketed?8000:4000,{deduplicate:true,mergeMorph:true,index16:true});}for(let j=0;j<c.parts.length;j++){
   const original=c.parts[j],pair=c.key+'-'+j;
   const selectBounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
   for(let i=0;i<original.pos.length;i+=3){const x=c.x+original.pos[i]/8,z=c.z+original.pos[i+2]/8,y=original.pos[i+1]*.05-500;

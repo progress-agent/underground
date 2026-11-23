@@ -120,10 +120,12 @@ substitution that would invalidate that argument. Legacy mode reproduces live's
 compressed files before measuring the same statistic.
 
 Detail uses 2km tiles. Every ribbon fragment, including a pavement overhang,
-is assigned to each intersected cell and repacked there. Distant geometry is
-clustered into 4km neighbourhoods, then split spatially at 65,000 vertices for
-16-bit indices and tighter frustum disposal. Positions retain their 8km source
-encoding frame. Bank Float32 positions stay separate from ordinary 16-bit positions. The runtime retains all
+is assigned to each intersected cell and repacked there. Distant integer geometry
+is grouped globally into 8km cells, so fragments from different source tiles share
+a packet. Spatial splitting at 65,000 vertices retains 16-bit indices. Positions
+are rebased exactly into the destination frame; only individual triangles with
+coordinates outside the unsigned-short range use Float32. Bank overlays
+keep their original Float32 frames in separate packets. The runtime retains all
 nearby detail within 1.1km below 120m on desktop and through 350m on the phone.
 Phone detail includes minor streets, exceeding the 1km walker guarantee.
 Distant packets preload the camera cone expanded by the 0.85 projection factor
@@ -174,3 +176,8 @@ ribbon half-width, left pavement width, right pavement width), in metres. Negati
 OSM left, with the unequal pavement offset already accounted for. The R base is uniform asphalt;
 the bands carry their classification for K to add kerbs and paving. The material's light pool
 is incident amber light in `reflectedLight.indirectDiffuse`; `totalEmissiveRadiance` stays zero.
+
+
+## Sprint 21Nov26s, fix round 1
+
+Untagged one-way halves keep only the outer pavement. Opposing mapped carriageways determine the outer side geometrically; an unpaired way uses the UK kerbside, left in its direction of travel, as an informed estimate. Explicit widths and lane counts retain their existing rules. Distant integer road triangles are consolidated globally into 8 km cells on both desktop and phone, with spatial splitting to retain 16-bit indices. Their world coordinates and attributes are preserved. Precise reservoir overlays keep their original coordinate frames, and nearby geometry is unchanged. The runtime orders pending downloads when the selection changes and does no asset-list scan on settled frames.

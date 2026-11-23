@@ -58,18 +58,18 @@ export function createOutlineMaterials() {
   return {day:patch(make()),night:patch(make(),true),depth:patch(new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking,side:THREE.DoubleSide}))};
 }
 
-export function decodeOutlineChunk(payload,index,VE=5) {
+export function* decodeOutlineChunkSteps(payload,index,VE=5,batchSize=32) {
   const {offset,length}=payload.chunks[index],v=new DataView(payload.buffer,offset,length);
   const nb=v.getUint32(0,true),nv=v.getUint32(4,true),ni=v.getUint32(8,true),vertexOffset=12+nb*48;
   if(((vertexOffset+nv*32+ni*2+3)&~3)!==length)throw new Error('corrupt outline geometry');
-  const data=new Float32Array(payload.buffer,offset+vertexOffset,nv*8),records=[];
+  const data=new Float32Array(payload.buffer,offset+vertexOffset,nv*8),records=[];let prepared=0;
   for(let i=0;i<nb;i++){
     const o=12+i*48,r={x:v.getFloat32(o,true),z:v.getFloat32(o+4,true),rectX:v.getFloat32(o+8,true),rectZ:v.getFloat32(o+12,true),
       height:v.getFloat32(o+16,true)*VE,base:v.getFloat32(o+20,true)*VE,n:v.getUint32(o+24,true),start:v.getUint32(o+28,true),first:v.getUint32(o+32,true),indices:v.getUint32(o+36,true),tile:v.getUint32(o+40,true),ordinal:v.getUint32(o+44,true)};
     if(r.start+2*(r.n+1)>nv||r.first+r.indices>ni)throw new Error('corrupt outline identity');
     r.ring=[];r.minX=Infinity;r.maxX=-Infinity;r.minZ=Infinity;r.maxZ=-Infinity;
-    for(let j=0;j<r.n;j++){const p=(r.start+j*2)*8,x=data[p],z=data[p+2];r.ring.push([x,z]);r.minX=Math.min(r.minX,x);r.maxX=Math.max(r.maxX,x);r.minZ=Math.min(r.minZ,z);r.maxZ=Math.max(r.maxZ,z);}
-    for(let j=0;j<2*(r.n+1);j++){const p=(r.start+j)*8;data[p+1]=r.base+(j%2?r.height:0);data[p+3]=r.base;data[p+6]=r.height;}
+    for(let j=0;j<r.n;j++){const p=(r.start+j*2)*8,x=data[p],z=data[p+2];r.ring.push([x,z]);r.minX=Math.min(r.minX,x);r.maxX=Math.max(r.maxX,x);r.minZ=Math.min(r.minZ,z);r.maxZ=Math.max(r.maxZ,z);if(++prepared%batchSize===0)yield;}
+    for(let j=0;j<2*(r.n+1);j++){const p=(r.start+j)*8;data[p+1]=r.base+(j%2?r.height:0);data[p+3]=r.base;data[p+6]=r.height;if(++prepared%batchSize===0)yield;}
     // Solids use negative x/z winding for the outward wall normal.
     r.ring.reverse();r.h=r.height;r.skirt=0;r.key=`outline:${r.tile}:${r.ordinal}`;r.oriented=false;
     records.push(r);
@@ -82,12 +82,20 @@ export function decodeOutlineChunk(payload,index,VE=5) {
   return {geometry,records};
 }
 
+// Synchronous facade for direct callers; the loader consumes bounded steps.
+export function decodeOutlineChunk(payload,index,VE=5) {
+  const steps=decodeOutlineChunkSteps(payload,index,VE);let next;
+  do{next=steps.next();}while(!next.done);
+  return next.value;
+}
+
 // Compact the existing tile's drawn instances once, preserving its allocation
 // and default-path construction. No off-path identity buffer is needed.
-export function* planOutlineBoxes(records,meshes,batchSize=128) {
+export function* planOutlineBoxes(records,meshes,batchSize=32) {
   const plan={items:[],matched:new Set(),placements:new Map(),keptFoundations:new Set(),hidden:0};
-  const byTile=new Map();
-  for(const r of records){if(!byTile.has(r.tile))byTile.set(r.tile,[]);byTile.get(r.tile).push(r);}
+  const byTile=new Map();let prepared=0;
+  // Index construction is loading work too, not just the subsequent box scan.
+  for(const r of records){if(!byTile.has(r.tile))byTile.set(r.tile,[]);byTile.get(r.tile).push(r);if(++prepared%batchSize===0)yield;}
   for(const mesh of meshes){
     const a=mesh.instanceMatrix.array,box=mesh.boundingBox,foundation=mesh.geometry.attributes.reservoirBase;
     const tile=Number(mesh.name?.replace('baked-buildings-',''));
@@ -99,6 +107,7 @@ export function* planOutlineBoxes(records,meshes,batchSize=128) {
     for(const r of near)for(const [x,z]of [[r.x,r.z],[r.rectX,r.rectZ]]){
       x0=Math.min(x0,Math.floor(x-.12));x1=Math.max(x1,Math.floor(x+.12));
       z0=Math.min(z0,Math.floor(z-.12));z1=Math.max(z1,Math.floor(z+.12));
+      if(++prepared%batchSize===0)yield;
     }
     // Tile-local integer keys avoid a new string for every scanned box. The
     // explicit bounds make the keys unique and keep this bake's keys small.
@@ -106,6 +115,7 @@ export function* planOutlineBoxes(records,meshes,batchSize=128) {
     const lookup=new Map();
     for(const r of near)for(const [x,z]of [[r.x,r.z],[r.rectX,r.rectZ]])for(let ix=Math.floor(x-.12);ix<=Math.floor(x+.12);ix++)for(let iz=Math.floor(z-.12);iz<=Math.floor(z+.12);iz++){
       const key=cellKey(ix,iz);if(!lookup.has(key))lookup.set(key,[]);lookup.get(key).push(r);
+      if(++prepared%batchSize===0)yield;
     }
     const keepRun=end=>{const n=end-run;if(n&&placed!==run)runs.push({from:run,to:end,dest:placed});placed+=n;};
     for(let i=0;i<mesh.count;i++){
@@ -179,13 +189,15 @@ export function createOutlineBuildings({set,scene,getMeshes,isReady,compile=asyn
     for(const mesh of getMeshes()){const tile=Number(mesh.name?.replace('baked-buildings-',''));if(Number.isFinite(tile))tileMeshes.set(tile,mesh);}
     for(let i=0;i<payload.chunks.length;i++){
       await checkpoint(true);
-      const {geometry,records}=timed(()=>decodeOutlineChunk(payload,i,VE),'decode');
+      const decoder=decodeOutlineChunkSteps(payload,i,VE);let decoded;
+      do{decoded=timed(()=>decoder.next(),'decode');if(!decoded.done&&performance.now()-taskStart>2)await checkpoint();}while(!decoded.done);
+      const {geometry,records}=decoded.value;
       // Suppressed station/edge boxes have no matching instance, so their
       // corresponding outline triangles are omitted too.
       await checkpoint();
       const target=tileMeshes.get(records[0]?.tile),planner=planOutlineBoxes(records,target?[target]:[]);
       let next;
-      do{next=timed(()=>planner.next(),'plan');if(!next.done)await checkpoint();}while(!next.done);
+      do{next=timed(()=>planner.next(),'plan');if(!next.done&&performance.now()-taskStart>2)await checkpoint();}while(!next.done);
       const plan=next.value,active=records.filter(r=>plan.matched.has(r)&&!getHidden(r));
       await checkpoint();timed(()=>applyOutlinePlacements(geometry,records,plan.placements),'placement');
       await checkpoint();const solidLayer=timed(()=>createOutlineSolidLayer(active),'solid');

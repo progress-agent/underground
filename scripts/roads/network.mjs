@@ -106,7 +106,8 @@ export function buildNetwork(root,ring,{legacy=false}={}) {
 
 // Match opposing, parallel one-way carriageways at their segment midpoints. Require
 // a shared road name/ref, same layer and a 3..40m separation. Roundabouts are not pairs.
-// With no credible pair retain both pavements; count those ways rather than guessing.
+// Untagged unpaired one-way halves use the UK traffic kerbside (left in the
+// direction of travel); explicit paired geometry still determines the outer side.
 export function pairCarriageways(roads) {
   const cells=new Map(), cell=80, segments=[];
   for(const r of roads)if(r.oneway&&!r.roundabout&&!r.tunnel)for(let i=1;i<r.p.length;i++){
@@ -132,7 +133,12 @@ export function pairCarriageways(roads) {
   const paired=new Set(),unpaired=new Set();
   for(const r of roads)if(r.oneway&&!r.tunnel){const v=votes.get(r);
     if(v){r[v.right>v.left?'right':'left']=0;r.pairedWith=[...v.ids].sort((a,b)=>a-b);paired.add(r.id);}
-    else unpaired.add(r.id);
+    else {
+      // R2: no width or lanes means half a class carriageway and one outer
+      // pavement. Keep explicitly tagged widths/lanes on their existing rule.
+      if(r.widthSource==='oneway-class')r[r.direction===-1?'left':'right']=0;
+      unpaired.add(r.id);
+    }
   }
   return {pairedOneWayWays:paired.size,unpairedOneWayWays:unpaired.size};
 }

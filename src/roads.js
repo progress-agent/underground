@@ -167,6 +167,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   const lastView=new Float64Array(16);lastView.fill(Infinity);
   const rotationEntries=[0,1,2,4,5,6,8,9,10];
   const resident=new Map(),inflight=new Map(),ready=[],wanted=new Set(),nearWanted=new Map();
+  let downloadQueue=[],downloadNext=0,lastFar=null;
   let nearDirty=true,attachPromise=null,compiled=false,widthReady=false,widthJob=null,widthPending=null,loadController=null,generation=0;
   const report=e=>{stats.errors.push(String(e));onError('Roads unavailable:',e);};
   const remove=(file,mesh)=>{group.remove(mesh);mesh.userData.roadNearGeometry.dispose();mesh.userData.roadFarGeometry?.dispose();stats.bytes-=mesh.userData.roadBytes;stats.vertices-=mesh.geometry.attributes.position.count;resident.delete(file);nearDirty=true;stats.disposed++;stats.loaded=resident.size;};
@@ -213,8 +214,13 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     const replacing=new Set(records.filter(r=>wanted.has(r.file)&&r.pair).map(r=>r.pair));
     for(const[file,mesh]of resident)if(!wanted.has(file)&&!replacing.has(mesh.userData.roadPair))remove(file,mesh);
     for(const[file,c]of inflight)if(!wanted.has(file)){c.abort();inflight.delete(file);}
-    // Nearest blocks first. This only runs on a block/range change, never scans geometry per frame.
-    records.sort((a,b)=>Math.hypot(a.x+a.size/2-x,a.z+a.size/2-z)-Math.hypot(b.x+b.size/2-x,b.z+b.size/2-z));
+    // Only pending blocks need ordering. A settled frame must not scan every
+    // offline variant, and neither should the distance comparator.
+    const queued=new Set(ready.map(r=>r.rec.file));
+    downloadQueue=records.filter(r=>wanted.has(r.file)&&!resident.has(r.file)&&!inflight.has(r.file)&&!queued.has(r.file))
+      .map(rec=>({rec,d:(rec.x+rec.size/2-x)**2+(rec.z+rec.size/2-z)**2}))
+      .sort((a,b)=>a.d-b.d).map(r=>r.rec);
+    downloadNext=0;
   }
   function syncNearTiles(){
     nearDirty=false;
@@ -224,8 +230,8 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   }
   function fetchMore(){
     if(!enabled||dead||attachPromise)return;
-    for(const rec of records){
-      if(inflight.size+ready.length>=4)break;
+    while(downloadNext<downloadQueue.length&&inflight.size+ready.length<4){
+      const rec=downloadQueue[downloadNext++];
       if(!wanted.has(rec.file)||resident.has(rec.file)||inflight.has(rec.file)||ready.some(r=>r.rec.file===rec.file))continue;
       const controller=new AbortController(),token=generation;inflight.set(rec.file,controller);
       fetch('/data/roads/'+rec.file,{signal:controller.signal}).then(bufferFrom).then(buffer=>{if(!dead&&enabled&&!controller.signal.aborted&&token===generation&&wanted.has(rec.file))ready.push({rec,buffer});}).catch(e=>{if(e.name!=='AbortError'&&!controller.signal.aborted&&token===generation){report(e);wanted.delete(rec.file);}}).finally(()=>{if(inflight.get(rec.file)===controller)inflight.delete(rec.file);});
@@ -238,7 +244,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
     const t=performance.now();
     const mesh=decodeRoadBlock(buffer,material,bridgeMaterial,rec);mesh.name='roads:'+rec.file;mesh.userData.roadBytes=rec.bytes;mesh.userData.roadPair=rec.pair;if(rec.tileLOD){if(rec.lod==='far')mesh.material=mesh.material===bridgeMaterial?farBridgeMaterial:farMaterial;else{mesh.userData.roadCell=Math.floor(rec.x/2000)*128+Math.floor(rec.z/2000);mesh.visible=false;}}
     // Both variants are precompiled offscreen after landing, before the first visible road.
-    const attach=()=>{if(dead||!enabled||!wanted.has(rec.file)){mesh.geometry.dispose();return;}if(rec.pair)for(const [file,previous]of resident)if(previous.userData.roadPair===rec.pair)remove(file,previous);group.add(mesh);resident.set(rec.file,mesh);nearDirty=true;stats.bytes+=rec.bytes;stats.vertices+=rec.vertices;stats.loaded=resident.size;};
+    const attach=()=>{if(dead||!enabled||!wanted.has(rec.file)){mesh.geometry.dispose();return;}if(rec.pair)for(const [file,previous]of resident)if(previous.userData.roadPair===rec.pair)remove(file,previous);mesh.geometry=lastFar?(mesh.userData.roadFarGeometry??mesh.userData.roadNearGeometry):mesh.userData.roadNearGeometry;group.add(mesh);resident.set(rec.file,mesh);nearDirty=true;stats.bytes+=rec.bytes;stats.vertices+=rec.vertices;stats.loaded=resident.size;};
     if(!group.parent)scene.add(group);
     if(!compiled && compile) {
       const proxies=new THREE.Group();
@@ -264,7 +270,7 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
   return {group,material,bridgeMaterial,stats,
     setLook(value){look.value=roadLook(value);},get look(){return look.value;},
     groundCue:{setStrength(v){cueStrength=groundCueStrength(v);},get strength(){return cueStrength;},get weight(){return cue.value;}},
-    setEnabled(v){enabled=!!v;if(!enabled)roadRasterWeight.value=1;group.visible=enabled&&widthReady;if(!enabled){generation++;loadController?.abort();widthJob=null;widthPending=null;widthReady=false;getBridges()?.userData.clearRoadWidths?.();started=false;records=[];wanted.clear();nearWanted.clear();nearCount.value=0;for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);lastX=Infinity;}},
+    setEnabled(v){enabled=!!v;if(!enabled)roadRasterWeight.value=1;group.visible=enabled&&widthReady;if(!enabled){generation++;loadController?.abort();widthJob=null;widthPending=null;widthReady=false;getBridges()?.userData.clearRoadWidths?.();started=false;records=[];downloadQueue=[];downloadNext=0;lastFar=null;wanted.clear();nearWanted.clear();nearCount.value=0;for(const c of inflight.values())c.abort();inflight.clear();ready.length=0;for(const[f,m]of resident)remove(f,m);lastX=Infinity;}},
     get enabled(){return enabled;},
     update({x,z,height=0,belowSurface=false,submerged=false,airborne=false}={}){
       const viewAllowed=enabled&&!belowSurface&&!submerged;group.visible=viewAllowed&&widthReady;ratio.value=getRatio();
@@ -293,8 +299,9 @@ export function createRoads({scene,phone=false,isOpen=()=>true,getRatio=()=>1,ge
       // Same vertex attributes, fewer triangles only beyond human-scale views.
       // Keep the full index resident and restore it before returning to the street.
       const far=height/ratio.value>=120;
-      for(const mesh of resident.values()){
-        mesh.geometry=far?(mesh.userData.roadFarGeometry??mesh.userData.roadNearGeometry):mesh.userData.roadNearGeometry;
+      if(far!==lastFar){
+        for(const mesh of resident.values())mesh.geometry=far?(mesh.userData.roadFarGeometry??mesh.userData.roadNearGeometry):mesh.userData.roadNearGeometry;
+        lastFar=far;
       }
       if(!inflight.size&&!ready.length&&!attachPromise&&resident.size===wanted.size)stats.state=stats.errors.length?'failed':'ready';
     },
