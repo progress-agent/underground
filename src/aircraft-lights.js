@@ -107,10 +107,9 @@ export function createAircraftLightBatch(capacity, name) {
   }
   function finish(amount, camera, seconds = performance.now() / 1000) {
     uniforms.amount.value = amount; uniforms.seconds.value = seconds;
-    const height = typeof window === 'undefined' ? 900 : window.innerHeight;
-    // onBeforeRender supplies the physical viewport, so DPR and Automatic's
-    // resolution scale affect this glow just like the rest of the image.
-    uniforms.pixels.value = height;
+    // onBeforeRender supplies the physical viewport for every draw, including
+    // DPR and Automatic's scale. Reading the window here would force layout
+    // after label writes, only to overwrite that value before rendering.
     points.visible = amount > 0 && count > 0; geometry.setDrawRange(0, count);
     for (const a of Object.values(geometry.attributes)) { a.clearUpdateRanges(); a.addUpdateRange(0, count * a.itemSize); a.needsUpdate = true; }
   }

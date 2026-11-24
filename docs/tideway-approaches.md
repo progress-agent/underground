@@ -44,3 +44,6 @@ drawn masks under acceptance erratum 4. The complete Tideway shafts and connecti
 tunnels remain accessible through the existing scene roots.
 
 Adjacent approach strips omit only face intervals covered inside their joined concrete volume. Exposed risers, lower faces where terrain bases differ, outer sides and terminal caps remain. This reduces submitted internal geometry without changing the collision volumes or walking surfaces.
+
+
+The visible deck and approach take collision precedence over approximate map boxes that touch their actual polygons. The last dry-land tread also carries a one-metre entry clearance, an informed estimate of one human step, so a walker can enter from adjacent dry terrain without spawning on an overlapping map-box roof. This clearance changes collision only. It applies only at that final tread, only to boxes that also touch the drawn approach, and never below the deck or while the works are hidden.

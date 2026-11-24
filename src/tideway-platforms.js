@@ -346,7 +346,8 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       for(let i=0;i<slabs.length;i++){
         const s=slabs[i],ring=s.ring.map(([x,z])=>[p.x+x,p.z-z]);
         pieces.push(geometryColor(polygon(s.ring,s.y),colors[data.wall]));
-        approachSolids.push({ring,lo:bases[i],hi:s.y,kind:'deck'});
+        // One metre is an informed estimate of one step from dry land onto the final tread.
+        approachSolids.push({ring,lo:bases[i],hi:s.y,kind:'deck',entryClearanceM:i===slabs.length-1?1:0});
       }
       // Keep the full external boundary, including risers and any exposed
       // lower interval where neighbouring terrain bases differ. Covered faces
@@ -378,7 +379,7 @@ export function* createTidewayPlatformsSteps({llToXZ,floorAt,VE=5,isDryLand=(x,z
       for(const s of [...rec.solids,...approachSolids]){
         const xs=s.ring.map(q=>q[0]),zs=s.ring.map(q=>q[1]);let base=s.land?s.land.position.y:WATER_TOP_Y+s.lo*sy,top=s.land?s.land.position.y+s.hi*sy:WATER_TOP_Y+s.hi*sy;
         if(s.kind==='deck'){base=Math.min(base,...s.ring.map(([x,z])=>floorAt(x,z)??base))-.05;}
-        solidRecords.push({ring:s.ring,minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs),base,h:top-base,skirt:0,absolute:true,key:`tideway:${data.id}:${s.kind}`,deck:s.kind==='deck'});
+        solidRecords.push({ring:s.ring,minX:Math.min(...xs),maxX:Math.max(...xs),minZ:Math.min(...zs),maxZ:Math.max(...zs),base,h:top-base,skirt:0,absolute:true,key:`tideway:${data.id}:${s.kind}`,deck:s.kind==='deck',entryClearanceM:s.entryClearanceM??0});
       }
       rec.group.updateMatrixWorld(true);
       // Entire works, including separate land columns and the terrain tie-in.

@@ -93,6 +93,7 @@ export const ADAPTIVE_TUNING = {
   targetMs: 1000 / 60,
   slowFrameRatio: 0, // phone opt-in: p95 / ratio joins the existing mean controller
   slowFrameWindowMs: 2000,
+  rungWindowMs: 0, // phone-only: at most one rung across a sliding stability window
   maxDescentRungs: 0, // phone: judge each rung with the existing benefit check; 0 keeps the work criterion
   overBudget: 1.10,     // drop when the mean interval exceeds 1.10 x target (~54.5 fps)
   shadowsOverBudget: 1.14, // but leave the shadows-on rung only above 19ms (~52.6 fps)
@@ -120,6 +121,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   // s21:T: only the last judgeWindows (judging) and anchorWindows (the anchor's least) window means are ever read, so atLevel keeps no more
   const AT_LEVEL_CAP = Math.max(K.judgeWindows, K.anchorWindows);
   let level = 0;
+  let rungHistory = [];
   let windowStart = null, cooldownUntil = 0, samples = [], longFrames = 0;
   let overWindows = 0, stableMs = 0;
   let slowFrames = [], lastP95 = 0;
@@ -145,10 +147,21 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function clearWindow(now) { samples = []; windowStart = now; }
 
+  function canChange(next, now) {
+    if (!K.rungWindowMs) return true;
+    const edge = now - K.rungWindowMs;
+    // Retain the state active at the left boundary as well as later changes.
+    while (rungHistory.length > 1 && rungHistory[1].at <= edge) rungHistory.shift();
+    let lo = next, hi = next;
+    for (const r of rungHistory) { lo = Math.min(lo, r.level); hi = Math.max(hi, r.level); }
+    return hi - lo <= 1;
+  }
+
   function change(next, now, why) {
     const from = level;
     stable = []; atLevel = [];
     level = Math.max(0, Math.min(MAX, next));
+    if (K.rungWindowMs) rungHistory.push({ at: now, level });
     apply(QUALITY_LEVELS[level]);
     cooldownUntil = now + K.cooldownMs; // exclude target reallocation and shader warm-up
     clearWindow(now);
@@ -158,6 +171,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function reset(now = null) {
     windowStart = now;
+    if (!rungHistory.length) rungHistory = [{ at: now ?? -Infinity, level }];
     cooldownUntil = now === null ? 0 : now + 1000;
     samples = []; slowFrames = []; lastP95 = 0; longFrames = 0; overWindows = 0; stableMs = 0; stable = [];
     pendingDrop = null; pendingProbe = null; lastProbe = null; hold = null; holdStreak = 0; descent = null; atLevel = []; heavy = 0; // s21:T heavy reset here too
@@ -165,6 +179,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   }
 
   function start(now) {
+    rungHistory = [];
     level = 0;
     apply(QUALITY_LEVELS[level]);
     reset(now);
@@ -172,6 +187,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
 
   function revert(now) {
     const back = descent.level;
+    if (!canChange(back, now)) return;
     holdStreak++;
     const ms = Math.min(K.holdMaxMs, K.holdMs * 2 ** (holdStreak - 1));
     hold = { level: back, until: now + ms, mean: descent.mean };
@@ -238,6 +254,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
       const desiredStep = mean > K.targetMs * K.doubleStep && level >= FIRST_UNSHADOWED ? 2 : 1;
       const step = Math.min(desiredStep, K.maxDescentRungs || desiredStep);
       const next = Math.min(MAX, level + step);
+      if (!canChange(next, now)) return;
       const exempt = next <= FIRST_UNSHADOWED;
       if (!exempt && !descent) descent = { level: Math.max(FIRST_UNSHADOWED, level), mean: Math.min(...atLevel.slice(-K.anchorWindows)) };   // s16:R the best of the recent windows here: a stall cannot inflate the anchor
       pendingDrop = { from: level, exempt };
@@ -274,6 +291,7 @@ export function createAdaptiveQuality({ apply, tuning = {} }) {
   }
 
   function probe(to, before, now, keep) {
+    if (!canChange(to, now)) return;
     const b = backoff.get(to);
     if (b && now < b.until && before > b.mean * K.lighterRetry) return;
     pendingProbe = { from: level, to, before };

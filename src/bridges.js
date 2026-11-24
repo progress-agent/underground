@@ -608,6 +608,7 @@ export async function createBridges({ getTerrainMeshSurfaceY, heightScale = 1, r
     }
     // Solids watches registry identity. Rebuild its deck/parapet bounds after a width switch.
     group.userData.registry=new Map(registry);
+    group.userData.casterGeometryVersion=(group.userData.casterGeometryVersion??0)+1;
   };
   group.userData.clearRoadWidths=()=>{
     group.userData.activateRoadWidths(false);

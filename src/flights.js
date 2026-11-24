@@ -704,7 +704,7 @@ export const MIN_ON_SCREEN_PX = 6;
 // be built a few milliseconds a frame after landing (src/late-layers.js); createFlights drains it, so every statement runs
 // in its original order.
 export function createFlights(options = {}) { const steps = createFlightsSteps(options); let r; do { r = steps.next(); } while (!r.done); return r.value; }
-export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () => 1, capacity = 48, model: trafficModel, minPixels = MIN_ON_SCREEN_PX } = {}) {
+export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () => 1, capacity = 48, model: trafficModel, minPixels = MIN_ON_SCREEN_PX, viewportHeightCssPx = () => typeof window === 'undefined' ? 900 : window.innerHeight } = {}) {
   const traffic = trafficModel || createTrafficModel({ getSurfaceY, VE });
   yield;
   const root = new THREE.Group(); root.name = 'flights';
@@ -741,7 +741,7 @@ export function* createFlightsSteps({ getSurfaceY, VE = 5, getHeightScale = () =
 
   const viewPos = new THREE.Vector3();
   function focalPx(camera) {
-    const h = typeof window === 'undefined' ? 900 : window.innerHeight;
+    const h = viewportHeightCssPx();
     return camera?.isPerspectiveCamera ? (h / 2) / Math.tan(camera.fov * DEG / 2) : 0;
   }
   function render(camera = lastCamera) {

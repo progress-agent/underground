@@ -443,6 +443,30 @@ function localOf(r, x, z) {
   return stat;
 }
 
+// The final tread permits the dry entry step recorded by the Tideway source.
+function insideEntry(r,x,z) {
+  if(pointInRing(x,z,r.ring))return true;
+  const margin=r.entryClearanceM??0;if(!margin)return false;
+  for(let i=0;i<r.ring.length;i++){
+    const a=r.ring[i],b=r.ring[(i+1)%r.ring.length],dx=b[0]-a[0],dz=b[1]-a[1],len=dx*dx+dz*dz;
+    const t=len?Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/len)):0;
+    if((x-a[0]-t*dx)**2+(z-a[1]-t*dz)**2<=margin*margin)return true;
+  }
+  return false;
+}
+
+// Exact polygon contact includes concave quay outlines and rotated map boxes.
+function ringsTouch(a,b) {
+  if(a.some(p=>pointInRing(p[0],p[1],b))||b.some(p=>pointInRing(p[0],p[1],a)))return true;
+  const cross=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]);
+  for(let i=0;i<a.length;i++)for(let j=0;j<b.length;j++){
+    const p=a[i],q=a[(i+1)%a.length],r=b[j],s=b[(j+1)%b.length];
+    if(Math.max(p[0],q[0])<Math.min(r[0],s[0])||Math.max(r[0],s[0])<Math.min(p[0],q[0])||Math.max(p[1],q[1])<Math.min(r[1],s[1])||Math.max(r[1],s[1])<Math.min(p[1],q[1]))continue;
+    if(cross(p,q,r)*cross(p,q,s)<=0&&cross(r,s,p)*cross(r,s,q)<=0)return true;
+  }
+  return false;
+}
+
 function emptyLayer() { return { items: [], grid: null, counts: null }; }
 function layerOf(items) { return { items, grid: buildGrid(items) }; }
 // Built incrementally by the opt-in outline loader, never during movement.
@@ -565,6 +589,12 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
         return false;
       });
     }
+    // The drawn Tideway approach/deck takes precedence over generic map
+    // boxes, just as a bridge deck does. These slabs are polygon prisms.
+    visit(tidewayLayer,x-1,x+1,z-1,z+1,r=>{
+      if(r.deck&&feetY>=r.base-step&&insideEntry(r,x,z))out.push(r);
+      return false;
+    });
     return out;
   }
 
@@ -580,6 +610,12 @@ export function createSolidWorld({ getGroundY = () => null, getWaterSurfaceY = (
     for (let i = 0; i < list.length; i++) {
       const r = list[i];
       if (maxX < r.minX || minX > r.maxX || maxZ < r.minZ || minZ > r.maxZ) continue;
+      if(r.ring){
+
+        // Ordered corners, in the box's own frame rather than its broad AABB.
+        const corners=footprint?[[-1,-1],[1,-1],[1,1],[-1,1]].map(([u,v])=>[footprint.ox+u*footprint.ux*footprint.uL+v*footprint.nx*footprint.v1,footprint.oz+u*footprint.uz*footprint.uL+v*footprint.nz*footprint.v1]):[[minX,minZ],[maxX,minZ],[maxX,maxZ],[minX,maxZ]];
+        if(ringsTouch(corners,r.ring))return true;continue;
+      }
       if(footprint){if(orientedOverlap(footprint,r))return true;continue;}
       const cu = (cx - r.ox) * r.ux + (cz - r.oz) * r.uz, cv = (cx - r.ox) * r.nx + (cz - r.oz) * r.nz;
       const eu = hx * Math.abs(r.ux) + hz * Math.abs(r.uz), ev = hx * Math.abs(r.nx) + hz * Math.abs(r.nz);

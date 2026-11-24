@@ -393,11 +393,15 @@ RECEIVE_GROUPS.add('player');
  * no shadow map existed, and they must not start taking part now.
  * Returns the number of objects whose flags changed.
  */
-export function applyShadowPolicy(root) {
+export function applyShadowPolicy(root, onCasterChange = null) {
   let changed = 0;
   const set = (o, cast, receive) => {
     if (!o.isMesh) return;
     if (o.castShadow !== cast || o.receiveShadow !== receive) {
+      // A receiver-only program change cannot change shadow-map contents.
+      // Keep the broad policy counter for diagnostics, with a separate caster
+      // counter for cache invalidation.
+      if (o.castShadow !== cast) onCasterChange?.(o);
       o.castShadow = cast; o.receiveShadow = receive; changed++;
     }
     const wantsDepth = cast && isBuildingMaterial(o.material);
@@ -463,7 +467,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
 
   const listeners = new Set();
   const status = {
-    airWeight: 0, strength: 0, active: false, rendered: 0, policyChanges: 0,
+    airWeight: 0, strength: 0, active: false, rendered: 0, policyChanges: 0, casterPolicyChanges: 0,
     adaptiveShadows: true, altitudeFade: 0, fit: null, chunkPatched: chunkOk,
   };
   const forward = new THREE.Vector3(), focus = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -499,6 +503,7 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
 
   let surfaceRoot = null;
   const surfaceChildren = [];
+  function policyCasterChanged() { status.casterPolicyChanges++; }
   function runPolicy(full) {
     let changes = 0;
     for (const child of scene.children) {
@@ -512,11 +517,11 @@ export function createSunSystem({ renderer, scene, lights, prefs = {}, savePrefs
           if (children[i] !== surfaceChildren[i]) { changed = true; break; }
         }
         if (full || changed) {
-          changes += applyShadowPolicy(child);
+          changes += applyShadowPolicy(child, policyCasterChanged);
           surfaceRoot = child; surfaceChildren.length = children.length;
           for (let i = 0; i < children.length; i++) surfaceChildren[i] = children[i];
         }
-      } else if (full) changes += applyShadowPolicy(child);
+      } else if (full) changes += applyShadowPolicy(child, policyCasterChanged);
     }
     status.policyChanges += changes;
   }

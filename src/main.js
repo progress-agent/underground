@@ -471,7 +471,7 @@ let syncRenderQualityUi = () => {};
 const adaptiveQuality = createAdaptiveQuality({ apply: quality => {
   renderQuality.set(quality);
   syncRenderQualityUi();
-}, tuning: isTouchDevice() ? { targetMs: 1000 / 30, slowFrameRatio: 1, maxDescentRungs: 1 } : {} });
+}, tuning: isTouchDevice() ? { targetMs: 1000 / 30, slowFrameRatio: 1, maxDescentRungs: 1, rungWindowMs: 30000 } : {} });
 
 const frameTimeReadout = new URLSearchParams(location.search).get('fps') === '1'
   ? createFrameTimeReadout({ getRung: () => adaptiveQuality.get().level }) : null;
@@ -1561,7 +1561,8 @@ function s21TryStartGeologyWork() {
           yield;
           flightsGroup?.userData.dispose();
           return yield* createFlightsSteps({ getSurfaceY: getStructuralSurfaceY,
-            VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale });
+            VE: VERTICAL_EXAGGERATION, getHeightScale: getBuildingHeightScale,
+            ...(phoneViewport ? { viewportHeightCssPx: () => phoneViewport.windowHeight } : {}) });
         },
         prepare: (group) => applyShadowPolicy(group),
         attach: (group) => { flightsGroup = group; scene.add(group); group.userData.prepareLights(renderer, camera, scene, composer.readBuffer); },
@@ -2060,7 +2061,12 @@ function* snapAllTubesToTerrainSteps({ onlyLine = null } = {}) {
       for (const pt of branchPts) {
         const surfaceY = getStructuralSurfaceY({ x: pt.x, z: pt.z });
         if (surfaceY !== null) {
-          pt.y = surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
+          // Synthetic river samples store depth below water level. Reusing
+          // that depth below the carved bed on a second snap sinks the line
+          // again, making geometry depend on terrain/network arrival order.
+          pt.y = pt._synthetic
+            ? (WATER_LEVEL_M - (pt._depthM ?? 0)) * sim.verticalScale
+            : surfaceY - (pt._depthM ?? 0) * sim.verticalScale;
         }
       }
       // ── s25:E ── sourced railway-bridge crossings (District at Putney and
@@ -4976,7 +4982,9 @@ function tick(frameTime) {
   if (updateCallCount === 0 && lineShaftLayers.size > 0) {
     // Station updates skipped
   }
-  parkLabelsGroup?.userData.update({camera,viewportHeight:window.innerHeight,submerged,labelsVisible});
+  // Label writes above can dirty layout. The phone resize cache owns this
+  // window-height read, just as it owns the canvas viewport used by stations.
+  parkLabelsGroup?.userData.update({camera,viewportHeight:phoneViewport ? phoneViewport.windowHeight : window.innerHeight,submerged,labelsVisible});
 
   // ── s02:F ── near/far follow the display height (above 20,000 units only); before the sun fit, fog and sky read the range
   viewRange.update();
@@ -5003,7 +5011,7 @@ function tick(frameTime) {
     enabled: economies.on('shadowCache'),
     active: sunSystem.status.active,
     heightScale: getBuildingHeightScale(),
-    casterVersion: casterVersionOf([surfaceGeometryGroup, landmarkGroup, bridgesGroup, airportsGroup]) ^ sunSystem.status.policyChanges,
+    casterVersion: sunSystem.status.active ? casterVersionOf([surfaceGeometryGroup, landmarkGroup, bridgesGroup, airportsGroup]) ^ sunSystem.status.casterPolicyChanges : 0,
     settled: !bakedBuilder || bakedBuilder.isDone(),
   });
   // ── /s24:R ──

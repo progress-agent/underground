@@ -160,13 +160,27 @@ export function createCameraRig({ THREE, ratio = 1, lineOfSight = null, groundY 
       to.x = origin.x - fx * want; to.y = origin.y - fy * want / rat; to.z = origin.z - fz * want;
       // Two rays: from the shoulder origin and from the pivot itself (the figure's neck), so the camera
       // neither sits behind a facade nor sees the figure through a corner.
+      let shoulderBlocked = false, pivotClear = false;
       for (let k = 0; k < 2; k++) {
         if (k === 0) { from.x = origin.x; from.y = origin.y; from.z = origin.z; } else { from.x = px; from.y = py; from.z = pz; }
         const res = lineOfSight(from, to, { pad: RIG.losPad });
+        if (k === 0) shoulderBlocked = res?.clear === false;
+        else pivotClear = res?.clear !== false;
         if (res && res.clear === false) {
           const d = Math.max(RIG.losMinDistance, res.t * want - RIG.losPad);
           if (d < dist) dist = d;
         }
+      }
+      // A low shoulder can fit under a raised box while its rising view ray
+      // immediately enters the underside. When the neck ray is clear, test a
+      // centred camera before pulling it onto the figure. The fallback must
+      // pass its own complete segment test, with the same facade padding.
+      if (shoulder > 0 && shoulderBlocked && pivotClear) {
+        from.x = px; from.y = py; from.z = pz;
+        to.x = px - fx * want; to.y = py - fy * want / rat; to.z = pz - fz * want;
+        const res = lineOfSight(from, to, { pad: RIG.losPad });
+        const centred = res?.clear === false ? Math.max(RIG.losMinDistance, res.t * want - RIG.losPad) : want;
+        if (centred > dist) { origin.set(px, py, pz); dist = centred; }
       }
       pulled = dist < want - 1e-6;
     }

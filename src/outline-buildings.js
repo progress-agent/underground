@@ -91,7 +91,7 @@ export function decodeOutlineChunk(payload,index,VE=5) {
 
 // Compact the existing tile's drawn instances once, preserving its allocation
 // and default-path construction. No off-path identity buffer is needed.
-export function* planOutlineBoxes(records,meshes,batchSize=32) {
+export function* planOutlineBoxes(records,meshes,batchSize=8) {
   const plan={items:[],matched:new Set(),placements:new Map(),keptFoundations:new Set(),hidden:0};
   const byTile=new Map();let prepared=0;
   // Index construction is loading work too, not just the subsequent box scan.
@@ -141,12 +141,24 @@ export function* planOutlineBoxes(records,meshes,batchSize=32) {
 // The displayed box datum includes legacy DEM corrections, late banks and
 // any upstream bake version. Inherit that final state rather than estimating
 // it from raw payload bases a second time.
-export function applyOutlinePlacements(geometry,records,placements) {
-  const data=geometry.attributes.position.data.array;
+export function* applyOutlinePlacementsSteps(geometry,records,placements,batchSize=32) {
+  const data=geometry.attributes.position.data.array;let prepared=0;
   for(const r of records){const p=placements.get(r);if(!p)continue;r.base=p.base;r.height=r.h=p.height;
-    for(let j=0;j<2*(r.n+1);j++){const o=(r.start+j)*8;data[o+1]=r.base+(j%2?r.height:0);data[o+3]=r.base;data[o+6]=r.height;}
+    for(let j=0;j<2*(r.n+1);j++){const o=(r.start+j)*8;data[o+1]=r.base+(j%2?r.height:0);data[o+3]=r.base;data[o+6]=r.height;
+      if(++prepared%batchSize===0)yield;
+    }
   }
-  geometry.computeBoundingBox();geometry.computeBoundingSphere();
+  // Native bounding scans are linear too. Keep both passes in the same
+  // bounded work stream as the datum updates, including a very large ring.
+  const box=new THREE.Box3(),point=new THREE.Vector3();
+  for(let o=0;o<data.length;o+=8){point.set(data[o],data[o+1],data[o+2]);box.expandByPoint(point);if(++prepared%batchSize===0)yield;}
+  const sphere=new THREE.Sphere();box.getCenter(sphere.center);let radiusSq=0;
+  for(let o=0;o<data.length;o+=8){point.set(data[o],data[o+1],data[o+2]);radiusSq=Math.max(radiusSq,point.distanceToSquared(sphere.center));if(++prepared%batchSize===0)yield;}
+  sphere.radius=Math.sqrt(radiusSq);geometry.boundingBox=box;geometry.boundingSphere=sphere;
+}
+
+export function applyOutlinePlacements(geometry,records,placements) {
+  const steps=applyOutlinePlacementsSteps(geometry,records,placements);while(!steps.next().done){}
 }
 
 export function commitOutlineBoxes(plan,invalidate=()=>{}) {
@@ -167,16 +179,28 @@ export function replaceOutlineBoxes(records,meshes,invalidate=()=>{}) {
   return commitOutlineBoxes(next.value,invalidate);
 }
 
+// Keep diagnostic storage bounded on the phone. All maxima and complete
+// loader-task durations remain recorded even after a slice sample is evicted.
+export function recordOutlineSlice(stats,ms,stage) {
+  const cap=2048;
+  stats.sliceCount=(stats.sliceCount??0)+1;
+  if(stats.slices.length<cap)stats.slices.push(ms);
+  else stats.slices[(stats.sliceCount-1)%cap]=ms;
+  stats.sliceSamplesOmitted=Math.max(0,stats.sliceCount-cap);
+  stats.maxSliceMs=Math.max(stats.maxSliceMs,ms);
+  stats.stageMax[stage]=Math.max(stats.stageMax[stage]||0,ms);
+}
+
 export function createOutlineBuildings({set,scene,getMeshes,isReady,compile=async()=>{},upload=()=>{},invalidate,getHidden=()=>false,VE=5}) {
   const group=new THREE.Group();group.name='outline-buildings';group.userData.solidRecords=[];group.userData.version=0;
   const stats={set,state:'waiting',count:0,hidden:0,foundationBoxes:0,chunks:0,uploads:0,pipelineUploads:0,maxSliceMs:0,maxTaskMs:0,stageMax:{},slices:[],tasks:[],errors:[]};
   const layers=[];
   let started=false,materials=null,lastMaterial=null;
-  const yieldFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
-  const timed=(fn,stage='other')=>{const t=performance.now(),r=fn();const ms=performance.now()-t;stats.slices.push(ms);stats.maxSliceMs=Math.max(stats.maxSliceMs,ms);stats.stageMax[stage]=Math.max(stats.stageMax[stage]||0,ms);return r;};
+  const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
+  const timed=(fn,stage='other')=>{const t=performance.now(),r=fn();recordOutlineSlice(stats,performance.now()-t,stage);return r;};
   let taskStart=0;
   function closeTask(){if(!taskStart)return;const ms=performance.now()-taskStart;stats.tasks.push(ms);stats.maxTaskMs=Math.max(stats.maxTaskMs,ms);taskStart=0;}
-  async function checkpoint(force=false){if(force||performance.now()-taskStart>2){closeTask();await yieldFrame();taskStart=performance.now();}}
+  async function checkpoint(force=false){if(force||performance.now()-taskStart>.75){closeTask();await yieldTask();taskStart=performance.now();}}
   async function load(){
     stats.state='fetching';
     const response=await fetch(`/data/surface/baked/outlines-${set}.z.bin`);
@@ -189,17 +213,19 @@ export function createOutlineBuildings({set,scene,getMeshes,isReady,compile=asyn
     for(const mesh of getMeshes()){const tile=Number(mesh.name?.replace('baked-buildings-',''));if(Number.isFinite(tile))tileMeshes.set(tile,mesh);}
     for(let i=0;i<payload.chunks.length;i++){
       await checkpoint(true);
-      const decoder=decodeOutlineChunkSteps(payload,i,VE);let decoded;
-      do{decoded=timed(()=>decoder.next(),'decode');if(!decoded.done&&performance.now()-taskStart>2)await checkpoint();}while(!decoded.done);
+      const decoder=decodeOutlineChunkSteps(payload,i,VE),decodeNext=()=>decoder.next();let decoded;
+      do{decoded=timed(decodeNext,'decode');if(!decoded.done&&performance.now()-taskStart>.75)await checkpoint();}while(!decoded.done);
       const {geometry,records}=decoded.value;
       // Suppressed station/edge boxes have no matching instance, so their
       // corresponding outline triangles are omitted too.
       await checkpoint();
-      const target=tileMeshes.get(records[0]?.tile),planner=planOutlineBoxes(records,target?[target]:[]);
+      const target=tileMeshes.get(records[0]?.tile),planner=planOutlineBoxes(records,target?[target]:[]),planNext=()=>planner.next();
       let next;
-      do{next=timed(()=>planner.next(),'plan');if(!next.done&&performance.now()-taskStart>2)await checkpoint();}while(!next.done);
+      do{next=timed(planNext,'plan');if(!next.done&&performance.now()-taskStart>.75)await checkpoint();}while(!next.done);
       const plan=next.value,active=records.filter(r=>plan.matched.has(r)&&!getHidden(r));
-      await checkpoint();timed(()=>applyOutlinePlacements(geometry,records,plan.placements),'placement');
+      await checkpoint(true);
+      const placer=applyOutlinePlacementsSteps(geometry,records,plan.placements),placeNext=()=>placer.next();let placed;
+      do{placed=timed(placeNext,'placement');if(!placed.done&&performance.now()-taskStart>.75)await checkpoint();}while(!placed.done);
       await checkpoint();const solidLayer=timed(()=>createOutlineSolidLayer(active),'solid');
       const drawn=new Set(active);
       const index=geometry.index.array;
@@ -212,7 +238,7 @@ export function createOutlineBuildings({set,scene,getMeshes,isReady,compile=asyn
       mesh.raycast=(raycaster,hits)=>{for(const r of active){const t=rayPrism(r,raycaster.ray,getBuildingHeightScale());if(t!=null&&t>=raycaster.near&&t<=raycaster.far)hits.push({distance:t,point:raycaster.ray.at(t,new THREE.Vector3()),object:mesh,building:r,faceIndex:r.first/3});}};
       if(i===0)for(const material of [materials.day,materials.night,materials.depth]){
         await checkpoint(true);const original=mesh.material;mesh.material=material;
-        const compilation=timed(()=>compile(mesh),'compile');closeTask();await compilation;taskStart=performance.now();
+        const compilation=timed(()=>compile(mesh),'compile');closeTask();await compilation;taskStart=performance.now();await checkpoint(true);
         timed(()=>upload(mesh,material),'upload');stats.pipelineUploads++;mesh.material=original;
       }
       await checkpoint();timed(()=>upload(mesh,mesh.material),'upload');

@@ -90,7 +90,7 @@ export function casterVersionOf(roots) {
   let h = 0;
   for (const root of roots) {
     if (!root) continue;
-    h = (h * 31 + root.id + (root.visible ? 7 : 3)) | 0;
+    h = (h * 31 + root.id + (root.visible ? 7 : 3) + (root.userData?.casterGeometryVersion ?? 0)) | 0;
     const kids = root.children;
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];

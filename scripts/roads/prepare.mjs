@@ -396,7 +396,17 @@ for(const [key,triangles]of spills)flush(groups.get(key),triangles);
 spills.clear();
 if(!legacy)rebucketFarRoads(groups);
 const records=[];let totalGPU=0,compressedBytes=0;
-for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){if(c.lod){const parts=c.parts.map(p=>compactRoadPart(p,p.idx));c.parts=c.lod==='near'?mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:false}):localiseRoadParts(c.rebucketed?parts:mergeRoadParts(parts),c.rebucketed?8000:4000,{deduplicate:true,mergeMorph:true,index16:true});}for(let j=0;j<c.parts.length;j++){
+for(const c of [...groups.values()].sort((a,b)=>a.key.localeCompare(b.key))){
+  if(c.lod){
+    const parts=c.parts.map(p=>compactRoadPart(p,p.idx));
+    if(c.lod==='near'){
+      // Share coincident vertices across preparation batches. A ground face
+      // also need not carry a bridge's otherwise-zero rise stream.
+      const separated=mergeRoadParts(parts,{maxVertices:65000,wide:false,splitMorph:true});
+      c.parts=localiseRoadParts(separated,2000,{deduplicate:true,mergeMorph:false,index16:true});
+    }else c.parts=localiseRoadParts(c.rebucketed?parts:mergeRoadParts(parts),c.rebucketed?8000:4000,{deduplicate:true,mergeMorph:true,index16:true});
+  }
+  for(let j=0;j<c.parts.length;j++){
   const original=c.parts[j],pair=c.key+'-'+j;
   const selectBounds=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];
   for(let i=0;i<original.pos.length;i+=3){const x=c.x+original.pos[i]/8,z=c.z+original.pos[i+2]/8,y=original.pos[i+1]*.05-500;

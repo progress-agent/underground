@@ -31,7 +31,10 @@ export function createPhoneCityBatches({ span = 6000, spanZ = 2000 } = {}) {
       // East-first means an eastward flight usually draws just a prefix. It
       // never removes a tile that the original tile frustum would draw.
       const originals=queue[next++].sort((a,b)=>b.boundingSphere.center.x-a.boundingSphere.center.x);
-      const count=originals.reduce((n,m)=>n+m.count,0),batch=new THREE.InstancedMesh(originals[0].geometry,originals[0].material,count);
+      const count=originals.reduce((n,m)=>n+m.count,0),batch=new THREE.InstancedMesh(originals[0].geometry,originals[0].material,0);
+      // Every matrix is copied from its source. Avoid the constructor's JS
+      // loop writing identities that are immediately overwritten.
+      batch.instanceMatrix=new THREE.InstancedBufferAttribute(new Float32Array(count*16),16);batch.count=count;
       const array=batch.instanceMatrix.array,bounds=new THREE.Box3(),states=[],ends=new Uint32Array(originals.length);
       let offset=0;
       for(const m of originals){
